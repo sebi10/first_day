@@ -77,7 +77,11 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
   for (const o of s.orders.filter((x) => x.role === role && x.status === 'countered')) s = step(s, { t: 'acceptCounter', orderId: o.id }, now);
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
-  for (const o of ready.slice(0, bot.perTurn ?? 4)) {
+  // a crewmate's report is a favour done on top of the usual jobs (people make time when a friend is stuck);
+  // repairs and redos are real jobs and take a slot
+  const reports = ready.filter((o) => o.kind === 'report');
+  const jobs = ready.filter((o) => o.kind !== 'report').slice(0, bot.perTurn ?? 4);
+  for (const o of [...reports, ...jobs]) {
     const sc = score(r, skill);
     s = step(s, { t: 'complete', role, orderId: o.id, score: sc, perfect: sc >= 0.95 }, now);
   }
@@ -98,7 +102,8 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     }
     const asset = s.assets.find((a) => a.id === o.assetId);
     const exp = expectedDeferralCost(s, o).cost;
-    const critical = (asset && asset.health < 70) || o.kind === 'inspect100' || o.kind === 'codeprep' || o.deferrals >= 2;
+    // a known defect's repair is safety work: the defect is still in service
+    const critical = (asset && asset.health < 70) || o.kind === 'inspect100' || o.kind === 'codeprep' || o.kind === 'repair' || o.deferrals >= 2;
     const worth = exp >= o.cost * 0.6 || critical;
     // like a person would: cheap safety-critical work gets approved even when cash is tight
     const cheapCritical = critical && o.cost <= 600 && s.cash - o.cost >= ECON.freezeBelow;
@@ -106,7 +111,12 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     else if (o.lastDeferredWeek !== s.week) s = step(s, { t: 'defer', orderId: o.id, reason: s.cash - o.cost < reserve ? 'cash' : 'priority' }, now);
   }
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
-  for (const o of s.orders.filter((x) => x.role === 'fin' && x.status === 'ready')) {
+  // a crewmate's report first (it costs them every week), then the biggest money hunt
+  // (when a report caps the desk, only the first one gets done)
+  const tasks = s.orders
+    .filter((x) => x.role === 'fin' && x.status === 'ready')
+    .sort((a, b) => Number(b.kind === 'report') - Number(a.kind === 'report') || (b.leak ?? 0) - (a.leak ?? 0));
+  for (const o of tasks) {
     const sc = score(r, skill);
     if (o.kind === 'auction') {
       const fair = (ECON.partMarket.low + ECON.partMarket.high) / 2;
@@ -129,28 +139,36 @@ export type SimWeek = {
   revenue: number;
   cash: number;
   incidents: number;
+  /** of which: hidden defects that surfaced */
+  defects: number;
   flights: string;
   houses: string;
 };
 
-export function simulate(team: Team, weeks: number, seed: number, trace?: (s: IslandState) => void) {
+/** `salt` re-rolls the crew's weeks (who shows up, how each job goes) for robustness checks; '' is the standard run. */
+export function simulate(team: Team, weeks: number, seed: number, trace?: (s: IslandState) => void, salt = '') {
   let now = Date.UTC(2026, 8, 1, 12);
   let s = createIsland({ id: `sim-${seed}`, name: 'Sim Island', now, tz: 'Europe/Paris', seed: hashSeed('sim', seed), creator: { uid: 'u-mech', name: 'M', role: 'mech' } });
   s = step(s, { t: 'join', uid: 'u-elec', name: 'E', role: 'elec' }, now);
   s = step(s, { t: 'join', uid: 'u-fin', name: 'F', role: 'fin' }, now);
   for (const role of ROLES) s = step(s, { t: 'week0Done', role }, now);
-  const r = rng(hashSeed('bots', seed));
+  // Who shows up (and in what order) has its own stream, and each seat's week of
+  // play has its own stream too: a rule that adds or removes a job shifts only
+  // that seat's week, never the whole run's absences, so before/after balance
+  // runs compare the same crew weeks.
+  const away = rng(hashSeed('bots-away', seed, salt));
   const awayLast: Record<Role, boolean> = { mech: false, elec: false, fin: false };
   const out: SimWeek[] = [];
   let minCash = s.cash;
   for (let w = 0; w < weeks; w++) {
     const week = s.week;
-    const order = r.shuffle([...ROLES]);
+    const order = away.shuffle([...ROLES]);
     for (const role of order) {
       const bot = team[role];
-      const missed = bot.absent || (bot.miss ? r.chance(bot.streak && awayLast[role] ? 0.5 : bot.miss) : false);
+      const missed = bot.absent || (bot.miss ? away.chance(bot.streak && awayLast[role] ? 0.5 : bot.miss) : false);
       awayLast[role] = !!missed;
       if (missed) continue;
+      const r = rng(hashSeed('bots', seed, salt, role, week));
       if (role === 'fin') s = playFin(s, bot, r, now);
       else s = playOps(s, role, bot, r, now);
       s = step(s, { t: 'endTurn', role }, now);
@@ -169,6 +187,7 @@ export function simulate(team: Team, weeks: number, seed: number, trace?: (s: Is
       revenue: h.revenue,
       cash: h.cashEnd,
       incidents: h.incidents.length,
+      defects: h.incidents.filter((i) => i.kind === 'defect').length,
       flights: `${h.flightsFlown}/${h.flightsScheduled}`,
       houses: `${h.housesBooked}/${h.housesRentable}`,
     });

@@ -120,7 +120,8 @@ describe('approvals, counters, freeze', () => {
     const o = s.orders.find((x) => x.status === 'pending')!;
     const a = s.assets.find((x) => x.id === o.assetId);
     if (a) a.health = 80;
-    o.kind = 'repair';
+    // a routine job ('repair' is now a real kind: a known defect's fix, which is safety-critical)
+    o.kind = 'tires';
     expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toMatch(/safety-critical/);
     // safety-critical work (asset under 60) can still be approved if cash covers it
     if (a) {

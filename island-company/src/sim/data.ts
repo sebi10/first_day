@@ -221,6 +221,160 @@ export const FIN_TASKS = {
   invoice: { title: 'Three-way match: vendor invoices', puzzle: 'invoice' as PuzzleId, tier: 1 },
 };
 
+// ---------------------------------------------------------------------------
+// Consequences: blind sign-off, hidden defects, repairs, cross-trade reports.
+
+/**
+ * Blind sign-off and hidden defects. From puzzle tier 2 a real job gives no
+ * verdict: how good it was shows up later, in the asset's health, an
+ * inspection, or an incident. Tuned against the paper sim (docs/DECISIONS.md,
+ * "Consequences"); the spec's starting values are noted where they moved.
+ */
+export const DEFECT = {
+  /** launch tier from which a real job is signed off blind (tiers 0-1 keep teaching feedback) */
+  blindFromTier: 2,
+  /** at or above this true score a job leaves nothing behind */
+  clean: 0.85,
+  /** 0.6 ≤ q < 0.85: chance = (0.85 − q) × slope, so a bare pass is 5% (spec 0.4 → 10%) */
+  slope: 0.2,
+  /** q < 0.6 (a botch): 10% + 1.8 per point under 0.6, capped at 100% (spec, unchanged) */
+  botchBase: 0.1,
+  botchSlope: 1.8,
+  /** under this, the defect is severe (severity 2) */
+  severeBelow: 0.4,
+  /** weeks until it surfaces: severity 1 → 1..4 (spec 1..3: more time for an inspection to catch it), severity 2 → 1..2 */
+  dueMin: 1,
+  dueMax: [4, 2] as const,
+  /** incident cost = the original job's cost × this, severity 1 / 2 (spec 1.5 / 3) */
+  incidentMult: [1.2, 2.5] as const,
+  /** asset health lost when it surfaces, severity 1 / 2 */
+  healthHit: [12, 25] as const,
+  /** jobs with no price tag (load sheets) still cost at least this much to put right */
+  minBase: 300,
+  /** repair cost = this × the original's (spec ~0.8); gain = 0.4 × the original's gain, at least 4 */
+  repairCost: 0.6,
+  repairGain: 0.4,
+  repairMinGain: 4,
+  /** after an incident, the repair also restores this share of the health the failure took (the failed part is replaced) */
+  repairRestores: 0.5,
+  /** the redo is free (already paid) and restores this share of the original's gain: it is the original job, done properly */
+  redoGain: 1,
+  /** an inspection needs at least a pass to find anything */
+  detectAt: 0.6,
+};
+
+/** What a hidden defect looks like, and the reasonable repair for it, by the ORIGINAL job's puzzle. */
+export type DefectRule = {
+  /** incident text: "<incident> on <asset>: traced to …" */
+  incident: string;
+  /** inspection find: "found <found> on <asset>, left from week N" */
+  found: string;
+  /** the corrective job: a different puzzle from the original */
+  fix: { puzzle: PuzzleId; title: string; parts?: number };
+  /** redo the original afterwards (default true; paperwork that is redone every week anyway says false) */
+  redo?: boolean;
+};
+
+/**
+ * Keyed by puzzle id (a plain string, so a branch that adds a puzzle only adds
+ * its row). Unknown puzzles fall back to DEFECT_FALLBACK for their trade.
+ */
+export const DEFECT_RULES: Record<string, DefectRule> = {
+  torque: { incident: 'Fasteners worked loose in service', found: 'under-torqued fasteners', fix: { puzzle: 'teardown', title: 'Replace the stretched fasteners' } },
+  crack: { incident: 'A crack the inspection missed grew until the part failed', found: 'a crack the last inspection missed', fix: { puzzle: 'teardown', title: 'Remove the cracked part and fit a serviceable one' } },
+  safetywire: { incident: 'Safety wire let go and the hardware backed off', found: 'safety wire twisted the wrong way', fix: { puzzle: 'torque', title: 'Re-torque the loosened hardware' } },
+  teardown: { incident: 'A part fitted wrong failed in service', found: 'a misassembled installation', fix: { puzzle: 'teardown', title: 'Rework the installation' } },
+  balance: { incident: 'Hard landing with an out-of-limits load', found: 'hard-landing damage from an out-of-limits load', fix: { puzzle: 'crack', title: 'Hard-landing inspection of the gear' }, redo: false },
+  trace: { incident: 'A connection left loose started arcing', found: 'an open splice left in a junction box', fix: { puzzle: 'meter', title: 'Find the arcing connection' } },
+  panel: { incident: 'An overloaded breaker cooked its lugs', found: 'an overloaded leg in the panel', fix: { puzzle: 'wireup', title: 'Replace the heat-damaged breaker lugs' } },
+  wireup: { incident: 'A loose terminal overheated', found: 'a loose terminal', fix: { puzzle: 'meter', title: 'Locate the loose terminal' } },
+  meter: { incident: 'The fault that was misdiagnosed came back', found: 'a misdiagnosed fault', fix: { puzzle: 'trace', title: 'Trace the real fault' } },
+  conduit: { incident: 'Conductors nicked in a kinked run shorted out', found: 'a kinked conduit run with nicked conductors', fix: { puzzle: 'wireup', title: 'Pull new conductors through the damaged run' } },
+};
+
+/** For a puzzle with no row yet (new puzzles land from other branches): a sensible default per trade. */
+export const DEFECT_FALLBACK: Record<OpsRole, DefectRule> = {
+  mech: { incident: 'A job signed off unfinished failed in service', found: 'work that was signed off unfinished', fix: { puzzle: 'teardown', title: 'Rework the job' } },
+  elec: { incident: 'A fault the last job left behind tripped the circuit', found: 'a fault the last job left behind', fix: { puzzle: 'meter', title: 'Find the fault the last job left' } },
+};
+
+export function defectRule(puzzle: string, role: Role): DefectRule {
+  return DEFECT_RULES[puzzle] ?? DEFECT_FALLBACK[role === 'elec' ? 'elec' : 'mech'];
+}
+
+/**
+ * Inspection-type jobs (kind → how the feed names it). A pass finds the latent
+ * defects its own trade left on the same asset in an earlier week: the chance
+ * to fix it before it fails.
+ */
+export const INSPECTS: Record<string, string> = {
+  inspect100: '100-hr inspection',
+  corrosion: 'wheel-half penetrant check',
+  spar: 'wing spar inspection',
+  // an oil change includes the engine-compartment look and a filter check for metal
+  oil: 'oil change and engine look-over',
+  codeprep: 'code inspection prep',
+  // tracing and metering a house's circuits opens the boxes a bad splice hides in
+  trip: 'outlet trace',
+  flicker: 'flicker diagnosis',
+  genTest: 'generator circuit test',
+  xfmr: 'panel diagnosis',
+};
+
+/** Cross-trade reports: one trade's problem that another trade has to fix. All three trades report and fix. */
+export const REPORT = {
+  fromWeek: 3,
+  /** chance per week of a new report (spec ~0.4; 0.3 keeps the tier-4 economy off its knife-edge) */
+  chance: 0.3,
+  /** at most this many open at once, and never two for the same fixer */
+  maxOpen: 2,
+  /** a 'cap' report limits the reporter to this many jobs per turn (the analyst: desk tasks) */
+  capOps: 2,
+  capFin: 1,
+  /** a fix that doesn't hold comes back after 1..2 weeks */
+  againMin: 1,
+  againMax: 2,
+  /** leak amounts grow with the island tier */
+  leakPerTier: 0.3,
+};
+
+export type ReportDef = {
+  key: string;
+  by: Role;
+  fixer: Role;
+  /** the fixer's card */
+  title: string;
+  /** feed: "<reporter> reports: <said>. <fixer>, it's yours." */
+  said: string;
+  puzzle: PuzzleId;
+  effect: 'cap' | 'leak';
+  /** leak: USD per resolved week at tier 1 */
+  amount?: number;
+  /** out of pocket for the fix (paid at once, no approval) */
+  cost: number;
+  /** the reporter's notice: "<notice>: 2 jobs max until <fixer> fixes <it>" */
+  notice: string;
+  it?: 'it' | 'them';
+  /** only once the island has this tier (the generator exists from tier 3) */
+  minTier?: number;
+};
+
+export const REPORTS: ReportDef[] = [
+  { key: 'hangarLights', by: 'mech', fixer: 'elec', title: 'Hangar work lights are dead', said: 'the hangar work lights are dead', puzzle: 'trace', effect: 'cap', cost: 60, notice: 'Hangar lights out', it: 'them' },
+  { key: 'compressor', by: 'mech', fixer: 'elec', title: 'Hangar compressor keeps tripping its breaker', said: 'the hangar compressor keeps tripping its breaker', puzzle: 'meter', effect: 'cap', cost: 40, notice: 'No shop air' },
+  { key: 'hangarDoor', by: 'mech', fixer: 'elec', title: 'Hangar door motor starter keeps dropping out', said: 'the hangar door motor starter keeps dropping out', puzzle: 'wireup', effect: 'cap', cost: 90, notice: 'Hangar door stuck half open' },
+  { key: 'doubleBilled', by: 'mech', fixer: 'fin', title: 'Parts vendor billed the brake kit twice', said: 'the parts vendor billed the brake kit twice', puzzle: 'invoice', effect: 'leak', amount: 240, cost: 0, notice: 'Brake kit billed twice' },
+  { key: 'genFan', by: 'elec', fixer: 'mech', title: 'Generator housing fan bearing is screaming', said: 'the generator housing fan bearing is screaming', puzzle: 'teardown', effect: 'cap', cost: 110, notice: 'Generator fan failing', minTier: 3 },
+  { key: 'trencher', by: 'elec', fixer: 'mech', title: 'Trencher drive belt snapped', said: 'the trencher drive belt snapped', puzzle: 'teardown', effect: 'cap', cost: 80, notice: 'Trencher down' },
+  { key: 'utilityBill', by: 'elec', fixer: 'fin', title: "Utility bill doesn't match the meter readings", said: "the utility bill doesn't match the meter readings", puzzle: 'reconcile', effect: 'leak', amount: 200, cost: 0, notice: 'Utility overbilling' },
+  { key: 'supplyHouse', by: 'elec', fixer: 'fin', title: 'Supply house charged for wire we sent back', said: 'the supply house charged us for wire we sent back', puzzle: 'invoice', effect: 'leak', amount: 180, cost: 0, notice: 'Returned wire still billed' },
+  { key: 'officeCircuit', by: 'fin', fixer: 'elec', title: 'Office circuit trips when the printer and kettle run', said: 'the office circuit trips whenever the printer and the kettle run', puzzle: 'meter', effect: 'cap', cost: 50, notice: 'Office breaker keeps tripping' },
+  // moves to the hydraulics puzzle when that branch lands
+  { key: 'vanBrakes', by: 'fin', fixer: 'mech', title: 'Company van brakes feel soft', said: 'the company van brakes feel soft', puzzle: 'torque', effect: 'leak', amount: 160, cost: 120, notice: 'Van off the road' },
+];
+
+export const REPORT_BY_KEY: Record<string, ReportDef> = Object.fromEntries(REPORTS.map((r) => [r.key, r]));
+
 export type Tool = { id: string; level: number; name: string; puzzle: PuzzleId; effect: string };
 
 export const TOOLS: Record<Role, Tool[]> = {

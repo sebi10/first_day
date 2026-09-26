@@ -1,16 +1,39 @@
 // The island engine: a pure, deterministic reducer. Every client (and the
 // balance sim) runs the same code, so any phone can resolve a week and get
 // byte-identical results from the same inputs + seed.
-import { CATALOG, CATALOG_BY_KIND, ECON, FIN_TASKS, INSURANCE, MODELS, PROJECTS, STORIES, TIERS } from './data';
+import {
+  CATALOG,
+  CATALOG_BY_KIND,
+  DEFECT,
+  defectRule,
+  ECON,
+  FIN_TASKS,
+  INSPECTS,
+  INSURANCE,
+  MODELS,
+  PROJECTS,
+  REPORT,
+  REPORT_BY_KEY,
+  REPORTS,
+  ROLE_LABEL,
+  STORIES,
+  TIERS,
+  type ReportDef,
+} from './data';
 import {
   capOf,
   charterLoad,
   clamp,
   isTagged,
+  isBlind,
   isRework,
   SIGNOFF,
   credit,
+  defectChance,
+  defectSeverity,
   deferralRisk,
+  openReports,
+  reportCap,
   grid,
   houseBlocker,
   houseRentable,
@@ -35,6 +58,7 @@ import {
   ROLES,
   type Action,
   type Asset,
+  type Defect,
   type FeedEvent,
   type Grade,
   type Incident,
@@ -525,9 +549,9 @@ export function squawkable(role: Role, asset: Asset) {
   return CATALOG.filter((c) => c.role === role && c.targets.includes(asset.model) && c.gain > 0);
 }
 
-/** Safety-critical work stays approvable through a cash freeze: an asset under 60, or an inspection sign-off. */
+/** Safety-critical work stays approvable through a cash freeze: an asset under 60, an inspection sign-off, or a known defect's repair. */
 export function isEmergency(s: IslandState, o: Order) {
-  if (o.kind === 'inspect100' || o.kind === 'codeprep') return true;
+  if (o.kind === 'inspect100' || o.kind === 'codeprep' || o.kind === 'repair') return true;
   const a = s.assets.find((x) => x.id === o.assetId);
   return !!a && a.health < 60;
 }
@@ -576,10 +600,18 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   }
   if (a.role === 'mech' && !covered && powered(s).gridDown && turn.done >= 1)
     return fail('Grid down: hangar tools offline, 1 order max.');
+  // a crewmate's unfixed problem slows this seat down (the hangar lights are out)
+  const cap = covered ? null : reportCap(s, a.role);
+  if (cap && turn.done >= cap.limit) return fail(cap.text);
 
-  // Rework: a job that fails its own check isn't signed off. It stays open
-  // with a fresh fault (new seed), so the retry is a new job, not a replay.
-  if (!covered && isRework(o, a.score)) {
+  // Blind sign-off (a real job at puzzle tier 2+): no verdict now. The true
+  // score still drives everything; how good it was shows up later.
+  const blind = !covered && isBlind(s, o, a.role);
+
+  // Rework (teaching tiers only): a job that fails its own check isn't signed
+  // off. It stays open with a fresh fault (new seed), so the retry is a new
+  // job, not a replay. Blind jobs never rework: hidden defects replace it.
+  if (!covered && isRework(o, a.score, blind)) {
     o.seed = hashSeed(o.seed, `rework${s.week}`);
     turn.done += 1;
     const asset = assetOf(s, o);
@@ -589,7 +621,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
 
   const cr = covered ? credit(a.score, 0) : credit(a.score, player.perfects);
   o.status = 'done';
-  o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, summary: a.summary };
+  o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, ...(blind ? { blind: true } : { summary: a.summary }) };
   turn.done += 1;
   if (a.perfect && !covered && player.perfects < 15) player.perfects += 1;
   player.best = { ...(player.best ?? {}), [o.puzzle]: Math.max(player.best?.[o.puzzle] ?? 0, clamp(a.score, 0, 1)) };
@@ -600,15 +632,19 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     asset.health = clamp(asset.health + o.gain * cr, 0, 100);
     // a perfect job holds: that asset skips next week's decay too
     asset.touchedWeek = Math.max(asset.touchedWeek, s.week + (a.perfect && !covered ? 1 : 0));
-    // sign-off is pass/fail: a pass renews the inspection whatever the credit
-    if (o.kind === 'inspect100' && a.score >= SIGNOFF) asset.sinceInspection = 0;
-    if (o.kind === 'codeprep' && a.score >= SIGNOFF) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
+    // sign-off is pass/fail: a pass renews the inspection whatever the credit.
+    // A blind sign-off is in the logbook whatever it missed (what it missed is a hidden defect).
+    const signed = blind || a.score >= SIGNOFF;
+    if (o.kind === 'inspect100' && signed) asset.sinceInspection = 0;
+    if (o.kind === 'codeprep' && signed) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
   }
 
-  if (o.kind === 'project') {
+  if (o.kind === 'report') {
+    closeReport(s, o, a.role, player.name, a.score, now);
+  } else if (o.kind === 'project') {
     // the floatplane auction is real capex: the winning deposit leaves the bank
     if (o.puzzle === 'auction' && Number(a.data?.kits ?? 0) > 0) s.cash -= Math.max(0, Number(a.data?.spent ?? 0));
-    feed(s, o.role, 'good', `${player.name} finished their part: ${o.title} (${Math.round(a.score * 100)}%).`, now);
+    feed(s, o.role, blind ? 'info' : 'good', blind ? `${player.name} signed off their part: ${o.title}.` : `${player.name} finished their part: ${o.title} (${Math.round(a.score * 100)}%).`, now);
     finishProjectIfDone(s, now);
   } else if (o.kind === 'auction') {
     const room = Math.max(0, ECON.maxParts - s.parts.stock - s.parts.inTransit);
@@ -623,12 +659,206 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     const pts = Array.isArray(a.data?.points) ? (a.data!.points as number[]).slice(0, 4).map(Number) : [];
     if (pts.length === 4) s.forecasts.push({ week: s.week, points: pts, actual: [] });
   } else if (o.role === 'fin') {
-    feed(s, 'fin', 'good', `${o.title}: found ${usd((o.leak ?? 0) * a.score)}.`, now);
+    // blind: what it recovered shows in the week's review, not now
+    feed(s, 'fin', blind ? 'info' : 'good', blind ? `${o.title} filed.` : `${o.title}: found ${usd((o.leak ?? 0) * a.score)}.`, now);
   } else {
     const by = covered ? `${player.name} (lending a hand)` : player.name;
-    feed(s, o.role, a.perfect ? 'good' : 'info', `${by} finished ${o.title}${asset ? ` on ${asset.name}` : ''}${a.perfect ? ' — perfect' : ''}.`, now);
+    if (blind) feed(s, o.role, 'info', `${by} signed off ${o.title}${asset ? ` on ${asset.name}` : ''}.`, now);
+    else feed(s, o.role, a.perfect ? 'good' : 'info', `${by} finished ${o.title}${asset ? ` on ${asset.name}` : ''}${a.perfect ? ' — perfect' : ''}.`, now);
   }
+
+  // hidden consequences: a passed inspection finds what an earlier job left; this job may leave something
+  if (asset && INSPECTS[o.kind] && a.score >= DEFECT.detectAt) detectDefects(s, o, asset, player.name, now);
+  if (defectable(o)) rollDefect(s, o, a.role, player.name, a.score);
+  if (o.repair) spawnRedo(s, o, now);
   return { s };
+}
+
+// ---------------------------------------------------------------------------
+// Hidden defects, repairs and redos
+
+/** Trade jobs on an asset can leave a hidden defect (not crew-project parts, not desk work). */
+const defectable = (o: Order) => o.role !== 'fin' && o.kind !== 'project' && o.kind !== 'report' && o.assetId !== null;
+
+/** Lower-case a title's first letter for mid-sentence use, unless it's an acronym ("GFCI in wet rooms"). */
+const lc = (t: string) => (t.length > 1 && t[1] === t[1].toLowerCase() ? t[0].toLowerCase() + t.slice(1) : t);
+
+/** "the prop bolt re-torque Ana signed off in week 5"; a repair's title is an instruction, so it goes in brackets. */
+export const tracedTo = (d: Pick<Defect, 'orderKind' | 'title' | 'name' | 'week'>) =>
+  d.orderKind === 'repair' ? `the repair ${d.name} signed off in week ${d.week} (${lc(d.title)})` : `the ${lc(d.title)} ${d.name} signed off in week ${d.week}`;
+
+/** On sign-off: roll (from the order seed, deterministic) for a latent defect from the TRUE score. */
+function rollDefect(s: IslandState, o: Order, by: Role, name: string, q: number) {
+  const r = rng(hashSeed(o.seed, 'defect', s.week));
+  if (!r.chance(defectChance(q))) return;
+  const severity = defectSeverity(q);
+  const rule = defectRule(o.puzzle, o.role);
+  (s.defects ??= []).push({
+    id: `d${s.nextId++}`,
+    orderKind: o.kind,
+    puzzle: o.puzzle,
+    title: o.title,
+    assetId: o.assetId,
+    role: o.role,
+    by,
+    name,
+    week: s.week,
+    // a severe defect comes due sooner
+    dueWeek: s.week + r.int(DEFECT.dueMin, DEFECT.dueMax[severity - 1]),
+    severity,
+    cost: o.redo?.cost ?? o.cost,
+    tier: o.tier,
+    gain: o.gain,
+    // a repair's own defect gets another repair; the original's redo is already on its way
+    redo: rule.redo !== false && o.kind !== 'repair',
+  });
+}
+
+/** The corrective job for a defect: same trade and asset, a different puzzle, pending the analyst. */
+function addRepair(s: IslandState, d: Defect, via: 'inspection' | 'incident', found?: { foundBy: string; foundIn: string }) {
+  const rule = defectRule(d.puzzle, d.role);
+  return newOrder(s, {
+    role: d.role,
+    kind: 'repair',
+    assetId: d.assetId,
+    title: rule.fix.title,
+    puzzle: rule.fix.puzzle,
+    tier: d.tier,
+    cost: round10(Math.max(d.cost, DEFECT.minBase) * DEFECT.repairCost),
+    parts: rule.fix.parts ?? 0,
+    // a small gain; after a failure the repair also puts back part of what the failure took
+    gain:
+      Math.max(DEFECT.repairMinGain, Math.round(d.gain * DEFECT.repairGain)) +
+      (via === 'incident' ? Math.round(DEFECT.healthHit[d.severity - 1] * DEFECT.repairRestores) : 0),
+    status: 'pending',
+    repair: { defect: d, via, problem: rule.found, ...(found ?? {}) },
+  });
+}
+
+/** A passed inspection finds the latent defects its trade left on this asset in an earlier week: no incident, a repair instead. */
+function detectDefects(s: IslandState, o: Order, asset: Asset, name: string, now: number) {
+  const found = (s.defects ?? []).filter((d) => !d.report && d.assetId === asset.id && d.role === o.role && d.week < s.week);
+  if (!found.length) return;
+  const ids = new Set(found.map((d) => d.id));
+  s.defects = s.defects!.filter((d) => !ids.has(d.id));
+  const what = INSPECTS[o.kind];
+  for (const d of found) {
+    const rep = addRepair(s, d, 'inspection', { foundBy: name, foundIn: what });
+    feed(s, o.role, 'good', `${name}'s ${what} found ${rep.repair!.problem} on ${asset.name}, left from week ${d.week}. Repair written up: ${rep.title}.`, now);
+  }
+}
+
+/** Repair done: the original job has to be done again (free, already paid). */
+function spawnRedo(s: IslandState, o: Order, now: number) {
+  const d = o.repair!.defect;
+  if (!d.redo || !d.assetId) return;
+  const base = d.title.replace(/ \(redo\)$/, '');
+  const asset = s.assets.find((a) => a.id === d.assetId);
+  const redo = newOrder(s, {
+    role: d.role,
+    kind: d.orderKind,
+    assetId: d.assetId,
+    title: `${base} (redo)`,
+    puzzle: d.puzzle,
+    tier: d.tier,
+    cost: 0,
+    parts: 0,
+    gain: Math.max(1, Math.round(d.gain * DEFECT.redoGain)),
+    status: 'ready',
+    redo: { week: d.week, by: d.by, name: d.name, cost: d.cost },
+  });
+  feed(s, d.role, 'info', `Repair signed off${asset ? ` on ${asset.name}` : ''}. Now the original job: ${redo.title}.`, now);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-trade reports
+
+/** Open a report: the fixer's card (ready, no approval; the small cost is paid now). */
+function openReport(s: IslandState, def: ReportDef, now: number, again?: number) {
+  const amount = def.effect === 'leak' ? round10((def.amount ?? 0) * (1 + REPORT.leakPerTier * (s.tier - 1))) : 0;
+  const tier = def.fixer === 'fin' ? finTier(s) : clamp(1 + Math.floor(s.tier / 2), 1, 5);
+  const o = newOrder(s, {
+    role: def.fixer,
+    kind: 'report',
+    assetId: null,
+    title: again ? `${def.title} (again)` : def.title,
+    puzzle: def.puzzle,
+    tier,
+    cost: def.cost,
+    parts: 0,
+    gain: 0,
+    status: 'ready',
+    // the analyst's puzzle scales its numbers to what's at stake
+    ...(def.fixer === 'fin' ? { leak: amount } : {}),
+    report: { key: def.key, by: def.by, effect: def.effect, amount, ...(again ? { again } : {}) },
+  });
+  if (o.cost > 0) {
+    s.cash -= o.cost;
+    o.approvedWeek = s.week;
+    o.autoApproved = true;
+  }
+  const who = s.players[def.by]?.name ?? ROLE_LABEL[def.by];
+  const fixer = s.players[def.fixer]?.name ?? ROLE_LABEL[def.fixer];
+  feed(
+    s,
+    def.fixer,
+    'bad',
+    again ? `${who}: ${def.said} again. The fix from week ${again} didn't hold. ${fixer}, it's back on your list.` : `${who} reports: ${def.said}. ${fixer}, it's yours.`,
+    now,
+  );
+  return o;
+}
+
+/** A report fix: the reporter is back to normal. A botched (or sloppy) fix comes back 1-2 weeks later. */
+function closeReport(s: IslandState, o: Order, by: Role, name: string, q: number, now: number) {
+  const rep = o.report!;
+  const r = rng(hashSeed(o.seed, 'again', s.week));
+  const chance = q < SIGNOFF ? 1 : defectChance(q);
+  if (r.chance(chance)) {
+    (s.defects ??= []).push({
+      id: `d${s.nextId++}`,
+      orderKind: 'report',
+      puzzle: o.puzzle,
+      title: o.title,
+      assetId: null,
+      role: o.role,
+      by,
+      name,
+      week: s.week,
+      dueWeek: s.week + r.int(REPORT.againMin, REPORT.againMax),
+      severity: 1,
+      cost: o.cost,
+      tier: o.tier,
+      gain: 0,
+      redo: false,
+      report: { key: rep.key, by: rep.by, effect: rep.effect, amount: rep.amount },
+    });
+  }
+  const who = s.players[rep.by]?.name ?? ROLE_LABEL[rep.by];
+  feed(s, o.role, 'info', `${name} closed out ${who}'s report: ${o.title}.${rep.effect === 'cap' ? ` ${who} is back to full speed.` : ''}`, now);
+}
+
+/** Week open: fixes that didn't hold come back, then maybe a new report (from week 3). */
+function generateReports(s: IslandState, now: number) {
+  const W = s.week;
+  const due = (s.defects ?? []).filter((d) => d.report && d.dueWeek <= W);
+  if (due.length) {
+    s.defects = s.defects!.filter((d) => !due.includes(d));
+    for (const d of due) {
+      const def = REPORT_BY_KEY[d.report!.key];
+      if (def) openReport(s, def, now, d.week);
+    }
+  }
+  if (W < REPORT.fromWeek) return;
+  const r = rng(hashSeed(s.seed, 'report', W));
+  if (!r.chance(REPORT.chance)) return;
+  const open = openReports(s);
+  if (open.length >= REPORT.maxOpen) return;
+  // never two for the same fixer, counting fixes that are about to come back
+  const busy = new Set<Role>([...open.map((o) => o.role), ...(s.defects ?? []).filter((d) => d.report).map((d) => d.role)]);
+  const cands = REPORTS.filter((d) => !busy.has(d.fixer) && !!s.players[d.by] && !!s.players[d.fixer] && s.tier >= (d.minTier ?? 1));
+  if (!cands.length) return;
+  openReport(s, r.pick(cands), now);
 }
 
 function story(s: IslandState, prev: IslandState, key: string, role: Role, now: number): ApplyResult {
@@ -715,6 +945,7 @@ function openWeek(s: IslandState, now: number) {
 
   generateOpsOrders(s, r);
   generateFinTasks(s, r);
+  generateReports(s, now);
   autoApprove(s);
 
   s.deadline = nextDeadline(now, s.creatorTz, s.resolveHour);
@@ -849,13 +1080,22 @@ function autoRun(s: IslandState, role: Role) {
       close.status = 'done';
       close.result = { score: 0.5, perfect: false, credit: 0.5, by: 'fin', week: s.week, auto: true };
     }
+    // a crewmate's report gets a 50% patch too (it won't hold)
+    const report = s.orders.find((o) => o.role === 'fin' && o.kind === 'report' && o.status === 'ready');
+    if (report) {
+      report.status = 'done';
+      report.result = { score: 0.5, perfect: false, credit: 0.5, by: 'fin', week: s.week, auto: true };
+      closeReport(s, report, 'fin', `Autopilot (${s.players.fin?.name ?? ROLE_LABEL.fin})`, 0.5, s.updatedAt);
+    }
     return;
   }
   const ready = s.orders
     .filter((o) => o.role === role && o.status === 'ready' && o.kind !== 'project') // crew projects wait for the crew
-    .sort((a, b) => urgency(s, b) - urgency(s, a))
-    .slice(0, 2);
-  for (const o of ready) {
+    .sort((a, b) => urgency(s, b) - urgency(s, a));
+  // two jobs at 50%, plus a quick patch on a crewmate's report (it won't hold)
+  const report = ready.find((o) => o.kind === 'report');
+  const jobs = [...ready.filter((o) => o.kind !== 'report').slice(0, 2), ...(report ? [report] : [])];
+  for (const o of jobs) {
     o.status = 'done';
     o.result = { score: 0.5, perfect: false, credit: 0.5, by: role, week: s.week, auto: true };
     const asset = assetOf(s, o);
@@ -863,6 +1103,10 @@ function autoRun(s: IslandState, role: Role) {
       asset.health = clamp(asset.health + o.gain * 0.5, 0, 100);
       asset.touchedWeek = s.week;
     }
+    // autopilot keeps to the manual (no hidden defects), but a 50% patch on a crewmate's report won't hold
+    if (o.kind === 'report') closeReport(s, o, role, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, 0.5, s.updatedAt);
+    // a repair still needs its redo
+    if (o.repair) spawnRedo(s, o, s.updatedAt);
   }
 }
 
@@ -1034,7 +1278,8 @@ export function resolveWeek(s: IslandState, now: number) {
     const p = deferralRisk(o);
     if (r.chance(p)) {
       const asset = assetOf(s, o);
-      const cost = ECON.deferral.costMult * o.cost;
+      // a redo is free to do but not free to fail: it costs what the original job did
+      const cost = ECON.deferral.costMult * (o.redo?.cost ?? o.cost);
       incidents.push({ kind: 'deferral', role: o.role, assetId: o.assetId, title: `${o.title}${asset ? ` on ${asset.name}` : ''}`, cost });
       if (asset) {
         asset.health -= ECON.deferral.healthHit;
@@ -1049,11 +1294,51 @@ export function resolveWeek(s: IslandState, now: number) {
     }
   }
 
+  // 7b. hidden defects surface: a job signed off badly fails in service, and the review traces it
+  const surfaced: Defect[] = [];
+  if (s.defects?.length) {
+    const keep: Defect[] = [];
+    for (const d of s.defects) {
+      if (d.report || d.dueWeek > W) {
+        keep.push(d);
+        continue;
+      }
+      const asset = s.assets.find((a) => a.id === d.assetId);
+      if (!asset) continue;
+      // out of service can't fail in service (it waits a week), and nothing fails before week 3
+      if (isTagged(s, asset.id) || W < 3) {
+        d.dueWeek = Math.max(W + 1, 3);
+        keep.push(d);
+        continue;
+      }
+      const rule = defectRule(d.puzzle, d.role);
+      const sev = d.severity - 1;
+      const cost = round10(Math.max(d.cost, DEFECT.minBase) * DEFECT.incidentMult[sev]);
+      incidents.push({ kind: 'defect', role: d.role, assetId: asset.id, title: `${rule.incident} on ${asset.name}`, cost, from: { title: d.title, name: d.name, week: d.week } });
+      asset.health -= DEFECT.healthHit[sev];
+      line(d.role, 'bad', `${rule.incident} on ${asset.name}: traced to ${tracedTo(d)}.`);
+      const rev = bookedRevenue.get(asset.id);
+      if (rev) {
+        refunds += rev * 0.5;
+        line('elec', 'bad', `Guests at ${asset.name} refunded half after the incident.`);
+      }
+      surfaced.push(d);
+    }
+    s.defects = keep;
+  }
+  // this week's inspection finds: caught before they failed
+  for (const o of s.orders) {
+    const rp = o.repair;
+    if (rp?.via !== 'inspection' || o.createdWeek !== W) continue;
+    const asset = assetOf(s, o);
+    line(o.role, 'good', `${rp.foundBy}'s ${rp.foundIn} found ${rp.problem}${asset ? ` on ${asset.name}` : ''}, left from week ${rp.defect.week}: caught before it failed.`);
+  }
+
   // 8. carry-over
   for (const o of s.orders) {
     if (!open(o)) continue;
     if (o.kind === 'project') continue; // crew projects wait for the crew
-    if (o.role === 'fin' || o.gain === 0) {
+    if ((o.role === 'fin' || o.gain === 0) && o.kind !== 'report') {
       o.status = 'cancelled'; // desk tasks and load sheets are for this week only
       continue;
     }
@@ -1070,6 +1355,8 @@ export function resolveWeek(s: IslandState, now: number) {
   // prune old closed orders
   const projectIds = new Set(Object.values(s.project?.orders ?? {}));
   s.orders = s.orders.filter((o) => open(o) || projectIds.has(o.id) || (o.result?.week ?? o.createdWeek) >= W - 1);
+  // a surfaced defect goes to its trade as a repair (pending the analyst), after the carry-over so it starts fresh
+  for (const d of surfaced) addRepair(s, d, 'incident');
 
   // 9. decay + storm
   const shield = s.modifiers.some((m) => m.kind === 'stormShield' && m.until >= W) ? 0.5 : 1;
@@ -1091,7 +1378,7 @@ export function resolveWeek(s: IslandState, now: number) {
   // 10. analyst money hunts: close / bank rec / invoice match recover a hidden leak
   let leak = 0;
   let found = 0;
-  for (const t of s.orders.filter((o) => o.role === 'fin' && o.leak && o.createdWeek === W)) {
+  for (const t of s.orders.filter((o) => o.role === 'fin' && o.kind !== 'report' && o.leak && o.createdWeek === W)) {
     const got = t.result ? (t.leak ?? 0) * t.result.score : 0;
     leak += t.leak ?? 0;
     found += got;
@@ -1099,6 +1386,20 @@ export function resolveWeek(s: IslandState, now: number) {
     line('fin', got >= (t.leak ?? 0) * 0.95 ? 'good' : 'bad', got > 0 ? `${t.title}: recovered ${usd(got)} of ${usd(t.leak ?? 0)} ${what}.` : `${t.title} skipped: ${usd(t.leak ?? 0)} ${what} lost.`);
   }
   const leakCost = Math.round(leak - found);
+
+  // 10b. open cross-trade reports: a leak costs cash every week; a cap slowed the reporter down
+  let reportLeak = 0;
+  for (const o of openReports(s)) {
+    const rep = o.report!;
+    const who = s.players[rep.by]?.name ?? ROLE_LABEL[rep.by];
+    if (rep.effect === 'leak') {
+      reportLeak += rep.amount;
+      line(o.role, 'bad', `${o.title}: ${usd(rep.amount)} lost this week (reported week ${o.createdWeek}).`);
+    } else {
+      const lim = rep.by === 'fin' ? REPORT.capFin : REPORT.capOps;
+      line(o.role, 'bad', `${o.title}: still open, so ${who} was held to ${lim} ${rep.by === 'fin' ? 'desk task' + (lim > 1 ? 's' : '') : 'jobs'}.`);
+    }
+  }
 
   // 11. cash
   const revenue = Math.round(rental + charter - refunds);
@@ -1110,7 +1411,7 @@ export function resolveWeek(s: IslandState, now: number) {
   if (grossIncidents) line('fin', 'info', `Claims ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
   const cashStart = s.openCash;
   const loanPay = s.loan ? Math.min(s.loan.left, s.loan.weekly) : 0;
-  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - netIncidents - loanPay);
+  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - reportLeak - netIncidents - loanPay);
   if (s.loan) {
     s.loan.left -= loanPay;
     if (s.loan.left <= 0) {
@@ -1204,12 +1505,17 @@ export function resolveWeek(s: IslandState, now: number) {
 
   // 18. MVP lines
   const doneThisWeek = (role: Role) => s.orders.filter((o) => o.result?.week === W && o.result.by === role && !o.result.auto);
-  const best = (role: Role) => doneThisWeek(role).sort((a, b) => (b.result!.score ?? 0) - (a.result!.score ?? 0))[0];
+  // blind sign-offs never show a score, not even here
+  const best = (role: Role) => doneThisWeek(role).filter((o) => !o.result!.blind).sort((a, b) => (b.result!.score ?? 0) - (a.result!.score ?? 0))[0];
+  const signedOff = (role: Role) => {
+    const n = doneThisWeek(role).filter((o) => o.result!.blind).length;
+    return n ? ` · ${n} signed off` : '';
+  };
   const bm = best('mech');
   const be = best('elec');
   const mvp: Record<Role, string> = {
-    mech: `${flown}/${scheduled} flights${bm ? ` · best: ${bm.title} ${Math.round(bm.result!.score * 100)}%` : ''}`,
-    elec: `${booked.length}/${hs.length} houses booked${be ? ` · best: ${be.title} ${Math.round(be.result!.score * 100)}%` : ''}`,
+    mech: `${flown}/${scheduled} flights${bm ? ` · best: ${bm.title} ${Math.round(bm.result!.score * 100)}%` : ''}${signedOff('mech')}`,
+    elec: `${booked.length}/${hs.length} houses booked${be ? ` · best: ${be.title} ${Math.round(be.result!.score * 100)}%` : ''}${signedOff('elec')}`,
     fin: `Cash ${s.cash - cashStart >= 0 ? '+' : '−'}${usd(Math.abs(s.cash - cashStart))}${found ? ` · recovered ${usd(found)}` : ''}`,
   };
 
@@ -1227,7 +1533,7 @@ export function resolveWeek(s: IslandState, now: number) {
     nearMisses,
     cashStart,
     cashEnd: s.cash,
-    costs: { fixed, insurance: premium, leak: leakCost, incidents: netIncidents, refunds: Math.round(refunds), loan: loanPay || undefined },
+    costs: { fixed, insurance: premium, leak: leakCost, incidents: netIncidents, refunds: Math.round(refunds), loan: loanPay || undefined, reports: reportLeak || undefined },
     housesBooked: booked.length,
     housesRentable: rentable.length,
     partsDelivered: delivered,
