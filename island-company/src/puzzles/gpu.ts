@@ -111,13 +111,19 @@ export type GpuModel = {
   idle: number;
   /** tool gpuMeter: digital volts/amps readout on the cart */
   meter: boolean;
+  /**
+   * the battery cart's state of charge, 0..1 (the island's cart, 1 in the lab).
+   * A low cart rests a little below its setting and sags hard under the start
+   * load (its internal resistance climbs as it runs down), so it cranks slower.
+   */
+  charge: number;
   steps: { id: StepId; text: string }[];
 };
 
 /** current-limit knob range, amps */
 export const AMP_KNOB = { min: 0, max: 1600, detent: 50 } as const;
 
-export function generateGpu(seed: number, tier: number, tools: string[] = [], kind?: GpuKind): GpuModel {
+export function generateGpu(seed: number, tier: number, tools: string[] = [], kind?: GpuKind, charge = 100): GpuModel {
   const t = clamp(Math.round(tier), 0, 5);
   const r = rng(hashSeed('gpu', seed, t));
   const k: GpuKind = kind ?? (t >= 4 ? 'turbine' : 'piston');
@@ -157,6 +163,7 @@ export function generateGpu(seed: number, tier: number, tools: string[] = [], ki
     fuelMin: 12,
     idle: 52,
     meter: tools.includes('gpuMeter'),
+    charge: clamp(charge / 100, 0, 1),
     steps: [],
   };
   m.steps = checklistFor(m);
@@ -424,11 +431,14 @@ function updateFeed(s: GpuSim) {
   s.busV = trueBus(s);
 }
 
+/** a low battery cart delivers less: full from half charge up, down to 0.8 when flat */
+export const chargeFactor = (m: GpuModel) => (m.charge >= 0.5 ? 1 : 0.8 + 0.4 * m.charge);
+
 /** starter power available, 0..~1.3 (1 = the cart at the placard setting) */
 export function crankPower(s: GpuSim): number {
   const { ac } = s.m;
   if (s.fed) {
-    const vf = s.cartV === ac.volts ? 1 : s.cartV > ac.volts ? 1.2 : 0.3;
+    const vf = (s.cartV === ac.volts ? 1 : s.cartV > ac.volts ? 1.2 : 0.3) * chargeFactor(s.m);
     if (ac.kind === 'turbine') return vf * clamp(s.cartA / ac.ampMax, 0, 1.3);
     return vf * clamp(s.cartA / 250, 0.3, 1);
   }
@@ -438,11 +448,22 @@ export function crankPower(s: GpuSim): number {
 
 const cranking = (s: GpuSim) => s.starter && !(s.m.ac.kind === 'piston' && s.fired);
 
-/** the cart's own output voltmeter: its terminal volts, sagging under the starter's load */
+/** the cart's resting output: its setting, a little under it as the battery runs down */
+export const cartRest = (s: GpuSim) => s.cartV * (0.955 + 0.045 * s.m.charge);
+
+/**
+ * the cart's own output voltmeter: its terminal volts, sagging under the
+ * starter's load. A run-down battery's internal resistance climbs, so it sags
+ * several times as far (more on a 28 V cart, whose cells are in longer
+ * strings), never below two thirds of its rest voltage.
+ */
 export function cartOut(s: GpuSim): number {
   if (!s.cartOn) return 0;
-  if (!s.fed) return s.cartV;
-  return s.cartV - (cranking(s) ? clamp(s.amps / 1000, 0, 1.2) * 2.6 : 0) - (s.running ? 0 : 0.1);
+  const rest = cartRest(s);
+  if (!s.fed) return rest;
+  const weak = 1 + 4 * (1 - s.m.charge) * (s.cartV / 14);
+  const sag = cranking(s) ? Math.min(rest * 0.35, clamp(s.amps / 1000, 0, 1.2) * 2.6 * weak) : 0;
+  return rest - sag - (s.running ? 0 : 0.1);
 }
 
 /** the panel voltmeter reads the main bus: dead with the battery master OFF, else the strongest source on it */
@@ -845,7 +866,8 @@ export const gpu: PuzzleDef = {
   mount(host, p) {
     const job = p.context?.job;
     const kind: GpuKind | undefined = job === 'gpuTurbine' ? 'turbine' : job === 'gpuPiston' ? 'piston' : undefined;
-    const m = generateGpu(p.seed, p.tier, p.tools, kind);
+    // the island's cart, as it was left: a run-down one sags under the start
+    const m = generateGpu(p.seed, p.tier, p.tools, kind, p.context?.cart?.charge ?? 100);
     const { ac } = m;
     const tb = ac.kind === 'turbine';
     const high = ac.wing === 'high';
@@ -1161,6 +1183,8 @@ export const gpu: PuzzleDef = {
       settle(host, res, res.perfect ? 900 : 400);
     }
     const dataOf = () => ({
+      // which airframe it was (a turbine start takes more out of the cart)
+      ac: ac.kind,
       errors: s.errors.slice(),
       faults: s.faults.slice(),
       aborts: s.aborts,
@@ -2100,6 +2124,25 @@ export const gpu: PuzzleDef = {
         ctx.stroke();
       }
       label(ctx, 'GROUND POWER', c.x + 110, c.y + 17, { size: 11, weight: 900, color: shade(C.mech, -0.55), align: 'left' });
+      // the battery's state of charge, as the cart's LED bar shows it: right-aligned before the
+      // louvres, the percentage dropped first when the cart is narrow
+      const right = c.x + c.w - 74;
+      const titleEnd = c.x + 208;
+      const withText = right - 30 - 38 > titleEnd;
+      const bx = withText ? right - 30 - 38 : right - 36;
+      if (bx > titleEnd) {
+        const lit = Math.max(1, Math.round(m.charge * 5));
+        // the cart's own LEDs (not the game's verdict colours)
+        const tone = m.charge < 0.3 ? '#FF5A3C' : m.charge < 0.6 ? '#FFB02E' : '#5BE07A';
+        roundRect(ctx, bx - 2, c.y + 9, 36, 14, 3);
+        ctx.fillStyle = PANEL;
+        ctx.fill();
+        for (let i = 0; i < 5; i++) {
+          ctx.fillStyle = i < lit ? tone : 'rgba(251,245,233,.18)';
+          ctx.fillRect(bx + 1 + i * 6.4, c.y + 12, 4.6, 8);
+        }
+        if (withText) tnum(ctx, `${Math.round(m.charge * 100)}%`, right, c.y + 17, { size: 10, weight: 900, color: shade(C.mech, -0.55), align: 'right' });
+      }
       // control panel
       const P = g.panel;
       roundRect(ctx, P.x, P.y, P.w, P.h, 10);

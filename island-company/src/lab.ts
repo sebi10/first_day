@@ -5,6 +5,8 @@
 //   &card=1  card-driven torque / hydraulic servicing: the island plane's AMM task card (both effectivities)
 //   &chain=lookup|research&tag=lining  the part chain's IPC lookup or logbook research (&plant=32-40&via=stc|field: the plane carries that alteration)
 //   &isl=7  the island seed the plane (and its card) comes from
+//   &charge=25  the ground power cart's charge (%): a low cart sags under the start
+//   &job=boom / &job=van  the hydraulic bench's crewmate vehicles; &job=gpuCable (wire-up), hangar (meter), gpu (variance)
 import type { PuzzleContext, PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
 import { aircraftOf, type Ata, type PlantVia } from './sim/aircraft';
 import { chainFind, manualCard } from './sim/chain';
@@ -54,6 +56,7 @@ const context: PuzzleContext = {
   leak: 540,
   assetName: q.get('asset') ?? 'Twin N-12',
   job,
+  ...(q.has('charge') ? { cart: { name: 'GPU cart 1', charge: Number(q.get('charge')) } } : {}),
 };
 
 // the island's plane: its task card, or the part chain on it

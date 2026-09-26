@@ -493,7 +493,7 @@ describe('the manual drives the numbers', () => {
     const card = manualCard(twin, 'hydraulics', 'hydraulics', false)!;
     expect(card.precharge!.lines).toHaveLength(2);
     expect(card.fluid!.lines).toHaveLength(2);
-    const m = generateHydraulics(9, 3, [], card);
+    const m = generateHydraulics(9, 3, [], undefined, card);
     const pc = card.precharge!.lines.find((l) => l.applies)!;
     expect(m.precharge!.ref).toBe(pc.psi);
     expect(m.precharge!.refTemp).toBe(70);

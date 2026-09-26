@@ -1,11 +1,11 @@
 // Scripted players for the paper sim (scripts/balance.ts) and tests.
 // They call the same reducer as real phones, so balance numbers are real.
 import { botChainData, islandAircraft, openChain } from './chain';
-import { ECON, TIERS } from './data';
+import { ECON, GSE, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
-import { charterLoad, expectedDeferralCost, logistic, occupancy, urgency } from './econ';
+import { cableReport, charterLoad, expectedDeferralCost, gseCarts, logistic, occupancy, urgency } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
-import { ROLES, type Action, type IslandState, type Role } from './types';
+import { ROLES, type Action, type GseCart, type IslandState, type Order, type Role } from './types';
 
 export type Bot = {
   skill: number;
@@ -72,19 +72,41 @@ export function bestRates(s: IslandState) {
   return { nightly: bestN, charter: bestC };
 }
 
+/** The cart a bot would use for a start: the one on that plane if it's charged and in service, else the best-charged free one. */
+function botCart(s: IslandState, o: Order): GseCart | null {
+  const ok = (c: GseCart) => c.charge >= GSE.minStart && !cableReport(s, c.id);
+  const carts = gseCarts(s);
+  const on = carts.find((c) => c.hookedTo === o.assetId);
+  if (on && ok(on)) return on;
+  return carts.filter((c) => ok(c) && !c.hookedTo).sort((a, b) => b.charge - a.charge)[0] ?? null;
+}
+
 function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: number) {
   // the crew backs the analyst's story call (bots agree; people may not)
   if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role }, now);
   for (const o of s.orders.filter((x) => x.role === role && x.status === 'countered')) s = step(s, { t: 'acceptCounter', orderId: o.id }, now);
+  // the mechanic looks the ground power cables over about once a month (a cracked one gets written up)
+  if (role === 'mech')
+    for (const c of gseCarts(s)) if (!c.inspected || s.week - c.inspected.week >= 4) s = step(s, { t: 'gse', role, cart: c.id, op: 'inspect' }, now);
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
   // a crewmate's report is a favour done on top of the usual jobs (people make time when a friend is stuck);
-  // repairs and redos are real jobs and take a slot
+  // repairs and redos are real jobs and take a slot. A ground power start with no charged cart to hand waits.
   const reports = ready.filter((o) => o.kind === 'report');
-  const jobs = ready.filter((o) => o.kind !== 'report').slice(0, bot.perTurn ?? 4);
+  const jobs = ready.filter((o) => o.kind !== 'report' && (o.kind !== 'gpustart' || !!botCart(s, o))).slice(0, bot.perTurn ?? 4);
   const play = (o: (typeof ready)[number]) => {
+    // tow a charged cart over for a start (a flat or tagged-out one on that plane goes back on the charger first),
+    // and put it back on the charger after
+    const cart = o.kind === 'gpustart' ? botCart(s, o) : null;
+    if (o.kind === 'gpustart' && !cart) return;
+    if (cart && cart.hookedTo !== o.assetId) {
+      const on = gseCarts(s).find((c) => c.hookedTo === o.assetId);
+      if (on) s = step(s, { t: 'gse', role, cart: on.id, op: 'charge' }, now);
+      s = step(s, { t: 'gse', role, cart: cart.id, op: 'hook', assetId: o.assetId! }, now);
+    }
     const sc = score(r, skill);
     s = step(s, { t: 'complete', role, orderId: o.id, score: sc, perfect: sc >= 0.95, data: chainData(s, o, skill, r) }, now);
+    if (cart) s = step(s, { t: 'gse', role, cart: cart.id, op: 'charge' }, now);
   };
   for (const o of [...reports, ...jobs]) play(o);
   // a job that found a part: the IPC lookup comes straight after it, if there's a slot left (the plane is down)

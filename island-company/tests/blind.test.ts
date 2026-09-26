@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { crack, distToInd, generateCrack, styleOf } from '../src/puzzles/crack';
 import { generateGpu, gpu } from '../src/puzzles/gpu';
-import { hydraulics } from '../src/puzzles/hydraulics';
+import { generateHydraulics, hydraulics, LEAK_SPOTS } from '../src/puzzles/hydraulics';
 import { generateIpc, ipc, scoreIpc } from '../src/puzzles/ipc';
 import { markInput } from '../src/puzzles/kit';
 import { FIELDS_FOR, generateLogbook, idealAnswer, logbook, rightValues, scoreLogbook, type LbModel, type LbRoute } from '../src/puzzles/logbook';
@@ -314,6 +314,88 @@ describe('hydraulic servicing: a blind sign-off gives nothing away', () => {
       }
       expect(run.statuses.join(' ')).toMatch(blind ? /Hyd 0 psi/ : /Take the filler cap off/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("a crewmate's vehicle on the hydraulic bench: a blind sign-off gives nothing away", () => {
+  /** the bucket truck, boom still up: open the leaking fitting (the load comes down) */
+  const openUnderLoad = (blind: boolean) => {
+    const m = generateHydraulics(3, 2, [], 'boom');
+    const run = mount(hydraulics, { seed: 3, tier: 2, blind, job: 'boom' });
+    const tab = run.at('Cylinder');
+    run.tap(tab.x, tab.y);
+    run.step(0.1);
+    run.clear();
+    run.step(0.05);
+    // the four places the lift circuit could leak, drawn as tap rings in LEAK_SPOTS order
+    const rings = run.arcs.filter((a) => a.r === 13).slice(0, 4);
+    const spot = rings[LEAK_SPOTS.indexOf(m.leak!.at)];
+    run.tap(spot.x, spot.y);
+    run.step(0.1);
+    const b = run.at('Replace it');
+    run.clear();
+    run.tap(b.x, b.y);
+    run.step(0.3);
+    return run;
+  };
+
+  it('not blind: the boom drops and the job says why', () => {
+    const run = openUnderLoad(false);
+    expect(run.drew(/The boom dropped/)).toBe(true);
+    expect(run.sounds).toContain('fault');
+    expect(run.inst.timeUp().score).toBeLessThanOrEqual(0.3);
+  });
+
+  it('blind: the boom still comes down with a thud (the world), nothing says why, the true score is kept', () => {
+    const open = openUnderLoad(false);
+    const run = openUnderLoad(true);
+    expect(run.drew(/dropped|never open/i)).toBe(false);
+    expect(run.sounds).toContain('thunk');
+    for (const v of VERDICT) expect(run.sounds, v).not.toContain(v);
+    expect(run.drew('fresh oil')).toBe(false);
+    expect(run.statuses.every((x) => /^Lift cyl [\d,]+ psi$/.test(x)), run.statuses.join(' | ')).toBe(true);
+    const res = run.inst.timeUp();
+    expect(res.score).toBe(open.inst.timeUp().score);
+    expect(res.data).toMatchObject({ system: 'boom', underLoad: true, leakFixed: true });
+  });
+
+  /** the van: open the bleeder and pump the pedal until the master cylinder runs dry */
+  const runDry = (blind: boolean) => {
+    const run = mount(hydraulics, { seed: 2, tier: 2, blind, job: 'van' });
+    const tab = run.at('Brake');
+    run.tap(tab.x, tab.y);
+    run.step(0.1);
+    run.clear();
+    run.step(0.05);
+    // the bleeder wrench's ring (the only r = 11 arc on the wheel)
+    const bleeder = run.arcs.find((a) => a.r === 11)!;
+    run.tap(bleeder.x, bleeder.y);
+    run.step(0.1);
+    const pedal = run.at('press');
+    run.clear();
+    for (let k = 0; k < 14; k++) {
+      run.press(pedal.x, pedal.y, 0.25);
+      run.step(0.25);
+    }
+    return run;
+  };
+
+  it('not blind: the reservoir running dry is called out as it happens', () => {
+    const run = runDry(false);
+    expect(run.drew('dry!')).toBe(true);
+    expect(run.sounds).toContain('fault');
+  });
+
+  it('blind: the bubbles in the hose are all there is; no "dry!", no fault sound, the same true score', () => {
+    const open = runDry(false);
+    const run = runDry(true);
+    expect(run.drew('dry!')).toBe(false);
+    for (const v of VERDICT) expect(run.sounds, v).not.toContain(v);
+    const res = run.inst.timeUp();
+    expect(res.score).toBe(open.inst.timeUp().score);
+    expect(res.data).toMatchObject({ system: 'van' });
   });
 });
 

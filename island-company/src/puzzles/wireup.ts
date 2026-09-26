@@ -4,14 +4,34 @@
 // (black screw) takes the source hot and the brass screws take the travelers;
 // on a GFCI the source goes on LINE. Tiers 0–2 label every terminal; from
 // tier 3 you get only the screw colours, like a real device.
+// A crewmate's ground power cart (job 'gpuCable'): its cable is cracked at the
+// plug, so it is cut back past the damage and a new 28 V DC plug goes on:
+// red to the + pin, black to the − pin, and the small lead to the short pin
+// (the interlock that lets the aircraft's external power relay close only
+// once the plug is fully home). Each conductor is stripped to the depth of
+// its pin's barrel and clamped: no hook, and no bare copper past the barrel.
 import { rng } from '../sim/rng';
 import { C, backdrop, clamp, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
-type Term = { id: string; label: string; color: 'brass' | 'silver' | 'green' | 'dark' | 'nut'; x: number; y: number; multi?: boolean; stamp?: string };
+type Term = {
+  id: string;
+  label: string;
+  /** 'nut': a splice (twisted, no hook); 'pin': a plug pin's set-screw barrel (clamped, no hook) */
+  color: 'brass' | 'silver' | 'green' | 'dark' | 'nut' | 'pin';
+  x: number;
+  y: number;
+  multi?: boolean;
+  /** printed on the device, shown with the headlamp tool (LINE / LOAD, COMMON) */
+  stamp?: string;
+  /** moulded into the device, always readable (a plug's + and −) */
+  mark?: string;
+  /** a plug pin's size on the drawing (the interlock pin is the small, short one) */
+  r?: number;
+};
 type Wire = { id: string; color: 'black' | 'white' | 'bare' | 'red'; cable: string; target: string[]; label: string };
 export type WireModel = {
-  device: 'receptacle' | 'switch3' | 'passthrough' | 'gfci' | 'switch3src';
+  device: 'receptacle' | 'switch3' | 'passthrough' | 'gfci' | 'switch3src' | 'gpuplug';
   title: string;
   terms: Term[];
   wires: Wire[];
@@ -32,13 +52,40 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
   // the job decides the device: a GFCI job is a GFCI, a 3-way job is a 3-way
   // a repair on an outlet (a scorched device, a backstab, a re-landed run) is a receptacle job
   const device: WireModel['device'] =
-    job === 'gfci' ? 'gfci' : job === 'switch3' ? (t >= 5 ? 'switch3src' : 'switch3') : job === 'outlet' ? (t >= 3 ? 'passthrough' : 'receptacle') : byTier;
+    job === 'gpuCable'
+      ? 'gpuplug'
+      : job === 'gfci'
+        ? 'gfci'
+        : job === 'switch3'
+          ? t >= 5
+            ? 'switch3src'
+            : 'switch3'
+          : job === 'outlet'
+            ? t >= 3
+              ? 'passthrough'
+              : 'receptacle'
+            : byTier;
   const labels = t <= 2;
   let terms: Term[] = [];
   let wires: Wire[] = [];
   let cables: WireModel['cables'] = [];
   let title = '';
-  if (device === 'receptacle' || device === 'passthrough') {
+  if (device === 'gpuplug') {
+    title = 'GPU plug: new plug on the cut-back cable';
+    // the insert face: two big pins marked + and −, and the short interlock pin (on the + side)
+    const flip = r.chance(0.5);
+    terms = [
+      { id: 'pos', label: 'POS +', color: 'pin', x: flip ? 0.72 : 0.28, y: 0.42, mark: '+', r: 14 },
+      { id: 'neg', label: 'NEG −', color: 'pin', x: flip ? 0.28 : 0.72, y: 0.42, mark: '−', r: 14 },
+      { id: 'ilk', label: 'SHORT PIN', color: 'pin', x: flip ? 0.64 : 0.36, y: 0.78, r: 8 },
+    ];
+    cables = [{ id: 'A', label: 'from the cart', x: 0.5 }];
+    wires = [
+      { id: 'A-red', color: 'red', cable: 'A', target: ['pos'], label: t <= 2 ? 'red (+, 2 AWG)' : 'red (2 AWG)' },
+      { id: 'A-blk', color: 'black', cable: 'A', target: ['neg'], label: t <= 2 ? 'black (−, 2 AWG)' : 'black (2 AWG)' },
+      { id: 'A-ilk', color: 'white', cable: 'A', target: ['ilk'], label: t <= 2 ? 'white (interlock, 16 AWG)' : 'white (16 AWG)' },
+    ];
+  } else if (device === 'receptacle' || device === 'passthrough') {
     title = device === 'receptacle' ? 'Duplex receptacle' : 'Receptacle, power passing through';
     terms = [
       { id: 'b1', label: 'HOT', color: 'brass', x: 0.72, y: 0.36 },
@@ -161,7 +208,7 @@ export function scoreWireup(m: WireModel, landed: Landing[]) {
     const stripOk = Math.abs(l.strip - m.stripTarget) <= 0.2;
     if (l.strip > m.stripTarget + 0.2) exposed++;
     if (stripOk) v += 0.25;
-    if (term.color === 'nut') v += 0.15; // splices twist, no hook
+    if (term.color === 'nut' || term.color === 'pin') v += 0.15; // splices twist and pins clamp: no hook
     else if (l.cw) v += 0.15;
     else hooks++;
     total += v;
@@ -172,7 +219,7 @@ export function scoreWireup(m: WireModel, landed: Landing[]) {
 }
 
 const WIRE_FILL: Record<Wire['color'], string> = { black: '#1f2a30', white: '#f7f3ea', bare: '#c98a4b', red: '#9b3b45' };
-const SCREW: Record<Term['color'], string> = { brass: '#c9a86a', silver: '#cfd8d8', green: '#4e8a5a', dark: '#3b464b', nut: '#f4d35e' };
+const SCREW: Record<Term['color'], string> = { brass: '#c9a86a', silver: '#cfd8d8', green: '#4e8a5a', dark: '#3b464b', nut: '#f4d35e', pin: '#d9b45a' };
 
 export const wireup: PuzzleDef = {
   id: 'wireup',
@@ -344,10 +391,24 @@ export const wireup: PuzzleDef = {
       roundRect(ctx, g.box.x + 8, g.box.y + 8, g.box.w - 16, g.box.h - 16, 8);
       ctx.fillStyle = '#6b767b';
       ctx.fill();
-      // device yoke
-      roundRect(ctx, g.box.x + g.box.w * 0.34, g.box.y + g.box.h * 0.14, g.box.w * 0.32, g.box.h * 0.72, 8);
-      ctx.fillStyle = m.device === 'gfci' ? '#f7f3ea' : '#efe8da';
-      ctx.fill();
+      if (m.device === 'gpuplug') {
+        // the plug's rubber insert, seen from the back where the conductors go in
+        const cx = g.box.x + g.box.w / 2;
+        const cy = g.box.y + g.box.h * 0.56;
+        const rr = Math.min(g.box.w, g.box.h) * 0.44;
+        ctx.fillStyle = '#2b3438';
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#161c1f';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      } else {
+        // device yoke
+        roundRect(ctx, g.box.x + g.box.w * 0.34, g.box.y + g.box.h * 0.14, g.box.w * 0.32, g.box.h * 0.72, 8);
+        ctx.fillStyle = m.device === 'gfci' ? '#f7f3ea' : '#efe8da';
+        ctx.fill();
+      }
       if (m.device === 'gfci') {
         ctx.fillStyle = C.elec; // yellow tape over LOAD, as shipped
         ctx.fillRect(g.box.x + g.box.w * 0.62, g.box.y + g.box.h * 0.26, 14, g.box.h * 0.16);
@@ -363,7 +424,18 @@ export const wireup: PuzzleDef = {
       // terminals
       for (const t of m.terms) {
         const tp = termPos(t);
-        if (t.color === 'nut') {
+        if (t.color === 'pin') {
+          // a pin's barrel, with its set screw
+          const pr = t.r ?? 11;
+          ctx.fillStyle = SCREW.pin;
+          ctx.beginPath();
+          ctx.arc(tp.x, tp.y, pr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#6b5424';
+          ctx.beginPath();
+          ctx.arc(tp.x, tp.y, pr * 0.45, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (t.color === 'nut') {
           ctx.fillStyle = SCREW.nut;
           ctx.beginPath();
           ctx.moveTo(tp.x - 12, tp.y + 10);
@@ -384,10 +456,11 @@ export const wireup: PuzzleDef = {
           ctx.lineTo(tp.x + 6, tp.y);
           ctx.stroke();
         }
-        const txt = m.labels ? t.label : m.stamps ? t.stamp : undefined;
-        if (txt) label(ctx, txt, tp.x + (t.x < 0.5 ? -16 : 16), tp.y + (t.color === 'nut' ? 18 : 0), { size: 10, weight: 900, color: C.paper, align: t.x < 0.5 ? 'right' : 'left' });
-        // teaching tiers: a faint clockwise guide arc around each screw
-        if (m.labels && t.color !== 'nut' && !landed.some((l) => l.term === t.id)) {
+        const txt = m.labels ? t.label : (t.mark ?? (m.stamps ? t.stamp : undefined));
+        const off = (t.r ?? 11) + 5;
+        if (txt) label(ctx, txt, tp.x + (t.x < 0.5 ? -off : off), tp.y + (t.color === 'nut' ? 18 : 0), { size: t.mark && !m.labels ? 16 : 10, weight: 900, color: C.paper, align: t.x < 0.5 ? 'right' : 'left' });
+        // teaching tiers: a faint clockwise guide arc around each screw (a splice twists, a pin clamps)
+        if (m.labels && t.color !== 'nut' && t.color !== 'pin' && !landed.some((l) => l.term === t.id)) {
           ctx.strokeStyle = 'rgba(251,245,233,.55)';
           ctx.lineWidth = 1.5;
           ctx.setLineDash([2, 3]);
@@ -407,7 +480,7 @@ export const wireup: PuzzleDef = {
         const cx = g.box.x + c.x * g.box.w;
         drawWire(w, cx, g.box.y + 6, tp.x, tp.y, 0);
         // the hook, drawn the way it was landed (straight = no hook at all)
-        if (t.color !== 'nut' && l.cw !== null) {
+        if (t.color !== 'nut' && t.color !== 'pin' && l.cw !== null) {
           ctx.strokeStyle = WIRE_FILL.bare;
           ctx.lineWidth = 3;
           ctx.beginPath();
@@ -426,7 +499,13 @@ export const wireup: PuzzleDef = {
         }
       }
       // wire tray
-      label(ctx, 'Swipe a tip left to strip (gauge 3/4 in), drag the wire to a screw', 14, g.tray.y - 10, { size: 10, weight: 700, color: C.inkSoft, align: 'left' });
+      label(
+        ctx,
+        m.device === 'gpuplug' ? 'Swipe a tip left to strip (barrels 3/4 in deep), drag each to its pin' : 'Swipe a tip left to strip (gauge 3/4 in), drag the wire to a screw',
+        14,
+        g.tray.y - 10,
+        { size: 10, weight: 700, color: C.inkSoft, align: 'left' },
+      );
       free().forEach((w, i) => {
         const r = wireRow(i);
         roundRect(ctx, r.x, r.y, r.w, r.h, 10);
@@ -459,7 +538,7 @@ export const wireup: PuzzleDef = {
         roundRect(ctx, g.w / 2 - 110, g.h - 60, 220, 48, 24);
         ctx.fillStyle = finished ? 'rgba(31,42,48,.2)' : C.sea;
         ctx.fill();
-        label(ctx, finished ? 'Tested' : 'Fold in + test', g.w / 2, g.h - 36, { size: 16, weight: 800, color: C.white });
+        label(ctx, finished ? 'Tested' : m.device === 'gpuplug' ? 'Close up + test' : 'Fold in + test', g.w / 2, g.h - 36, { size: 16, weight: 800, color: C.white });
       }
       if (flash) {
         const t = clamp((performance.now() - flash) / 700, 0, 1);

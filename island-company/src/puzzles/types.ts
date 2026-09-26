@@ -51,6 +51,11 @@ export interface PuzzleContext {
   card?: ManualCard;
   /** launched by the part chain (src/sim/chain.ts): the IPC lookup or the logbook research for this part */
   chain?: { step: 'lookup' | 'research'; tag: string; item: string; found: string };
+  /**
+   * ground power start: the cart hooked up to the plane (the island's GSE state).
+   * `charge` 0..100: a low cart's output sags under the start load.
+   */
+  cart?: { name: string; charge: number };
 }
 
 /** One value as the manual prints it, with the effectivity it applies to. */

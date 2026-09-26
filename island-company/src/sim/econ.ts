@@ -1,6 +1,6 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
-import { CATALOG_BY_KIND, DEFECT, ECON, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
-import type { Asset, IslandState, Order, Role, Weather } from './types';
+import { CATALOG_BY_KIND, DEFECT, ECON, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
+import type { Asset, CableBand, GseCart, IslandState, Order, Role, Weather } from './types';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round10 = (v: number) => Math.round(v / 10) * 10;
@@ -255,4 +255,48 @@ export function projectWeek(s: IslandState, rates = s.rates) {
     budget: td.budget,
     fixed: td.fixed,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Ground power carts
+
+/** A cart as it comes to the island: full, on the charger. */
+export function newCart(c: { id: string; name: string }): GseCart {
+  return { id: c.id, name: c.name, charge: 100, wear: c.id === GSE.carts[0].id ? GSE.startWear : 0, hookedTo: null, charging: true, inspected: null };
+}
+
+/**
+ * The island's ground power carts: the stored ones, plus any its tier has
+ * brought that aren't stored yet. An island saved before carts existed stores
+ * none, and gets the default (on the charger, full) the first time it is read.
+ */
+export function gseCarts(s: Pick<IslandState, 'gse' | 'tier'>): GseCart[] {
+  const out = s.gse ? [...s.gse] : [];
+  for (const c of GSE.carts) if (c.tier <= s.tier && !out.some((x) => x.id === c.id)) out.push(newCart(c));
+  return out;
+}
+
+/** What an inspection sees on a cable this worn. */
+export const cableBand = (wear: number): CableBand => (wear >= GSE.pitted ? 'pitted' : wear >= GSE.cracked ? 'cracked' : 'good');
+
+/** The open report that has this cart tagged out (its cable is cracked at the plug), if any. */
+export const cableReport = (s: IslandState, cartId: string) => openReports(s).find((o) => o.report?.key === 'gpuCable' && o.report.cart === cartId);
+
+/** The cart hooked up to this plane, if any. */
+export const cartOn = (s: IslandState, assetId: string | null) => (assetId ? gseCarts(s).find((c) => c.hookedTo === assetId) : undefined);
+
+/**
+ * A ground power start needs a charged cart hooked up to that plane, with a
+ * cable that isn't tagged out. `blocker` says what is missing (the card shows
+ * it, and the engine refuses the start with it).
+ */
+export function gseForStart(s: IslandState, o: Pick<Order, 'kind' | 'assetId'>): { cart: GseCart | null; blocker: string | null } {
+  if (o.kind !== 'gpustart') return { cart: null, blocker: null };
+  const plane = s.assets.find((a) => a.id === o.assetId)?.name ?? 'the plane';
+  const cart = cartOn(s, o.assetId) ?? null;
+  if (!cart) return { cart, blocker: `Hook a charged cart up to ${plane} first` };
+  const rep = cableReport(s, cart.id);
+  if (rep) return { cart, blocker: `${cart.name} is tagged out until ${s.players[rep.role]?.name ?? ROLE_LABEL[rep.role]} fixes its cable: hook up another cart` };
+  if (cart.charge < GSE.minStart) return { cart, blocker: `Hook a charged cart up to ${plane} first: ${cart.name} is down to ${Math.round(cart.charge)}%` };
+  return { cart, blocker: null };
 }

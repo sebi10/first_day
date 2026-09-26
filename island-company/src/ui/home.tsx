@@ -4,12 +4,13 @@ import { useEffect, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
-import { powered, tierDef, urgency } from '../sim/econ';
+import { gseForStart, powered, tierDef, urgency } from '../sim/econ';
 import { ROLES, type IslandState, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
 import { ChainBanner } from './chain';
 import { Desk } from './desk';
+import { GseSheet } from './gse';
 import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
 import { unreadBoard } from './crewboard';
@@ -32,6 +33,8 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
   const [play, setPlay] = useState<{ launch: PuzzleLaunch; order: Order; cover: boolean; week: number } | null>(null);
   const [review, setReview] = useState<WeekReport | null>(null);
   const [handoff, setHandoff] = useState<Role | null>(null);
+  // the ground power sheet: closed (undefined), all carts (null), or one cart first
+  const [gse, setGse] = useState<string | null | undefined>(undefined);
   const reduce = settings.get().reduceMotion;
 
   // auto-open the newest board review once, but never on top of a running puzzle
@@ -59,6 +62,14 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
   if (!me.week0Done) return <Week0 ctl={ctl} role={role} />;
 
   const onPlay = (o: Order, cover = false) => {
+    // a ground power start needs a charged cart hooked up first: say so and show the carts, never a puzzle that can't count
+    const g = gseForStart(s, o);
+    if (g.blocker) {
+      fx.bad();
+      toast(`${g.blocker}.`);
+      setGse(g.cart?.id ?? null);
+      return;
+    }
     fx.tap();
     setPlay({ launch: launchFor(s, o, role, cover), order: o, cover, week: s.week });
   };
@@ -76,7 +87,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
 
   return (
     <div class={`${reduce ? 'reduce-motion' : ''} ${lefty}`}>
-      {tab === 'island' && <Home ctl={ctl} onPlay={onPlay} onSeat={() => setHandoff(role)} />}
+      {tab === 'island' && <Home ctl={ctl} onPlay={onPlay} onSeat={() => setHandoff(role)} onGse={setGse} />}
       {tab === 'board' && <Board ctl={ctl} onReview={setReview} />}
       {tab === 'me' && <Me ctl={ctl} onLeave={() => (location.hash = '#/')} />}
 
@@ -100,6 +111,9 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
           }}
         />
       )}
+      <Sheet open={gse !== undefined} onClose={() => setGse(undefined)} label="Ground power">
+        {gse !== undefined && <GseSheet ctl={ctl} focus={gse} onClose={() => setGse(undefined)} />}
+      </Sheet>
       <Sheet open={!!handoff} onClose={() => setHandoff(null)} label="Switch seat">
         <div class="col" style={{ gap: 10 }}>
           <h2>Pass the phone</h2>
@@ -166,7 +180,7 @@ function Loading({ text, back }: { text: string; back?: boolean }) {
   );
 }
 
-function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void }) {
+function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void; onGse(cart: string | null): void }) {
   const { s, role, ref, sync } = ctl;
   const r = role!;
   const [zoom, setZoom] = useState(false);
@@ -211,6 +225,10 @@ function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: bool
             onTap={() => {
               fx.tap();
               setZoom((z) => !z);
+            }}
+            onCart={(id) => {
+              fx.tap();
+              onGse(id);
             }}
           />
           <span class="island-hint">
@@ -347,7 +365,7 @@ function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: bool
             )}
             <ChainBanner s={s} role={r} />
             <CrewProject ctl={ctl} onPlay={onPlay} />
-            {r === 'fin' ? <Desk ctl={ctl} onPlay={onPlay} /> : <OpsPanel ctl={ctl} role={r} onPlay={onPlay} />}
+            {r === 'fin' ? <Desk ctl={ctl} onPlay={onPlay} /> : <OpsPanel ctl={ctl} role={r} onPlay={onPlay} onGse={onGse} />}
           </>
         )}
       </div>
@@ -460,7 +478,8 @@ function Dock({
   const r = role!;
   const [confirm, setConfirm] = useState(false);
   const turn = s.turns[r];
-  const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
+  // a ground power start waiting on a cart isn't something to start yet
+  const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready' && !gseForStart(s, o).blocker).sort((a, b) => urgency(s, b) - urgency(s, a));
   const ready = readyList.length;
   const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week).length : 0;
   const gridCapped = (r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1) || !!capNow(s, r)?.full;

@@ -20,7 +20,7 @@ Short on time? Anyone can try the whole game alone first with *New island → 1 
 
 | | Mechanic | Electrician | Analyst |
 | --- | --- | --- | --- |
-| Your zone | Hangar, airstrip, 2 planes (1 at tier 1) | 4 cottages (2 at tier 1), the grid, later a generator | The office: cash, prices, approvals, parts |
+| Your zone | Hangar, airstrip, 2 planes (1 at tier 1), the ground power carts | 4 cottages (2 at tier 1), the grid, later a generator | The office: cash, prices, approvals, parts |
 | Your number | Flights available | Houses rentable | Repairs approved |
 | If you slip | No flights → no guests, no parts | No power / closed houses → no revenue, hangar tools offline | Undecided cards become deferrals → incident risk for everyone |
 | Your jobs (puzzles) | Torque sequence, crack hunt (UV penetrant, one tap circles an indication), engine teardown, weight and balance, safety wire, hydraulic servicing, ground power start; when a part is missing: the IPC lookup and logbook research | Circuit trace, panel load, wire-up, multimeter diagnosis, conduit bending | Variance find, parts auction, cash forecast, bank reconciliation, three-way match |
@@ -35,6 +35,8 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
    - **Analyst:** swipe cards (→ approve, ← defer, ↑ cheaper fix), then set prices on the demand curve.
    - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident). Once a week you can also **write up a squawk**: tap one of your assets and pick the job you judge it needs; it lands on the analyst's desk with your name on it.
 4. Tap **End turn**.
+
+**Mechanic: the ground power carts.** A *Ground power start* job needs a charged cart hooked up to that plane first. Tap a yellow cart on the island (or the *Ground power* card on your panel) to plug it in on the hangar charger, hook it up to a plane, unhook it, or inspect its cable. Its light is green from 60%, amber from 30%, red below: a start needs 30% and takes about a quarter (a turbine nearly half). A cart only charges when the week resolves, on the charger, while the hangar has power, so put it back after a start. A run-down cart shows in the start itself: its voltmeter sags under the load. Every start wears the cable, and only an inspection tells you how it's holding up. A cracked one is tagged out and goes to the electrician for a new plug; a start through burnt pins can quietly damage the plane's receptacle. Hooked up during an avionics job, a cart gives the radio a steady bus.
 
 The week resolves at **20:00 island time**, or as soon as all three have ended their turn. Everyone gets the board review. Miss a day and your role runs on autopilot at 50%: nothing is lost, but that week doesn't count toward unlocks.
 
@@ -74,11 +76,13 @@ You get one chain at a time, with a breather after each. It never falls on the i
 
 From week 3 the island throws up problems one trade has and another has to fix. All three of you report and all three fix:
 
-- The mechanic: "the hangar work lights are dead" (electrician), "the parts vendor put us on credit hold" (analyst).
-- The electrician: "the trencher drive belt snapped" (mechanic), "utility autopay is drafting more than the bills" (analyst).
-- The analyst: "office outlets go dead when the printer runs" (electrician), "the van wheel is wobbling" (mechanic).
+- The mechanic: "the hangar work lights are dead", "the hangar's 28 V ground power keeps going dead", "the GPU cart cable is cracked at the plug" (electrician); "the parts vendor put us on credit hold", "GPU starts never make it onto the charter invoices" (analyst).
+- The electrician: "the trencher drive belt snapped", "the bucket truck boom creeps down: oil at the lift cylinder" (mechanic); "utility autopay is drafting more than the bills" (analyst).
+- The analyst: "office outlets go dead when the printer runs" (electrician), "the van wheel is wobbling", "the van's brake pedal is soft" (mechanic).
 
-A report lands on the fixer's list, ready, no approval. While it's open it either **slows the reporter down** (2 jobs a turn, or 1 desk task) or **costs cash every week**. Tap it to see who's waiting on you, then *Start*. A fix that doesn't hold comes back a week or two later. A money leak that comes back also charges the weeks it only looked fixed. Autopilot patches a slow-down, but a money leak waits for a person.
+The two vehicles use the hydraulic bench with their own rules. The bucket truck takes the AW hydraulic oil on its decal, not aviation 5606, and the boom comes down onto its rest before anything on the lift cylinder is opened. The van's brakes take DOT 3/4 brake fluid (a glycol); mineral fluid swells its seals.
+
+A report lands on the fixer's list, ready, no approval. While it's open it either **slows the reporter down** (2 jobs a turn, or 1 desk task), **costs cash every week**, or (the GPU cable) **keeps that cart tagged out**. Tap it to see who's waiting on you, then *Start*. A fix that doesn't hold comes back a week or two later. A money leak that comes back also charges the weeks it only looked fixed. Autopilot patches a slow-down, but a money leak waits for a person.
 
 ## 7. Lend a hand
 

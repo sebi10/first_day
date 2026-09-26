@@ -1,6 +1,6 @@
 // Work-order cards: the universal container (same radius, shadow, grammar).
-import { defectRule, ECON, incidentText, ROLE_LABEL } from '../sim/data';
-import { deferralRisk, expectedDeferralCost } from '../sim/econ';
+import { defectRule, ECON, GSE, incidentText, ROLE_LABEL } from '../sim/data';
+import { deferralRisk, expectedDeferralCost, gseForStart } from '../sim/econ';
 import { isEmergency, tracedTo } from '../sim/engine';
 import type { IslandState, Order, Role } from '../sim/types';
 import { ChainChip, ChainOrigin } from './chain';
@@ -9,6 +9,7 @@ import { capWords, reportSaid } from './select';
 import { C, ROLE_TINT } from './theme';
 
 const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
+const cartName = (s: IslandState, id?: string) => s.gse?.find((c) => c.id === id)?.name ?? 'the GPU cart';
 
 const PUZZLE_ICON: Record<Role, string> = { mech: 'wrench', elec: 'bolt', fin: 'chart' };
 
@@ -65,9 +66,24 @@ function ReportEffect({ s, o }: { s: IslandState; o: Order }) {
   if (!rep || o.status === 'done' || o.status === 'cancelled') return null;
   return (
     <>
-      <span class="chip rust">{rep.effect === 'cap' ? `${nameOf(s, rep.by)}: ${capWords(rep.by)}` : `−${usd(rep.amount)}/week`}</span>
+      <span class="chip rust">
+        {rep.effect === 'cap' ? `${nameOf(s, rep.by)}: ${capWords(rep.by)}` : rep.effect === 'gse' ? `${cartName(s, rep.cart)} tagged out` : `−${usd(rep.amount)}/week`}
+      </span>
       {rep.again && <span class="chip">Came back · week {rep.again} fix didn't hold</span>}
     </>
+  );
+}
+
+/** A ground power start: the cart it needs, or what's missing (the card says so before anyone starts it). */
+function GpuChip({ s, o }: { s: IslandState; o: Order }) {
+  if (o.kind !== 'gpustart' || o.status === 'done' || o.status === 'cancelled') return null;
+  const g = gseForStart(s, o);
+  // short enough for one chip on a phone; the card's detail says it in full
+  if (g.blocker) return <span class="chip rust">⚡ {g.cart && g.cart.charge < GSE.minStart ? 'Cart too low: charge it' : g.cart ? 'Cart tagged out' : 'Hook up a charged cart first'}</span>;
+  return (
+    <span class="chip sea">
+      ⚡ {g.cart!.name} hooked up · {Math.round(g.cart!.charge)}%
+    </span>
   );
 }
 
@@ -105,6 +121,7 @@ export function OrderCard({ s, o, onOpen, held, me }: { s: IslandState; o: Order
           {o.squawk && <span class="chip">✎ {o.squawk}</span>}
           <OriginChips s={s} o={o} />
           {statusChip(s, o, me)}
+          <GpuChip s={s} o={o} />
           <ReportEffect s={s} o={o} />
           {carried && (
             <span class={`chip ${risk >= 0.3 ? 'rust' : ''}`}>
@@ -143,6 +160,13 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       </div>
       <Origin s={s} o={o} />
       <ChainOrigin s={s} o={o} me={role} />
+      {o.kind === 'gpustart' && o.status !== 'done' && o.status !== 'cancelled' && (
+        <p class={gseForStart(s, o).blocker ? 'fault' : 'muted'} style={{ margin: 0, fontWeight: 700 }}>
+          {gseForStart(s, o).blocker
+            ? `${gseForStart(s, o).blocker}. A ground power start runs off a charged cart hooked up to the plane.`
+            : `${gseForStart(s, o).cart!.name} is hooked up at ${Math.round(gseForStart(s, o).cart!.charge)}%: a start takes about a quarter of it (a turbine nearly half).`}
+        </p>
+      )}
       {o.status === 'pending' && !o.chain && (
         <p class="muted" style={{ margin: 0 }}>
           {role === 'fin'
@@ -254,7 +278,9 @@ function Origin({ s, o }: { s: IslandState; o: Order }) {
           <span class="fault" style={{ fontWeight: 700 }}>
             {rep.effect === 'cap'
               ? `Until it's fixed, ${by} is held to ${capWords(rep.by).replace(' max', '')} a turn.`
-              : `Costs ${usd(rep.amount)} every week it stays open.`}
+              : rep.effect === 'gse'
+                ? `Until it's fixed, ${cartName(s, rep.cart)} is tagged out: no ground power starts on it. Cut the cable back past the crack and fit a new plug.`
+                : `Costs ${usd(rep.amount)} every week it stays open.`}
           </span>
         )}
         {open && (

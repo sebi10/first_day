@@ -645,6 +645,55 @@ export const inspects = (inspection: string, job: string) => {
   return s === 'all' || !!s?.includes(job);
 };
 
+/**
+ * Ground power carts (GSE): battery carts the mechanic charges in the hangar,
+ * tows to a plane and hooks up for a ground power start. Tuned so a cart that
+ * goes back on the charger after each start is always ready, a forgotten one
+ * runs flat in two or three starts, and a cable that is never inspected wears
+ * into the arcing band in about ten starts.
+ */
+export const GSE = {
+  /** the carts, and the island tier each arrives with */
+  carts: [
+    { id: 'gpu1', name: 'GPU cart 1', tier: 1 },
+    { id: 'gpu2', name: 'GPU cart 2', tier: 3 },
+  ],
+  /** the first cart came second-hand: some wear on its cable already */
+  startWear: 20,
+  /** a start needs at least this much charge */
+  minStart: 30,
+  /** charge a start uses: a piston single, a turbine single */
+  drain: { piston: 25, turbine: 45 },
+  /** cable wear a start adds; a live plug or unplug arcs the pins and adds more */
+  wear: 7,
+  arcWear: 15,
+  /** each resolved week on the charger (hangar power on); the electricity, USD per point of charge */
+  chargePerWeek: 60,
+  powerPerPoint: 0.5,
+  /** self-discharge per resolved week off the charger */
+  idleDrain: 4,
+  /** what an inspection sees: from `cracked` the insulation is cracked near the plug, from `pitted` the pins are pitted and burnt */
+  cracked: 40,
+  pitted: 70,
+  /** at this wear the damage can't be missed: the mechanic writes it up without an inspection */
+  autoReport: 85,
+  /** a start on pitted pins may arc into the plane's receptacle: (wear − arcFrom) / arcSpan, so 70 → 17%, 85 → 42%, 100 → 67% */
+  arcFrom: 60,
+  arcSpan: 60,
+  /** a cable arc from wear this high is the severe kind (a melted plug) */
+  arcSevere: 90,
+  /** avionics work on a plane with a charged cart hooked up: a steady bus for the radio checks (+health, some charge) */
+  avionicsBonus: 2,
+  avionicsDrain: 5,
+};
+
+/** An inspection's words for each band. */
+export const CABLE_BAND: Record<'good' | 'cracked' | 'pitted', string> = {
+  good: 'cable and plug in good shape',
+  cracked: 'insulation cracked near the plug',
+  pitted: 'plug pins pitted and burnt',
+};
+
 /** Cross-trade reports: one trade's problem that another trade has to fix. All three trades report and fix. */
 export const REPORT = {
   fromWeek: 3,
@@ -673,9 +722,10 @@ export type ReportDef = {
   /** feed when a fix didn't hold: "<reporter>: <back>. The fix from week N didn't hold." */
   back: string;
   puzzle: PuzzleId;
-  /** the puzzle's scenario (teardown assembly, crack part, wire-up device) */
+  /** the puzzle's scenario (teardown assembly, crack part, wire-up device, hydraulic system) */
   job?: string;
-  effect: 'cap' | 'leak';
+  /** cap: the reporter is held to fewer jobs; leak: cash every week; gse: a ground power cart is tagged out */
+  effect: 'cap' | 'leak' | 'gse';
   /** leak: USD per resolved week at tier 1 */
   amount?: number;
   /** out of pocket for the fix (paid at once, no approval) */
@@ -687,35 +737,53 @@ export type ReportDef = {
   fixes?: string;
   /** only once the island has this tier (the generator exists from tier 3) */
   minTier?: number;
+  /** raised by something that happened (a worn cable), never drawn at random */
+  auto?: boolean;
 };
 
 /**
- * Data-driven: a branch that adds a puzzle adds its reports here. The
- * hydraulics and ground power puzzles model aircraft systems only (a light
- * twin's power brakes, a single on a GPU cart), so they bring no crewmate
- * reports yet: a van's soft brakes or a bucket truck's boom need their own
- * scenario in the puzzle first. Leaks are causes that really recur week after
- * week, not one-off errors.
+ * Data-driven: a branch that adds a puzzle adds its reports here. Leaks are
+ * causes that really recur week after week, not one-off errors. Each row is a
+ * physical cause and the fix that removes it.
  */
 export const REPORTS: ReportDef[] = [
   // the mechanic reports
   { key: 'hangarLights', by: 'mech', fixer: 'elec', title: 'Hangar work lights are dead', said: 'the hangar work lights are dead', back: 'the hangar work lights are out again', puzzle: 'trace', job: 'hangar', effect: 'cap', cost: 60, notice: 'Hangar lights out', it: 'them' },
   { key: 'compressor', by: 'mech', fixer: 'elec', title: 'Hangar compressor keeps tripping its breaker', said: 'the hangar compressor keeps tripping its breaker', back: 'the hangar compressor is tripping its breaker again', puzzle: 'meter', job: 'shop', effect: 'cap', cost: 40, notice: 'No shop air' },
   { key: 'charger', by: 'mech', fixer: 'elec', title: 'Aircraft battery charger keeps tripping the hangar GFCI', said: 'the aircraft battery charger keeps tripping the hangar GFCI', back: 'the battery charger is tripping the GFCI again', puzzle: 'meter', job: 'shop', effect: 'cap', cost: 30, notice: 'No battery charging' },
+  // the hangar's 28 V DC ground power (a maintenance supply that runs a plane's bus for avionics
+  // work) plugs into a 120 V branch circuit. Dead, or dropping out when it's loaded, means an open
+  // or loose connection on that circuit, which the electrician meters down to the bad device.
+  // Until then, work that needs the bus powered in the hangar waits.
+  { key: 'hangarGpu', by: 'mech', fixer: 'elec', title: 'Hangar 28 V ground power receptacle keeps going dead', said: "the hangar's 28 V ground power receptacle keeps going dead", back: 'the hangar 28 V ground power is dead again', puzzle: 'meter', job: 'hangar', effect: 'cap', cost: 50, notice: 'No hangar ground power' },
+  // a worn cable, written up when an inspection finds it (or when it is too far gone to miss):
+  // the electrician cuts it back past the damage and fits a new plug. Until then the cart is
+  // tagged out. Never random: the cart's wear raises it (engine: openCableReport).
+  { key: 'gpuCable', by: 'mech', fixer: 'elec', title: 'GPU cart cable insulation is cracked at the plug', said: 'the GPU cart cable insulation is cracked at the plug', back: 'the GPU cart cable is cracked at the plug again', puzzle: 'wireup', job: 'gpuCable', effect: 'gse', cost: 40, notice: 'GPU cart tagged out', auto: true },
   { key: 'vendorPrice', by: 'mech', fixer: 'fin', title: 'Parts vendor is billing list price, not our contract price', said: 'the parts vendor is billing list price, not our contract price', back: 'the parts vendor is still billing list price', puzzle: 'invoice', effect: 'leak', amount: 240, cost: 0, notice: 'Parts billed at list' },
   { key: 'avgas', by: 'mech', fixer: 'fin', title: 'Avgas went up $1.20/gal and charter prices never moved', said: 'avgas went up $1.20 a gallon and charter prices never moved', back: 'charter pricing still hasn’t caught up with avgas', puzzle: 'variance', effect: 'leak', amount: 200, cost: 0, notice: 'Charters priced on old fuel' },
+  // the ground power fee is a pass-through the billing never picks up: the carts' power and
+  // wear land in costs with no recovery, a variance the analyst traces and bills from now on
+  { key: 'gpuBilling', by: 'mech', fixer: 'fin', title: 'GPU starts never make it onto the charter invoices', said: 'the ground power starts never make it onto the charter invoices', back: 'the ground power starts are still missing from the invoices', puzzle: 'variance', job: 'gpu', effect: 'leak', amount: 150, cost: 0, notice: 'GPU starts not billed' },
   { key: 'creditHold', by: 'mech', fixer: 'fin', title: 'Parts vendor put us on credit hold', said: 'the parts vendor put us on credit hold', back: 'the parts vendor put us back on credit hold', puzzle: 'reconcile', effect: 'cap', cost: 0, notice: 'Parts on credit hold', fixes: 'clears' },
   // the electrician reports
   { key: 'genFan', by: 'elec', fixer: 'mech', title: 'Generator radiator fan bearing is screaming', said: 'the generator radiator fan bearing is screaming', back: 'the generator radiator fan is screaming again', puzzle: 'teardown', job: 'fan', effect: 'cap', cost: 110, notice: 'Generator fan failing', minTier: 3 },
   { key: 'trencher', by: 'elec', fixer: 'mech', title: 'Trencher drive belt snapped', said: 'the trencher drive belt snapped', back: 'the trencher belt let go again', puzzle: 'teardown', job: 'trencher', effect: 'cap', cost: 80, notice: 'Trencher down' },
   { key: 'ladderRack', by: 'elec', fixer: 'mech', title: 'Work truck ladder rack is cracked at the welds', said: 'the work truck ladder rack is cracked at the welds', back: 'the ladder rack weld has cracked again', puzzle: 'crack', job: 'ladder', effect: 'cap', cost: 50, notice: 'Ladder rack unsafe' },
+  // oil escaping from the lift cylinder's load side lets the boom settle under load. Lower it
+  // onto its rest (never open that fitting with the boom up), replace the leaking seal, then top
+  // up with the truck's decal oil (AW hydraulic oil, not aviation 5606) with the boom stowed
+  { key: 'boom', by: 'elec', fixer: 'mech', title: 'Bucket truck boom creeps down: hydraulic leak at the lift cylinder', said: 'the bucket truck boom creeps down and oil is leaking at the lift cylinder', back: 'the bucket truck boom is creeping down again', puzzle: 'hydraulics', job: 'boom', effect: 'cap', cost: 90, notice: 'Bucket truck parked' },
   { key: 'utilityAutopay', by: 'elec', fixer: 'fin', title: 'Utility autopay is drafting more than the bills', said: 'the utility autopay is drafting more than the bills', back: 'the utility autopay is still drafting more than the bills', puzzle: 'reconcile', effect: 'leak', amount: 200, cost: 0, notice: 'Utility overdrafting' },
   { key: 'autoShip', by: 'elec', fixer: 'fin', title: 'Supply house auto-ship keeps billing wire we cancelled', said: 'the supply house auto-ship keeps billing wire we cancelled', back: 'the supply house is still billing the cancelled wire', puzzle: 'invoice', effect: 'leak', amount: 180, cost: 0, notice: 'Cancelled wire still billed' },
   { key: 'copper', by: 'elec', fixer: 'fin', title: 'Copper jumped 20%: fixed-price house jobs are underwater', said: 'copper jumped 20% and the fixed-price house jobs are underwater', back: 'house jobs are still priced on last year’s copper', puzzle: 'variance', effect: 'leak', amount: 220, cost: 0, notice: 'Jobs priced on old copper' },
   // the analyst reports
   { key: 'officeOutlets', by: 'fin', fixer: 'elec', title: 'Office outlets go dead and come back when the printer runs', said: 'the office outlets go dead and come back whenever the printer runs', back: 'the office outlets are dropping out again', puzzle: 'meter', job: 'office', effect: 'cap', cost: 50, notice: 'Office power keeps dropping' },
-  // a fault the torque puzzle really fixes (a soft brake pedal would be hydraulic, once that puzzle has a vehicle scenario)
+  // a fault the torque puzzle really fixes (a soft pedal is hydraulic: that is the 'van' row below)
   { key: 'vanWheel', by: 'fin', fixer: 'mech', title: 'Company van wheel is wobbling: lug nuts loose', said: 'the company van wheel is wobbling and the lug nuts are loose', back: 'the van wheel is wobbling again', puzzle: 'torque', effect: 'leak', amount: 160, cost: 60, notice: 'Van off the road' },
+  // a soft pedal is air in the brake lines: bleed them with DOT 3/4 brake fluid (glycol) and keep
+  // the reservoir from running dry. Mineral fluid (5606, ATF) swells a DOT system's rubber seals
+  { key: 'van', by: 'fin', fixer: 'mech', title: 'Company van brake pedal is soft', said: 'the company van brake pedal is soft and sinks toward the floor', back: 'the van brake pedal has gone soft again', puzzle: 'hydraulics', job: 'van', effect: 'leak', amount: 150, cost: 40, notice: 'Van parked: soft brakes' },
 ];
 
 export const REPORT_BY_KEY: Record<string, ReportDef> = Object.fromEntries(REPORTS.map((r) => [r.key, r]));
