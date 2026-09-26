@@ -132,7 +132,7 @@ export function Island({
   const houses = s.assets.filter((a) => a.kind === 'house');
   const grid = s.assets.find((a) => a.kind === 'grid');
   const gen = s.assets.find((a) => a.kind === 'generator');
-  const flying = planes.some((p) => planeCapacity(p, s.tier, s.weather) > 0 && !p.model.includes('cargo'));
+  const flying = planes.some((p) => !s.tags?.[p.id] && planeCapacity(p, s.tier, s.weather) > 0 && !p.model.includes('cargo'));
   const booked = houses.filter((h) => houseRentable(s, h)).length;
   const night = phase === 'night';
 
@@ -274,10 +274,11 @@ export function Island({
         {/* planes on the apron / dock */}
         {parked.map((p) => {
           const [x, y] = POS[p.id] ?? [150, 130];
+          const grounded = !!s.tags?.[p.id];
           return (
-            <g key={p.id}>
+            <g key={p.id} opacity={grounded ? 0.7 : 1}>
               <Plane x={x} y={y} cargo={p.model === 'cargo'} />
-              {p.health < 60 && <Tag x={x + 12} y={y - 16} />}
+              {grounded ? <Tag x={x + 14} y={y - 16} text="GND" /> : p.health < 60 && <Tag x={x + 12} y={y - 16} />}
             </g>
           );
         })}
@@ -374,7 +375,7 @@ export function Island({
                   <circle r={3} cx={3} cy={-4} fill="#b8c0c2" class={motion ? 'smoke' : ''} style={{ animationDelay: '1.2s' }} />
                 </g>
               )}
-              {!rentable && <Tag x={POS[h.id][0] + 12} y={POS[h.id][1] - 22} />}
+              {!rentable && <Tag x={POS[h.id][0] + 12} y={POS[h.id][1] - 22} text={s.tags?.[h.id] ? 'TAG' : undefined} />}
             </g>
           );
         })}

@@ -8,7 +8,7 @@ import { rng } from '../sim/rng';
 import { C, backdrop, clamp, label, loop, pointer, roundRect, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
-type Term = { id: string; label: string; color: 'brass' | 'silver' | 'green' | 'dark' | 'nut'; x: number; y: number; multi?: boolean };
+type Term = { id: string; label: string; color: 'brass' | 'silver' | 'green' | 'dark' | 'nut'; x: number; y: number; multi?: boolean; stamp?: string };
 type Wire = { id: string; color: 'black' | 'white' | 'bare' | 'red'; cable: string; target: string[]; label: string };
 export type WireModel = {
   device: 'receptacle' | 'switch3' | 'passthrough' | 'gfci' | 'switch3src';
@@ -16,15 +16,22 @@ export type WireModel = {
   terms: Term[];
   wires: Wire[];
   cables: { id: string; label: string; x: number }[];
+  /** teaching labels (tiers 0-2): HOT / NEU / GND spelled out */
   labels: boolean;
+  /** only what a real device has stamped on it (LINE/LOAD, COMMON): the headlamp tool */
+  stamps: boolean;
+  /** live strip-length readout: teaching tiers, or the stripper-with-gauge tool */
+  stripReadout: boolean;
   stripTarget: number; // inches
 };
 
-export function generateWireup(seed: number, tier: number, tools: string[] = []): WireModel {
+export function generateWireup(seed: number, tier: number, tools: string[] = [], job?: string): WireModel {
   const r = rng(seed);
   const t = Math.max(0, tier);
-  const device: WireModel['device'] = t <= 1 ? 'receptacle' : t === 2 ? (r.chance(0.5) ? 'switch3' : 'receptacle') : t === 3 ? r.pick(['passthrough', 'switch3'] as const) : t === 4 ? 'gfci' : 'switch3src';
-  const labels = t <= 2 || tools.includes('labelMaker');
+  const byTier: WireModel['device'] = t <= 1 ? 'receptacle' : t === 2 ? (r.chance(0.5) ? 'switch3' : 'receptacle') : t === 3 ? r.pick(['passthrough', 'switch3'] as const) : t === 4 ? 'gfci' : 'switch3src';
+  // the job decides the device: a GFCI job is a GFCI, a 3-way job is a 3-way
+  const device: WireModel['device'] = job === 'gfci' ? 'gfci' : job === 'switch3' ? (t >= 5 ? 'switch3src' : 'switch3') : byTier;
+  const labels = t <= 2;
   let terms: Term[] = [];
   let wires: Wire[] = [];
   let cables: WireModel['cables'] = [];
@@ -55,7 +62,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [])
   } else if (device === 'switch3') {
     title = '3-way switch (switch loop end)';
     terms = [
-      { id: 'com', label: 'COM', color: 'dark', x: 0.28, y: 0.62 },
+      { id: 'com', label: 'COM', color: 'dark', x: 0.28, y: 0.62, stamp: 'COMMON' },
       { id: 't1', label: 'T1', color: 'brass', x: 0.72, y: 0.36 },
       { id: 't2', label: 'T2', color: 'brass', x: 0.72, y: 0.62 },
       { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.84, multi: true },
@@ -70,10 +77,10 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [])
   } else if (device === 'gfci') {
     title = 'GFCI receptacle, protecting downstream';
     terms = [
-      { id: 'lh', label: 'LINE HOT', color: 'brass', x: 0.72, y: 0.66 },
-      { id: 'ln', label: 'LINE NEU', color: 'silver', x: 0.28, y: 0.66 },
-      { id: 'dh', label: 'LOAD HOT', color: 'brass', x: 0.72, y: 0.34 },
-      { id: 'dn', label: 'LOAD NEU', color: 'silver', x: 0.28, y: 0.34 },
+      { id: 'lh', label: 'LINE HOT', color: 'brass', x: 0.72, y: 0.66, stamp: 'LINE' },
+      { id: 'ln', label: 'LINE NEU', color: 'silver', x: 0.28, y: 0.66, stamp: 'LINE' },
+      { id: 'dh', label: 'LOAD HOT', color: 'brass', x: 0.72, y: 0.34, stamp: 'LOAD' },
+      { id: 'dn', label: 'LOAD NEU', color: 'silver', x: 0.28, y: 0.34, stamp: 'LOAD' },
       { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.86, multi: true },
     ];
     // real devices: LINE at the bottom; LOAD under the yellow tape at the top
@@ -84,8 +91,8 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [])
     ];
     const src = r.pick(['A', 'B']);
     const dn = src === 'A' ? 'B' : 'A';
-    cables.find((c) => c.id === src)!.label = t <= 4 && labels ? 'from panel' : 'reads 120 V';
-    cables.find((c) => c.id === dn)!.label = t <= 4 && labels ? 'to bath outlet' : 'reads 0 V';
+    cables.find((c) => c.id === src)!.label = t <= 2 ? 'from panel' : 'reads 120 V';
+    cables.find((c) => c.id === dn)!.label = t <= 2 ? 'to bath outlet' : 'reads 0 V';
     wires = [
       { id: `${src}-blk`, color: 'black', cable: src, target: ['lh'], label: 'black' },
       { id: `${src}-wht`, color: 'white', cable: src, target: ['ln'], label: 'white' },
@@ -97,7 +104,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [])
   } else {
     title = '3-way switch at the source';
     terms = [
-      { id: 'com', label: 'COM', color: 'dark', x: 0.28, y: 0.62 },
+      { id: 'com', label: 'COM', color: 'dark', x: 0.28, y: 0.62, stamp: 'COMMON' },
       { id: 't1', label: 'T1', color: 'brass', x: 0.72, y: 0.36 },
       { id: 't2', label: 'T2', color: 'brass', x: 0.72, y: 0.62 },
       { id: 'nut', label: 'wire nut', color: 'nut', x: 0.5, y: 0.2, multi: true },
@@ -117,7 +124,17 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [])
       { id: 'T-gnd', color: 'bare', cable: 'T', target: ['g'], label: 'bare' },
     ];
   }
-  return { device, title, terms, wires: r.shuffle(wires), cables, labels, stripTarget: 0.75 };
+  return {
+    device,
+    title,
+    terms,
+    wires: r.shuffle(wires),
+    cables,
+    labels,
+    stamps: !labels && tools.includes('labelMaker'),
+    stripReadout: t <= 2 || tools.includes('torqueScrewdriver'),
+    stripTarget: 0.75,
+  };
 }
 
 export type Landing = { wire: string; term: string; strip: number; cw: boolean | null };
@@ -164,8 +181,7 @@ export const wireup: PuzzleDef = {
   term: 'Brass = hot, silver = neutral, green = ground. Hook clockwise so tightening closes the loop.',
   seconds: (tier) => 70 + tier * 10,
   mount(host, p) {
-    const m = generateWireup(p.seed, p.tier, p.tools);
-    const autoHook = p.tools.includes('torqueScrewdriver');
+    const m = generateWireup(p.seed, p.tier, p.tools, p.context?.job);
     const st = stage(host.el);
     const { ctx } = st;
     const strip = new Map<string, number>(); // inches stripped
@@ -241,7 +257,7 @@ export const wireup: PuzzleDef = {
         if (!gsx || finished) return;
         if (gsx.kind === 'strip') {
           const s = strip.get(gsx.wire) ?? 0;
-          if (s > 0) (Math.abs(s - m.stripTarget) <= 0.2 ? host.fx.snap : host.fx.bad)();
+          if (s > 0) (!m.stripReadout || Math.abs(s - m.stripTarget) <= 0.2 ? host.fx.snap : host.fx.bad)();
           return;
         }
         // landing: nearest terminal to the release point
@@ -277,7 +293,7 @@ export const wireup: PuzzleDef = {
           if (d < -Math.PI) d += Math.PI * 2;
           wind += d;
         }
-        const cw = autoHook ? true : Math.abs(wind) < 0.6 ? null : wind > 0; // screen coords: positive = clockwise
+        const cw = Math.abs(wind) < 0.6 ? null : wind > 0; // screen coords: positive = clockwise
         landed.push({ wire: gsx.wire, term: best.id, strip: s, cw });
         active = null;
         host.fx.snap();
@@ -363,7 +379,8 @@ export const wireup: PuzzleDef = {
           ctx.lineTo(tp.x + 6, tp.y);
           ctx.stroke();
         }
-        if (m.labels) label(ctx, t.label, tp.x + (t.x < 0.5 ? -16 : 16), tp.y + (t.color === 'nut' ? 18 : 0), { size: 9, weight: 900, color: C.paper, align: t.x < 0.5 ? 'right' : 'left' });
+        const txt = m.labels ? t.label : m.stamps ? t.stamp : undefined;
+        if (txt) label(ctx, txt, tp.x + (t.x < 0.5 ? -16 : 16), tp.y + (t.color === 'nut' ? 18 : 0), { size: 9, weight: 900, color: C.paper, align: t.x < 0.5 ? 'right' : 'left' });
       }
       // landed wires
       for (const l of landed) {
@@ -409,10 +426,10 @@ export const wireup: PuzzleDef = {
         ctx.setLineDash([3, 3]);
         ctx.strokeRect(z.x, z.y + 2, z.w, z.h - 4);
         ctx.setLineDash([]);
-        label(ctx, s ? `${s.toFixed(2)} in` : 'strip ←', z.x + 30, r.y + 10, {
+        label(ctx, s ? (m.stripReadout ? `${s.toFixed(2)} in` : 'stripped') : 'strip ←', z.x + 30, r.y + 10, {
           size: 10,
           weight: 800,
-          color: s ? (Math.abs(s - m.stripTarget) <= 0.2 ? C.palm : s > m.stripTarget ? C.rust : C.inkSoft) : C.sea,
+          color: s ? (!m.stripReadout ? C.inkSoft : Math.abs(s - m.stripTarget) <= 0.2 ? C.palm : s > m.stripTarget ? C.rust : C.inkSoft) : C.sea,
         });
       });
       if (gesture && gesture.kind === 'land' && gesture.path.length) {

@@ -932,17 +932,8 @@ export const conduit: PuzzleDef = {
       const srt = sortedMarks();
       const cur = sel();
       if (hasBender && state === 'layout' && cur) {
-        const i = srt.indexOf(cur);
+        // the table printed on the shoe, nothing more: the layout math stays the electrician's
         let txt = cur.angle === 90 ? 'bender: arrow on the mark · 90° take-up 5″' : '';
-        for (const j of [i - 1, i + 1]) {
-          const o = srt[j];
-          const t = TABLE[cur.angle];
-          if (!o || !t || o.angle !== cur.angle || o.dir === cur.dir) continue;
-          const d = Math.abs(o.at - cur.at);
-          const r = d / t.mult;
-          txt = `bender: ${inches(d)}″ ÷ ${t.mult} = ${inches(r)}″ offset · shrink ${inches(r * t.shrink)}″`;
-          break;
-        }
         if (!txt && TABLE[cur.angle]) txt = `bender: ${deg(cur.angle)} · ×${TABLE[cur.angle].mult} · shrink ${sixteenths(TABLE[cur.angle].shrink)}″ per inch`;
         label(ctx, txt, g.w / 2, y + 124, { size: 11, weight: 800, color: C.seaDeep });
       }

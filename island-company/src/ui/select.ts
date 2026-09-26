@@ -53,7 +53,8 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   const p = s.players[role];
   const grace = !assist && p && s.week <= p.graceUntil;
   const asset = s.assets.find((a) => a.id === o.assetId);
-  const tier = grace ? 1 : o.tier;
+  // lending a hand always plays at expert level: real trade knowledge is the gate
+  const tier = assist ? Math.max(3, o.tier) : grace ? 1 : o.tier;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
   const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.kind };
   if (o.kind === 'auction') {
@@ -69,6 +70,7 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
     tier,
     tools: p && !assist ? toolsFor(role, p.xp) : [],
     title: assist ? `Lending a hand · ${o.title}` : o.title,
+    expert: assist,
     subtitle: asset?.name ?? (grace ? 'new-crew difficulty' : assist ? 'outside your trade' : undefined),
     context,
     reward,

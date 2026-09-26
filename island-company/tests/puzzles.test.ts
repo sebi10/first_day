@@ -233,6 +233,13 @@ describe('wire-up', () => {
     expect(scoreWireup(g, swapped).score).toBeLessThan(0.5);
     expect(generateWireup(1, 2).labels).toBe(true);
     expect(generateWireup(1, 3).labels).toBe(false);
-    expect(generateWireup(1, 3, ['labelMaker']).labels).toBe(true);
+    // the headlamp reads only real stamped markings (LINE/LOAD, COMMON), never HOT/NEU
+    expect(generateWireup(1, 3, ['labelMaker']).labels).toBe(false);
+    expect(generateWireup(1, 3, ['labelMaker']).stamps).toBe(true);
+    expect(generateWireup(1, 3).stripReadout).toBe(false);
+    expect(generateWireup(1, 3, ['torqueScrewdriver']).stripReadout).toBe(true);
+    // the job picks the device
+    expect(generateWireup(1, 1, [], 'gfci').device).toBe('gfci');
+    expect(generateWireup(1, 2, [], 'switch3').device).toBe('switch3');
   });
 });

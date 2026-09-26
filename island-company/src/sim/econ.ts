@@ -21,16 +21,20 @@ export function modifierMult(s: IslandState, kind: 'demand' | 'charterDemand', w
 }
 
 /** Expected occupancy (0..1) of a cottage-class house for a nightly rate */
+// Season moves what guests will pay (the logistic midpoint), so the best
+// price changes week to week and the analyst has to keep reading the market.
 export function occupancy(s: IslandState, rate: number, week = s.week) {
-  return clamp(logistic(rate, ECON.nightlyMid, ECON.nightlyS) * season(week, s.seed) * modifierMult(s, 'demand', week), 0, 1);
+  return clamp(logistic(rate, ECON.nightlyMid * season(week, s.seed), ECON.nightlyS) * modifierMult(s, 'demand', week), 0, 1);
 }
 
 export function charterLoad(s: IslandState, rate: number, week = s.week) {
-  return clamp(
-    logistic(rate, ECON.charterMid, ECON.charterS) * season(week, s.seed) * modifierMult(s, 'charterDemand', week),
-    0,
-    1,
-  );
+  return clamp(logistic(rate, ECON.charterMid * season(week, s.seed), ECON.charterS) * modifierMult(s, 'charterDemand', week), 0, 1);
+}
+
+/** safety calls: a grounded plane or a red-tagged house is out of service this week */
+export const isTagged = (s: IslandState, id: string) => !!s.tags?.[id];
+export function capOf(s: IslandState, p: Asset, weather: Weather = s.weather) {
+  return isTagged(s, p.id) ? 0 : planeCapacity(p, s.tier, weather);
 }
 
 export const rateBounds = (base: number, receivership: boolean) => ({
@@ -64,10 +68,11 @@ export function powered(s: IslandState) {
 }
 
 export function houseRentable(s: IslandState, h: Asset, week = s.week) {
-  return powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week;
+  return !isTagged(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week;
 }
 
 export function houseBlocker(s: IslandState, h: Asset, week = s.week): string | null {
+  if (isTagged(s, h.id)) return 'red-tagged';
   if (!powered(s).on) return 'no power';
   if (h.health < 40) return `reliability ${Math.round(h.health)}`;
   if ((h.inspectionUntil ?? 0) < week) return 'inspection lapsed';
@@ -77,11 +82,11 @@ export function houseBlocker(s: IslandState, h: Asset, week = s.week): string | 
 export function passengerFlights(s: IslandState) {
   return planes(s)
     .filter((p) => !MODELS[p.model].cargo)
-    .reduce((n, p) => n + planeCapacity(p, s.tier, s.weather), 0);
+    .reduce((n, p) => n + capOf(s, p), 0);
 }
 
 export function flightsAvailable(s: IslandState) {
-  return planes(s).reduce((n, p) => n + planeCapacity(p, s.tier, s.weather), 0);
+  return planes(s).reduce((n, p) => n + capOf(s, p), 0);
 }
 
 export function housesRentable(s: IslandState) {
@@ -138,7 +143,7 @@ export function urgency(s: IslandState, o: Order) {
 export function projectWeek(s: IslandState, rates = s.rates) {
   const td = tierDef(s.tier);
   const pax = planes(s).filter((p) => !MODELS[p.model].cargo);
-  const paxFlights = pax.reduce((n, p) => n + planeCapacity(p, s.tier, s.weather), 0);
+  const paxFlights = pax.reduce((n, p) => n + capOf(s, p), 0);
   const rentable = houses(s)
     .filter((h) => houseRentable(s, h))
     .sort((a, b) => b.health - a.health);
@@ -149,7 +154,7 @@ export function projectWeek(s: IslandState, rates = s.rates) {
   const load = charterLoad(s, rates.charter);
   let charter = 0;
   for (const p of [...pax].sort((a, b) => (MODELS[a.model].mult ?? 1) - (MODELS[b.model].mult ?? 1))) {
-    const n = planeCapacity(p, s.tier, s.weather);
+    const n = capOf(s, p);
     const used = Math.min(guestNeed, n);
     guestNeed -= used;
     charter += (n - used) * rates.charter * (MODELS[p.model].mult ?? 1) * load;

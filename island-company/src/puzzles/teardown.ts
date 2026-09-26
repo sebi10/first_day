@@ -130,7 +130,7 @@ export function scoreTeardown(m: TeardownModel, s: { forced: number; wrongInstal
 export const teardown: PuzzleDef = {
   id: 'teardown',
   role: 'mech',
-  title: 'Engine teardown',
+  title: 'Remove and replace',
   gesture: 'Drag parts to slots',
   howTo: 'Remove in order, swap the failed part, rebuild in reverse.',
   term: 'Teardown: disassembly per the maintenance manual; reassembly is the reverse order.',
@@ -141,6 +141,7 @@ export const teardown: PuzzleDef = {
     const st = stage(host.el);
     const { ctx } = st;
     const removed = new Set<string>();
+    const removalOrder: string[] = [];
     const installed = new Set<string>(m.parts.map((x) => x.id));
     const inspected = new Set<string>();
     const binned = new Set<string>(); // failed parts thrown out
@@ -154,7 +155,6 @@ export const teardown: PuzzleDef = {
     let shake: { id: string; t: number } | null = null;
     let finished = false;
     let flourish = 0;
-    const startT = performance.now();
 
     const geo = () => {
       const w = st.w;
@@ -195,6 +195,7 @@ export const teardown: PuzzleDef = {
       }
       removed.add(id);
       installed.delete(id);
+      removalOrder.push(id);
       host.fx.snap();
       status();
       return true;
@@ -323,7 +324,6 @@ export const teardown: PuzzleDef = {
       roundRect(ctx, g.asm.x - 4, g.asm.y - 4, g.asm.w + 8, g.asm.h + 8, 14);
       ctx.fillStyle = 'rgba(31,42,48,.05)';
       ctx.fill();
-      const nextLegal = trayHint && performance.now() - startT < 4000;
       for (const part of m.parts) {
         const r = partRect(part);
         if (!installed.has(part.id)) {
@@ -332,7 +332,7 @@ export const teardown: PuzzleDef = {
         }
         if (drag && drag.id === part.id && drag.from === 'asm') continue;
         drawPart(part, r);
-        if ((m.numbered || nextLegal) && phase === 'teardown') {
+        if (m.numbered && phase === 'teardown') {
           const n = m.order.indexOf(part.id) + 1;
           ctx.fillStyle = C.ink;
           ctx.beginPath();
@@ -348,7 +348,12 @@ export const teardown: PuzzleDef = {
       label(ctx, 'Parts tray · tap to inspect, drag back to rebuild', g.tray.x + 12, g.tray.y + 13, { size: 11, weight: 700, align: 'left', color: C.inkSoft });
       trayIds().forEach((id, i) => {
         if (drag && drag.id === id) return;
-        drawPart(m.parts.find((x) => x.id === id)!, trayRect(i));
+        const r = trayRect(i);
+        drawPart(m.parts.find((x) => x.id === id)!, r);
+        if (trayHint) {
+          const n = removalOrder.indexOf(id) + 1;
+          if (n > 0) label(ctx, `#${n}`, r.x + r.w - 14, r.y + r.h - 9, { size: 10, weight: 900, color: C.sea });
+        }
       });
       // bin
       roundRect(ctx, g.bin.x, g.bin.y, g.bin.w, g.bin.h, 12);

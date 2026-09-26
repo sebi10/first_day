@@ -132,7 +132,9 @@ describe('three-way match model', () => {
         expect(m.teach).toBe(false);
         expect(m.band).toBe(false);
         expect(m.showWindow).toBe(false);
-        expect(generateInvoice(seed, t, ['poLookup']).band).toBe(true); // the tool may add the readout
+        // the PO lookup shows unit prices (a raw lookup) but never the tolerance band
+        expect(generateInvoice(seed, t, ['poLookup']).band).toBe(false);
+        expect(generateInvoice(seed, t, ['poLookup']).unitPrice).toBe(true);
       }
     expect(generateInvoice(1, 2).band).toBe(true);
   });

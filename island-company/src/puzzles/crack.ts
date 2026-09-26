@@ -36,9 +36,11 @@ function jagged(r: ReturnType<typeof rng>, from: P, angle: number, len: number, 
   return pts;
 }
 
-export function generateCrack(seed: number, tier: number, tools: string[] = []): CrackModel {
+export function generateCrack(seed: number, tier: number, tools: string[] = [], job?: string): CrackModel {
   const r = rng(seed);
-  const part: CrackModel['part'] = r.chance(0.5) ? 'spar' : 'hub';
+  const coin = r.chance(0.5);
+  // the job decides the part: spar inspections look at a spar, wheel-half checks at a hub
+  const part: CrackModel['part'] = job === 'spar' ? 'spar' : job === 'corrosion' ? 'hub' : coin ? 'spar' : 'hub';
   const holes: P[] = [];
   if (part === 'spar') {
     for (let i = 0; i < 7; i++) {
@@ -135,7 +137,7 @@ export const crack: PuzzleDef = {
   term: 'Penetrant inspection: dye seeps into cracks and glows under UV. Cracks bleed; scratches don’t.',
   seconds: (tier) => 60 + tier * 10,
   mount(host, p) {
-    const m = generateCrack(p.seed, p.tier, p.tools);
+    const m = generateCrack(p.seed, p.tier, p.tools, p.context?.job);
     const depthView = p.tools.includes('borescope');
     const st = stage(host.el);
     const { ctx } = st;

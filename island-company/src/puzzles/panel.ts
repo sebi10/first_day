@@ -22,6 +22,7 @@ export type Circuit = {
 };
 
 export type PanelModel = {
+  title: string;
   rows: number; // per column
   limit: number; // per-leg service limit in amps
   circuits: Circuit[];
@@ -50,8 +51,9 @@ const LOADS_240 = [
   { name: 'Hot tub heater', awg: 8, lo: 5000, hi: 6500 },
 ];
 
-export function generatePanel(seed: number, tier: number, _tools: string[] = []): PanelModel {
+export function generatePanel(seed: number, tier: number, _tools: string[] = [], job?: string): PanelModel {
   const r = rng(seed);
+  const generator = job === 'transfer';
   const n120 = tier <= 0 ? 3 : tier <= 2 ? 4 + tier : tier === 3 ? 6 : tier === 4 ? 7 : 8;
   const n240 = tier <= 0 ? 1 : tier <= 2 ? 1 : tier <= 4 ? 2 : 3;
   const circuits: Circuit[] = [];
@@ -76,7 +78,16 @@ export function generatePanel(seed: number, tier: number, _tools: string[] = [])
   }
   const margin = [1.12, 1.1, 1.08, 1.06, 1.05, 1.04][clamp(tier, 0, 5)];
   const limit = Math.ceil((Math.max(l1, l2) * margin) / 5) * 5;
-  return { rows, limit, circuits: r.shuffle(circuits), sizing: tier >= 3, wattsOnly: tier >= 4, liveTotals: tier <= 2 };
+  return {
+    title: generator ? `Generator transfer panel · ${limit} A per leg` : job === 'codeprep' ? `Inspection prep · ${limit} A per leg` : `Main panel · ${limit} A per leg`,
+    rows,
+    limit,
+    circuits: r.shuffle(circuits),
+    // inspectors check breaker-to-wire sizing, so code prep always sizes
+    sizing: tier >= 3 || job === 'codeprep',
+    wattsOnly: tier >= 4 || generator, // a generator is rated in kW
+    liveTotals: tier <= 2,
+  };
 }
 
 /** slot index: col*rows + row. Row parity decides the leg: even row = L1, odd row = L2. */
@@ -123,7 +134,7 @@ export const panel: PuzzleDef = {
   term: 'Split-phase: two 120 V legs. 240 V loads draw from both. Breaker protects the wire.',
   seconds: (tier) => 70 + tier * 10,
   mount(host, p) {
-    const m = generatePanel(p.seed, p.tier, p.tools);
+    const m = generatePanel(p.seed, p.tier, p.tools, p.context?.job);
     const clampMeter = p.tools.includes('clampMeter');
     const st = stage(host.el);
     const { ctx } = st;
@@ -264,7 +275,7 @@ export const panel: PuzzleDef = {
     function draw() {
       const g = geo();
       backdrop(ctx, g.w, g.h);
-      label(ctx, `Main panel · ${m.limit} A per leg`, 16, 22, { size: 14, weight: 800, align: 'left' });
+      label(ctx, m.title, 16, 22, { size: 14, weight: 800, align: 'left' });
       // panel box + bus
       roundRect(ctx, g.px, g.py, g.pw, g.ph, 12);
       ctx.fillStyle = '#9aa5a9';

@@ -285,8 +285,9 @@ function adopt(m: BalanceModel, s: BalanceSolution, tools: string[]): BalanceMod
   m.best = { offload: s.best.offload, margin: s.best.margin };
   m.legalFrac = s.legalFrac;
   m.landingTraps = s.landingTraps;
-  // the CG computer is a convenience readout; it never places anything for you
-  if (tools.includes('cgComputer')) m.aids.cgReadout = true;
+  // the station moment card is a raw-number convenience: it shows weight × arm,
+  // never the CG. Working out CG = Σmoment ÷ Σweight stays the pilot's job.
+  if (tools.includes('cgComputer')) m.aids.momentMath = true;
   return m;
 }
 

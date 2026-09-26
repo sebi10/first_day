@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
 import { listPrice } from '../sim/engine';
-import { charterLoad, expectedDeferralCost, logistic, occupancy, projectWeek, rateBounds, tierDef, urgency } from '../sim/econ';
+import { charterLoad, expectedDeferralCost, logistic, occupancy, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
 import type { Insurance, Order } from '../sim/types';
 import { fx } from './feedback';
 import { Btn, Icon, Seg, TierDots, usd } from './kit';
@@ -249,7 +249,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
 
 // --- pricing ------------------------------------------------------------------
 
-function Curve({ min, max, value, mid, sd, dots, unit, occ }: { min: number; max: number; value: number; mid: number; sd: number; dots: number; unit: string; occ: number }) {
+function Curve({ min, max, value, mid, sd, dots, unit, occ, showRevenue }: { min: number; max: number; value: number; mid: number; sd: number; dots: number; unit: string; occ: number; showRevenue: boolean }) {
   const W = 320;
   const H = 110;
   const xs = Array.from({ length: 41 }, (_, i) => min + ((max - min) * i) / 40);
@@ -263,7 +263,7 @@ function Curve({ min, max, value, mid, sd, dots, unit, occ }: { min: number; max
   return (
     <div class="demand">
       <svg viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
-        <path d={revPath} fill={C.palm} opacity=".16" />
+        {showRevenue && <path d={revPath} fill={C.palm} opacity=".16" />}
         <path d={occPath} stroke={C.sea} stroke-width="2.5" fill="none" />
         <line x1={X(value)} x2={X(value)} y1={4} y2={H - 8} stroke={C.ink} stroke-width="2" stroke-dasharray="3 3" />
         <line x1={0} x2={W} y1={H - 8} y2={H - 8} stroke={C.ink} opacity=".2" />
@@ -275,7 +275,13 @@ function Curve({ min, max, value, mid, sd, dots, unit, occ }: { min: number; max
           ))}
         </span>
         <span class="label">
-          <span style={{ color: C.sea }}>━ demand</span> · <span style={{ color: C.palm }}>▇ revenue</span>
+          <span style={{ color: C.sea }}>━ demand</span>
+          {showRevenue && (
+            <>
+              {' · '}
+              <span style={{ color: C.palm }}>▇ revenue</span>
+            </>
+          )}
         </span>
       </div>
     </div>
@@ -309,7 +315,7 @@ function Pricing({ ctl }: { ctl: Ctl }) {
         <b>Nightly rate · cottage</b>
         <b class="num">{usd(n)}</b>
       </div>
-      <Curve min={rb.min} max={rb.max} value={n} mid={ECON.nightlyMid} sd={ECON.nightlyS} dots={7} unit="nights" occ={occ} />
+      <Curve min={rb.min} max={rb.max} value={n} mid={ECON.nightlyMid * season(s.week, s.seed)} sd={ECON.nightlyS} dots={7} unit="nights" occ={occ} showRevenue={s.tier <= 2} />
       <input
         type="range"
         min={rb.min}
@@ -332,7 +338,7 @@ function Pricing({ ctl }: { ctl: Ctl }) {
         <b>Charter rate · day tour</b>
         <b class="num">{usd(c)}</b>
       </div>
-      <Curve min={cb.min} max={cb.max} value={c} mid={ECON.charterMid} sd={ECON.charterS} dots={6} unit="seats" occ={load} />
+      <Curve min={cb.min} max={cb.max} value={c} mid={ECON.charterMid * season(s.week, s.seed)} sd={ECON.charterS} dots={6} unit="seats" occ={load} showRevenue={s.tier <= 2} />
       <input
         type="range"
         min={cb.min}

@@ -1,8 +1,7 @@
 // Mechanic hangar / electrician cottages: assets, work orders, covering.
 import { useState } from 'preact/hooks';
-import { ECON, MODELS, ROLE_LABEL } from '../sim/data';
+import { ECON, MODELS } from '../sim/data';
 import { houseBlocker, planeCapacity, powered } from '../sim/econ';
-import { isMentor } from '../sim/progression';
 import type { Order, Role } from '../sim/types';
 import { Btn, Health, Icon, Sheet, usd } from './kit';
 import { OrderCard, OrderDetail } from './orders';
@@ -36,14 +35,16 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
             .filter((a) => a.kind === 'plane')
             .map((p) => {
               const cap = planeCapacity(p, s.tier, s.weather);
+              const grounded = !!s.tags?.[p.id];
               return (
-                <div class="asset" key={p.id}>
+                <div class="asset" key={p.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name="plane" size={22} />
                   <Health value={p.health} label={`${p.name} · ${MODELS[p.model].label}`} />
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
-                    <b class={`num ${cap === 0 ? 'fault' : ''}`}>{cap === 0 ? 'AOG' : `${cap} fl`}</b>
+                    <b class={`num ${cap === 0 && !grounded ? 'fault' : ''}`}>{grounded ? 'GND' : cap === 0 ? 'AOG' : `${cap} fl`}</b>
                     <span class="label num">{p.sinceInspection ?? 0}/{ECON.planeInspectionFlights} insp</span>
                   </span>
+                  <SafetyCall ctl={ctl} role={role} id={p.id} on={grounded} word="Ground" />
                 </div>
               );
             })}
@@ -54,8 +55,9 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
               const why = h.kind === 'house' ? houseBlocker(s, h) : null;
               const label =
                 h.kind === 'grid' ? `${h.name} · ${pw.gridDown ? 'DOWN' : 'live'}` : h.kind === 'generator' ? `${h.name} · ${h.health >= 50 ? 'ready' : 'unreliable'}` : `${h.name}`;
+              const tagged = !!s.tags?.[h.id];
               return (
-                <div class="asset" key={h.id}>
+                <div class="asset" key={h.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name={h.kind === 'house' ? 'house' : 'bolt'} size={22} />
                   <Health value={h.health} label={label} />
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
@@ -70,6 +72,7 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
                       <span class="label">{h.kind === 'grid' ? 'feeds all' : 'backup'}</span>
                     )}
                   </span>
+                  {h.kind === 'grid' ? <span /> : <SafetyCall ctl={ctl} role={role} id={h.id} on={tagged} word="Red-tag" />}
                 </div>
               );
             })}
@@ -140,12 +143,29 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
   );
 }
 
+/** Safety call: ground a plane / red-tag a house for this week. Out of service = no flights or guests, but nothing can fail in service. */
+function SafetyCall({ ctl, role, id, on, word }: { ctl: Ctl; role: Role; id: string; on: boolean; word: string }) {
+  const ended = !!ctl.s.turns[role]?.ended;
+  return (
+    <button
+      class={`chip ${on ? 'rust' : ''}`}
+      style={{ border: 0, minHeight: 34, minWidth: 64, justifyContent: 'center' }}
+      disabled={ended || ctl.s.week < 1}
+      aria-pressed={on}
+      title={on ? 'Return to service' : `${word} for this week: no flights/guests, but no in-service failures`}
+      onClick={() => void ctl.dispatch({ t: 'tag', role, assetId: id, on: !on })}
+    >
+      {on ? '↺ Undo' : word}
+    </button>
+  );
+}
+
 /** Lend a hand: one try per week at another trade's job. Real know-how is the gate. */
 export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPlay(o: Order, cover?: boolean): void }) {
   const { s } = ctl;
   const me = s.players[role];
   if (!me || s.week < 1 || s.turns[role]?.ended) return null;
-  const allowance = isMentor(me) ? 2 : 1;
+  const allowance = 1;
   const used = s.coversUsed[role] ?? 0;
   const orders = s.orders.filter((o) => o.role !== role && o.status === 'ready');
   if (!orders.length) return null;
@@ -158,7 +178,7 @@ export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPl
         </span>
       </div>
       <span class="label">
-        Try another trade's job. Your tools stay home, and under 40% botches it: the asset takes −6 and the job stays open for its owner. Only do it if you actually know how.
+        Try another trade's job at expert level, no hints. Your tools stay home, and anything under 60% botches it: the asset takes −6 and the job stays open for its owner.
       </span>
       {used < allowance &&
         orders
@@ -168,7 +188,7 @@ export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPl
             <OrderCard key={o.id} s={s} o={o} onOpen={() => onPlay(o, true)} />
           ))}
       {used >= allowance && <span class="muted">You already lent a hand this week.</span>}
-      <span class="label">{ROLE_LABEL[role]}s can't take tools across trades. Mentors (level 30) get 2 tries.</span>
+      <span class="label">Only if you actually know the trade.</span>
     </div>
   );
 }

@@ -3,8 +3,10 @@
 // byte-identical results from the same inputs + seed.
 import { CATALOG, CATALOG_BY_KIND, ECON, FIN_TASKS, INSURANCE, MODELS, STORIES, TIERS } from './data';
 import {
+  capOf,
   charterLoad,
   clamp,
+  isTagged,
   credit,
   deferralRisk,
   grid,
@@ -24,7 +26,7 @@ import {
   tierDef,
   urgency,
 } from './econ';
-import { isMentor, levelOf, orderXp, tierUnlocked } from './progression';
+import { levelOf, orderXp, tierUnlocked } from './progression';
 import { hashSeed, rng, type Rng } from './rng';
 import { nextDeadline } from './time';
 import {
@@ -387,7 +389,25 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       return { s };
     }
     case 'story':
-      return story(s, prev, a.key, now);
+      return story(s, prev, a.key, a.role, now);
+    case 'tag': {
+      // safety calls: an A&P can ground a plane, an electrician can red-tag a house or the grid
+      const asset = s.assets.find((x) => x.id === a.assetId);
+      if (!asset) return fail('No such asset.');
+      const allowed = (a.role === 'mech' && asset.kind === 'plane') || (a.role === 'elec' && (asset.kind === 'house' || asset.kind === 'generator'));
+      if (!allowed) return fail(a.role === 'fin' ? 'Only the trades can ground or red-tag.' : 'Not your call: that asset belongs to the other trade.');
+      if (s.turns[a.role]?.ended) return fail('Your turn is over for this week.');
+      s.tags = { ...(s.tags ?? {}) };
+      const who = s.players[a.role]?.name ?? a.role;
+      if (a.on) {
+        s.tags[asset.id] = a.role;
+        feed(s, a.role, 'bad', `${who} ${asset.kind === 'plane' ? 'grounded' : 'red-tagged'} ${asset.name} this week (safety call).`, now);
+      } else {
+        delete s.tags[asset.id];
+        feed(s, a.role, 'info', `${who} returned ${asset.name} to service.`, now);
+      }
+      return { s };
+    }
     case 'practice': {
       const p = s.players[a.role];
       if (!p) return fail('Join first.');
@@ -422,18 +442,18 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   const player = s.players[a.role];
   if (!player) return fail('Join first.');
 
-  // Lend a hand: anyone may try another trade's job once a week (mentors twice).
-  // Real trade knowledge is the gate: no tools come with you, and a botched
-  // attempt (<40%) damages the asset and leaves the job open for its owner.
+  // Lend a hand: anyone may try another trade's job once a week, at expert
+  // difficulty. Real trade knowledge is the gate: no tools come with you, and
+  // anything under a pass (60%) is a botch that damages the asset and leaves
+  // the job open for its owner.
   let covered = false;
   if (o.role !== a.role) {
     if (!a.cover) return fail('Not your trade. Use Lend a hand.');
-    const allowance = isMentor(player) ? 2 : 1;
-    if ((s.coversUsed[a.role] ?? 0) >= allowance) return fail(allowance === 1 ? 'You already lent a hand this week.' : 'Two assists per week, even for a mentor.');
+    if ((s.coversUsed[a.role] ?? 0) >= 1) return fail('You already lent a hand this week.');
     s.coversUsed[a.role] = (s.coversUsed[a.role] ?? 0) + 1;
     player.covers += 1;
     covered = true;
-    if (a.score < 0.4) {
+    if (a.score < 0.6) {
       const asset = assetOf(s, o);
       if (asset) {
         asset.health = clamp(asset.health - 6, 0, 100);
@@ -456,7 +476,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   gainXp(s, a.role, Math.round(orderXp(o.tier, cr, a.perfect) * (covered ? 0.5 : 1)));
 
   const asset = assetOf(s, o);
-  if (asset) {
+  if (asset && o.gain > 0) {
     asset.health = clamp(asset.health + o.gain * cr, 0, 100);
     asset.touchedWeek = s.week;
     if (o.kind === 'inspect100' && cr >= 1) asset.sinceInspection = 0;
@@ -484,9 +504,25 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   return { s };
 }
 
-function story(s: IslandState, prev: IslandState, key: string, now: number): ApplyResult {
+function story(s: IslandState, prev: IslandState, key: string, role: Role, now: number): ApplyResult {
   const card = s.story;
   if (!card || card.chosen) return { s: prev, error: 'No story card waiting.' };
+  if (!card.options.some((o) => o.key === key)) return { s: prev, error: 'Not an option.' };
+  // crew vote: two of three decide; if all three split, the most-voted (else the safe option) wins
+  card.votes = { ...(card.votes ?? {}), [role]: key };
+  const tally = new Map<string, number>();
+  for (const v of Object.values(card.votes)) if (v) tally.set(v, (tally.get(v) ?? 0) + 1);
+  const top = [...tally.entries()].sort((x, y) => y[1] - x[1])[0];
+  const voters = Object.keys(card.votes).length;
+  if (!(top[1] >= 2 || voters >= 3)) {
+    feed(s, role, 'info', `${s.players[role]?.name ?? role} voted on “${card.title}”. Waiting for a second vote.`, now);
+    return { s };
+  }
+  return decideStory(s, top[1] >= 2 ? top[0] : card.options[card.options.length - 1].key, now);
+}
+
+function decideStory(s: IslandState, key: string, now: number): ApplyResult {
+  const card = s.story!;
   const W = s.week;
   card.chosen = key;
   switch (`${card.id}:${key}`) {
@@ -515,7 +551,8 @@ function story(s: IslandState, prev: IslandState, key: string, now: number): App
       break;
     }
     case 'wedding:yes':
-      s.modifiers.push({ kind: 'demand', mult: 1.4, until: W, label: 'Wedding party' });
+      // they want EVERY house next week: an unrentable one costs you $1,000
+      s.modifiers.push({ kind: 'demand', mult: 1.4, until: W + 1, label: 'Wedding party' });
       break;
   }
   const opt = card.options.find((o) => o.key === key);
@@ -541,7 +578,13 @@ function openWeek(s: IslandState, now: number) {
   s.autoSpent = { mech: 0, elec: 0 };
   s.openCash = s.cash;
   s.modifiers = s.modifiers.filter((m) => m.until >= W);
+  s.tags = {};
   if (s.story?.chosen) s.story = null;
+  else if (s.story && s.story.week < W - 1) {
+    // undecided for two weeks: take the safe option
+    decideStory(s, s.story.options[s.story.options.length - 1].key, now);
+    s.story = null;
+  }
 
   generateOpsOrders(s, r);
   generateFinTasks(s, r);
@@ -602,7 +645,8 @@ function addOps(s: IslandState, kind: string, asset: Asset) {
     cost: orderCost(kind, tier),
     parts: c.parts,
     gain: c.gain,
-    status: 'pending',
+    // paperwork (no cost) never needs an approval card
+    status: c.cost === 0 ? 'ready' : 'pending',
   });
 }
 
@@ -714,13 +758,16 @@ export function resolveWeek(s: IslandState, now: number) {
   const perPlane = flightsPerPlane(s.tier);
   const guestSlots: { plane: Asset; n: number }[] = [];
   for (const p of planes(s)) {
-    scheduled += perPlane;
-    const healthCap = planeCapacity(p, s.tier, 'clear');
-    const cap = planeCapacity(p, s.tier, s.weather);
-    if (healthCap < perPlane)
+    // on-time is judged against what the weather allows, not against a clear sky
+    scheduled += planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
+    const grounded = isTagged(s, p.id);
+    const healthCap = grounded ? 0 : planeCapacity(p, s.tier, 'clear');
+    const cap = capOf(s, p);
+    if (grounded) line('mech', 'info', `${p.name} grounded by the mechanic this week (safety call).`);
+    else if (healthCap < perPlane)
       line('mech', 'bad', `${perPlane - healthCap} flight${perPlane - healthCap > 1 ? 's' : ''} lost on ${p.name}: airworthiness ${Math.round(p.health)}`);
     if (cap < healthCap) line('all', 'info', `${healthCap - cap} flight${healthCap - cap > 1 ? 's' : ''} lost on ${p.name}: ${s.weather}`);
-    if (cap === 0 && healthCap === 0) line('mech', 'bad', `${p.name} is AOG (aircraft on ground).`);
+    if (cap === 0 && healthCap === 0 && !grounded) line('mech', 'bad', `${p.name} is AOG (aircraft on ground).`);
     for (let i = 0; i < cap; i++) {
       if (p.health < 60 && r.chance(ECON.nearMissPerFlight)) {
         nearMisses++;
@@ -771,8 +818,25 @@ export function resolveWeek(s: IslandState, now: number) {
   const ferry = td.ferry;
   const arrivals = passenger + ferry;
   const booked = rentable.slice(0, arrivals);
-  if (rentable.length > arrivals)
-    line('mech', 'bad', `${rentable.length - arrivals} house${rentable.length - arrivals > 1 ? 's' : ''} empty: only ${passenger} guest flights${ferry ? ` + ${ferry} ferry` : ''}.`);
+  if (rentable.length > arrivals) {
+    const clearSky = planes(s)
+      .filter((p) => !MODELS[p.model].cargo)
+      .reduce((n, p) => n + capOf(s, p, 'clear'), 0);
+    const weatherOnly = rentable.length <= clearSky + ferry;
+    line(
+      weatherOnly ? 'all' : 'mech',
+      weatherOnly ? 'info' : 'bad',
+      `${rentable.length - arrivals} house${rentable.length - arrivals > 1 ? 's' : ''} empty: only ${passenger} guest flights${ferry ? ` + ${ferry} ferry` : ''}${weatherOnly ? ` (${s.weather})` : ''}.`,
+    );
+  }
+  // the wedding wanted every house
+  if (s.modifiers.some((m) => m.label === 'Wedding party' && m.until === W)) {
+    const short = hs.length - rentable.length;
+    if (short > 0) {
+      s.cash -= 1000 * short;
+      line('elec', 'bad', `Wedding party: ${short} house${short > 1 ? 's' : ''} not ready, −$${(1000 * short).toLocaleString('en-US')}.`);
+    }
+  }
   const occ = occupancy(s, s.rates.nightly, W);
   let rental = 0;
   let refunds = 0;
@@ -789,6 +853,7 @@ export function resolveWeek(s: IslandState, now: number) {
     h.health -= ECON.houseWear;
   }
   for (const h of hs) {
+    if (isTagged(s, h.id)) continue; // red-tagged = de-energised: no fire
     if (h.health < 30 && r.chance(ECON.fireChance)) {
       const cost = 1500 + 500 * s.tier;
       incidents.push({ kind: 'fire', role: 'elec', assetId: h.id, title: `Electrical fire at ${h.name}`, cost });
@@ -805,12 +870,17 @@ export function resolveWeek(s: IslandState, now: number) {
     const used = Math.min(guestNeed, slot.n);
     guestNeed -= used;
     const spare = slot.n - used;
-    charter += spare * s.rates.charter * (MODELS[slot.plane.model].mult ?? 1) * load * r.range(0.9, 1.1);
+    // no signed load sheet, no charter: half the tours stay on the ramp
+    const sheet = s.orders.find((o) => o.kind === 'wb' && o.assetId === slot.plane.id && o.result?.week === W);
+    const dispatch = sheet ? 0.5 + 0.5 * Math.min(1, sheet.result!.credit) : 0.5;
+    if (spare > 0 && !sheet) line('mech', 'bad', `No load sheet for ${slot.plane.name}: half its charters stayed on the ramp.`);
+    charter += spare * s.rates.charter * (MODELS[slot.plane.model].mult ?? 1) * load * dispatch * r.range(0.9, 1.1);
   }
 
   // 7. deferral risk: orders carried from an earlier week roll now
   for (const o of s.orders) {
-    if (!open(o) || o.role === 'fin' || o.deferrals < 1 || (o.lastDeferredWeek ?? W) >= W) continue;
+    if (!open(o) || o.role === 'fin' || o.gain === 0 || o.deferrals < 1 || (o.lastDeferredWeek ?? W) >= W) continue;
+    if (o.assetId && isTagged(s, o.assetId)) continue; // out of service: it can't fail in service
     const p = deferralRisk(o);
     if (r.chance(p)) {
       const asset = assetOf(s, o);
@@ -833,8 +903,8 @@ export function resolveWeek(s: IslandState, now: number) {
   // 8. carry-over
   for (const o of s.orders) {
     if (!open(o)) continue;
-    if (o.role === 'fin') {
-      o.status = 'cancelled';
+    if (o.role === 'fin' || o.gain === 0) {
+      o.status = 'cancelled'; // desk tasks and load sheets are for this week only
       continue;
     }
     if (o.lastDeferredWeek !== W) {

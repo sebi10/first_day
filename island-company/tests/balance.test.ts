@@ -146,9 +146,9 @@ describe('weight & balance model', () => {
         expect(JSON.stringify(m)).not.toMatch(/plan|hint|answer|solution/i);
       }
     }
-    // the CG computer adds a convenience readout (computes the CG) but never moment math or limits
+    // the station moment card shows raw weight × arm; computing the CG stays the pilot's job
     const tooled = generateBalance(4, 4, ['cgComputer']);
-    expect(tooled.aids).toEqual({ momentMath: false, cgReadout: true, limitLabels: false });
+    expect(tooled.aids).toEqual({ momentMath: true, cgReadout: false, limitLabels: false });
   });
 
   it('leaving can-wait freight behind is only free when it has to stay', () => {

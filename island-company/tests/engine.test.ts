@@ -251,3 +251,44 @@ describe('multi-device seats', () => {
     expect(s.players.mech!.xp).toBe(900);
   });
 });
+
+describe('crew decisions', () => {
+  it('safety calls: the A&P grounds a plane, only the trades can call it, and it flies nothing', () => {
+    let s = started();
+    expect(apply(s, { t: 'tag', role: 'fin', assetId: 'p1', on: true }, NOW).error).toBeTruthy();
+    expect(apply(s, { t: 'tag', role: 'elec', assetId: 'p1', on: true }, NOW).error).toBeTruthy();
+    s = apply(s, { t: 'tag', role: 'mech', assetId: 'p1', on: true }, NOW).s;
+    s = apply(s, { t: 'tag', role: 'elec', assetId: 'h1', on: true }, NOW).s;
+    for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'endTurn', role: r }, NOW).s;
+    const rep = s.history[0];
+    expect(rep.flightsFlown).toBe(0);
+    expect(rep.housesBooked).toBe(0); // no guest flights, and cottage 1 red-tagged
+    expect(s.tags).toEqual({}); // calls last one week
+  });
+
+  it('story cards are a crew vote: two of three decide', () => {
+    let s = started();
+    s.story = { id: 'surplus', week: s.week, title: 'Sale', body: '', options: [{ key: 'buy', label: 'Buy', effect: '' }, { key: 'pass', label: 'Pass', effect: '' }] };
+    s = apply(s, { t: 'story', key: 'buy', role: 'fin' }, NOW).s;
+    expect(s.story!.chosen).toBeUndefined();
+    s = apply(s, { t: 'story', key: 'pass', role: 'mech' }, NOW).s;
+    expect(s.story!.chosen).toBeUndefined();
+    s = apply(s, { t: 'story', key: 'buy', role: 'elec' }, NOW).s;
+    expect(s.story!.chosen).toBe('buy');
+  });
+
+  it('lend a hand: 40-59% is still a botch (the bar is a pass)', () => {
+    let s = started();
+    const o = s.orders.find((x) => x.role === 'mech' && x.status === 'ready')!;
+    s = apply(s, { t: 'complete', role: 'fin', orderId: o.id, score: 0.55, perfect: false, cover: true }, NOW).s;
+    expect(s.orders.find((x) => x.id === o.id)!.status).toBe('ready');
+  });
+
+  it('the load sheet is paperwork: ready at once, no health gain, expires weekly', () => {
+    const s = started();
+    const wb = s.orders.find((o) => o.kind === 'wb');
+    expect(wb?.status).toBe('ready');
+    const s2 = apply(s, { t: 'complete', role: 'mech', orderId: wb!.id, score: 1, perfect: true }, NOW).s;
+    expect(s2.assets.find((a) => a.id === wb!.assetId)!.health).toBe(s.assets.find((a) => a.id === wb!.assetId)!.health);
+  });
+});

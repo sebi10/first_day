@@ -177,13 +177,14 @@ export const CATALOG: CatalogEntry[] = [
     weight: (a) => ((a.sinceInspection ?? 0) >= ECON.planeInspectionFlights - 2 ? 100 : 0),
   },
   { kind: 'tires', role: 'mech', title: 'Tire and brake', puzzle: 'torque', tier: 1, cost: 320, parts: 1, gain: 10, targets: ['twin', 'cargo', 'float'], weight: below(96, 3) },
-  { kind: 'prop', role: 'mech', title: 'Prop balance', puzzle: 'torque', tier: 2, cost: 280, parts: 0, gain: 12, targets: ['twin', 'cargo', 'float'], weight: below(90, 3) },
-  { kind: 'corrosion', role: 'mech', title: 'Corrosion treatment', puzzle: 'crack', tier: 2, cost: 520, parts: 0, gain: 16, targets: ['twin', 'cargo', 'float'], weight: below(86, 4) },
-  { kind: 'avionics', role: 'mech', title: 'Avionics squawk', puzzle: 'teardown', tier: 2, cost: 640, parts: 1, gain: 14, targets: ['twin', 'cargo', 'float'], weight: below(92, 2) },
+  { kind: 'prop', role: 'mech', title: 'Prop bolt re-torque', puzzle: 'torque', tier: 2, cost: 280, parts: 0, gain: 12, targets: ['twin', 'cargo', 'float'], weight: below(90, 3) },
+  { kind: 'corrosion', role: 'mech', title: 'Wheel-half penetrant check', puzzle: 'crack', tier: 2, cost: 520, parts: 0, gain: 16, targets: ['twin', 'cargo', 'float'], weight: below(86, 4) },
+  { kind: 'avionics', role: 'mech', title: 'Swap the com radio', puzzle: 'teardown', tier: 2, cost: 640, parts: 1, gain: 14, targets: ['twin', 'cargo', 'float'], weight: below(92, 2) },
   { kind: 'alternator', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4) },
   { kind: 'cylinder', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'cargo', 'float'], weight: below(65, 8) },
   { kind: 'spar', role: 'mech', title: 'Wing spar inspection', puzzle: 'crack', tier: 3, cost: 880, parts: 0, gain: 22, targets: ['twin', 'cargo', 'float'], weight: below(60, 8) },
-  { kind: 'wb', role: 'mech', title: 'Weight and balance check', puzzle: 'balance', tier: 1, cost: 60, parts: 0, gain: 8, targets: ['twin', 'float'], weight: below(99, 3) },
+  // paperwork, not a repair: no health gain, but no load sheet means half the charters stay on the ramp
+  { kind: 'wb', role: 'mech', title: 'Charter load sheet', puzzle: 'balance', tier: 1, cost: 0, parts: 0, gain: 0, targets: ['twin', 'float'], weight: () => 100 },
   { kind: 'wire', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
   { kind: 'oil', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
   // Electrician — houses
@@ -199,13 +200,13 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'flicker', role: 'elec', title: 'Diagnose flickering lights', puzzle: 'meter', tier: 1, cost: 90, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(94, 4) },
   { kind: 'hottub', role: 'elec', title: 'Run conduit to the hot tub', puzzle: 'conduit', tier: 2, cost: 460, parts: 1, gain: 16, targets: ['cottage', 'villa', 'lodge'], weight: below(86, 2) },
   // Electrician — grid + generator
-  { kind: 'feeder', role: 'elec', title: 'Trace a feeder fault', puzzle: 'trace', tier: 2, cost: 420, parts: 0, gain: 16, targets: ['panel'], weight: below(90, 4) },
+  { kind: 'feeder', role: 'elec', title: 'Trace a dead cottage feeder', puzzle: 'trace', tier: 2, cost: 420, parts: 0, gain: 16, targets: ['panel'], weight: below(90, 4) },
   { kind: 'panelUp', role: 'elec', title: 'Panel upgrade', puzzle: 'panel', tier: 3, cost: 2100, parts: 1, gain: 30, targets: ['panel'], weight: below(66, 8) },
-  { kind: 'genService', role: 'elec', title: 'Generator service', puzzle: 'trace', tier: 2, cost: 380, parts: 0, gain: 15, targets: ['gen'], weight: below(90, 3) },
-  { kind: 'transfer', role: 'elec', title: 'Generator transfer switch', puzzle: 'wireup', tier: 3, cost: 1150, parts: 1, gain: 22, targets: ['gen'], weight: below(78, 4) },
-  { kind: 'xfmr', role: 'elec', title: 'Test the transformer', puzzle: 'meter', tier: 2, cost: 200, parts: 0, gain: 14, targets: ['panel'], weight: below(88, 3) },
+  { kind: 'genService', role: 'mech', title: 'Generator engine service', puzzle: 'torque', tier: 2, cost: 380, parts: 0, gain: 15, targets: ['gen'], weight: below(90, 3) },
+  { kind: 'transfer', role: 'elec', title: 'Generator transfer panel', puzzle: 'panel', tier: 3, cost: 1150, parts: 1, gain: 22, targets: ['gen'], weight: below(78, 4) },
+  { kind: 'xfmr', role: 'elec', title: 'Diagnose a dead circuit at the panel', puzzle: 'meter', tier: 2, cost: 200, parts: 0, gain: 14, targets: ['panel'], weight: below(88, 3) },
   { kind: 'dockrun', role: 'elec', title: 'Conduit run to the fuel dock', puzzle: 'conduit', tier: 3, cost: 520, parts: 1, gain: 18, targets: ['panel'], weight: below(80, 2) },
-  { kind: 'genTest', role: 'elec', title: 'Load-test the generator', puzzle: 'meter', tier: 2, cost: 160, parts: 0, gain: 12, targets: ['gen'], weight: below(94, 3) },
+  { kind: 'genTest', role: 'elec', title: 'Test generator-backed circuits', puzzle: 'meter', tier: 2, cost: 160, parts: 0, gain: 12, targets: ['gen'], weight: below(94, 3) },
 ];
 
 export const CATALOG_BY_KIND = Object.fromEntries(CATALOG.map((c) => [c.kind, c]));
@@ -223,21 +224,21 @@ export type Tool = { id: string; level: number; name: string; puzzle: PuzzleId; 
 export const TOOLS: Record<Role, Tool[]> = {
   mech: [
     { id: 'clickWrench', level: 3, name: 'Click-type wrench', puzzle: 'torque', effect: 'Clicks when a bolt enters the band' },
-    { id: 'borescope', level: 6, name: 'Borescope', puzzle: 'crack', effect: 'Cracks show depth and glow longer' },
-    { id: 'partsTray', level: 9, name: 'Parts tray', puzzle: 'teardown', effect: 'Highlights the next legal part' },
+    { id: 'borescope', level: 6, name: 'Non-aqueous developer', puzzle: 'crack', effect: 'Indications bleed out faster and linger' },
+    { id: 'partsTray', level: 9, name: 'Numbered parts tray', puzzle: 'teardown', effect: 'Removed parts keep their order number' },
     { id: 'gaugeDamper', level: 12, name: 'Gauge damper', puzzle: 'torque', effect: 'Halves torque needle lag' },
     { id: 'uvPlus', level: 15, name: 'UV floodlamp', puzzle: 'crack', effect: 'Wider lamp beam' },
-    { id: 'cgComputer', level: 18, name: 'CG computer', puzzle: 'balance', effect: 'CG dot moves live while you drag' },
+    { id: 'cgComputer', level: 18, name: 'Station moment card', puzzle: 'balance', effect: 'Moment per station shown while you drag' },
     { id: 'wirePliers', level: 21, name: 'Safety-wire pliers', puzzle: 'safetywire', effect: 'Live twists-per-inch readout' },
   ],
   elec: [
     { id: 'clampMeter', level: 3, name: 'Clamp meter', puzzle: 'panel', effect: 'Live amps per phase while dragging' },
-    { id: 'toneTracer', level: 6, name: 'Tone tracer', puzzle: 'trace', effect: 'Hum grows near the fault' },
-    { id: 'labelMaker', level: 9, name: 'Label maker', puzzle: 'wireup', effect: 'Terminal labels printed' },
-    { id: 'fishTape', level: 12, name: 'Fish tape', puzzle: 'trace', effect: 'See inside junction boxes' },
-    { id: 'torqueScrewdriver', level: 15, name: 'Torque screwdriver', puzzle: 'wireup', effect: 'Loops wrap clockwise' },
+    { id: 'toneTracer', level: 6, name: 'Tone tracer', puzzle: 'trace', effect: 'Steady tone while you follow a cable' },
+    { id: 'labelMaker', level: 9, name: 'Headlamp', puzzle: 'wireup', effect: 'Read the markings stamped on the device' },
+    { id: 'fishTape', level: 12, name: 'Circuit tracer receiver', puzzle: 'trace', effect: 'Junction-box branches readable' },
+    { id: 'torqueScrewdriver', level: 15, name: 'Stripper with gauge', puzzle: 'wireup', effect: 'Live strip-length readout' },
     { id: 'nonContact', level: 18, name: 'Non-contact tester', puzzle: 'meter', effect: 'Glows near live conductors' },
-    { id: 'bender', level: 21, name: 'Hand bender guide', puzzle: 'conduit', effect: 'Bend marks show multiplier and shrink' },
+    { id: 'bender', level: 21, name: 'Bender with printed table', puzzle: 'conduit', effect: 'Multiplier and shrink table on the shoe' },
   ],
   fin: [
     { id: 'driverTree', level: 3, name: 'Driver tree', puzzle: 'variance', effect: 'Lines grouped by driver' },
@@ -246,7 +247,7 @@ export const TOOLS: Record<Role, Tool[]> = {
     { id: 'pivot', level: 12, name: 'Pivot sort', puzzle: 'variance', effect: 'Sort by absolute variance' },
     { id: 'bidMemory', level: 15, name: 'Bid memory', puzzle: 'auction', effect: "Shows rivals' last raises" },
     { id: 'autoMatch', level: 18, name: 'Auto-match rules', puzzle: 'reconcile', effect: 'Exact 1:1 matches pre-highlighted' },
-    { id: 'poLookup', level: 21, name: 'PO lookup', puzzle: 'invoice', effect: 'PO lines expand with tolerance bands' },
+    { id: 'poLookup', level: 21, name: 'PO lookup', puzzle: 'invoice', effect: 'PO lines show unit prices' },
   ],
 };
 

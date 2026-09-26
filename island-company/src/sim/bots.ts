@@ -56,6 +56,8 @@ export function bestRates(s: IslandState) {
 }
 
 function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: number) {
+  // the crew backs the analyst's story call (bots agree; people may not)
+  if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role }, now);
   for (const o of s.orders.filter((x) => x.role === role && x.status === 'countered')) s = step(s, { t: 'acceptCounter', orderId: o.id }, now);
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   for (const o of ready.slice(0, bot.perTurn ?? 4)) {
@@ -68,7 +70,7 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
 function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
   if (!bot.naive) s = step(s, { t: 'setRates', ...bestRates(s) }, now);
   if (s.pendingBonus) s = step(s, { t: 'allocateBonus', choice: 'reserve' }, now);
-  if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key }, now);
+  if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role: 'fin' }, now);
 
   const reserve = 1500 + TIERS[s.tier - 1].fixed;
   const pend = s.orders.filter((o) => o.status === 'pending').sort((a, b) => urgency(s, b) - urgency(s, a));

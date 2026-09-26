@@ -138,27 +138,44 @@ function History({ s }: { s: IslandState }) {
 
 function StoryCard({ ctl }: { ctl: Ctl }) {
   const card = ctl.s.story!;
+  const role = ctl.role;
+  const votes = card.votes ?? {};
   return (
     <div class="card col" style={{ gap: 10, borderTop: `6px solid ${C.fin}` }}>
       <span class="chip ink" style={{ alignSelf: 'flex-start' }}>
-        Story · 3-week streak
+        Story · crew vote, two of three decide
       </span>
       <h2>{card.title}</h2>
       <span class="muted">{card.body}</span>
-      {card.options.map((o) => (
-        <button
-          key={o.key}
-          class="card"
-          style={{ border: 0, textAlign: 'left', background: 'var(--sand)' }}
-          onClick={() => {
-            fx.snap();
-            void ctl.dispatch({ t: 'story', key: o.key });
-          }}
-        >
-          <b>{o.label}</b>
-          <div class="label">{o.effect}</div>
-        </button>
-      ))}
+      {card.options.map((o) => {
+        const voters = ROLES.filter((r) => votes[r] === o.key);
+        const mine = role && votes[role] === o.key;
+        return (
+          <button
+            key={o.key}
+            class="card"
+            style={{ border: 0, textAlign: 'left', background: 'var(--sand)', outline: mine ? `3px solid ${C.sea}` : 'none' }}
+            onClick={() => {
+              if (!role) return;
+              fx.snap();
+              void ctl.dispatch({ t: 'story', key: o.key, role });
+            }}
+          >
+            <div class="row spread">
+              <b>{o.label}</b>
+              <span class="row" style={{ gap: 4 }}>
+                {voters.map((r) => (
+                  <span key={r} class="avatar" style={{ ['--tint' as string]: ROLE_TINT[r], width: 22, height: 22, fontSize: 11 }}>
+                    {(ctl.s.players[r]?.name ?? '?')[0]}
+                  </span>
+                ))}
+              </span>
+            </div>
+            <div class="label">{o.effect}</div>
+          </button>
+        );
+      })}
+      <span class="label">Undecided for two weeks? The safe option wins.</span>
     </div>
   );
 }

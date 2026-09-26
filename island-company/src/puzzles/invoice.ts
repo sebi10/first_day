@@ -75,8 +75,10 @@ export type InvModel = {
   cards: InvCard[];
   /** Σ atStake — the money a clean run protects, ≈ context.leak */
   money: number;
-  /** PO shows unit price and the tolerance band: teaching tiers, or the poLookup tool */
+  /** PO shows the tolerance band: teaching tiers only */
   band: boolean;
+  /** PO shows unit prices: teaching tiers, or the poLookup tool (a raw lookup, not the answer) */
+  unitPrice: boolean;
   /** the discount toggle counts down the 10-day window (teaching tiers only) */
   showWindow: boolean;
   /** tiers 0–2 teach: band printed, window countdown, agreed tax rate on the PO */
@@ -372,7 +374,8 @@ export function generateInvoice(seed: number, tier: number, tools: string[] = []
     tolAbs: 10,
     cards: [],
     money: 0,
-    band: t <= 2 || tools.includes('poLookup'),
+    band: t <= 2,
+    unitPrice: t <= 2 || tools.includes('poLookup'),
     showWindow: t <= 2,
     teach: t <= 2,
   };
@@ -1008,6 +1011,9 @@ export const invoice: PuzzleDef = {
           if (m.band) {
             tnum(ctx, `${l.poQty} × ${money(l.poPrice, { dollar: false })}`, xPO, mid - 8, { size: 12, weight: 750, align: 'center' });
             tnum(ctx, `≤ ${money(bandMax(m, l), { dollar: false })}`, xPO, mid + 9, { size: 10.5, weight: 750, color: C.sea, align: 'center' });
+          } else if (m.unitPrice) {
+            tnum(ctx, `${l.poQty} × ${money(l.poPrice, { dollar: false })}`, xPO, mid - 8, { size: 12, weight: 750, align: 'center' });
+            tnum(ctx, money(l.poQty * l.poPrice), xPO, mid + 9, { size: 10.5, weight: 650, color: C.inkSoft, align: 'center' });
           } else {
             tnum(ctx, String(l.poQty), xPO, mid - 8, { size: 14, weight: 800, align: 'center' });
             tnum(ctx, money(l.poQty * l.poPrice), xPO, mid + 9, { size: 10.5, weight: 650, color: C.inkSoft, align: 'center' });

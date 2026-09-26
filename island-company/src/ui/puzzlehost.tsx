@@ -19,6 +19,8 @@ export type PuzzleLaunch = {
   context?: PuzzleContext;
   /** e.g. "+18 airworthiness on Twin N-12" */
   reward?: string;
+  /** outside your trade: no rule text in the overlay */
+  expert?: boolean;
 };
 
 const SEEN = 'ic.seen.';
@@ -183,7 +185,7 @@ export function PuzzleHost({ launch, onResult, onClose }: { launch: PuzzleLaunch
               <span class="chip ink">{def.gesture}</span>
               <h2>{def.howTo}</h2>
               <p class="muted" style={{ margin: 0, maxWidth: 320 }}>
-                {def.term}
+                {launch.expert ? 'Outside your trade: no hints. Under 60% is a botch.' : def.term}
               </p>
               {launch.tools.length > 0 && (
                 <p class="label" style={{ margin: 0 }}>

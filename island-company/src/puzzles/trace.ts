@@ -203,10 +203,8 @@ export const trace: PuzzleDef = {
       });
       if (moved) {
         const now = performance.now();
-        const a = m.chain[m.faultAfter];
-        const faultPos = m.devices[a].pos;
-        const near = Math.hypot(p.x - faultPos.x, p.y - faultPos.y);
-        const gap = tone ? clamp(40 + near * 600, 40, 260) : 90;
+        // tone tracer: a steady tone while you're on the cable (it follows wire, it doesn't find faults)
+        const gap = tone ? 45 : 110;
         if (now - lastTick > gap) {
           host.fx.tick();
           lastTick = now;

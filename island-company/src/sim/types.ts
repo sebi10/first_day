@@ -168,6 +168,8 @@ export interface StoryCard {
   body: string;
   options: { key: string; label: string; effect: string }[];
   chosen?: string;
+  /** crew vote: decided when two agree (or all three have voted) */
+  votes?: Partial<Record<Role, string>>;
 }
 
 export interface IslandState {
@@ -224,6 +226,8 @@ export interface IslandState {
   updatedAt: number;
   /** optional shared ntfy.sh topic for free push notifications */
   ntfy?: string;
+  /** safety calls for this week: assetId → role that grounded / red-tagged it */
+  tags?: Record<string, Role>;
 }
 
 export type Action =
@@ -252,7 +256,8 @@ export type Action =
   | { t: 'buyList' }
   | { t: 'endTurn'; role: Role }
   | { t: 'allocateBonus'; choice: 'reserve' | 'capex' | 'split' }
-  | { t: 'story'; key: string }
+  | { t: 'story'; key: string; role: Role }
+  | { t: 'tag'; role: Role; assetId: string; on: boolean }
   | { t: 'cosmetic'; role: Role; id: string }
   | { t: 'practice'; role: Role; puzzle: PuzzleId; tier: number; score: number }
   | { t: 'resolve'; week: number };
