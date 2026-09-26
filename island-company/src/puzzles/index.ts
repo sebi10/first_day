@@ -8,6 +8,7 @@ import { safetywire } from './safetywire';
 import { crack } from './crack';
 import { forecast } from './forecast';
 import { hydraulics } from './hydraulics';
+import { gpu } from './gpu';
 import { panel } from './panel';
 import { teardown } from './teardown';
 import { torque } from './torque';
@@ -33,4 +34,5 @@ export const PUZZLES: Record<PuzzleId, PuzzleDef> = {
   reconcile,
   invoice,
   hydraulics,
+  gpu,
 };
