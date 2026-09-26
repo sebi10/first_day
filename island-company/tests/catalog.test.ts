@@ -5,8 +5,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PUZZLES } from '../src/puzzles';
+import type { PuzzleId } from '../src/puzzles/types';
+import { aircraftOf } from '../src/sim/aircraft';
 import { CATALOG, CATALOG_BY_KIND, FIN_TASKS, MODELS, PROJECTS, TOOLS } from '../src/sim/data';
-import type { Asset } from '../src/sim/types';
+import { createIsland } from '../src/sim/engine';
+import type { Asset, Order } from '../src/sim/types';
+import { islandAircraft, launchFor } from '../src/ui/select';
 
 const plane = (model: string, health: number): Asset =>
   ({ id: 'x', kind: 'plane', model, name: 'X', health, touchedWeek: 0, sinceInspection: 0 }) as unknown as Asset;
@@ -23,9 +27,18 @@ describe('catalog wiring', () => {
     for (const t of Object.values(FIN_TASKS)) expect(PUZZLES[t.puzzle].role).toBe('fin');
   });
 
-  it('every mechanic puzzle is on the work-order catalog', () => {
+  // the paperwork puzzles are not work orders of their own: the part chain (a squawk → the
+  // IPC → the logbooks and an engineering approval) launches them on the job it belongs to
+  const CHAIN: ReadonlySet<PuzzleId> = new Set<PuzzleId>(['ipc', 'logbook']);
+
+  it('every mechanic puzzle is on the work-order catalog (the part-chain puzzles are launched by the chain)', () => {
     const used = new Set(CATALOG.filter((c) => c.role === 'mech').map((c) => c.puzzle));
-    for (const d of Object.values(PUZZLES)) if (d.role === 'mech') expect(used.has(d.id), d.id).toBe(true);
+    for (const d of Object.values(PUZZLES)) if (d.role === 'mech' && !CHAIN.has(d.id)) expect(used.has(d.id), d.id).toBe(true);
+    // a chain puzzle is a registered mechanic puzzle, and not a catalog job as well
+    for (const id of CHAIN) {
+      expect(PUZZLES[id].role, id).toBe('mech');
+      expect(used.has(id), id).toBe(false);
+    }
   });
 
   it('every tool belongs to its trade and is read by its puzzle', () => {
@@ -58,5 +71,27 @@ describe('catalog wiring', () => {
     // the ground power puzzle models single-engine airframes only
     expect(gpu.targets.every((t) => !/twin/i.test(MODELS[t].label))).toBe(true);
     expect(gpu.cost).toBeLessThan(Math.min(...CATALOG.filter((c) => c.role === 'mech' && c.cost > 0 && c !== gpu).map((c) => c.cost)));
+  });
+});
+
+describe('launch wiring', () => {
+  it("a paperwork puzzle on a plane gets the island's own airplane, built once; other jobs don't pay for it", () => {
+    const base = createIsland({ id: 'lw', name: 'Launch Isle', now: 1_700_000_000_000, tz: 'UTC', seed: 4242, creator: { uid: 'a', name: 'Ana', role: 'mech' } });
+    const cargo = { id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 70, touchedWeek: 0, sinceInspection: 0 } as Asset;
+    const s = { ...base, assets: [cargo] };
+    const order = (puzzle: string, kind: string) => ({ id: `o-${puzzle}`, kind, role: 'mech', puzzle, assetId: 'p2', title: 'Job', seed: 9, status: 'ready', tier: 2, gain: 10, cost: 0 }) as unknown as Order;
+    for (const puzzle of ['ipc', 'logbook']) {
+      const a = launchFor(s, order(puzzle, 'tires'), 'mech').context!.aircraft!;
+      expect(a.model, puzzle).toBe('cargo');
+      expect(a.assetId).toBe('p2');
+      expect(a.islandSeed).toBe(4242);
+      // derived from the seed: the same records aircraftOf builds, and the same object every launch
+      expect(a.registration).toBe(aircraftOf(4242, 'p2', 'cargo').registration);
+      expect(launchFor(s, order(puzzle, 'tires'), 'mech').context!.aircraft).toBe(a);
+      expect(islandAircraft(4242, cargo)).toBe(a);
+    }
+    expect(launchFor(s, order('torque', 'tires'), 'mech').context!.aircraft).toBeUndefined();
+    // the island doc never carries it
+    expect(JSON.stringify(s)).not.toContain('registration');
   });
 });

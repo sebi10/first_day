@@ -18,6 +18,12 @@
 // spelled out, the record entry that matters is flagged). From tier 3 the
 // player gets only what a mechanic really gets: a squawk, the book and the
 // airplane's records.
+//
+// Blind sign-off (a real job from tier 2, params.blind): the request goes to
+// stores as written. No "doesn't fit" at the airplane, no coach line that
+// knows the answer, no ✓/✗, no reveal of the right P/N or approval and no
+// verdict sounds: the stamped parts request (and the approval it cites) is
+// what you get, in the same time whatever it scored.
 import { hashSeed, rng } from '../sim/rng';
 import {
   aircraftOf,
@@ -1369,6 +1375,7 @@ export const ipc: PuzzleDef = {
     const m = generateIpc(p.seed, p.tier, p.tools, p.context);
     const { ac, fig } = m;
     const rm = p.reducedMotion;
+    const blind = !!p.blind;
 
     // ---- state
     const marks: IpcAttempt['marks'] = m.premarked ? { ...m.marks } : {};
@@ -1622,7 +1629,7 @@ export const ipc: PuzzleDef = {
       const citeEntry = cite ? ac.log.find((e) => e.id === cite) : undefined;
       const apr =
         ica && alt
-          ? `<div class="apr"><div><b>ENGINEERING APPROVAL</b><small>${alt.stc ? `STC ${esc(alt.stc)}` : 'Field approval'} · Form 337 ${fmtDate(alt.form337)} · Log: ${citeEntry ? `${fmtDate(citeEntry.date)} ✓` : '—'}</small></div><button data-act="cite">${citeEntry ? 'Change' : 'Cite entry'}</button></div>`
+          ? `<div class="apr"><div><b>ENGINEERING APPROVAL</b><small>${alt.stc ? `STC ${esc(alt.stc)}` : 'Field approval'} · Form 337 ${fmtDate(alt.form337)} · Log: ${citeEntry ? `${fmtDate(citeEntry.date)}${blind ? '' : ' ✓'}` : '—'}</small></div><button data-act="cite">${citeEntry ? 'Change' : 'Cite entry'}</button></div>`
           : '';
       slip.innerHTML = `
         <div class="slh"><span>PARTS REQUEST</span><span>${esc(ac.registration)} · ${esc(m.ata)}</span></div>
@@ -1688,6 +1695,15 @@ export const ipc: PuzzleDef = {
     function coach() {
       if (!m.teach) return;
       let t: string;
+      // blind: the coach follows your own steps, never what the answer needs
+      if (blind) {
+        if (selItem === null && !lines.length) t = 'Tap the circled callout. Then decide which rows fit this airplane.';
+        else if (!m.premarked && (!marks.ab || !marks.cd)) t = `Mark the effectivity codes: S/N from the data plate, ${sbFig} from the Records.`;
+        else if (!lines.length) t = 'Read the notes (NP, SUPSD BY), pick the row whose EFF fits, then Add it to the request.';
+        else t = 'Anything the notes or the AMM task call for with it? Check the quantity, then Order.';
+        coachEl.textContent = t;
+        return;
+      }
       const onTarget = selItem === m.item;
       const inReq = lines.length > 0;
       const has = (e: Expected) => lines.some((l) => e.accept.includes(l.pn) || l.pn === e.old?.pn);
@@ -1746,7 +1762,7 @@ export const ipc: PuzzleDef = {
         <div class="lr">${esc(e.ref)}</div>
         ${e.cert ? `<div class="lr" style="margin-top:3px;font-style:italic">${esc(e.cert)}</div>` : ''}
         <div class="ls">${esc(e.signature)}</div>
-        ${citeMode ? `<button class="cite${cite === e.id ? ' done' : ''}" data-cite="${esc(e.id)}">${cite === e.id ? 'Cited on the request ✓' : 'Cite this entry'}</button>` : ''}
+        ${citeMode ? `<button class="cite${cite === e.id ? ' done' : ''}" data-cite="${esc(e.id)}">${cite === e.id ? `Cited on the request${blind ? '' : ' ✓'}` : 'Cite this entry'}</button>` : ''}
       </div>`;
     }
 
@@ -1862,7 +1878,8 @@ export const ipc: PuzzleDef = {
     function order() {
       if (finished || !lines.length || host.paused()) return;
       const a = attempt();
-      if (wouldReveal(m, a)) {
+      // blind: the order goes in as written; whether the part fits is not shown here
+      if (!blind && wouldReveal(m, a)) {
         revealed = true;
         const alt = m.alteration!;
         const main = alt.parts![1] ?? alt.parts![0];
@@ -1886,6 +1903,25 @@ export const ipc: PuzzleDef = {
       finished = true;
       const sc = scoreIpc(m, a);
       const res = result(sc.score, sc.summary, { pn: sc.parts.pn, qty: sc.parts.qty, reason: sc.parts.reason, fault: sc.fault, case: m.caseKey, planted: m.planted });
+      if (blind) {
+        // the stamped request is the paperwork: what you ordered and the approval you cited, nothing on whether it was right
+        const citeEntry = cite ? ac.log.find((e) => e.id === cite) : undefined;
+        const alt = m.alteration;
+        const apr = alt && lines.some(approvalLine)
+          ? `<div class="vn"><i>·</i><span>Engineering approval requested: ${alt.stc ? `STC ${esc(alt.stc)}` : 'field approval'}, Form 337 ${fmtDate(alt.form337)}, log ${citeEntry ? `entry of ${fmtDate(citeEntry.date)}` : 'entry not cited'}</span></div>`
+          : '';
+        showCard(`
+          <div class="istamp" style="color:${C.seaDeep}">ORDERED</div>
+          <div class="vn"><i>·</i><span>${esc(ac.registration)} · ${esc(m.ata)} · ${esc(m.squawk)}</span></div>
+          ${lines.map((l) => `<div class="vn"><i>·</i><span>${esc(l.pn)} × ${l.qty} · ${l.src === 'ica' ? 'ICA' : `Fig ${fig.fig}`}-${esc(l.item)} · ${esc(l.nomen)}</span></div>`).join('')}
+          ${apr}`);
+        refreshSlip();
+        refreshList();
+        host.fx.snap();
+        host.status('Parts request sent to stores');
+        settle(host, res, 1600);
+        return;
+      }
       const stampTxt = sc.fault ? 'WRONG PART' : m.planted && sc.parts.pn > 0 && sc.parts.reason < 1 ? 'HELD' : res.score >= 0.6 ? 'PULLED' : 'NOT RIGHT';
       const col = sc.fault || res.score < 0.6 ? C.rust : C.palm;
       showCard(`

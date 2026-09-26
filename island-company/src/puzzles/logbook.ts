@@ -39,6 +39,10 @@
 // Tiers 0–2 teach (the entry outlined, year starred, hints on effectivity and
 // on which entry matters, specific return notes); from tier 3 only what a
 // mechanic would really see: the whole IPC figure, bare codes, generic returns.
+// Blind sign-off (a real job from tier 2, params.blind): the paperwork goes in
+// once. No engineering review or inspector buy-back, no returns, no ✓/✗, no
+// verdict stamp or sounds: you see the request you sent or the entry you
+// signed, stamped as handed in, whatever it scored.
 import {
   ATA_TITLE,
   IPC_ATAS,
@@ -1426,6 +1430,7 @@ export const logbook: PuzzleDef = {
   mount(host, p) {
     const m = generateLogbook(p.seed, p.tier, p.tools, p.context);
     const { ac } = m;
+    const blind = !!p.blind;
     const r = rng(hashSeed('lb-ui', p.seed));
     const bare = m.tier >= 3;
     const sbLike = m.kase === 'sb' || m.kase === 'sbpre';
@@ -2020,8 +2025,9 @@ ${notes.map((x) => `<div style="font-size:10.5px;margin-top:6px;color:${C.inkSof
       if (!route || finished) return;
       const fields = FIELDS_FOR[route];
       if (fields.some((f) => values[f] === undefined)) return;
-      const rv = reviewLogbook(m, route, values, entry);
       const req = ROUTES.find((x) => x.id === route)!.form === 'request';
+      if (blind) return handIn(req);
+      const rv = reviewLogbook(m, route, values, entry);
       if (rv.verdict === 'returned') {
         returns++;
         returnedRoutes.push(route);
@@ -2084,6 +2090,32 @@ ${!req && paperwork.length && rv.verdict !== 'serious' ? `<div class="lb-ln bad"
         });
       });
       renderApprove();
+    }
+
+    /** blind: the paperwork as handed in (your request, or the entry you signed), stamped, and the job closes */
+    function handIn(req: boolean) {
+      finished = true;
+      const res = (locked = finalResult(true));
+      const jobBook = bookOf.get(bookFor(m.ata) + (m.jobPos ? `:${m.jobPos}` : ''))?.name ?? 'Airframe';
+      const who = req ? `${esc(ac.registration)} · ${esc(m.job.wo)} · ${fmtDate(ac.asOf)}` : `${esc(ac.registration)} · ${esc(jobBook.replace(/^(Airframe|Engine|Propeller)/, (x) => x.toLowerCase()))} log · ${fmtDate(ac.asOf)}`;
+      const body = req
+        ? `${FIELDS_FOR[route!].map((f) => `<div class="lb-ln"><i>·</i><span>${esc(FIELD_LABEL[f])}: ${esc(valueLabel(f)?.label ?? '')}</span></div>`).join('')}
+<div class="lb-ln"><i>·</i><span>Logbook entry relied on: ${esc(relLabel())}</span></div>`
+        : `<div class="lb-newe"><p class="lb-p">${esc(entryTextOf(m, values))}</p><div class="lb-sg"><em>You</em><span>A&amp;P ${esc(m.cert)}</span></div></div>
+<div class="lb-ln"><i>·</i><span>Relied on: ${esc(relLabel())}</span></div>`;
+      const word = req ? 'Sent to engineering' : 'Signed';
+      rev.innerHTML = `<div class="lb-memo"><h3>${req ? 'YOUR ENGINEERING REQUEST' : 'YOUR LOGBOOK ENTRY'}</h3><div class="meta">${who}</div>
+${body}
+<div class="lb-bigstamp" style="color:${C.seaDeep}">${esc(word)}</div></div>`;
+      rev.classList.add('open');
+      const stampAt = 320;
+      later(stampAt, () => {
+        rev.querySelector('.lb-bigstamp')?.classList.add('go');
+        host.fx.snap();
+      });
+      // the same hand-in time whatever the result
+      settle(host, res, stampAt + 1600);
+      host.status(req ? 'Request sent to engineering' : 'Entry signed');
     }
 
     function reviewLines(rv: Review): { ok: boolean; text: string }[] {

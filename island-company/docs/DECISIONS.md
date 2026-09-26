@@ -198,6 +198,24 @@ The consequences branch and the mechanic branch were built side by side and merg
 
 Robustness (`npm run balance -- robust`, 360 games per team): three friends reach tier 5 in week 22–23 (60 of 360 miss it by week 26, 61 before the merge); all average in week 22 (21 miss, 32 before). Weeks below $0: 4 per team, in 3 of its 360 games (1 week in 1 game before the merge). All of them are weeks 24–26 of a late grid-and-generator collapse (no rentable houses, no flights for two or three weeks), the tier-4 knife-edge described above, now reshuffled by two more mechanic jobs in the queue. The follow-up rules (the new defect rows with their parts kits, the wider wheel-half scope; bots report no variants) barely move the bots: the same negative weeks, at most one more or fewer missed tier 5 per crew, and the 30-seed medians are unchanged. Left untuned because the standard run is clean; if it shows up in play, the first knob is the new jobs' queue weight (`below(94, 4)` / `below(96, 4)` in the catalog).
 
+### Integration with the island art and the paperwork puzzles (IPC lookup, logbook research)
+
+Three more branches merged on top: the new island art (`island.tsx`, `ui/island/*`, the island lab), the IPC parts lookup and the logbook research puzzle. Both puzzles build on `src/sim/aircraft.ts` (seeded identity, logbooks, IPC figures, AMM task cards and hidden plants), and each branch had extended it. The merged module keeps both: the AD method of compliance, the lining rivet UPA and the IPC art hooks, and the field-approved and FAA-PMA plants, per-unit engine and propeller books (a twin keeps one per engine and per propeller), EA parts control and the review of field 337s. An AD on a replaced assembly reads "N/A per STC …" or "per Form 337 dated … (field approval)". Every other AD line states how it was complied with.
+
+- `reviewRequest` treated any cite containing "337" as a field approval, which refused an STC numbered like SA03372CE. An STC-shaped cite is now always an STC.
+- The IPC puzzle handles the new plants on an airplane it is given. A field-approved kit is cited by its 337, since it has no STC number. An FAA-PMA part is an approved replacement for the IPC part, so that job is an ordinary IPC job. The records show which unit's book an entry is in.
+- **Blind sign-off covers both.** The paperwork you stamp stays. Whether the P/N or the approval route was right is hidden.
+
+| Puzzle | Hidden when blind | Still there |
+| --- | --- | --- |
+| IPC lookup | "DOESN'T FIT" at the airplane (the IPC part on an STC airplane goes to stores as ordered, scored as the wrong part), the coach line that knew whether the part on the request was the answer (it now follows your own steps), the PULLED / HELD / WRONG PART stamp, ✓/✗ notes, the "why", the ✓ on a cited entry, verdict sounds, the flourish | the figure, the book's notes and effectivity codes, the records and ICAs, and your request stamped ORDERED with the lines and the approval it cites |
+| Logbook research | engineering's review and the inspector's buy-back (no returns: the paperwork goes in once), ✗ on fields, the EA issued / Returned / Not airworthy stamp, verdict sounds, the flourish | the books, the IPC sheet, the lead's note (tier 2), and your request or your signed entry, stamped *Sent to engineering* / *Signed* |
+
+- Not on the catalog yet. `ipc` and `logbook` are the part chain's puzzles (a squawk, then the IPC, then the logbooks and an engineering approval). `tests/catalog.test.ts` lists them as chain puzzles until the chain launches them.
+- `launchFor` hands a paperwork puzzle on a plane the island's own airplane: `context.aircraft = aircraftOf(seed, asset.id, asset.model)`. It is derived from the seed, never stored in the island doc, and built once per island and plane (`islandAircraft`). Other jobs don't build it. An airplane given without a plant never gets an IPC "part no exist" case. The logbook puzzle plants its case on that airplane's identity.
+- The paperwork puzzles are HTML, so `tests/blind.test.ts` mounts them on a small DOM (`tests/minidom.ts`) and clicks through the same way with and without `blind`.
+- Balance is unchanged by the merge. The paper sim does not play puzzles, and the standard and robust runs match the numbers above.
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
 Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; see that section for current numbers.

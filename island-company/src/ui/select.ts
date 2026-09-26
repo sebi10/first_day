@@ -1,10 +1,12 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
+import type { PuzzleId } from '../puzzles/types';
+import { aircraftOf, type Aircraft } from '../sim/aircraft';
 import { ECON, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { forecastContext, listPrice } from '../sim/engine';
 import { flightsAvailable, flightsPerPlane, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
-import type { IslandState, Order, Role } from '../sim/types';
+import type { Asset, IslandState, Order, Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
 
 export type Block = { from: Role; to: Role; text: string };
@@ -74,6 +76,26 @@ function statusRank(o: Order) {
   return { countered: 0, ready: 1, waiting_part: 2, pending: 3, approved: 3, done: 5, cancelled: 6 }[o.status];
 }
 
+/** the mechanic puzzles that read the airplane's own records (PuzzleContext.aircraft) */
+const READS_AIRCRAFT: ReadonlySet<PuzzleId> = new Set<PuzzleId>(['ipc', 'logbook']);
+
+/**
+ * The island's own airplane: identity, logbooks, IPC and AMM, derived from the
+ * island seed and the asset (never stored in the island doc). Building one
+ * writes years of logbooks, so each is built once and kept.
+ */
+const fleet = new Map<string, Aircraft>();
+export function islandAircraft(seed: number, asset: Pick<Asset, 'id' | 'model'>): Aircraft {
+  const key = `${seed}|${asset.id}|${asset.model}`;
+  let ac = fleet.get(key);
+  if (!ac) {
+    // a device only ever sees a few islands: a small cap keeps a long session bounded
+    if (fleet.size >= 12) fleet.clear();
+    fleet.set(key, (ac = aircraftOf(seed, asset.id, asset.model)));
+  }
+  return ac;
+}
+
 export function launchFor(s: IslandState, o: Order, role: Role, assist = false): PuzzleLaunch {
   const p = s.players[role];
   const grace = !assist && p && s.week <= p.graceUntil;
@@ -99,6 +121,8 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
     context.market = { low: Math.round(low * f), high: Math.round(high * f), fair, cap: Math.min(Math.round(listPrice(s) * 0.92), Math.max(0, s.cash - ECON.freezeBelow)) };
   }
   if (o.puzzle === 'forecast') Object.assign(context, forecastContext(s));
+  // paperwork on a plane: the island's own airplane (twin / cargo / float), its records as they are
+  if (asset?.kind === 'plane' && READS_AIRCRAFT.has(o.puzzle)) context.aircraft = islandAircraft(s.seed, asset);
   return {
     puzzle: o.puzzle,
     seed: hashSeed(o.seed, role),

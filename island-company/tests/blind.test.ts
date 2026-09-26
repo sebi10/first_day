@@ -1,16 +1,21 @@
-// Blind sign-off in the crack hunt, hydraulic servicing and ground power start.
+// Blind sign-off in the crack hunt, hydraulic servicing, ground power start,
+// and the paperwork puzzles (IPC parts lookup, logbook research).
 // Each puzzle is mounted headless (a recording canvas, a manual frame clock and
-// synthetic pointer events), played the same way with and without `blind`, and
-// what it draws and plays is compared: the teaching run gets its verdict and
-// reveal, the blind run gets none, and both hand in the same true score.
+// synthetic pointer events; the paperwork puzzles on a small DOM), played the
+// same way with and without `blind`, and what it draws and plays is compared:
+// the teaching run gets its verdict and reveal, the blind run gets none, and
+// both hand in the same true score.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { crack, distToInd, generateCrack, styleOf } from '../src/puzzles/crack';
 import { generateGpu, gpu } from '../src/puzzles/gpu';
 import { hydraulics } from '../src/puzzles/hydraulics';
+import { generateIpc, ipc, scoreIpc } from '../src/puzzles/ipc';
 import { markInput } from '../src/puzzles/kit';
-import type { PuzzleDef, PuzzleResult } from '../src/puzzles/types';
+import { FIELDS_FOR, generateLogbook, idealAnswer, logbook, rightValues, scoreLogbook, type LbModel, type LbRoute } from '../src/puzzles/logbook';
+import type { PuzzleContext, PuzzleDef, PuzzleResult } from '../src/puzzles/types';
 import type { Fx } from '../src/ui/feedback';
 import { C } from '../src/ui/theme';
+import { MiniEl, miniDocument, textOf } from './minidom';
 
 const W = 390;
 const H = 640;
@@ -392,5 +397,274 @@ describe('ground power start: a blind sign-off gives nothing away', () => {
       const r = run.inst.timeUp();
       expect(r.data).toMatchObject({ errors: expect.arrayContaining(['arcIn']), defect: 'arc' });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The paperwork puzzles are HTML: mount them on the small DOM, click through
+// ---------------------------------------------------------------------------
+
+/** Mount an HTML puzzle headless: what it shows, says and plays is recorded. */
+function mountDom(def: PuzzleDef, o: { seed: number; tier: number; blind: boolean; context?: PuzzleContext }) {
+  vi.stubGlobal('document', miniDocument());
+  vi.stubGlobal('window', { devicePixelRatio: 1, setTimeout: (f: () => void, ms?: number) => setTimeout(f, ms), clearTimeout: (h: number) => clearTimeout(h) });
+  vi.stubGlobal('location', { pathname: '/' });
+  const el = new MiniEl('div');
+  const sounds: string[] = [];
+  const fx = new Proxy({}, { get: (_t, k) => () => sounds.push(String(k)) }) as Fx;
+  const statuses: string[] = [];
+  let held: { r: PuzzleResult; ms: number } | null = null;
+  const inst = def.mount(
+    {
+      el: el as unknown as HTMLElement,
+      fx,
+      done: (r) => (held ??= { r, ms: 0 }),
+      hold: (r, ms) => (held ??= { r, ms }),
+      status: (s) => statuses.push(s),
+      paused: () => false,
+    },
+    { seed: o.seed, tier: o.tier, tools: [], reducedMotion: true, blind: o.blind, context: o.context },
+  );
+  const find = (sel: string) => {
+    const e = el.querySelector(sel);
+    if (!e) throw new Error(`nothing matches ${sel}`);
+    return e;
+  };
+  return {
+    el,
+    sounds,
+    statuses,
+    inst,
+    get held() {
+      return held;
+    },
+    find,
+    click: (sel: string) => find(sel).click(),
+    text: (sel: string) => textOf(el.querySelector(sel)),
+  };
+}
+
+const ASSETS = ['Twin N-12', 'Cargo C-7', 'Float F-3'];
+/** the verdict words a stamp or a card could say */
+const IPC_VERDICT = /WRONG PART|HELD|PULLED|NOT RIGHT|DOESN.T FIT|approved|not in|Needed|Missed|replaced that assembly/i;
+
+describe('IPC parts lookup: a blind sign-off gives nothing away', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** click a parts-list row by its P/N and add it to the request */
+  const order = (run: ReturnType<typeof mountDom>, pns: string[]) => {
+    for (const pn of pns) {
+      const row = run.el.querySelectorAll('.r[data-src="ipc"]').find((r) => textOf(r.querySelector('.rp')) === pn);
+      if (!row) throw new Error(`no row ${pn}`);
+      row.click();
+      run.click('.r.sel [data-add]');
+    }
+    run.click('[data-act="order"]');
+  };
+
+  // tier 5: an STC replaced the assembly, so the IPC part is the wrong part
+  const planted = (() => {
+    for (const assetName of ASSETS)
+      for (let seed = 1; seed <= 40; seed++) {
+        const m = generateIpc(seed, 5, [], { assetName });
+        if (m.planted) return { seed, assetName, m };
+      }
+    throw new Error('no planted case');
+  })();
+
+  it("not blind: the IPC part on an STC airplane comes back “doesn't fit”, and the job goes on", () => {
+    const run = mountDom(ipc, { seed: planted.seed, tier: 5, blind: false, context: { assetName: planted.assetName } });
+    order(run, [planted.m.ac.plant!.ipcPn]);
+    expect(run.text('.vd')).toMatch(/DOESN.T FIT/);
+    expect(run.sounds).toContain('thunk');
+    expect(run.held).toBeNull();
+  });
+
+  it('blind: the same order goes to stores as written, stamped, with its true score and no reveal', () => {
+    const run = mountDom(ipc, { seed: planted.seed, tier: 5, blind: true, context: { assetName: planted.assetName } });
+    const pn = planted.m.ac.plant!.ipcPn;
+    order(run, [pn]);
+    const card = run.text('.vd');
+    expect(card).toContain('ORDERED');
+    expect(card).toContain(pn);
+    expect(card).not.toMatch(IPC_VERDICT);
+    for (const t of ['✓', '✗']) expect(card, t).not.toContain(t);
+    for (const w of planted.m.why) expect(card).not.toContain(w);
+    for (const v of [...VERDICT, 'thunk']) expect(run.sounds, v).not.toContain(v);
+    // the true score: the wrong part, ordered without checking the records
+    const truth = scoreIpc(planted.m, { lines: [{ pn, qty: 1, src: 'ipc' }], marks: {} });
+    expect(run.held!.r.score).toBe(truth.score);
+    expect(run.held!.r.score).toBeLessThanOrEqual(0.35);
+    expect(run.held!.ms).toBe(1600);
+    expect(run.statuses.join(' ')).not.toContain(truth.summary);
+  });
+
+  it('blind and not: the same order, the same result; only the open run gets the stamp, the ticks and the why', () => {
+    // tier 3: a plain IPC job, ordered right and ordered wrong
+    const m = generateIpc(7, 3, [], { assetName: 'Cargo C-7' });
+    const wrong = m.fig.rows.find((r) => r.applies && r.upa !== 'RF' && !r.np && !m.expect.some((e) => e.accept.includes(r.pn)))!;
+    for (const pns of [m.expect.map((e) => e.pn), [wrong.pn]]) {
+      const open = mountDom(ipc, { seed: 7, tier: 3, blind: false, context: { assetName: 'Cargo C-7' } });
+      order(open, pns);
+      const run = mountDom(ipc, { seed: 7, tier: 3, blind: true, context: { assetName: 'Cargo C-7' } });
+      order(run, pns);
+      expect(run.held!.r).toEqual(open.held!.r);
+      expect(open.text('.vd')).toMatch(/PULLED|NOT RIGHT|WRONG PART/);
+      expect(open.text('.vd')).toMatch(/[✓✗]/);
+      expect(open.sounds.some((s) => VERDICT.includes(s))).toBe(true);
+      const card = run.text('.vd');
+      expect(card).toContain('ORDERED');
+      expect(card).not.toMatch(/[✓✗]/);
+      expect(card).not.toMatch(IPC_VERDICT);
+      for (const v of VERDICT) expect(run.sounds, v).not.toContain(v);
+      // the same hand-in time whatever it scored
+      expect(run.held!.ms).toBe(1600);
+    }
+  });
+
+  it("tier 2 blind: the coach follows your steps, never whether the part on the request is the answer", () => {
+    // a teaching job whose answer brings a second part (the code-3 set or an AMM part)
+    const pick = (() => {
+      for (const assetName of ASSETS)
+        for (let seed = 1; seed <= 60; seed++) {
+          const m = generateIpc(seed, 2, [], { assetName });
+          if (m.teach && !m.premarked && m.expect.length > 1) return { seed, assetName, m };
+        }
+      throw new Error('no two-part tier-2 job');
+    })();
+    const { m } = pick;
+    const wrong = m.fig.rows.find((r) => r.upa !== 'RF' && !r.np && !m.expect.some((e) => e.accept.includes(r.pn) || e.old?.pn === r.pn))!;
+    const coachAfter = (blind: boolean, pn: string) => {
+      const run = mountDom(ipc, { seed: pick.seed, tier: 2, blind, context: { assetName: pick.assetName } });
+      // mark effectivity (any codes: the coach must not care which)
+      run.click('.ec[data-code="A"]');
+      run.click('.ec[data-code="C"]');
+      const row = run.el.querySelectorAll('.r[data-src="ipc"]').find((r) => textOf(r.querySelector('.rp')) === pn)!;
+      row.click();
+      run.click('.r.sel [data-add]');
+      return run.text('.coach');
+    };
+    expect(coachAfter(false, m.expect[0].pn)).not.toBe(coachAfter(false, wrong.pn));
+    expect(coachAfter(true, m.expect[0].pn)).toBe(coachAfter(true, wrong.pn));
+  });
+});
+
+describe('logbook research: a blind sign-off gives nothing away', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** research (the entry relied on, or "no record"), pick the route, fill the form, hand it in */
+  const play = (run: ReturnType<typeof mountDom>, m: LbModel, entry: string, route: LbRoute, values: Partial<Record<string, string>>) => {
+    run.click('[data-go="logs"]');
+    if (entry === 'none') run.click('[data-act="none"]');
+    else {
+      const e = m.ac.log.find((x) => x.id === entry)!;
+      const key = e.pos ? `${e.book}:${e.pos}` : e.book;
+      if (run.el.querySelector(`[data-book="${key}"]`)?.classList.contains('on') === false) run.click(`[data-book="${key}"]`);
+      run.find(`.lb-e[data-id="${entry}"]`).dispatch('keydown', { key: 'Enter' });
+    }
+    run.click('[data-act="next"]');
+    run.click(`[data-route="${route}"]`);
+    vi.advanceTimersByTime(200);
+    for (const f of FIELDS_FOR[route]) {
+      if (values[f] === undefined) continue;
+      run.click(`[data-field="${f}"]`);
+      run.click(`.lb-sheet [data-opt="${values[f]}"]`);
+    }
+    run.click('[data-submit]');
+    vi.advanceTimersByTime(4000);
+  };
+
+  // tier 4: an STC case, so a request relying on "no record" is sent back by engineering
+  const stc = (() => {
+    for (let seed = 1; seed <= 80; seed++) {
+      const m = generateLogbook(seed, 4, [], { assetName: 'Cargo C-7' });
+      if (m.kase === 'stc') return { seed, m };
+    }
+    throw new Error('no STC case');
+  })();
+
+  it('not blind: engineering sends the request back, item by item, with a stamp and a sound', () => {
+    const { seed, m } = stc;
+    const values = Object.fromEntries(FIELDS_FOR.eng.map((f) => [f, rightValues(m, 'eng', f)[0]]));
+    const run = mountDom(logbook, { seed, tier: 4, blind: false, context: { assetName: 'Cargo C-7' } });
+    play(run, m, 'none', 'eng', values);
+    const memo = run.text('.lb-rev');
+    expect(memo).toContain('ENGINEERING REVIEW');
+    expect(memo).toContain('Returned');
+    expect(memo).toContain('✗');
+    expect(run.sounds).toContain('bad');
+    expect(run.held).toBeNull();
+  });
+
+  it('blind: the request goes in once, stamped as sent; no review, no return, the true score', () => {
+    const { seed, m } = stc;
+    const values = Object.fromEntries(FIELDS_FOR.eng.map((f) => [f, rightValues(m, 'eng', f)[0]]));
+    const run = mountDom(logbook, { seed, tier: 4, blind: true, context: { assetName: 'Cargo C-7' } });
+    play(run, m, 'none', 'eng', values);
+    const memo = run.text('.lb-rev');
+    expect(memo).toContain('YOUR ENGINEERING REQUEST');
+    expect(memo).toContain('Sent to engineering');
+    expect(memo).toContain('No record explains it');
+    expect(memo).not.toMatch(/REVIEW|Returned|EA \d|Not approved|Not needed|Data on file|[✓✗]/);
+    for (const v of VERDICT) expect(run.sounds, v).not.toContain(v);
+    const truth = scoreLogbook(m, { entry: 'none', route: 'eng', values, returns: 0, submitted: true });
+    expect(run.held!.r.score).toBe(truth.score);
+    expect(run.held!.r.score).toBeLessThan(0.6);
+    expect(run.held!.ms).toBe(1920);
+    expect(run.statuses.join(' ')).not.toContain(truth.summary);
+  });
+
+  it('blind and not: the right paperwork, the same result; only the open run is told it was right', () => {
+    const { seed, m } = stc;
+    const ideal = idealAnswer(m);
+    const open = mountDom(logbook, { seed, tier: 4, blind: false, context: { assetName: 'Cargo C-7' } });
+    play(open, m, ideal.entry, ideal.route, ideal.values);
+    const run = mountDom(logbook, { seed, tier: 4, blind: true, context: { assetName: 'Cargo C-7' } });
+    play(run, m, ideal.entry, ideal.route, ideal.values);
+    expect(open.held!.r.score).toBe(1);
+    expect(run.held!.r).toEqual(open.held!.r);
+    expect(open.text('.lb-rev')).toMatch(/EA issued/);
+    expect(open.sounds).toContain('good');
+    expect(run.text('.lb-rev')).not.toMatch(/EA issued|EA \d|[✓✗]/);
+    for (const v of VERDICT) expect(run.sounds, v).not.toContain(v);
+    expect(run.held!.ms).toBe(1920);
+  });
+
+  it('blind: a logbook entry you sign stays on the page with your signature, stamped signed, whatever the inspector would say', () => {
+    // an SB case at tier 2: sign an IPC entry relying on "no record" (a serious fault, open or blind)
+    const pick = (() => {
+      for (let seed = 1; seed <= 120; seed++) {
+        const m = generateLogbook(seed, 2, [], { assetName: 'Twin N-12' });
+        if (m.kase === 'sb') return { seed, m };
+      }
+      throw new Error('no SB case');
+    })();
+    const { seed, m } = pick;
+    const values = Object.fromEntries(FIELDS_FOR.ipc.map((f) => [f, rightValues(m, 'ipc', f)[0]]));
+    const open = mountDom(logbook, { seed, tier: 2, blind: false, context: { assetName: 'Twin N-12' } });
+    play(open, m, 'none', 'ipc', values);
+    expect(open.text('.lb-rev')).toMatch(/Not airworthy|Not eligible|Records fault/);
+    expect(open.sounds).toContain('bad');
+    const run = mountDom(logbook, { seed, tier: 2, blind: true, context: { assetName: 'Twin N-12' } });
+    play(run, m, 'none', 'ipc', values);
+    const memo = run.text('.lb-rev');
+    expect(memo).toContain('YOUR LOGBOOK ENTRY');
+    expect(memo).toContain(`A&P ${m.cert}`);
+    expect(memo).toContain('Signed');
+    expect(memo).not.toMatch(/Not airworthy|Not eligible|Records fault|Inspector|serious|[✓✗]/i);
+    for (const v of VERDICT) expect(run.sounds, v).not.toContain(v);
+    expect(run.held!.r).toEqual(open.held!.r);
+    expect(run.held!.r.score).toBeLessThanOrEqual(0.2);
+    expect(run.held!.ms).toBe(1920);
   });
 });
