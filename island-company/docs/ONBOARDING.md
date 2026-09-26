@@ -33,7 +33,7 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 2. Do 2–4 jobs. Each job is a 60–120 s puzzle; the clock starts on your first touch. The better the work, the more the asset recovers: a bare pass (60%) restores 81% of the job, a clean one 105%, and perfect runs add a small permanent bonus. Under 40% the job fails its own check and comes back as **rework** with a fresh fault.
 3. Make your calls:
    - **Analyst:** swipe cards (→ approve, ← defer, ↑ cheaper fix), then set prices on the demand curve.
-   - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident).
+   - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident). Once a week you can also **write up a squawk**: tap one of your assets and pick the job you judge it needs; it lands on the analyst's desk with your name on it.
 4. Tap **End turn**.
 
 The week resolves at **20:00 island time**, or as soon as all three have ended their turn. Everyone gets the board review. Miss a day and your role runs on autopilot at 50%: nothing is lost, but that week doesn't count toward unlocks.

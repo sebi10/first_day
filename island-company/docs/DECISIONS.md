@@ -54,7 +54,8 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
 - **Balance / systems:** see the table below; plus crew projects, safety calls, votes, the load sheet gating charters, weather-capped grading and the credit curve above.
 - **UX:** the clock starts on your first touch, Back before touching costs nothing, help stays until you tap it, wrong input shakes and says so; meter and panel labels no longer overlap.
 - **Performance:** island motion pauses when idle, covered or off-screen (main thread 28% → 0.3% busy at 4× CPU); puzzle canvases idle at 30 → 10 fps and stop under cards; cold start reopens the last island (≈140 ms, offline too); online moves show instantly.
-- **Not done yet:** a per-turn work cap with trade-raised squawks (more choices for mechanic/electrician); lazy-loading puzzles (≈86 kB gzipped off the first load); fully on-demand canvas redraws; moving the top-heavy puzzles' targets into the thumb zone.
+- **Squawks** (systems finding "the trades make almost no decisions"): once a week each trade writes up a job it judges an asset needs; the analyst sees "Written up by <name>" on the card. A hard work cap was considered and rejected: it adds friction, not choices.
+- **Not done yet:** lazy-loading puzzles (≈86 kB gzipped off the first load); fully on-demand canvas redraws; moving the top-heavy puzzles' targets into the thumb zone.
 
 ## Additions (beyond MVP scope)
 
