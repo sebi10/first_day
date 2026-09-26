@@ -143,6 +143,24 @@ export function label(
   ctx.fillText(str, x, y);
 }
 
+/** Like label, but shrinks (down to 8px) then ellipsizes so the text fits maxW. */
+export function fitLabel(
+  ctx: CanvasRenderingContext2D,
+  str: string,
+  x: number,
+  y: number,
+  maxW: number,
+  o: { size?: number; weight?: number; color?: string; align?: CanvasTextAlign } = {},
+) {
+  let size = o.size ?? 13;
+  const font = (px: number) => `${o.weight ?? 600} ${px}px ${FONT}`;
+  ctx.font = font(size);
+  while (size > 8 && ctx.measureText(str).width > maxW) ctx.font = font(--size);
+  let s = str;
+  while (s.length > 1 && ctx.measureText(s).width > maxW) s = s.slice(0, -2) + '…';
+  label(ctx, s, x, y, { ...o, size });
+}
+
 /** Painterly backdrop: soft vertical gradient in sand, used behind every puzzle */
 export function backdrop(ctx: CanvasRenderingContext2D, w: number, h: number, tint: string = C.sand) {
   const g = ctx.createLinearGradient(0, 0, 0, h);

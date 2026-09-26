@@ -5,7 +5,7 @@
 // 3 you size the breaker to the wire (14→15 A, 12→20 A, 10→30 A, 8→40 A,
 // 6→50 A) and do the load math yourself; from tier 4 loads come in watts.
 import { rng } from '../sim/rng';
-import { C, backdrop, clamp, label, loop, pointer, roundRect, stage } from './kit';
+import { C, FONT, backdrop, clamp, fitLabel, label, loop, pointer, roundRect, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export const AMPACITY: Record<number, number> = { 14: 15, 12: 20, 10: 30, 8: 40, 6: 50 };
@@ -267,9 +267,14 @@ export const panel: PuzzleDef = {
       ctx.fill();
       ctx.fillStyle = lit ? C.elec : '#56646b';
       ctx.fillRect(r.x + 6, r.y + r.h / 2 - 3, 14, 6);
-      label(ctx, c.name, r.x + 26, r.y + r.h / 2 - (r.h > 40 ? 7 : 0), { size: 10, weight: 800, color: C.paper, align: 'left' });
-      label(ctx, `${size}A${c.volts === 240 ? ' 2P' : ''}`, r.x + r.w - 6, r.y + r.h / 2, { size: 10, weight: 900, color: C.elec, align: 'right' });
-      if (r.h > 40) label(ctx, loadText(c), r.x + 26, r.y + r.h / 2 + 9, { size: 9, color: C.paper, align: 'left' });
+      const tag = `${size}A${c.volts === 240 ? ' 2P' : ''}`;
+      ctx.font = `900 10px ${FONT}`;
+      const room = r.w - 26 - ctx.measureText(tag).width - 12;
+      fitLabel(ctx, c.name, r.x + 26, r.y + r.h / 2 - (r.h > 40 ? 7 : 0), room, { size: 10, weight: 800, color: C.paper, align: 'left' });
+      // tall 2-pole slots: tag in the corner so the load line keeps its volts
+      const tall = r.h > 60;
+      label(ctx, tag, r.x + r.w - 6, tall ? r.y + 14 : r.y + r.h / 2, { size: 10, weight: 900, color: C.elec, align: 'right' });
+      if (r.h > 40) fitLabel(ctx, loadText(c), r.x + 26, r.y + r.h / 2 + 9, tall ? r.w - 32 : room, { size: 9, color: C.paper, align: 'left' });
     }
 
     function draw() {

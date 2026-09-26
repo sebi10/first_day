@@ -728,10 +728,11 @@ export const meter: PuzzleDef = {
       roundRect(ctx, lx, ly, lw, lh, 8);
       ctx.clip();
       const cx = lx + lw / 2;
-      const cy = ly + lh * 2.1;
-      const R = lh * 1.9;
-      const a0 = -Math.PI / 2 - 0.56;
-      const a1 = -Math.PI / 2 + 0.56;
+      // shallow arc in the top band so it never runs through the digits
+      const cy = ly + lh * 2.6;
+      const R = lh * 2.45;
+      const a0 = -Math.PI / 2 - 0.4;
+      const a1 = -Math.PI / 2 + 0.4;
       const toA = (v: number) => a0 + (clamp(v, 0, 250) / 250) * (a1 - a0);
       ctx.globalAlpha = 0.35;
       ctx.strokeStyle = C.ink;
@@ -755,7 +756,7 @@ export const meter: PuzzleDef = {
       ctx.globalAlpha = 0.5;
       ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(na) * (R - lh * 0.9), cy + Math.sin(na) * (R - lh * 0.9));
+      ctx.moveTo(cx + Math.cos(na) * (R - lh * 0.32), cy + Math.sin(na) * (R - lh * 0.32));
       ctx.lineTo(cx + Math.cos(na) * (R + 8), cy + Math.sin(na) * (R + 8));
       ctx.stroke();
       ctx.restore();
@@ -764,11 +765,11 @@ export const meter: PuzzleDef = {
       let val = settle.v;
       if (live && !settle.snapped) val = settle.v * (0.55 + 0.45 * ((now - settle.t0) / 320)) + (Math.random() - 0.5) * 6;
       const str = live ? Math.max(0, val).toFixed(1).padStart(5, ' ') : '  -.-';
-      const size = Math.min(46, lh * 0.5);
+      const size = Math.min(42, lh * 0.4);
       const cell = size * 0.62;
       const dot = size * 0.3;
       const right = lx + lw - 12;
-      const base = ly + lh * 0.7;
+      const base = ly + lh * 0.9;
       let cxr = right;
       ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'center';
@@ -785,9 +786,8 @@ export const meter: PuzzleDef = {
         if (ch !== ' ') ctx.fillText(ch, mx, base);
         cxr -= cw;
       }
-      label(ctx, 'V AC', lx + lw - 10, ly + lh - 10, { size: 11, weight: 800, align: 'right' });
+      label(ctx, 'V AC', lx + lw - 10, ly + 11, { size: 10, weight: 800, align: 'right' });
       label(ctx, load ? 'LOADED' : 'AUTO', lx + 8, ly + 11, { size: 9, weight: 800, align: 'left', color: shade(C.ink, 0.2) });
-      if (log[0]) label(ctx, log[0].split('  ')[0], lx + 8, ly + lh - 10, { size: 10.5, weight: 700, align: 'left', color: shade(C.ink, 0.2) });
       // side panel: log + jacks
       const sx = lx + lw + 10;
       const sw = x + W - 10 - sx;
