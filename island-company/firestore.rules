@@ -1,0 +1,17 @@
+rules_version = '2';
+// Trust model: three friends. The 10-character island code is the key;
+// anyone signed in (anonymously) who knows it can read and play.
+// Listing islands is blocked, so codes can't be enumerated.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /islands/{islandId} {
+      allow get: if request.auth != null;
+      allow list: if false;
+      allow create, update: if request.auth != null
+        && request.resource.data.json is string
+        && request.resource.data.json.size() < 900000
+        && request.resource.data.v == 1;
+      allow delete: if false;
+    }
+  }
+}
