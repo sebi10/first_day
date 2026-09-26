@@ -57,8 +57,24 @@ export type BalanceModel = {
   /** fuel on board at takeoff; burn > 0 means the landing CG must be checked too */
   fuel: { kg: number; burn: number };
   items: LoadItem[];
-  /** best legal loading: fewest optional items left, then the most centred CG */
-  best: { plan: number[]; offload: number; margin: number };
+  /**
+   * What the best legal loading achieves (fewest can-wait items left, then the
+   * most centred CG). Scoring reference only: the loading itself is not stored,
+   * call solveBalance() for it.
+   */
+  best: { offload: number; margin: number };
+  /**
+   * Teaching aids. Tiers 0-2 teach; from tier 3 the player works the load sheet
+   * from trade knowledge (moment = weight × arm, CG = total moment / total weight).
+   */
+  aids: {
+    /** show "82 × 155 = 12,710" while dragging over a station */
+    momentMath: boolean;
+    /** CG computed and plotted for you (tiers 0-2, or the cgComputer tool) */
+    cgReadout: boolean;
+    /** forward/aft limits at the current weight spelled out */
+    limitLabels: boolean;
+  };
   /** share of all possible loadings that are legal (lower = harder) */
   legalFrac: number;
   /** loadings legal at takeoff that fail only at landing fuel (tier 5 trap) */
@@ -139,11 +155,17 @@ export function evaluateLoad(m: BalanceModel, place: number[]): LoadEval {
 }
 
 /** Exhaustive search over every loading (guests by seat row, freight by bay). */
-export function solveBalance(m: BalanceModel): Pick<BalanceModel, 'best' | 'legalFrac' | 'landingTraps'> | null {
+export type BalanceSolution = {
+  best: { plan: number[]; offload: number; margin: number };
+  legalFrac: number;
+  landingTraps: number;
+};
+
+export function solveBalance(m: BalanceModel): BalanceSolution | null {
   const pax = m.items.map((it, i) => (it.kind === 'pax' ? i : -1)).filter((i) => i >= 0);
   const cargo = m.items.map((it, i) => (it.kind !== 'pax' ? i : -1)).filter((i) => i >= 0);
   const place = new Array(m.items.length).fill(-1);
-  let best: BalanceModel['best'] | null = null;
+  let best: BalanceSolution['best'] | null = null;
   let total = 0;
   let legal = 0;
   let traps = 0;
@@ -252,13 +274,23 @@ function buildLoad(r: Rng, t: number): BalanceModel {
     pilot: { name: 'Pilot', kg: r.int(72, 92) },
     fuel: { kg: fuelKg, burn: t >= 5 ? r5(fuelKg * r.range(0.55, 0.68)) : 0 },
     items,
-    best: { plan: [], offload: 0, margin: 0 },
+    best: { offload: 0, margin: 0 },
+    aids: { momentMath: t <= 2, cgReadout: t <= 2, limitLabels: t <= 2 },
     legalFrac: 0,
     landingTraps: 0,
   };
 }
 
-export function generateBalance(seed: number, tier: number, _tools: string[] = []): BalanceModel {
+function adopt(m: BalanceModel, s: BalanceSolution, tools: string[]): BalanceModel {
+  m.best = { offload: s.best.offload, margin: s.best.margin };
+  m.legalFrac = s.legalFrac;
+  m.landingTraps = s.landingTraps;
+  // the CG computer is a convenience readout; it never places anything for you
+  if (tools.includes('cgComputer')) m.aids.cgReadout = true;
+  return m;
+}
+
+export function generateBalance(seed: number, tier: number, tools: string[] = []): BalanceModel {
   const t = clamp(Math.round(tier), 0, 5);
   const wantOffload = rng(hashSeed('balance-offload', seed, t)).chance(TIER.offload[t]);
   let fallback: BalanceModel | null = null;
@@ -267,7 +299,7 @@ export function generateBalance(seed: number, tier: number, _tools: string[] = [
     const m = buildLoad(rng(hashSeed('balance', seed, t, attempt)), t);
     const s = solveBalance(m);
     if (!s) continue;
-    Object.assign(m, s);
+    adopt(m, s, tools);
     fallback ??= m;
     const ok =
       m.legalFrac <= TIER.maxLegal[t] &&
@@ -282,8 +314,7 @@ export function generateBalance(seed: number, tier: number, _tools: string[] = [
   if (fallback) return fallback;
   // Never expected: strip everything optional-free down to a trivially legal load.
   const m = buildLoad(rng(hashSeed('balance-easy', seed)), 0);
-  Object.assign(m, solveBalance(m)!);
-  return m;
+  return adopt(m, solveBalance(m)!, tools);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,32 +322,38 @@ export function generateBalance(seed: number, tier: number, _tools: string[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Legal load: 1, minus 0.03 per move beyond one-per-item (max 0.2), 0.06 per
- * refused signature, up to 0.12 for a CG hugging a limit (relative to the best
- * achievable margin), 0.12 per item left behind that didn't need to be. A legal
- * load always passes. Illegal (only at time-up): 0.1–0.5 by progress/closeness.
+ * Legal load: 1, minus 0.03 per move beyond one-per-item (max 0.2), up to 0.12
+ * for a CG hugging a limit (relative to the best achievable margin), 0.12 per
+ * item left behind that didn't need to be; floored at a pass (0.6).
+ * Each refused signature (the pilot's check found it illegal) is a botched load
+ * sheet: -0.06 while teaching (tiers 1-2, still floored), -0.2 from tier 3 with
+ * no floor, so trial-and-error signing without knowing the maths fails.
+ * Time-up without a signature: partial credit only (never a pass from tier 3).
+ * Illegal load at time-up: 0.05-0.5 by progress and closeness.
  */
 export function scoreBalance(m: BalanceModel, place: number[], moves: number, refused: number, signed = true): number {
   const e = evaluateLoad(m, place);
+  const tut = m.tier === 0;
+  const expert = m.tier >= 3;
   if (!e.legal) {
     const req = m.items.filter((it) => !it.optional).length;
     const progress = req ? (req - e.missing) / req : 1;
     const close = 1 - clamp(e.cgOut / 4 + e.over / 120 + e.bayOver / 40, 0, 1);
-    return clamp(0.1 + 0.4 * progress * (0.35 + 0.65 * close) - 0.03 * refused, 0.05, 0.5);
+    return clamp(0.1 + 0.4 * progress * (0.35 + 0.65 * close) - (expert ? 0.06 : 0.03) * refused, 0.05, 0.5);
   }
-  const tut = m.tier === 0;
   const loaded = place.filter((s) => s >= 0).length;
   const extra = Math.max(0, moves - loaded);
   let s = 1;
   s -= Math.min(0.2, (tut ? 0.01 : 0.03) * extra);
-  s -= (tut ? 0.02 : 0.06) * refused;
   if (!tut) {
     const q = m.best.margin > 0 ? clamp(e.margin / m.best.margin, 0, 1) : 1;
     s -= 0.12 * clamp((0.6 - q) / 0.6, 0, 1);
   }
   s -= 0.12 * Math.max(0, e.offloaded - m.best.offload);
-  if (!signed) s -= 0.05;
-  return clamp(s, 0.6, 1);
+  if (expert) s = Math.max(0.6, s) - 0.2 * refused;
+  else s = Math.max(0.6, s - (tut ? 0.02 : 0.06) * refused);
+  if (!signed) s = Math.min(s - 0.05, expert ? 0.55 : 0.75);
+  return clamp(s, 0, 1);
 }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -346,12 +383,17 @@ export const balance: PuzzleDef = {
   role: 'mech',
   title: 'Weight & balance',
   gesture: 'Drag to stations',
-  howTo: 'Drag each load to a station. Keep the CG dot inside.',
+  howTo: 'Drag each load to a station. Keep the CG in the envelope.',
   term: 'CG: the balance point. Outside the envelope the plane is unsafe to fly.',
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 10,
   mount(host, p) {
     const m = generateBalance(p.seed, p.tier, p.tools);
     const live = p.tools.includes('cgComputer');
+    // from tier 3 (without the CG computer) nobody computes the CG for you: the
+    // sheet shows total weight and total moment, the pilot's check shows the CG
+    const key = (pl: number[]) => pl.join(',');
+    let checkedKey = '';
+    const cgVisible = () => m.aids.cgReadout || checkedKey === key(place) || finished;
     const st = stage(host.el);
     const { ctx } = st;
     const place: number[] = new Array(m.items.length).fill(-1);
@@ -459,7 +501,8 @@ export const balance: PuzzleDef = {
     const updateStatus = () => {
       const e = evaluateLoad(m, place);
       const cg = m.fuel.burn ? `${e.cg.toFixed(1)}→${e.cgL.toFixed(1)}` : e.cg.toFixed(1);
-      host.status(`GW ${fmt(e.w)} / ${fmt(m.maxGross)} kg · CG ${cg} in`);
+      if (cgVisible()) host.status(`GW ${fmt(e.w)} / ${fmt(m.maxGross)} kg · CG ${cg} in`);
+      else host.status(`GW ${fmt(e.w)} / ${fmt(m.maxGross)} kg · moment ${fmt(e.w * e.cg)} kg·in`);
     };
     updateStatus();
 
@@ -489,12 +532,17 @@ export const balance: PuzzleDef = {
     const sign = () => {
       const e = evaluateLoad(m, place);
       if (e.legal) {
+        checkedKey = key(place);
         finish();
         return;
       }
-      refused++;
       host.fx.bad();
       flash.until = performance.now() + 1400;
+      // an incomplete sheet is just bounced; a completed one that fails the check is a botched load sheet
+      if (!e.missing) {
+        refused++;
+        checkedKey = key(place);
+      }
       if (e.missing) {
         flash.what = 'missing';
         host.status(`Can't sign: ${e.missing} still on the ramp`);
@@ -603,18 +651,23 @@ export const balance: PuzzleDef = {
       ctx.font = `800 18px ${FONT}`;
       const gwW = ctx.measureText(fmt(e.w)).width;
       label(ctx, `/ ${fmt(m.maxGross)} kg`, g.pad + 26 + gwW, 21, { size: 12, weight: 600, color: C.inkSoft, align: 'left' });
+      const showCG = cgVisible();
       const inside = e.cgOut === 0;
-      const cgTxt = m.fuel.burn ? `${e.cg.toFixed(1)} → ${e.cgL.toFixed(1)} in` : `${e.cg.toFixed(1)} in`;
-      label(ctx, cgTxt, g.w - g.pad, 20, { size: 18, weight: 800, color: inside ? C.ink : C.rust, align: 'right' });
+      const cgTxt = !showCG
+        ? `${fmt(e.w * e.cg)}`
+        : m.fuel.burn
+          ? `${e.cg.toFixed(1)} → ${e.cgL.toFixed(1)} in`
+          : `${e.cg.toFixed(1)} in`;
+      label(ctx, cgTxt, g.w - g.pad, 20, { size: 18, weight: 800, color: inside || !showCG ? C.ink : C.rust, align: 'right' });
       ctx.font = `800 18px ${FONT}`;
-      label(ctx, 'CG', g.w - g.pad - ctx.measureText(cgTxt).width - 6, 20, {
+      label(ctx, showCG ? 'CG' : 'Σ moment kg·in', g.w - g.pad - ctx.measureText(cgTxt).width - 6, 20, {
         size: 11,
         weight: 700,
         color: C.inkSoft,
         align: 'right',
       });
 
-      drawChart(g, e, preview, gleam, flashing('cg') ? pulse : 0);
+      drawChart(g, e, preview, gleam, flashing('cg') ? pulse : 0, showCG);
       drawPlane(g, e, flashing, pulse);
       drawRamp(g, flashing('missing') ? pulse : 0);
 
@@ -639,13 +692,13 @@ export const balance: PuzzleDef = {
       }
     }
 
-    function drawChart(g: Geo, e: LoadEval, preview: LoadEval | null, gleam: number, alarm: number) {
+    function drawChart(g: Geo, e: LoadEval, preview: LoadEval | null, gleam: number, alarm: number, showCG: boolean) {
       const c = g.chart;
       const X0 = 72;
       const X1 = 88;
       const Y0 = ENVELOPE.minW;
       const Y1 = 2500;
-      const px = (cg: number) => c.x + ((clamp(cg, X0 - 0.6, X1 + 0.6) - X0) / (X1 - X0)) * c.w;
+      const px = (cg: number) => c.x + ((clamp(cg, X0 - 0.3, X1 + 0.3) - X0) / (X1 - X0)) * c.w;
       const py = (w: number) => c.y + c.h - ((clamp(w, Y0 - 30, Y1 + 30) - Y0) / (Y1 - Y0)) * c.h;
       // paper card
       ctx.fillStyle = shade(C.paper, 0.3);
@@ -655,7 +708,15 @@ export const balance: PuzzleDef = {
       ctx.lineWidth = 1;
       ctx.stroke();
       label(ctx, 'CG envelope', g.pad + 10, g.chartTop + 11, { size: 11, weight: 800, color: C.ink, align: 'left' });
-      label(ctx, 'weight vs CG', g.w - g.pad - 10, g.chartTop + 11, { size: 10, weight: 600, color: C.inkSoft, align: 'right' });
+      if (m.aids.limitLabels) {
+        // teaching: spell out the limits at the current weight
+        label(ctx, `limits at ${fmt(e.w)} kg: ${fwdLimit(e.w).toFixed(1)}–${aftLimit().toFixed(1)} in`, g.w - g.pad - 10, g.chartTop + 11, {
+          size: 10,
+          weight: 700,
+          color: C.palmDark,
+          align: 'right',
+        });
+      } else label(ctx, 'weight vs CG', g.w - g.pad - 10, g.chartTop + 11, { size: 10, weight: 600, color: C.inkSoft, align: 'right' });
       // grid
       ctx.strokeStyle = shade(C.sandDeep, 0.2);
       ctx.lineWidth = 1;
@@ -732,6 +793,23 @@ export const balance: PuzzleDef = {
         ctx.stroke();
         if (!ghost && m.fuel.burn) label(ctx, 'T/O', tx - 10, ty - 1, { size: 9, weight: 800, color: C.inkSoft, align: 'right' });
       };
+      if (!showCG) {
+        // only the weight is known until the CG is worked out (or the pilot checks it)
+        const line = (w: number, txt: string) => {
+          ctx.setLineDash([2, 4]);
+          ctx.strokeStyle = C.seaDeep;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(c.x, py(w));
+          ctx.lineTo(c.x + c.w, py(w));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          label(ctx, txt, c.x + 4, py(w) - 7, { size: 9, weight: 800, color: C.seaDeep, align: 'left' });
+        };
+        line(e.w, `GW ${fmt(e.w)}`);
+        if (m.fuel.burn) line(e.wL, `LDG ${fmt(e.wL)}`);
+        return;
+      }
       if (preview) {
         ctx.globalAlpha = 0.85;
         dot(preview, true);
@@ -812,7 +890,7 @@ export const balance: PuzzleDef = {
 
       // fuel (wing tanks) tag
       const fuelTxt = `Fuel ${m.fuel.kg} kg @ ${ARM.fuel} in${m.fuel.burn ? ` · burn ${m.fuel.burn}` : ''}`;
-      label(ctx, fuelTxt, x(ARM.fuel), bot + 15, { size: 10, weight: 700, color: C.seaDeep });
+      label(ctx, fuelTxt, x(96), bot + 15, { size: 10, weight: 700, color: C.seaDeep });
 
       // stations
       const hl = drag && drag.over != null && drag.over >= 0 ? drag.over : -1;
@@ -895,21 +973,6 @@ export const balance: PuzzleDef = {
         label(ctx, `${a}`, x(a), ry + 11, { size: 10, weight: 700, color: C.ink });
       }
       label(ctx, 'arm, in', x(212), ry + 11, { size: 9, weight: 600, color: C.inkSoft, align: 'right' });
-
-      // moment math next to the hovered station
-      if (drag && hl >= 0 && accepts(hl, drag.item)) {
-        const it = m.items[drag.item];
-        const r = stationRect(g, hl);
-        const txt = `${it.kg} × ${STATIONS[hl].arm} = ${fmt(it.kg * STATIONS[hl].arm)}`;
-        ctx.font = `700 11px ${FONT}`;
-        const tw = ctx.measureText(txt).width + 14;
-        const tx = clamp(r.x + r.w / 2 - tw / 2, 4, g.w - tw - 4);
-        const ty = top - 26;
-        ctx.fillStyle = C.ink;
-        roundRect(ctx, tx, ty, tw, 20, 10);
-        ctx.fill();
-        label(ctx, txt, tx + tw / 2, ty + 10.5, { size: 11, weight: 700, color: C.paper });
-      }
     }
 
     function person(r: Rect, txt: string, col: string) {
@@ -1000,33 +1063,56 @@ export const balance: PuzzleDef = {
     }
 
     function drawDragChip(g: Geo, d: Drag, preview: LoadEval | null) {
-      const base = chipRect(g, d.item);
-      const w = Math.min(base.w, 80);
-      const h = base.h - 6;
-      const r = { x: d.x - w / 2, y: d.y - LIFT - h / 2, w, h };
-      ctx.globalAlpha = 0.93;
-      chip(r, d.item, true);
-      ctx.globalAlpha = 1;
-      // keep the target visible through the lifted chip
-      if (d.over != null && d.over >= 0 && accepts(d.over, d.item)) {
-        const t = stationRect(g, d.over);
+      const it = m.items[d.item];
+      const over = d.over;
+      if (over != null && over >= 0 && accepts(over, d.item) && over !== d.from) {
+        // magnetic preview: a ghost of the load sits in the slot, one tag floats above the airframe
+        const t = stationRect(g, over);
+        ctx.globalAlpha = 0.6;
+        if (STATIONS[over].kind === 'seat') person(t, String(it.kg), C.sea);
+        else {
+          const n0 = bayItems(over).filter((i) => i !== d.item).length;
+          const rh = Math.min(22, (t.h - 6) / (n0 + 1));
+          const yy = t.y + t.h - 3 - (n0 + 1) * rh;
+          ctx.fillStyle = it.kind === 'crate' ? C.mech : shade(C.sea, 0.55);
+          roundRect(ctx, t.x + 3, yy + 1, t.w - 6, rh - 2, 4);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
         ctx.strokeStyle = C.sea;
         ctx.lineWidth = 3;
         roundRect(ctx, t.x - 2, t.y - 2, t.w + 4, t.h + 4, 9);
         ctx.stroke();
+        const bayKg = STATIONS[over].kind === 'bay' ? bayItems(over).filter((i) => i !== d.item).reduce((a2, i) => a2 + m.items[i].kg, 0) + it.kg : 0;
+        const full = STATIONS[over].kind === 'bay' && bayKg > STATIONS[over].limit;
+        const txt = m.aids.momentMath
+          ? `${it.kg} × ${STATIONS[over].arm} = ${fmt(it.kg * STATIONS[over].arm)}`
+          : `${it.kind === 'pax' ? 'Guest ' : ''}${it.name} · ${it.kg} kg`;
+        const full2 = full ? `${txt} · bay ${bayKg}/${STATIONS[over].limit}` : txt;
+        ctx.font = `700 12px ${FONT}`;
+        const tw = ctx.measureText(full2).width + 18;
+        const tx = clamp(t.x + t.w / 2 - tw / 2, 4, g.w - tw - 4);
+        const ty = g.plane.cy - g.plane.half - 34;
+        ctx.fillStyle = full ? C.rust : C.ink;
+        roundRect(ctx, tx, ty, tw, 24, 12);
+        ctx.fill();
+        label(ctx, full2, tx + tw / 2, ty + 12.5, { size: 12, weight: 700, color: C.paper });
+        if (preview && !preview.legal && preview.missing === 0 && !full) {
+          label(ctx, preview.over ? 'over gross' : 'CG out', tx + tw / 2, ty - 10, { size: 11, weight: 800, color: C.rust });
+        }
+        return;
       }
-      if (d.over != null && d.over >= 0 && !accepts(d.over, d.item)) {
+      const base = chipRect(g, d.item);
+      const w = Math.min(base.w, 84);
+      const h = base.h - 4;
+      const r = { x: d.x - w / 2, y: d.y - LIFT - h / 2, w, h };
+      chip(r, d.item, true);
+      if (over != null && over >= 0 && !accepts(over, d.item)) {
         ctx.strokeStyle = C.rust;
         ctx.lineWidth = 2.5;
         roundRect(ctx, r.x, r.y, r.w, r.h, 10);
         ctx.stroke();
-      }
-      if (preview && !preview.legal && preview.missing === 0) {
-        label(ctx, preview.over ? 'over gross' : preview.bayOver ? 'bay full' : 'CG out', d.x, r.y - 9, {
-          size: 11,
-          weight: 800,
-          color: C.rust,
-        });
+        label(ctx, it.kind === 'pax' ? 'guests ride in seats' : 'cargo goes in a bay', d.x, r.y - 10, { size: 11, weight: 800, color: C.rust });
       }
     }
 

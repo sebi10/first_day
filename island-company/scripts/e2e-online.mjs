@@ -75,6 +75,7 @@ const fail = async (e) => {
 };
 const all = [];
 process.on('unhandledRejection', fail);
+process.on('uncaughtException', fail);
 
 // 1. Seb creates an online island as mechanic on his phone
 const seb = await device('seb-phone', phone);
@@ -84,7 +85,8 @@ await seb.page.getByPlaceholder('e.g. Seb').fill('Seb');
 await seb.click('New island');
 await seb.page.getByRole('radio', { name: '3 devices · online' }).click();
 await seb.page.getByRole('radio', { name: /Mechanic/ }).click();
-await seb.click('Found the island', { wait: 2500 });
+await seb.click('Found the island', { wait: 500 });
+await seb.page.waitForURL(/#\/i\/\w+/, { timeout: 20000 });
 const code = /#\/i\/(\w+)/.exec(seb.page.url())[1];
 console.log('island code', code);
 await seb.shot('created');
@@ -110,7 +112,7 @@ await seb.shot('week1');
 await ravi.shot('week1-desk');
 
 // 3. Seb links his laptop to the mechanic seat with the seat code
-await seb.click('Me');
+await seb.click('Me', { exact: true });
 const seatCode = (await seb.page.locator('b.code').nth(1).innerText()).trim();
 console.log('seat code', seatCode);
 await seb.shot('me-seat-code');
@@ -129,7 +131,7 @@ const jobTitle = (await job.locator('b').first().innerText()).trim();
 await job.click();
 await sebLaptop.finishPuzzle();
 await sebLaptop.page.waitForTimeout(1500);
-await seb.click('Island');
+await seb.click('Island', { exact: true });
 await seb.page.waitForTimeout(2500);
 const phoneSeesDone = await seb.page.locator('.order.done', { hasText: jobTitle }).count();
 console.log(`job "${jobTitle}" done on laptop → visible on phone: ${phoneSeesDone > 0}`);

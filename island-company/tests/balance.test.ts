@@ -13,6 +13,8 @@ import {
 } from '../src/puzzles/balance';
 
 const SEEDS = Array.from({ length: 30 }, (_, i) => i + 1);
+/** the solver's best loading (the model itself never carries it) */
+const planOf = (m: ReturnType<typeof generateBalance>) => solveBalance(m)!.best.plan;
 const loadedCount = (plan: number[]) => plan.filter((s) => s >= 0).length;
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
@@ -25,7 +27,7 @@ describe('weight & balance model', () => {
 
   it('CG is total moment / total weight (moment = weight × arm), fuel included', () => {
     const m = generateBalance(5, 1);
-    const place = m.best.plan;
+    const place = planOf(m);
     let w = m.empty.kg + m.pilot.kg + m.fuel.kg;
     let mo = m.empty.kg * m.empty.arm + m.pilot.kg * ARM.front + m.fuel.kg * ARM.fuel;
     m.items.forEach((it, i) => {
@@ -48,15 +50,16 @@ describe('weight & balance model', () => {
     for (let t = 0; t <= 5; t++) {
       for (const s of SEEDS) {
         const m = generateBalance(s, t);
-        const e = evaluateLoad(m, m.best.plan);
+        const plan = planOf(m);
+        const e = evaluateLoad(m, plan);
         expect(e.legal, `tier ${t} seed ${s}`).toBe(true);
         // guests are never left behind; only can-wait freight may be
         m.items.forEach((it, i) => {
-          if (!it.optional) expect(m.best.plan[i]).toBeGreaterThanOrEqual(0);
+          if (!it.optional) expect(plan[i]).toBeGreaterThanOrEqual(0);
         });
         // the plan respects station kinds
         m.items.forEach((it, i) => {
-          const st = m.best.plan[i];
+          const st = plan[i];
           if (st >= 0) expect(STATIONS[st].kind === 'seat').toBe(it.kind === 'pax');
         });
       }
@@ -67,7 +70,8 @@ describe('weight & balance model', () => {
     for (let t = 0; t <= 5; t++) {
       for (const s of SEEDS.slice(0, 10)) {
         const m = generateBalance(s, t);
-        const score = scoreBalance(m, m.best.plan, loadedCount(m.best.plan), 0);
+        const plan = planOf(m);
+        const score = scoreBalance(m, plan, loadedCount(plan), 0);
         expect(score, `tier ${t} seed ${s}`).toBeGreaterThanOrEqual(0.95);
       }
     }
@@ -88,7 +92,8 @@ describe('weight & balance model', () => {
 
   it('bay weight limits are enforced', () => {
     const m = generateBalance(3, 2);
-    const allNose = m.items.map((it, i) => (it.kind === 'pax' ? m.best.plan[i] : NOSE));
+    const plan = planOf(m);
+    const allNose = m.items.map((it, i) => (it.kind === 'pax' ? plan[i] : NOSE));
     const e = evaluateLoad(m, allNose);
     const cargoKg = m.items.filter((it) => it.kind !== 'pax').reduce((a, it) => a + it.kg, 0);
     if (cargoKg > STATIONS[NOSE].limit) {
@@ -97,16 +102,53 @@ describe('weight & balance model', () => {
     }
   });
 
-  it('extra moves, refusals and a CG on the limit cost points, but a legal load still passes', () => {
+  it('extra moves cost points but a legal, signed load passes; teaching tiers forgive refusals', () => {
     const m = generateBalance(8, 4);
-    const n = loadedCount(m.best.plan);
-    const clean = scoreBalance(m, m.best.plan, n, 0);
-    const fiddly = scoreBalance(m, m.best.plan, n + 4, 0);
-    const refused = scoreBalance(m, m.best.plan, n, 2);
+    const plan = planOf(m);
+    const n = loadedCount(plan);
+    const clean = scoreBalance(m, plan, n, 0);
+    const fiddly = scoreBalance(m, plan, n + 4, 0);
     expect(fiddly).toBeLessThan(clean);
     expect(fiddly).toBeLessThan(0.95);
-    expect(refused).toBeLessThan(0.95);
-    expect(scoreBalance(m, m.best.plan, n + 30, 5)).toBeGreaterThanOrEqual(0.6);
+    expect(scoreBalance(m, plan, n + 30, 0)).toBeGreaterThanOrEqual(0.6);
+    const t2 = generateBalance(8, 2);
+    const p2 = planOf(t2);
+    expect(scoreBalance(t2, p2, loadedCount(p2), 3)).toBeGreaterThanOrEqual(0.6);
+    expect(scoreBalance(t2, p2, loadedCount(p2), 1)).toBeLessThan(0.95);
+  });
+
+  it('from tier 3, botched attempts score as botched: failed checks and unsigned sheets do not pass', () => {
+    for (const t of [3, 4, 5]) {
+      for (const s of SEEDS.slice(0, 8)) {
+        const m = generateBalance(s, t);
+        const plan = planOf(m);
+        const n = loadedCount(plan);
+        // an expert slip (one failed check) still passes; guessing until the pilot accepts does not
+        expect(scoreBalance(m, plan, n, 1)).toBeGreaterThanOrEqual(0.6);
+        expect(scoreBalance(m, plan, n + 3, 2)).toBeLessThan(0.6);
+        // a legal load nobody checked and signed is not a finished job
+        expect(scoreBalance(m, plan, n, 0, false)).toBeLessThan(0.6);
+      }
+    }
+  });
+
+  it('tiers 0-2 teach; from tier 3 the model exposes no answer-revealing aids', () => {
+    for (const t of [0, 1, 2]) {
+      const m = generateBalance(4, t);
+      expect(m.aids).toEqual({ momentMath: true, cgReadout: true, limitLabels: true });
+    }
+    for (const t of [3, 4, 5]) {
+      for (const s of SEEDS.slice(0, 5)) {
+        const m = generateBalance(s, t);
+        expect(Object.values(m.aids).some(Boolean), `tier ${t} seed ${s}`).toBe(false);
+        // the model holds no loading solution at all, only the scoring reference
+        expect(Object.keys(m.best).sort()).toEqual(['margin', 'offload']);
+        expect(JSON.stringify(m)).not.toMatch(/plan|hint|answer|solution/i);
+      }
+    }
+    // the CG computer adds a convenience readout (computes the CG) but never moment math or limits
+    const tooled = generateBalance(4, 4, ['cgComputer']);
+    expect(tooled.aids).toEqual({ momentMath: false, cgReadout: true, limitLabels: false });
   });
 
   it('leaving can-wait freight behind is only free when it has to stay', () => {
@@ -116,10 +158,11 @@ describe('weight & balance model', () => {
       if (m.best.offload !== 0) continue;
       const opt = m.items.findIndex((it) => it.optional);
       if (opt < 0) continue;
-      const plan = m.best.plan.slice();
+      const best = planOf(m);
+      const plan = best.slice();
       plan[opt] = -1;
       if (!evaluateLoad(m, plan).legal) continue;
-      expect(scoreBalance(m, plan, loadedCount(plan), 0)).toBeLessThan(scoreBalance(m, m.best.plan, loadedCount(m.best.plan), 0));
+      expect(scoreBalance(m, plan, loadedCount(plan), 0)).toBeLessThan(scoreBalance(m, best, loadedCount(best), 0));
       checked++;
     }
     expect(checked).toBeGreaterThan(0);
@@ -132,7 +175,7 @@ describe('weight & balance model', () => {
       const m = generateBalance(s, 5);
       expect(m.fuel.burn).toBeGreaterThan(0);
       expect(m.landingTraps).toBeGreaterThan(0);
-      const e = evaluateLoad(m, m.best.plan);
+      const e = evaluateLoad(m, planOf(m));
       expect(e.cgL).toBeGreaterThan(e.cg); // fuel sits forward of the CG
     }
     expect(generateBalance(1, 4).fuel.burn).toBe(0);
