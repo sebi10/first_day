@@ -210,6 +210,92 @@ await shot('me-scrolled');
   if (ws.some((x) => /wrong|back out/i.test(x)) || !/^Span 1 of/.test(ws[ws.length - 1] ?? '') || wr.data?.wrongWay !== 1)
     throw new Error(`blind safety wire gave a verdict or refused the thread: ${ws.join(' | ')} / wrongWay ${wr.data?.wrongWay}`);
   console.log('blind check: torque and safety wire take a wrong move silently');
+
+  // crack hunt, hydraulic servicing, ground power start: nothing drawn on the canvas gives a verdict.
+  // The lab page records every fillText (and the receptacle's pins) in page coordinates.
+  const drawn = await ctx.newPage();
+  drawn.on('pageerror', (e) => errors.push(String(e)));
+  await drawn.addInitScript(() => {
+    const P = CanvasRenderingContext2D.prototype;
+    const wrap = (orig, kind) =>
+      function (...a) {
+        if (this.canvas.isConnected) {
+          const m = this.getTransform();
+          const r = this.canvas.getBoundingClientRect();
+          const k = this.canvas.width / r.width;
+          const [x, y] = kind === 'text' ? [a[1], a[2]] : [a[0], a[1]];
+          (window.__drawn ??= []).push({ kind, text: kind === 'text' ? String(a[0]) : '', r: a[2], t: performance.now(), x: r.left + (m.a * x + m.c * y + m.e) / k, y: r.top + (m.b * x + m.d * y + m.f) / k });
+        }
+        return orig.apply(this, a);
+      };
+    P.fillText = wrap(P.fillText, 'text');
+    P.arc = wrap(P.arc, 'arc');
+  });
+  const since = (t) => drawn.evaluate((t0) => window.__drawn.filter((d) => d.kind === 'text' && d.t >= t0).map((d) => d.text), t);
+  const where = async (text) => {
+    const d = await drawn.evaluate((s) => window.__drawn.filter((e) => e.text === s).pop(), text);
+    if (!d) throw new Error(`"${text}" was never drawn`);
+    return d;
+  };
+  const nowT = () => drawn.evaluate(() => performance.now());
+  const VERDICT = /✓|✗|missed|tool mark|swabs off|open metal|bleed-out|porosity|specks|STOP|CONTAMINATED|hazard|Not this system|At FULL|Plugged in live|Fault:/;
+  const open = async (p) => {
+    await drawn.goto(`${base}/lab.html?p=${p}&tier=3&seed=3&blind=1&notimer=1`);
+    await drawn.waitForFunction(() => window.__lab && window.__drawn?.length);
+  };
+  // crack: circle whatever is under a few taps, then sign off: no rings judged, no missed cracks, no labels
+  await open('crack');
+  const cb = await drawn.locator('#stage canvas').boundingBox();
+  for (const [fx, fy] of [[0.3, 0.3], [0.5, 0.45], [0.7, 0.6], [0.4, 0.72], [0.6, 0.22]]) {
+    await drawn.mouse.click(cb.x + cb.width * fx, cb.y + cb.height * fy);
+    await drawn.waitForTimeout(120);
+  }
+  const sign = await where('Sign off');
+  const t0 = await nowT();
+  await drawn.mouse.click(sign.x, sign.y);
+  await drawn.waitForTimeout(1500);
+  await drawn.screenshot({ path: `${out}/${String(++n).padStart(2, '0')}-blind-crack-signed.png` });
+  const crackV = (await since(t0)).filter((s) => VERDICT.test(s));
+  if (crackV.length || !/no verdict/.test(await drawn.locator('#res').textContent())) throw new Error(`blind crack hunt revealed: ${crackV.join(', ')}`);
+  // hydraulics: oxygen on the charging hose charges like nitrogen; no STOP card, the job carries on
+  await open('hydraulics');
+  for (const name of ['Accum.', 'OXYGEN']) {
+    const b = await where(name);
+    await drawn.mouse.click(b.x, b.y);
+    await drawn.waitForTimeout(200);
+  }
+  const wheel = await where('CHARGE · hold');
+  const t1 = await nowT();
+  await drawn.mouse.move(wheel.x, wheel.y - 16);
+  await drawn.mouse.down();
+  await drawn.waitForTimeout(1200);
+  await drawn.mouse.up();
+  await drawn.waitForTimeout(400);
+  const hydV = (await since(t1)).filter((s) => VERDICT.test(s));
+  if (hydV.length || (await drawn.evaluate(() => window.__lab.result))) throw new Error(`blind hydraulics called out the oxygen: ${hydV.join(', ')}`);
+  // gpu: cart ON, then plug in live. Sparks (the world), no "Plugged in live", and it still scores
+  await open('gpu');
+  const outSw = await where('OUTPUT');
+  await drawn.mouse.click(outSw.x, outSw.y + 41);
+  await drawn.waitForTimeout(300);
+  const cart = await where('GROUND POWER');
+  const pin = await drawn.evaluate(() => {
+    const p = window.__drawn.filter((d) => d.kind === 'arc' && d.r === 4.5);
+    return p.reverse().find((a) => p.some((b) => Math.abs(b.x - a.x - 18) < 0.5 && Math.abs(b.y - a.y) < 0.5));
+  });
+  const t2 = await nowT();
+  await drawn.mouse.move(cart.x - 40, cart.y - 35);
+  await drawn.mouse.down();
+  await drawn.mouse.move(cart.x - 20, cart.y - 55, { steps: 3 });
+  await drawn.mouse.move(pin.x + 9, pin.y + 4 + 34, { steps: 8 });
+  await drawn.mouse.up();
+  await drawn.waitForTimeout(500);
+  const gpuV = (await since(t2)).filter((s) => VERDICT.test(s));
+  const gr = await drawn.evaluate(() => window.__lab.timeUp());
+  await drawn.screenshot({ path: `${out}/${String(++n).padStart(2, '0')}-blind-gpu-live-plug.png` });
+  if (gpuV.length || !gr.data?.errors?.includes('arcIn')) throw new Error(`blind ground power start: ${gpuV.join(', ')} / ${gr.data?.errors}`);
+  console.log('blind check: crack hunt, hydraulics and ground power start draw no verdict');
+  await drawn.close();
   await lab.close();
 }
 

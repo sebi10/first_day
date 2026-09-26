@@ -186,7 +186,7 @@ function Origin({ s, o }: { s: IslandState; o: Order }) {
     const r = o.repair;
     const d = r.defect;
     // what happened, as the review told it (older saves: rebuilt from the rule)
-    const happened = r.incident ?? incidentText(defectRule(d.puzzle, d.role, d.orderKind), d.severity, asset?.name ?? 'the asset');
+    const happened = r.incident ?? incidentText(defectRule(d.puzzle, d.role, d.orderKind, d.variant), d.severity, asset?.name ?? 'the asset');
     return (
       <div class="card col" style={{ gap: 6, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${r.via === 'incident' ? C.rust : C.palm}` }}>
         <span class="label">{r.via === 'incident' ? 'Failed in service' : 'Caught by an inspection'}</span>

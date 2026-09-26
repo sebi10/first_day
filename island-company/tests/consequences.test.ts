@@ -3,7 +3,9 @@
 // never from itself: the true score drives everything that happens later.
 import { afterEach, describe, expect, it } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
-import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
+import { generateCrack } from '../src/puzzles/crack';
+import { generateTeardown } from '../src/puzzles/teardown';
+import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
 import { defectChance, defectSeverity, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
@@ -314,11 +316,12 @@ describe('hidden defects', () => {
   });
 
   it('unknown puzzles (from other branches) fall back to a sensible repair', () => {
-    expect(defectRule('hydraulics', 'mech').fix.puzzle).toBe('teardown');
-    expect(defectRule('gpu', 'elec').fix.puzzle).toBe('meter');
-    expect(defectRule('hydraulics', 'mech', 'bucketBoom')).toBe(defectRule('hydraulics', 'mech'));
-    // every repair is a different puzzle from the job it corrects
-    for (const [p, rule] of Object.entries(DEFECT_RULES)) expect(rule.fix.puzzle, p).not.toBe(p);
+    // (hydraulics and gpu have landed and have their own rows: see the integration tests)
+    expect(defectRule('winch', 'mech').fix.puzzle).toBe('teardown');
+    expect(defectRule('winch', 'elec').fix.puzzle).toBe('meter');
+    expect(defectRule('winch', 'mech', 'bucketBoom')).toBe(defectRule('winch', 'mech'));
+    // every repair is a different puzzle from the job it corrects (variant rows are keyed `<puzzle>:<variant>`)
+    for (const [p, rule] of Object.entries(DEFECT_RULES)) expect(rule.fix.puzzle, p).not.toBe(p.split(':')[0]);
     for (const c of CATALOG) expect(defectRule(c.puzzle, c.role, c.kind).fix.puzzle, c.kind).not.toBe(c.puzzle);
     // per-kind wording where the part matters, and a [write-up, failure] pair everywhere
     expect(defectRule('crack', 'mech', 'spar').fix).toMatchObject({ title: 'Spar-cap doubler repair per the SRM', parts: 1 });
@@ -636,5 +639,83 @@ describe('paper sim with consequences', () => {
       tiers.push(final.tier);
     }
     expect(tiers.filter((t) => t === 5).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('hidden defects from hydraulic servicing and ground power starts', () => {
+  it('both jobs have their own [write-up, failure] rows, and what went wrong picks the row', () => {
+    for (const key of ['hydraulics', 'hydraulics:fluid', 'gpu', 'gpu:arc', 'gpu:hot']) {
+      const rule = DEFECT_RULES[key];
+      expect(rule, key).toBeDefined();
+      expect(rule.incident).toHaveLength(2);
+      expect(rule.fix.puzzle, key).not.toBe(key.split(':')[0]);
+      // a real repair (parts), then the job again
+      expect(rule.fix.parts, key).toBeGreaterThanOrEqual(1);
+      expect(rule.redo, key).not.toBe(false);
+    }
+    // the catalog jobs use them, not the trade fallback
+    expect(defectRule('hydraulics', 'mech', 'hydraulics')).toBe(DEFECT_RULES.hydraulics);
+    expect(defectRule('gpu', 'mech', 'gpustart')).toBe(DEFECT_RULES.gpu);
+    expect(defectRule('hydraulics', 'mech', 'hydraulics', 'fluid')).toBe(DEFECT_RULES['hydraulics:fluid']);
+    expect(defectRule('gpu', 'mech', 'gpustart', 'hot')).toBe(DEFECT_RULES['gpu:hot']);
+    expect(defectRule('gpu', 'mech', 'gpustart', 'arc')).toBe(DEFECT_RULES['gpu:arc']);
+    // a puzzle's report is kept only when there is a rule for it
+    expect(defectVariant('gpu', { defect: 'hot' })).toBe('hot');
+    expect(defectVariant('gpu', { defect: 'banana' })).toBeUndefined();
+    expect(defectVariant('torque', { defect: 'hot' })).toBeUndefined();
+    expect(defectVariant('gpu', undefined)).toBeUndefined();
+    // the repair opens the assembly or the part it is about
+    expect(generateTeardown(1, 2, [], DEFECT_RULES.hydraulics.fix.job).title).toBe('Brake caliper (piston seals)');
+    expect(generateTeardown(1, 2, [], DEFECT_RULES['hydraulics:fluid'].fix.job).faults).toEqual(['seals']);
+    expect(generateTeardown(1, 2, [], DEFECT_RULES.gpu.fix.job).title).toBe('Com radio (panel stack)');
+    expect(generateTeardown(1, 2, [], DEFECT_RULES['gpu:arc'].fix.job).title).toBe('External power receptacle');
+    expect(generateCrack(1, 4, [], DEFECT_RULES['gpu:hot'].fix.job)).toMatchObject({ part: 'hub', name: 'Compressor turbine disk' });
+  });
+
+  it('a hot start fails in service as burnt turbine blades, is repaired through the hot section, then the start is done again', () => {
+    const s = atWeek(4);
+    const o = addOrder(s, { role: 'mech', kind: 'gpustart', puzzle: 'gpu', assetId: 'p1', tier: 4, cost: 120, gain: 8, title: 'Ground power start: weak battery' });
+    let r = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0, perfect: false, data: { errors: [], faults: ['hotStart'], defect: 'hot' } }, NOW).s;
+    const d = r.defects!.find((x) => x.orderKind === 'gpustart')!;
+    expect(d).toMatchObject({ variant: 'hot', puzzle: 'gpu', job: 'gpustart', log: 'ground power start', severity: 2 });
+    d.dueWeek = r.week;
+    r = resolve(r);
+    const inc = lastReport(r).incidents.find((i) => i.kind === 'defect')!;
+    expect(inc.title).toBe(incidentText(DEFECT_RULES['gpu:hot'], 2, 'Twin N-12'));
+    expect(inc.title).toMatch(/lost power on climb-out: turbine blades burnt in a hot start/);
+    expect(inc.from!.traced).toBe('the ground power start Ana signed off in week 4');
+    const rep = r.orders.find((x) => x.kind === 'repair' && x.repair?.defect.id === d.id)!;
+    expect(rep).toMatchObject({ puzzle: 'crack', job: 'hotsection', title: DEFECT_RULES['gpu:hot'].fix.title, parts: 1, cost: round10(DEFECT.minBase * 3) });
+    r = apply(r, { t: 'approve', orderId: rep.id }, NOW).s;
+    r = complete(r, 'mech', r.orders.find((x) => x.id === rep.id)!, 0.9).s;
+    expect(r.orders.find((x) => x.redo && x.kind === 'gpustart')).toMatchObject({ puzzle: 'gpu', title: 'Ground power start: weak battery (redo)', cost: 0, status: 'ready' });
+  });
+
+  it('a plug pulled live leaves arced receptacle pins; a start with no report of what went wrong leaves the default', () => {
+    const s = atWeek(4);
+    const arc = addOrder(s, { role: 'mech', kind: 'gpustart', puzzle: 'gpu', assetId: 'p1', tier: 2, cost: 120, gain: 8 });
+    const a = apply(s, { t: 'complete', role: 'mech', orderId: arc.id, score: 0, perfect: false, data: { errors: ['arcOut'], defect: 'arc' } }, NOW).s;
+    expect(a.defects![0].variant).toBe('arc');
+    const plain = apply(s, { t: 'complete', role: 'mech', orderId: arc.id, score: 0, perfect: false }, NOW).s;
+    expect(plain.defects![0].variant).toBeUndefined();
+    expect(defectRule(plain.defects![0].puzzle, 'mech', plain.defects![0].orderKind, plain.defects![0].variant)).toBe(DEFECT_RULES.gpu);
+  });
+
+  it('the wrong fluid is found by the next wheel-half check (the brake is off for it): seals and a flush, then the service again', () => {
+    const s = atWeek(4);
+    const o = addOrder(s, { role: 'mech', kind: 'hydraulics', puzzle: 'hydraulics', assetId: 'p1', tier: 3, cost: 260, gain: 13, title: 'Service the brake hydraulics' });
+    let r = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0, perfect: false, data: { defect: 'fluid' } }, NOW).s;
+    expect(r.defects![0]).toMatchObject({ variant: 'fluid', job: 'hydraulics', log: 'brake hydraulic servicing' });
+    expect(INSPECTS.corrosion.scope).toContain('hydraulics');
+    r.week = 5;
+    const pen = addOrder(r, { role: 'mech', kind: 'corrosion', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 520, gain: 16 });
+    r = complete(r, 'mech', pen, 0.9).s;
+    expect(r.defects ?? []).toHaveLength(0);
+    expect(r.feed.some((f) => /wheel-half penetrant check on Twin N-12 found the wrong fluid in the brake system, its seals swelling, left from week 4/.test(f.text))).toBe(true);
+    const rep = r.orders.find((x) => x.kind === 'repair')!;
+    expect(rep).toMatchObject({ puzzle: 'teardown', job: 'brake', title: DEFECT_RULES['hydraulics:fluid'].fix.title, parts: 1, cost: round10(Math.max(260, DEFECT.minBase) * 1.5) });
+    r = apply(r, { t: 'approve', orderId: rep.id }, NOW).s;
+    r = complete(r, 'mech', r.orders.find((x) => x.id === rep.id)!, 0.9).s;
+    expect(r.orders.find((x) => x.redo)).toMatchObject({ kind: 'hydraulics', puzzle: 'hydraulics', title: 'Service the brake hydraulics (redo)' });
   });
 });

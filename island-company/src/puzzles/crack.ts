@@ -479,6 +479,8 @@ const PARTS: Record<string, { part: CrackModel['part']; name: string }> = {
   tray: { part: 'spar', name: 'Radio tray rails' },
   gear: { part: 'spar', name: 'Main gear leg' },
   ladder: { part: 'spar', name: 'Ladder rack welds' },
+  // after a hot start: the hot section comes out and the CT disk goes in the penetrant booth
+  hotsection: { part: 'hub', name: 'Compressor turbine disk' },
 };
 
 export function generateCrack(seed: number, tier: number, tools: string[] = [], job?: string): CrackModel {

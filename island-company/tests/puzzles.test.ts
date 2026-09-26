@@ -103,7 +103,7 @@ describe('crack hunt', () => {
 describe('engine teardown', () => {
   it('follows the real removal order and reinstalls in reverse', () => {
     // the catalog's assemblies, plus the ones repairs and crewmates' reports open
-    for (const job of ['alternator', 'cylinder', 'avionics', 'wheel', 'wheelhalf', 'prop', 'exhaust', 'sparcap', 'genmount', 'fan', 'trencher']) {
+    for (const job of ['alternator', 'cylinder', 'avionics', 'wheel', 'wheelhalf', 'prop', 'exhaust', 'sparcap', 'genmount', 'fan', 'trencher', 'brake', 'receptacle']) {
       for (const tier of [1, 3, 5]) {
         const m = generateTeardown(2, tier, [], job);
         const removed = new Set<string>();
@@ -134,7 +134,7 @@ describe('engine teardown', () => {
     expect(generateTeardown(1, 2, [], 'genmount').faults).toEqual(['bolts', 'iso']);
   });
   it('handed in untouched is not a pass (it used to score 60%)', () => {
-    for (const job of ['alternator', 'cylinder', 'avionics', 'prop', 'wheel', 'fan']) {
+    for (const job of ['alternator', 'cylinder', 'avionics', 'prop', 'wheel', 'fan', 'brake', 'receptacle']) {
       for (const tier of [1, 2, 3, 5]) {
         const m = generateTeardown(3, tier, [], job);
         const all = new Set(m.parts.map((p) => p.id));

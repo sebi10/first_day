@@ -358,6 +358,56 @@ export const DEFECT_RULES: Record<string, DefectRule> = {
     found: 'a kinked conduit run with a nicked conductor',
     fix: { puzzle: 'meter', title: 'Find where the run is faulted to ground' },
   },
+  // Brake hydraulic servicing. A bleed left with air in the line (or the level
+  // or precharge off) leaves a soft brake; the brake comes apart for new piston
+  // O-rings and a flushed line, then the service is done again.
+  hydraulics: {
+    incident: [
+      'Pilot wrote up a soft, spongy brake pedal on {a} after the hydraulic service',
+      'Brakes on {a} faded on the landing roll, air still in the line from the hydraulic service: it ran off the end of the strip',
+    ],
+    found: 'air left in a brake line after the hydraulic service',
+    fix: { puzzle: 'teardown', title: 'Pull the brake, replace the piston O-rings and flush the line', parts: 1, job: 'brake' },
+  },
+  // variant (the puzzle reports it): the wrong fluid went in. Buna-N seals swell and weep.
+  'hydraulics:fluid': {
+    incident: [
+      'Fluid weeping at a brake caliper on {a}: the seals are swelling from the wrong hydraulic fluid',
+      'A swollen brake seal on {a} let go on the landing roll: one brake gone, it slid off onto the grass',
+    ],
+    found: 'the wrong fluid in the brake system, its seals swelling',
+    fix: { puzzle: 'teardown', title: 'Drain and flush the hydraulic system, replace every seal the wrong fluid reached', parts: 1, job: 'brake', cost: 1.5 },
+  },
+  // Ground power start. A sloppy start (avionics on at power-up, 28 V into a
+  // 14 V ship) spikes the avionics bus; the radio comes out, then the start is
+  // done again by the book.
+  gpu: {
+    incident: [
+      'Pilot wrote up a dead com radio on {a} after the ground power start: a spike reached the avionics',
+      'The radios on {a} failed on departure: the ground power start had spiked the avionics bus',
+    ],
+    found: 'avionics damaged by a spike on the ground power start',
+    fix: { puzzle: 'teardown', title: 'Replace the spike-damaged com radio and check the bus', parts: 1, job: 'avionics' },
+  },
+  // variant: the plug went in or came out with the cart live. The arc pits the pins.
+  'gpu:arc': {
+    incident: [
+      'Pilot wrote up the external power receptacle on {a}: burnt, pitted pins and the plug runs hot',
+      'The arced external power receptacle on {a} overheated on the next start: melted plug, scorched wiring behind it',
+    ],
+    found: 'arced, pitted pins in the external power receptacle',
+    fix: { puzzle: 'teardown', title: 'Replace the arced external power receptacle and check the relay contacts', parts: 1, job: 'receptacle' },
+  },
+  // variant (turbine): a hot start nobody wrote up. The hot section comes out
+  // for a borescope and the CT disk goes through the penetrant booth.
+  'gpu:hot': {
+    incident: [
+      'Engine trend check on {a} flagged the ITT exceedance from its ground power start: hot-section borescope written up',
+      '{a} lost power on climb-out: turbine blades burnt in a hot start nobody wrote up, precautionary landing',
+    ],
+    found: 'hot-start damage in the turbine hot section',
+    fix: { puzzle: 'crack', title: 'Hot-section inspection: borescope the vanes and blades, penetrant on the CT disk', parts: 1, job: 'hotsection', cost: 3 },
+  },
 };
 
 /** Per work-order kind: checked before the puzzle row. A repair's own defect uses the puzzle row. */
@@ -483,9 +533,25 @@ export const DEFECT_FALLBACK: Record<OpsRole, DefectRule> = {
   },
 };
 
-/** The rule for a defect: its job kind first (a repair's own defect has kind 'repair' and uses its puzzle's row), then its puzzle, then the trade default. */
-export function defectRule(puzzle: string, role: Role, kind?: string): DefectRule {
-  return (kind ? DEFECT_RULES_BY_KIND[kind] : undefined) ?? DEFECT_RULES[puzzle] ?? DEFECT_FALLBACK[role === 'elec' ? 'elec' : 'mech'];
+/**
+ * The rule for a defect: what went wrong first, when the puzzle reported it
+ * (`<puzzle>:<variant>`, e.g. 'gpu:hot' for a hot start), then its job kind (a
+ * repair's own defect has kind 'repair' and uses its puzzle's row), then its
+ * puzzle, then the trade default.
+ */
+export function defectRule(puzzle: string, role: Role, kind?: string, variant?: string): DefectRule {
+  return (
+    (variant ? DEFECT_RULES[`${puzzle}:${variant}`] : undefined) ??
+    (kind ? DEFECT_RULES_BY_KIND[kind] : undefined) ??
+    DEFECT_RULES[puzzle] ??
+    DEFECT_FALLBACK[role === 'elec' ? 'elec' : 'mech']
+  );
+}
+
+/** The failure mode a puzzle reports in its result (`data.defect`), kept only when a rule exists for it. */
+export function defectVariant(puzzle: string, data?: Record<string, unknown>): string | undefined {
+  const v = data?.defect;
+  return typeof v === 'string' && DEFECT_RULES[`${puzzle}:${v}`] ? v : undefined;
 }
 
 /** "Pilot wrote up a vibration on Twin N-12: …" */
@@ -500,7 +566,8 @@ export const incidentText = (rule: DefectRule, severity: 1 | 2, asset: string) =
  */
 export const INSPECTS: Record<string, { name: string; scope: readonly string[] | 'all' }> = {
   inspect100: { name: '100-hr inspection', scope: 'all' },
-  corrosion: { name: 'wheel-half penetrant check', scope: ['tires', 'corrosion'] },
+  // the wheel and brake come off for it: a weeping caliper or a soft pedal on reassembly shows
+  corrosion: { name: 'wheel-half penetrant check', scope: ['tires', 'corrosion', 'hydraulics'] },
   spar: { name: 'wing spar inspection', scope: ['spar', 'wb'] },
   // an oil change includes the engine-compartment look and a filter check for metal
   oil: { name: 'oil change and engine look-over', scope: ['oil', 'prop', 'wire', 'cylinder', 'alternator'] },
@@ -562,10 +629,12 @@ export type ReportDef = {
 };
 
 /**
- * Data-driven: a branch that adds a puzzle adds its reports here (the
- * hydraulics branch brings "Bucket truck boom is leaking hydraulic fluid" and
- * "Company van brakes feel soft"; the GPU cart comes with its puzzle).
- * Leaks are causes that really recur week after week, not one-off errors.
+ * Data-driven: a branch that adds a puzzle adds its reports here. The
+ * hydraulics and ground power puzzles model aircraft systems only (a light
+ * twin's power brakes, a single on a GPU cart), so they bring no crewmate
+ * reports yet: a van's soft brakes or a bucket truck's boom need their own
+ * scenario in the puzzle first. Leaks are causes that really recur week after
+ * week, not one-off errors.
  */
 export const REPORTS: ReportDef[] = [
   // the mechanic reports
@@ -584,7 +653,7 @@ export const REPORTS: ReportDef[] = [
   { key: 'copper', by: 'elec', fixer: 'fin', title: 'Copper jumped 20%: fixed-price house jobs are underwater', said: 'copper jumped 20% and the fixed-price house jobs are underwater', back: 'house jobs are still priced on last year’s copper', puzzle: 'variance', effect: 'leak', amount: 220, cost: 0, notice: 'Jobs priced on old copper' },
   // the analyst reports
   { key: 'officeOutlets', by: 'fin', fixer: 'elec', title: 'Office outlets go dead and come back when the printer runs', said: 'the office outlets go dead and come back whenever the printer runs', back: 'the office outlets are dropping out again', puzzle: 'meter', job: 'office', effect: 'cap', cost: 50, notice: 'Office power keeps dropping' },
-  // until the hydraulics puzzle lands: a fault the torque puzzle really fixes (a soft brake pedal is hydraulic, and moves there)
+  // a fault the torque puzzle really fixes (a soft brake pedal would be hydraulic, once that puzzle has a vehicle scenario)
   { key: 'vanWheel', by: 'fin', fixer: 'mech', title: 'Company van wheel is wobbling: lug nuts loose', said: 'the company van wheel is wobbling and the lug nuts are loose', back: 'the van wheel is wobbling again', puzzle: 'torque', effect: 'leak', amount: 160, cost: 60, notice: 'Van off the road' },
 ];
 
@@ -744,7 +813,7 @@ export const PROJECTS: Record<number, { title: string; jobs: Record<Role, { titl
   5: {
     title: 'Open the Lodge',
     jobs: {
-      mech: { title: 'Acceptance inspection: lodge deck beams', puzzle: 'crack' },
+      mech: { title: 'Acceptance inspection: aluminium deck beams', puzzle: 'crack' },
       elec: { title: 'Wire the lodge GFCIs', puzzle: 'wireup' },
       fin: { title: 'Opening budget review', puzzle: 'variance' },
     },

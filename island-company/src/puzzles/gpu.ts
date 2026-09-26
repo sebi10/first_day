@@ -7,6 +7,13 @@
 // slow start runs hot and must be aborted with the fuel lever, dry-motored to
 // clear it, and the starter rested before a second try.
 // Tiers 0-2 print the checklist; from tier 3 it is done from memory, as on the ramp.
+// Blind sign-off (a real job from tier 2, params.blind): no verdict while you
+// work or when it ends. Slips and faults are scored, never called out: no
+// "Plugged in live" or "Fault: hot start" line, no ticked-off checklist (the
+// card lists the items), no green flash when the plug seats, no summary and no
+// flourish at the end. What the ramp shows stays: sparks and pitted pins from a
+// live plug, smoke from behind the panel, the ITT needle climbing (and the
+// gauge's exceedance warning), torching at the exhaust, the starter's click.
 import { hashSeed, rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, fitLabel, label, lerp, loop, markInput, pointer, roundRect, settle, shade, stage, tnum } from './kit';
 import { PASS, result, type PuzzleDef, type PuzzleResult } from './types';
@@ -846,6 +853,10 @@ export const gpu: PuzzleDef = {
     const st = stage(host.el);
     const { ctx } = st;
     const teach = m.checklist;
+    const blind = !!p.blind;
+    // blind: the printed checklist stays, but nothing ticks itself off (a ticked item is a verdict)
+    const ticks = teach && !blind;
+    const guide = m.guide && !blind;
     const rm = p.reducedMotion;
 
     let finished = false;
@@ -1000,17 +1011,17 @@ export const gpu: PuzzleDef = {
             host.fx.thunk();
             break;
           case 'arc':
-            host.fx.fault();
+            (blind ? host.fx.snap : host.fx.fault)();
             arcT = clock;
             burst(g.rec.x, g.rec.y, 22);
             break;
           case 'locked':
-            host.fx.bad();
-            say('Range switch is locked while the output is ON', true);
+            (blind ? host.fx.tap : host.fx.bad)();
+            say('Range switch is locked while the output is ON', !blind);
             break;
           case 'stuck':
             host.fx.tick();
-            if (teach) say('Not fully seated: push it home', false, 2.4, 'stuck');
+            if (ticks) say('Not fully seated: push it home', false, 2.4, 'stuck');
             break;
           case 'seated':
             host.fx.thunk();
@@ -1022,11 +1033,11 @@ export const gpu: PuzzleDef = {
             host.fx.snap();
             break;
           case 'dead':
-            host.fx.bad();
-            say(teach ? 'Nothing: no power on the bus' : 'Click. Nothing turns', true);
+            (blind ? host.fx.tap : host.fx.bad)();
+            say(ticks ? 'Nothing: no power on the bus' : 'Click. Nothing turns', !blind);
             break;
           case 'fire':
-            host.fx.good();
+            (blind ? host.fx.thunk : host.fx.good)();
             fireT = clock;
             puff(g.w * (tb ? 0.36 : 0.22), g.fy + g.fh * 0.36, true, 7);
             break;
@@ -1036,29 +1047,33 @@ export const gpu: PuzzleDef = {
             break;
           case 'abort':
             host.fx.tap();
-            say(teach ? 'Fuel cut off: keep motoring to clear it' : 'Fuel cut off');
+            say(ticks ? 'Fuel cut off: keep motoring to clear it' : 'Fuel cut off');
             break;
           case 'cleared':
-            if (teach) {
+            if (ticks) {
               host.fx.tick();
               say('Cleared. Starter OFF and let it rest');
             }
             break;
           case 'run':
-            host.fx.good();
-            say(teach ? 'Running. Now the after-start items' : 'Engine running');
+            (blind ? host.fx.tap : host.fx.good)();
+            say(ticks ? 'Running. Now the after-start items' : 'Engine running');
             break;
           case 'err':
-            // teaching tiers call out every slip; from tier 3 only what you'd see or hear on the ramp
-            if (teach || LOUD.includes(e.id)) {
+            // teaching tiers call out every slip; from tier 3 only what you'd see or hear on the ramp.
+            // Blind: none (the sparks and the pitted pins still show)
+            if (!blind && (teach || LOUD.includes(e.id))) {
               host.fx.bad();
               say(cap(ERRORS[e.id].text), true);
             }
             if (e.id === 'arcIn' || e.id === 'arcOut') pitted = true;
             break;
           case 'fault': {
-            host.fx.fault();
-            say(faultText[e.id], true, 3.2);
+            // blind: no call-out; the smoke, the needle and the flames are what you get
+            if (!blind) {
+              host.fx.fault();
+              say(faultText[e.id], true, 3.2);
+            }
             if (e.id === 'overVolt' || e.id === 'avionicsStart') {
               // smoke from behind the panel: the radio stack, or the whole bus
               smokeAt = e.id === 'avionicsStart' ? { x: g.ctl.avionics.x, y: g.ctl.avionics.y - 26 } : { x: g.w / 2, y: g.ck.y + g.ck.h * 0.62 };
@@ -1132,6 +1147,12 @@ export const gpu: PuzzleDef = {
       drag = null;
       const sc = scoreGpu(s);
       const res = result(sc.score, sc.summary, dataOf());
+      // blind: one neutral close-out and no summary line, the same time whatever the result
+      if (blind) {
+        host.fx.tap();
+        settle(host, res, 600);
+        return;
+      }
       if (res.perfect) {
         flourishT = clock;
         host.fx.flourish();
@@ -1139,7 +1160,19 @@ export const gpu: PuzzleDef = {
       host.status(res.summary);
       settle(host, res, res.perfect ? 900 : 400);
     }
-    const dataOf = () => ({ errors: s.errors.slice(), faults: s.faults.slice(), aborts: s.aborts, stopped: s.stopped, peakItt: Math.round(s.peakItt) });
+    const dataOf = () => ({
+      errors: s.errors.slice(),
+      faults: s.faults.slice(),
+      aborts: s.aborts,
+      stopped: s.stopped,
+      peakItt: Math.round(s.peakItt),
+      // what went wrong, for the hidden defect it leaves (DEFECT_RULES 'gpu:hot', 'gpu:arc')
+      ...(s.faults.includes('hotStart') || s.errors.includes('hotRelight')
+        ? { defect: 'hot' }
+        : s.errors.includes('arcIn') || s.errors.includes('arcOut')
+          ? { defect: 'arc' }
+          : {}),
+    });
 
     // ---- input --------------------------------------------------------------
     const near = (a: P2, x: number, y: number, r: number) => Math.hypot(a.x - x, a.y - y) <= r;
@@ -1185,7 +1218,7 @@ export const gpu: PuzzleDef = {
           wiggleT = clock;
           host.fx.tick();
           // a Piper-style ship on ground power: the panel bus is dead until the master goes ON
-          if (teach && s.fed && !s.batt && !s.everRunning) say('Master OFF: panel is dead. Read the cart meter');
+          if (ticks && s.fed && !s.batt && !s.everRunning) say('Master OFF: panel is dead. Read the cart meter');
           return;
         }
         // the cart's output voltmeter (a 44 px band around the 20 px meter)
@@ -1607,7 +1640,7 @@ export const gpu: PuzzleDef = {
         label(ctx, 'PUSH', c.x, c.y + down, { size: 9, weight: 900, color: C.ink });
         if (teach) label(ctx, 'hold', c.x, c.y + 30, { size: 8, weight: 800, color: 'rgba(251,245,233,.55)' });
       }
-      if (m.guide && !finished) {
+      if (guide && !finished) {
         const t = stepTarget();
         if (t === 'voltmeter') ring(vm, g.gr + 5);
         else if (t && t in g.ctl) ring(g.ctl[t as Ctl], 24);
@@ -2185,7 +2218,7 @@ export const gpu: PuzzleDef = {
       }
       // output switch
       toggle(g.cartSw, lever.cart, 'OUTPUT', 'ON', 'OFF', 1.25);
-      if (m.guide && !finished) {
+      if (guide && !finished) {
         const t = stepTarget();
         if (t === 'cartMeter') ringRect(g.vMeter);
         if (t === 'volts') ring(V, kr + 6);
@@ -2263,7 +2296,7 @@ export const gpu: PuzzleDef = {
         ctx.arc(0, 4, 8, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-        const seatedFlash = clock - seatedT < 0.5 && s.plug === 'seated';
+        const seatedFlash = !blind && clock - seatedT < 0.5 && s.plug === 'seated';
         if (seatedFlash) {
           ctx.strokeStyle = C.palm;
           ctx.lineWidth = 3;
@@ -2272,7 +2305,7 @@ export const gpu: PuzzleDef = {
           ctx.stroke();
           ctx.globalAlpha = 1;
         }
-        if (partial && teach) {
+        if (partial && ticks) {
           roundRect(ctx, pp.x - 38, pp.y + 22, 76, 18, 9);
           ctx.fillStyle = C.paper;
           ctx.fill();
@@ -2316,12 +2349,12 @@ export const gpu: PuzzleDef = {
       ctx.fill();
       ctx.fillStyle = 'rgba(255,255,255,.12)';
       ctx.fillRect(hx - 17, hy - 10, 34, 2);
-      if (m.guide && !finished && stepTarget() === 'plug') ring(pp, 30);
+      if (guide && !finished && stepTarget() === 'plug') ring(pp, 30);
     }
 
     function drawHeader(g: Geo) {
       const showToast = toast.until > clock;
-      if (teach) {
+      if (ticks) {
         const cur = curStep();
         const idx = cur ? m.steps.indexOf(cur) + 1 : m.steps.length;
         const head = `CHECKLIST ${idx}/${m.steps.length}`;
@@ -2343,9 +2376,17 @@ export const gpu: PuzzleDef = {
         const txt = showToast ? toast.text : cur ? cur.text : 'All items done';
         fitLabel(ctx, txt, 14, 36, g.w - 96, { size: 15, weight: 800, color: showToast ? (toast.bad ? C.rust : C.seaDeep) : C.ink, align: 'left' });
       } else {
-        label(ctx, tb ? 'Turbine start on ground power' : `${ac.name}: ground power start`, 14, 16, { size: 15, weight: 800, align: 'left' });
-        const sub = showToast ? toast.text : s.everRunning ? 'Running. Finish the job' : 'No checklist on the ramp: from memory';
-        fitLabel(ctx, sub, 14, 37, g.w - 28, { size: 12, weight: showToast ? 800 : 600, color: showToast ? (toast.bad ? C.rust : C.seaDeep) : C.inkSoft, align: 'left' });
+        // blind with the printed checklist: the card is there (list ☰), it just doesn't tick
+        const room = teach ? g.w - 96 : g.w - 28;
+        if (teach) {
+          roundRect(ctx, g.w - 72, 6, 62, 36, 12);
+          ctx.fillStyle = 'rgba(31,42,48,.08)';
+          ctx.fill();
+          label(ctx, 'list ☰', g.w - 41, 24, { size: 12, weight: 800, color: C.seaDeep });
+        }
+        fitLabel(ctx, tb ? 'Turbine start on ground power' : `${ac.name}: ground power start`, 14, 16, room, { size: 15, weight: 800, align: 'left' });
+        const sub = showToast ? toast.text : s.everRunning ? 'Running. Finish the job' : teach ? 'Checklist on the card: list ☰' : 'No checklist on the ramp: from memory';
+        fitLabel(ctx, sub, 14, 37, room, { size: 12, weight: showToast ? 800 : 600, color: showToast ? (toast.bad ? C.rust : C.seaDeep) : C.inkSoft, align: 'left' });
       }
     }
 
@@ -2361,10 +2402,10 @@ export const gpu: PuzzleDef = {
       ctx.fillStyle = C.paper;
       ctx.fill();
       label(ctx, `External power start · ${ac.name}`, x + 16, y + 20, { size: 13, weight: 900, align: 'left' });
-      const cur = curStep();
+      const cur = ticks ? curStep() : undefined;
       m.steps.forEach((it, i) => {
         const ry = y + 44 + i * rowH;
-        const ok = stepDone(s, it.id);
+        const ok = ticks && stepDone(s, it.id);
         const isCur = cur && cur.id === it.id;
         if (isCur) {
           roundRect(ctx, x + 8, ry - 2, w - 16, rowH - 2, 8);

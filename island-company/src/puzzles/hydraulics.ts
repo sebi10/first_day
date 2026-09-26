@@ -8,6 +8,14 @@
 // Tiers 0-2 explain the placard and number the steps; from tier 3 only the
 // placard, the cans and the gauges are on screen.
 //
+// Blind sign-off (a real job from tier 2, params.blind): no verdict while you
+// work or when you sign. The wrong can pours like any other (its colour shows
+// in the glass, nothing stops you), oxygen charges like nitrogen, no shakes, no
+// "Not this system!" or "At FULL", no ticked-off steps (the work card just shows
+// the procedure), no green ring at 0 psi and no flourish. What the system
+// itself shows stays: the gauges, the level in the sight glass, fluid spilling
+// over, a soft pedal, bubbles in the bleed hose.
+//
 // The brakes are POWER brakes (Twin Otter, Aero Commander): the pedal only
 // meters accumulator pressure through a brake valve. Each application uses some
 // accumulator fluid, which returns to the reservoir, so pumping the pedal
@@ -554,6 +562,9 @@ export const hydraulics: PuzzleDef = {
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 12,
   mount(host, p) {
     const m = generateHydraulics(p.seed, p.tier, p.tools);
+    const blind = !!p.blind;
+    // the step banner ticks itself off (a verdict on the level): blind, it is a static work card
+    const tracker = m.teach && !blind;
     const loupe = p.tools.includes('sightLight');
     const fineValve = p.tools.includes('chargingKit');
     const st = stage(host.el);
@@ -613,7 +624,11 @@ export const hydraulics: PuzzleDef = {
       for (const g of grips.values()) if (g.kind === k) return true;
       return false;
     };
-    const shake = (key: string) => shakes.set(key, clock);
+    const shake = (key: string) => {
+      if (!blind) shakes.set(key, clock);
+    };
+    /** a "that didn't work" buzz; blind, every refusal is a plain tap */
+    const nope = () => (blind ? host.fx.tap : host.fx.bad)();
     const shakeX = (key: string) => {
       const t0 = shakes.get(key);
       if (t0 === undefined || clock - t0 > 0.35) return 0;
@@ -638,7 +653,7 @@ export const hydraulics: PuzzleDef = {
 
     const status = () => {
       let s: string;
-      if (m.teach) {
+      if (tracker) {
         const k = curStep();
         s = `Step ${k + 1}/5 · ${steps()[k].text}`;
       } else s = `Hyd ${fmt(hydPsi())} psi`;
@@ -769,7 +784,7 @@ export const hydraulics: PuzzleDef = {
       held = i;
       tilt = 0;
       host.fx.tap();
-      if (m.teach) {
+      if (m.teach && !blind) {
         if (!FLUIDS[f].compatible) say(`${FLUIDS[f].name}: ${FLUIDS[f].plain}. Not this system!`, true);
         else if (!m.approved.includes(f)) say('83282: only if the placard lists it', true);
       }
@@ -793,13 +808,15 @@ export const hydraulics: PuzzleDef = {
           } else host.fx.tick();
           break;
         case 'charge':
-          if (f.air) host.fx.fault();
+          if (f.air && !blind) host.fx.fault();
           else host.fx.tick();
           break;
         case 'flush':
           slugs.push({ t: clock, bubbles: f.bubbles, air: f.air, weak: f.weak });
           jar = Math.min(0.9, jar + f.dv * 0.6);
-          if (f.air) host.fx.fault();
+          // blind: the bubbles in the hose say it, not the sound
+          if (blind) host.fx.tick();
+          else if (f.air) host.fx.fault();
           else if (f.weak) host.fx.tick();
           else host.fx.snap();
           if (f.zero) zeroT = clock;
@@ -825,8 +842,10 @@ export const hydraulics: PuzzleDef = {
     }
 
     function contaminate(f: FluidId) {
-      if (finished) return;
+      if (finished || contaminated) return;
       contaminated = f;
+      // blind: it pours like any other can. The colour in the glass is all there is to see
+      if (blind) return;
       host.fx.fault();
       say(`${FLUIDS[f].name} in a 5606 system`, true);
       finishWith(1800);
@@ -858,6 +877,8 @@ export const hydraulics: PuzzleDef = {
         psi: Math.round(sys.p0),
         target: m.precharge ? Math.round(m.precharge.target) : undefined,
         spilled: +spilled.toFixed(3),
+        // what went wrong, for the hidden defect it leaves (DEFECT_RULES 'hydraulics:fluid')
+        ...(contaminated ? { defect: 'fluid' } : {}),
       });
     };
     function finishWith(ms?: number) {
@@ -865,11 +886,13 @@ export const hydraulics: PuzzleDef = {
       finished = true;
       grips.clear();
       const r = makeResult();
-      if (r.perfect) {
+      // blind: one neutral close-out, the same time whatever the result
+      if (blind) host.fx.tap();
+      else if (r.perfect) {
         flourishT = clock;
         host.fx.flourish();
       } else if (r.score >= 0.6) host.fx.good();
-      settle(host, r, ms ?? (r.perfect ? 900 : 450));
+      settle(host, r, blind ? 600 : (ms ?? (r.perfect ? 900 : 450)));
     }
 
     // --- input ---
@@ -904,8 +927,8 @@ export const hydraulics: PuzzleDef = {
           if (!capOn && funnel > 0.002) {
             // the funnel is still draining: the cap goes on after it has run through
             shake('cap');
-            host.fx.bad();
-            if (m.teach) say('Let the funnel drain first');
+            nope();
+            if (m.teach && !blind) say('Let the funnel drain first');
             return null;
           }
           if (!capOn && funnel > 0) {
@@ -923,7 +946,7 @@ export const hydraulics: PuzzleDef = {
         if (inR(x, y, rg.syringe, 6)) {
           if (capOn) {
             shake('cap');
-            host.fx.bad();
+            nope();
             return null;
           }
           host.fx.tap();
@@ -942,11 +965,14 @@ export const hydraulics: PuzzleDef = {
           holdT = 0;
           if (!hose) {
             shake('charge');
-            host.fx.bad();
+            nope();
             say('No charging hose connected');
             return null;
           }
-          if (hose === 'o2') {
+          if (hose === 'o2' && blind) {
+            // blind: the valve opens like any other; oxygen goes into the bottle, nothing says so
+            oxygen = true;
+          } else if (hose === 'o2') {
             oxygen = true;
             host.fx.fault();
             say('Oxygen + hydraulic oil: explosion hazard', true);
@@ -1013,8 +1039,8 @@ export const hydraulics: PuzzleDef = {
             // the cap is on: the can won't pour
             if (tilt <= 0.36) {
               shake('cap');
-              host.fx.bad();
-              if (m.teach) say('Take the filler cap off first');
+              nope();
+              if (m.teach && !blind) say('Take the filler cap off first');
             }
             t = 0.36;
           }
@@ -1093,7 +1119,7 @@ export const hydraulics: PuzzleDef = {
       }
       if (sys.dry && sys.res > m.outlet + (m.bleed?.pumpVol ?? 0)) sys.dry = false;
       // teaching ding when the level reaches FULL (discharged)
-      if (m.teach) {
+      if (tracker) {
         const ok = sys.vf <= 0 && levelOk();
         if (ok && !fullDing) {
           host.fx.snap();
@@ -1105,7 +1131,8 @@ export const hydraulics: PuzzleDef = {
       // nitrogen
       if (holding('charge') || holding('vent')) holdT += dt;
       if (holding('charge') && hose) {
-        if (hose === 'n2') addGas((fineValve ? Math.min(55, 8 + 40 * holdT) : Math.min(90, 18 + 70 * holdT)) * dt, 'n2');
+        // (oxygen only ever gets this far blind: a dry, high-pressure bottle fills like nitrogen)
+        if (hose === 'n2' || hose === 'o2') addGas((fineValve ? Math.min(55, 8 + 40 * holdT) : Math.min(90, 18 + 70 * holdT)) * dt, 'n2');
         else if (hose === 'air') {
           const gp = gasPsi() - heat;
           if (gp < 150) addGas(Math.min(40, 150 - gp) * dt, 'air');
@@ -1153,7 +1180,7 @@ export const hydraulics: PuzzleDef = {
       else if (scene === 'acc') drawAccScene(g);
       else drawBrakeScene(g);
       drawBar(g);
-      if (toast && clock - toast.t < 2.2 && !contaminated && !oxygen) {
+      if (toast && clock - toast.t < 2.2 && (blind || (!contaminated && !oxygen))) {
         const a = clamp((2.2 - (clock - toast.t)) / 0.4, 0, 1);
         ctx.globalAlpha = a;
         ctx.font = `800 13px ${FONT}`;
@@ -1174,7 +1201,7 @@ export const hydraulics: PuzzleDef = {
           ctx.globalAlpha = 1;
         }
       }
-      if (contaminated || oxygen) {
+      if ((contaminated || oxygen) && !blind) {
         ctx.fillStyle = 'rgba(31,42,48,.55)';
         ctx.fillRect(0, 0, g.w, g.h);
         roundRect(ctx, 24, g.h * 0.36, g.w - 48, 104, 16);
@@ -1287,7 +1314,7 @@ export const hydraulics: PuzzleDef = {
       dial(cx, cy, r, hydShown, 2000, { major: 500, minor: 100 });
       label(ctx, 'HYD PSI', cx, cy - r * 0.4, { size: 8.5, weight: 900, color: C.inkSoft });
       label(ctx, fmt(hydShown), cx, cy + r * 0.62, { size: 12, weight: 900, color: C.ink });
-      if (clock - zeroT < 0.5) {
+      if (clock - zeroT < 0.5 && !blind) {
         ctx.strokeStyle = C.palm;
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -1427,11 +1454,11 @@ export const hydraulics: PuzzleDef = {
       ctx.fill();
       drawGlass(glass, sys.res, fluidColor(), true, contaminated ? { amount: poured[contaminated] ?? 0, color: FLUIDS[contaminated].color } : undefined);
       marks(glass, 'right');
-      if (m.teach && sys.vf > 0) {
+      if (m.teach && !blind && sys.vf > 0) {
         label(ctx, 'reads low', tank.x - 6, glassY(glass, sys.res), { size: 10.5, weight: 800, color: C.sea, align: 'right' });
         label(ctx, 'under pressure', tank.x - 6, glassY(glass, sys.res) + 13, { size: 10.5, weight: 800, color: C.sea, align: 'right' });
       }
-      if (m.tier <= 1 && sys.vf <= 0 && levelOk()) label(ctx, '✓', glass.x - 14, glassY(glass, m.full), { size: 16, weight: 900, color: C.palm });
+      if (m.tier <= 1 && !blind && sys.vf <= 0 && levelOk()) label(ctx, '✓', glass.x - 14, glassY(glass, m.full), { size: 16, weight: 900, color: C.palm });
 
       // neck, funnel, cap
       const nk = rg.neck;
@@ -1558,9 +1585,13 @@ export const hydraulics: PuzzleDef = {
       ctx.globalAlpha = 1;
     }
 
+    /** blind: the procedure as printed on the work card (step 3 never turns into "Too full") */
+    const card = () => ['Pump the brakes to 0 psi', 'Take the filler cap off', `Pour ${approvedName} up to FULL`, 'Refit the filler cap', 'Sign off'];
     function drawBanner(r: R) {
-      const st = steps();
-      const k = st.findIndex((s) => !s.done);
+      // blind: nothing ticks itself off; the card steps through the procedure on its own
+      const st = tracker ? steps() : card().map((text) => ({ text, done: false }));
+      // (the first frame's dt can be a hair negative: never index with a negative step)
+      const k = tracker ? st.findIndex((s) => !s.done) : Math.floor(Math.max(0, clock) / 3.5) % st.length;
       roundRect(ctx, r.x, r.y, r.w, r.h, r.h / 2);
       ctx.fillStyle = 'rgba(46,124,147,.12)';
       ctx.fill();
@@ -2080,7 +2111,7 @@ export const hydraulics: PuzzleDef = {
       ctx.fill();
       drawGlass(gl, sys.res, fluidColor(), true);
       marks(gl, 'right', 9.5);
-      if (sys.dry) label(ctx, 'dry!', gl.x + gl.w + 8, gl.y + gl.h - 8, { size: 12, weight: 900, color: C.rust, align: 'left' });
+      if (sys.dry && !blind) label(ctx, 'dry!', gl.x + gl.w + 8, gl.y + gl.h - 8, { size: 12, weight: 900, color: C.rust, align: 'left' });
 
       // wheel and disc brake
       const wh = bg.wheel;

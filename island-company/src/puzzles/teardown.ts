@@ -144,6 +144,34 @@ const ASSEMBLIES: Record<string, Assembly> = {
     ],
     faults: [['belt'], ['belt'], ['belt', 'idler']],
   },
+  // repairs after a brake hydraulic service: a soft brake, or seals the wrong fluid swelled
+  brake: {
+    title: 'Brake caliper (piston seals)',
+    note: 'Pump the accumulator to 0 psi before you crack a line.',
+    parts: [
+      { id: 'depress', name: 'Accumulator to 0 psi', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#3b464b' },
+      { id: 'line', name: 'Brake line (capped)', above: ['depress'], box: [0.05, 0.2, 0.42, 0.12], minTier: 0, shade: '#9aa5a9' },
+      { id: 'bolts', name: 'Back-plate bolts', above: ['depress'], box: [0.53, 0.2, 0.42, 0.12], minTier: 1, shade: '#7f8b90' },
+      { id: 'caliper', name: 'Caliper housing', above: ['line', 'bolts'], box: [0.1, 0.4, 0.8, 0.14], minTier: 0, shade: '#b9a071' },
+      { id: 'piston', name: 'Brake piston', above: ['caliper'], box: [0.1, 0.6, 0.8, 0.12], minTier: 0, shade: '#b8c0c2' },
+      { id: 'seals', name: 'Piston O-rings', above: ['piston'], box: [0.2, 0.8, 0.6, 0.12], minTier: 0, shade: '#3b464b' },
+    ],
+    faults: [['seals'], ['seals'], ['seals', 'piston']],
+  },
+  // a repair after a ground power plug went in or came out live: the arc pits the pins
+  receptacle: {
+    title: 'External power receptacle',
+    note: 'Battery disconnected before a cable comes off.',
+    parts: [
+      { id: 'batt', name: 'Battery disconnected', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#3b464b' },
+      { id: 'panel', name: 'Access panel', above: ['batt'], box: [0.05, 0.2, 0.42, 0.12], minTier: 0, shade: '#dcd2bd' },
+      { id: 'boots', name: 'Terminal boots', above: ['batt'], box: [0.53, 0.2, 0.42, 0.12], minTier: 2, shade: '#56646b' },
+      { id: 'cables', name: 'Cable terminal nuts', above: ['panel', 'boots'], box: [0.1, 0.4, 0.8, 0.12], minTier: 0, shade: '#9aa5a9' },
+      { id: 'rec', name: 'Receptacle', above: ['cables'], box: [0.1, 0.6, 0.8, 0.16], minTier: 0, shade: '#7f8b90' },
+      { id: 'relay', name: 'External power relay', above: ['rec'], box: [0.2, 0.82, 0.6, 0.12], minTier: 3, shade: '#b8c0c2' },
+    ],
+    faults: [['rec'], ['rec'], ['rec', 'relay']],
+  },
 };
 
 // the main wheel: jack it, let the tire down, then hub cap → cotter pin → axle nut

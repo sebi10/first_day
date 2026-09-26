@@ -76,6 +76,8 @@ export interface Defect {
   /** the job as a noun ("prop bolt re-torque", "alternator replacement redo") for the review's "traced to" line */
   log?: string;
   puzzle: PuzzleId;
+  /** what went wrong, when the puzzle reported it and a rule exists for it ('hot' for a hot start): picks the `<puzzle>:<variant>` rule */
+  variant?: string;
   /** that job's title, as it appeared on the card */
   title: string;
   /** null for a report fix that won't hold (it reopens instead of causing an incident) */

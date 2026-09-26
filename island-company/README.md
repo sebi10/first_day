@@ -86,6 +86,8 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 
 Difficulty comes from the order's tier (1–5), which climbs as the island grows. It never depends on your level. Levels unlock **tools** that change how a puzzle plays (for example the click-type wrench, non-aqueous developer, clamp meter and driver tree): convenience or raw readings to interpret, never the answer. From tier 3 the teaching aids are gone, so real trade knowledge is what separates the three of you.
 
+From puzzle tier 2 a real work order is **signed off blind**, whatever the puzzle (hydraulic servicing and the ground power start included): no score, no ✓/✗, no "wrong" while you work and no reveal at the end. What the instruments and the part show stays (a gauge needle, fluid spilling over, sparks from a live plug). Careless work can leave a hidden defect that surfaces weeks later as a write-up or a failure, traced back to whoever signed it off; then comes a repair and the original job again. See [docs/ONBOARDING.md](docs/ONBOARDING.md) and the *Consequences* section of [docs/DECISIONS.md](docs/DECISIONS.md).
+
 ## Development
 
 ```bash
@@ -93,7 +95,7 @@ npm test             # engine + puzzle model tests (vitest)
 npm run balance      # paper sim: 10 scripted teams x 26 weeks x 30 seeds
 npm run typecheck
 npm run build        # dist/ with an offline service worker
-open http://localhost:5173/lab.html?p=torque&tier=3&seed=1   # puzzle lab
+open http://localhost:5173/lab.html?p=torque&tier=3&seed=1   # puzzle lab (&blind=1: as a real job, no verdict)
 node scripts/e2e.mjs shots/          # scripted playtest (phone); add `desktop` for 1280x820
 ```
 

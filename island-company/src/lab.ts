@@ -35,7 +35,8 @@ const lab = {
 function show(r: PuzzleResult) {
   lab.result = r;
   res.style.display = 'block';
-  res.textContent = `score ${r.score.toFixed(2)}${r.perfect ? ' PERFECT' : ''} — ${r.summary} ${r.data ? JSON.stringify(r.data) : ''}`;
+  // blind: the lab shows what the player gets (the score is still on window.__lab.result)
+  res.textContent = blind ? 'Signed off · no verdict on a real job' : `score ${r.score.toFixed(2)}${r.perfect ? ' PERFECT' : ''} — ${r.summary} ${r.data ? JSON.stringify(r.data) : ''}`;
 }
 
 const context = {

@@ -60,6 +60,7 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
 ## Additions (beyond MVP scope)
 
 - **Six more real-life puzzles** (15 total): weight and balance, safety wire, multimeter diagnosis, conduit bending, bank reconciliation, three-way match. Every role now has five puzzle types, each modelled on the actual procedure.
+- **Two more mechanic puzzles** (17 total): hydraulic servicing (`hydraulics`: discharge the accumulator, placard fluid to FULL, nitrogen precharge from tier 3, a brake bleed from tier 4) and ground power start (`gpu`: cart set to the placard, plug seated, volts checked; a turbine from tier 4). They are the work orders *Service the brake hydraulics* (twin, floatplane) and *Ground power start: weak battery* (the singles), with three new tools (sight-glass loupe, digital cart meter, nitrogen charging kit). The crack hunt was rewritten at the same time: one tap circles an indication, and a swab shows what bleeds back.
 - **All 5 island tiers** are data-driven in `src/sim/data.ts` (spec MVP was tiers 1–2). Tiers 3–5 add storms, the ferry, the generator, a floatplane, villas, a lodge, and night flights.
 - **Pass-and-play** on one device, plus **move to online** with progress intact.
 - **Desktop layout** (two columns), keyboard approvals (← defer, → approve, ↑ counter), Esc to close.
@@ -86,7 +87,7 @@ Owner direction: *"If we mess something up we shouldn't see an immediate sign th
 | Inspection | Finds defects in |
 | --- | --- |
 | 100-hr inspection, code inspection prep | everything on the asset |
-| Wheel-half penetrant check | tires, wheel halves |
+| Wheel-half penetrant check | tires, wheel halves, brake hydraulic servicing (the brake is off for it) |
 | Wing spar inspection | spar, load sheet (hard-landing damage) |
 | Oil change (engine look-over, filter check) | oil, prop, prop safety wire, cylinder, alternator |
 | Outlet trace / flicker diagnosis | outlets, GFCIs, 3-way switches, storm rewires (and flicker jobs) |
@@ -100,7 +101,7 @@ Owner direction: *"If we mess something up we shouldn't see an immediate sign th
 - Mechanic: loose prop bolts → *Pull the prop, replace the bolts, inspect the flange for fretting* (teardown of the propeller). Wheel through-bolts → replace them and check the holes for elongation. A missed crack → *Replace the cracked exhaust riser*, *Replace the wheel half and tire*, *Spar-cap doubler repair per the SRM* (parts kit; the spar repair costs 1.2× the inspection). Safety wire the wrong way → re-torque the hardware. A botched install → inspect the bracket / case / radio tray for damage (crack hunt), then the redo reinstalls.
 - Electrician: a missed backstab → *Replace the scorched outlet and move it off the backstab*. A missed loose neutral → *Replace the scorched device and re-terminate the neutral*. An oversized breaker → *Replace the scorched run and land it on the right-size breaker*. A kinked conduit run → *Find where the run is faulted to ground* (make it safe and find it); the redo re-bends the run and pulls new conductors.
 - A load sheet has no redo (it's redone every week anyway).
-- The puzzle shows the part the repair is about (`Order.job`): the propeller, the main wheel, the exhaust riser, the wing root, the alternator bracket, a receptacle. Seven teardown assemblies were added for this (and for the reports).
+- The puzzle shows the part the repair is about (`Order.job`): the propeller, the main wheel, the exhaust riser, the wing root, the alternator bracket, a receptacle. Seven teardown assemblies were added for this (and for the reports), and two more with the new mechanic puzzles (see below).
 - The repair goes to the analyst as a pending card at 0.6× the original's cost. It counts as safety-critical, so it can be approved through a cash freeze, and deferring it rolls deferral risk like any job. It restores a little health, plus half of what an incident took.
 - Finishing the repair spawns the **redo**: "<original title> (redo)", ready, cost 0 (already paid), approved in the trade's name, restoring half the original's gain (the botched sign-off already landed part of it; at 1× a caught defect ended up health-positive). If the same job is already open on that asset, that order becomes the redo, so there's never a second copy. A botched repair or redo can leave a defect again, so the chain continues.
 
@@ -116,7 +117,7 @@ Owner direction: *"If we mess something up we shouldn't see an immediate sign th
 | Analyst → electrician | Office outlets go dead and come back when the printer runs | meter (office circuit) | cap |
 | Analyst → mechanic | Company van wheel is wobbling: lug nuts loose | torque | leak |
 
-- Changed from the spec's list after review: leaks are causes that really recur (list price, auto-ship, autopay), not one-off double bills. "Office circuit trips when the printer and kettle run" is an overload (a dedicated circuit, not a meter job), so it's now the loose-connection version. It's the generator's *radiator* fan. "Van brakes feel soft" is hydraulic, so until the hydraulics puzzle lands it's a wobbling wheel the torque puzzle really fixes; the hydraulics branch brings the soft brakes, the bucket-truck boom and the GPU cart. The hangar-door row played a residential 3-way switch and was dropped.
+- Changed from the spec's list after review: leaks are causes that really recur (list price, auto-ship, autopay), not one-off double bills. "Office circuit trips when the printer and kettle run" is an overload (a dedicated circuit, not a meter job), so it's now the loose-connection version. It's the generator's *radiator* fan. "Van brakes feel soft" is hydraulic, so it's a wobbling wheel the torque puzzle really fixes. The hydraulics and ground power puzzles have landed, but they model aircraft only (a light twin's power brakes, a single on a GPU cart), so the van's soft brakes, the bucket-truck boom and a GPU-cart report wait for a vehicle scenario in those puzzles. The hangar-door row played a residential 3-way switch and was dropped.
 - From week 3, a 30% chance each week of a new report. At most 2 are open, counting fixes that are about to come back, and never two for one fixer.
 - A report is a ready card for the fixer: a small cost paid at once, no approval. Tapping it (like a repair or a redo) opens the story first, then *Start*.
 - **cap:** the reporter gets 2 jobs per turn, or 1 desk task for the analyst ("No shop air: 2 jobs max until Mia fixes it"). When it's used up, the dock says *End turn · limit reached* and ready cards dim. **leak:** cash every resolved week, a review line and `costs.reports`.
@@ -158,6 +159,44 @@ Robustness (`npm run balance -- robust`, 90 seeds × 4 crews = 360 games per tea
 - Both negative weeks are week 26 of a late tier-4 collapse: the grid and the generator go down together and revenue goes to zero for three weeks. The previous version had none in this sweep. Variants didn't remove them: a full-value redo, a 25% report chance, and dropping the three new cap reports gave 1, 2–3 and 3–6 negative weeks. It is the known tier-4 knife-edge ($7k/week fixed), reshuffled by any rule change, not one consequence rule.
 
 **Knobs if it feels too soft or too harsh:** `DEFECT.slope` (0.2), `REPORT.chance` (0.3), `REPORT.capOps` (2), and the `INSPECTS` scopes (wider scopes catch more before they fail). Re-run `npm run balance -- robust` after any change.
+
+### Integration with the new mechanic puzzles (hydraulic servicing, ground power start, the one-tap crack hunt)
+
+The consequences branch and the mechanic branch were built side by side and merged afterwards. What changed to make them one system:
+
+**Blind sign-off covers all 17 puzzles.** The rewritten crack hunt and the two new puzzles honour `PuzzleParams.blind` the same way torque and safety wire do: grading commentary goes, the world stays, every finish goes through `settle()`/`host.hold` with the same time whatever the result, and no flourish.
+
+| Puzzle | Hidden when blind | Still there (the world) |
+| --- | --- | --- |
+| Crack hunt | ✓/✗ badges and green/rust rings, dashed missed-crack rings, decoy labels ("tool mark: spanwise"), the booth re-lit as developed, the buzz on a bare-metal call, the flourish | your grease-pencil rings and '?' marks, the UV glow and bleed-back, the printed rules at tier 2 |
+| Hydraulic servicing | "Not this system!" / "83282: only if the placard lists it", "At FULL", shakes and buzzes when something won't go, the step banner ticking itself off (it becomes the work card), "reads low under pressure", the green ring at 0 psi, "dry!", the CONTAMINATED / STOP: OXYGEN cards (the wrong can pours and oxygen charges like nitrogen; both still cap the score), fault sounds for air in the hose | the placard and its squawk, both gauges, the level in the sight glass (a foreign fluid shows its colour), fluid spilling over, a soft pedal, bubbles in the bleed hose, the relief valve |
+| Ground power start | every slip and fault call-out ("Plugged in live", "Fault: hot start"), the checklist ticks and current item (the card still lists the items), the green flash when the plug seats, the summary on the status line, verdict sounds | sparks and pitted pins from a live plug, smoke from behind the panel, the ITT needle and the gauge's exceedance warning, torching at the exhaust, "Click. Nothing turns", the range-switch interlock |
+
+**Their own hidden defects.** Before, a botched hydraulic service or ground power start fell back to the mechanic's generic "rework the job". Now each has a [write-up, failure] pair and a real repair, and what went wrong picks the row: a puzzle can report its failure mode in its result (`data.defect`), and `defectRule` looks up `<puzzle>:<variant>` before the job kind (`defectVariant` keeps only a variant with a row; it is stored on the defect). Bots report no variant, so the paper sim is unchanged by it.
+
+| Job | What went wrong | Write-up / failure | Repair (then the original again) |
+| --- | --- | --- | --- |
+| Brake hydraulics | default (air left in the line, or the level or precharge off) | spongy brake pedal / brakes fade on the landing roll, runs off the end of the strip | teardown *Brake caliper*: replace the piston O-rings and flush the line (parts kit) |
+| Brake hydraulics | `fluid`: the wrong fluid went in | fluid weeping, seals swelling / a swollen seal lets go on the landing roll | teardown *Brake caliper*: drain and flush the system, replace every seal the wrong fluid reached (parts kit, 1.5× cost) |
+| Ground power start | default (avionics on at power-up, 28 V into a 14 V ship, a sloppy start) | dead com radio after the start / radios fail on departure | teardown *Com radio*: replace the spike-damaged radio and check the bus (parts kit) |
+| Ground power start | `arc`: plugged in or pulled out live | burnt, pitted receptacle pins / the receptacle overheats on the next start | teardown *External power receptacle* (new): replace it and check the relay contacts (parts kit) |
+| Ground power start | `hot`: a turbine hot start or a relight into residual fuel | ITT exceedance flagged, hot-section borescope written up / power loss on climb-out, burnt turbine blades | crack hunt on the *Compressor turbine disk*: hot-section inspection, borescope and penetrant (parts kit, 3× cost) |
+
+- Two teardown assemblies were added: *Brake caliper (piston seals)* (accumulator to 0 psi first) and *External power receptacle* (battery disconnected first; the relay is in it from tier 3).
+- The crack hunt keeps the consequences part table on the new drawing: repairs and reports look at a mount tube, the alternator bracket, the crankcase, the radio tray, the gear leg, the ladder rack welds or the compressor turbine disk (a long member draws as the spar, a round one as the wheel half). The lodge's crew-project job is now *Acceptance inspection: aluminium deck beams*, matching the part the crack hunt shows.
+- The puzzle lab shows "Signed off · no verdict" instead of the score with `&blind=1` (the score is still on `window.__lab.result`). `scripts/e2e.mjs` checks the three puzzles draw no verdict blind.
+
+**Balance after the merge** (`npm run balance`, 26 weeks × 30 seeds; no tuning needed):
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Defect incidents / wk | Revenue / wk |
+| --- | --- | --- | --- | --- | --- | --- |
+| Three friends | 8 / 11 / 16 / **21** | 89% | $6,050 | **0** | 0.105 | $9,302 |
+| All average | 7 / 10 / 16 / **22** | 93% | $6,554 | **0** | 0.072 | $9,952 |
+| All good | 5 / 8 / 16 / 21 | 99% | $6,735 | 0 | 0.015 | $11,912 |
+| Naive analyst | stays at tier 3 | 100% | $6,176 | 0 | | |
+| Every solo / absent team | stays at tier 1 | | | | | |
+
+Robustness (`npm run balance -- robust`, 360 games per team): three friends reach tier 5 in week 22–23 (60 of 360 miss it by week 26, 61 before the merge); all average in week 22 (21 miss, 32 before). Weeks below $0: 4 per team, in 3 of its 360 games (1 week in 1 game before the merge). All of them are weeks 24–26 of a late grid-and-generator collapse (no rentable houses, no flights for two or three weeks), the tier-4 knife-edge described above, now reshuffled by two more mechanic jobs in the queue. The follow-up rules (the new defect rows with their parts kits, the wider wheel-half scope; bots report no variants) barely move the bots: the same negative weeks, at most one more or fewer missed tier 5 per crew, and the 30-seed medians are unchanged. Left untuned because the standard run is clean; if it shows up in play, the first knob is the new jobs' queue weight (`below(94, 4)` / `below(96, 4)` in the catalog).
 
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 

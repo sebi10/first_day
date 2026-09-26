@@ -6,6 +6,7 @@ import {
   CATALOG_BY_KIND,
   DEFECT,
   defectRule,
+  defectVariant,
   ECON,
   FIN_TASKS,
   incidentText,
@@ -688,7 +689,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
 
   // hidden consequences: a passed inspection finds what an earlier job left; this job may leave something
   if (asset && INSPECTS[o.kind] && a.score >= DEFECT.detectAt) detectDefects(s, o, asset, player.name, now);
-  if (defectable(o)) rollDefect(s, o, a.role, player.name, a.score);
+  if (defectable(o)) rollDefect(s, o, a.role, player.name, a.score, defectVariant(o.puzzle, a.data));
   if (o.repair) spawnRedo(s, o, now);
   return { s };
 }
@@ -722,18 +723,23 @@ export function tracedTo(d: Pick<Defect, 'orderKind' | 'title' | 'name' | 'week'
   return `“${d.title}”, signed off by ${d.name} in week ${d.week}`;
 }
 
-/** On sign-off: roll (from the order seed, deterministic) for a latent defect from the TRUE score. */
-function rollDefect(s: IslandState, o: Order, by: Role, name: string, q: number) {
+/**
+ * On sign-off: roll (from the order seed, deterministic) for a latent defect
+ * from the TRUE score. `variant` is what the puzzle says went wrong (a hot
+ * start, the wrong fluid): the defect is that failure, not the job's default.
+ */
+function rollDefect(s: IslandState, o: Order, by: Role, name: string, q: number, variant?: string) {
   const r = rng(hashSeed(o.seed, 'defect', s.week));
   if (!r.chance(defectChance(q))) return;
   const severity = defectSeverity(q);
-  const rule = defectRule(o.puzzle, o.role, o.kind);
+  const rule = defectRule(o.puzzle, o.role, o.kind, variant);
   (s.defects ??= []).push({
     id: `d${s.nextId++}`,
     orderKind: o.kind,
     job: jobOf(o),
     log: logOf(o),
     puzzle: o.puzzle,
+    ...(variant ? { variant } : {}),
     title: o.title,
     assetId: o.assetId,
     role: o.role,
@@ -753,7 +759,7 @@ function rollDefect(s: IslandState, o: Order, by: Role, name: string, q: number)
 
 /** The corrective job for a defect: same trade and asset, a different puzzle, pending the analyst. */
 function addRepair(s: IslandState, d: Defect, via: 'inspection' | 'incident', o: { foundBy?: string; foundIn?: string; incident?: string } = {}) {
-  const rule = defectRule(d.puzzle, d.role, d.orderKind);
+  const rule = defectRule(d.puzzle, d.role, d.orderKind, d.variant);
   const fix = rule.fix;
   return newOrder(s, {
     role: d.role,
@@ -1414,7 +1420,7 @@ export function resolveWeek(s: IslandState, now: number) {
         keep.push(d);
         continue;
       }
-      const rule = defectRule(d.puzzle, d.role, d.orderKind);
+      const rule = defectRule(d.puzzle, d.role, d.orderKind, d.variant);
       const sev = d.severity - 1;
       const cost = round10(Math.max(d.cost, DEFECT.minBase) * DEFECT.incidentMult[sev]);
       const what = incidentText(rule, d.severity, asset.name);

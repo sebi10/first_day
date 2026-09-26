@@ -136,6 +136,8 @@ function signoffWords(o: Order, role: Role): { header: string; stamp: string } {
   if (kind === 'wb' || o.kind === 'wb') return { header: 'Load sheet', stamp: 'Released' };
   if (o.kind === 'inspect100' || o.kind === 'corrosion' || o.kind === 'spar') return { header: 'Logbook entry', stamp: 'Airworthy' };
   if (o.report || o.kind === 'project') return { header: 'Shop log', stamp: 'Work complete' };
+  // a ground power start is line work, not maintenance: no logbook entry, no return to service
+  if (o.kind === 'gpustart') return { header: 'Line log', stamp: 'Work complete' };
   return { header: 'Logbook entry', stamp: 'Return to service' };
 }
 
