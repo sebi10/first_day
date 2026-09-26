@@ -1,7 +1,7 @@
 // The island engine: a pure, deterministic reducer. Every client (and the
 // balance sim) runs the same code, so any phone can resolve a week and get
 // byte-identical results from the same inputs + seed.
-import { CATALOG, CATALOG_BY_KIND, ECON, FIN_TASKS, INSURANCE, MODELS, STORIES, TIERS } from './data';
+import { CATALOG, CATALOG_BY_KIND, ECON, FIN_TASKS, INSURANCE, MODELS, PROJECTS, STORIES, TIERS } from './data';
 import {
   capOf,
   charterLoad,
@@ -149,7 +149,34 @@ function newPlayer(uid: string, name: string, role: Role, xp: number, graceUntil
   };
 }
 
-function addTierAssets(s: IslandState, tier: number, week: number) {
+function startProject(s: IslandState) {
+  const tier = s.tier + 1;
+  const def = PROJECTS[tier];
+  if (!def) return;
+  const orders: Partial<Record<Role, string>> = {};
+  for (const role of ROLES) {
+    const j = def.jobs[role];
+    const o = newOrder(s, { role, kind: 'project', assetId: null, title: j.title, puzzle: j.puzzle, tier: clamp(Math.max(3, s.tier + 1), 1, 5), cost: 0, parts: 0, gain: 0, status: 'ready' });
+    orders[role] = o.id;
+  }
+  s.project = { tier, title: def.title, orders };
+  feed(s, 'all', 'good', `The island qualifies for tier ${tier}. Crew project: ${def.title}. One job each.`, s.updatedAt);
+}
+
+function finishProjectIfDone(s: IslandState, now: number) {
+  const p = s.project;
+  if (!p) return;
+  const parts = ROLES.map((r) => s.orders.find((o) => o.id === p.orders[r]));
+  if (!parts.every((o) => o?.status === 'done')) return;
+  const quality = parts.reduce((n, o) => n + (o!.result?.score ?? 0), 0) / parts.length;
+  s.tier = p.tier;
+  s.stats.tierReachedWeek[p.tier] = s.week;
+  addTierAssets(s, p.tier, s.week, Math.round(60 + 30 * quality));
+  s.project = null;
+  feed(s, 'all', 'good', `Tier ${p.tier} unlocked: ${tierDef(p.tier).name}! Built together at ${Math.round(quality * 100)}% quality.`, now);
+}
+
+function addTierAssets(s: IslandState, tier: number, week: number, health = 80) {
   const fresh = week === 0;
   for (const a of TIERS[tier - 1].adds) {
     if (s.assets.some((x) => x.id === a.id)) continue;
@@ -159,7 +186,7 @@ function addTierAssets(s: IslandState, tier: number, week: number) {
       kind,
       model: a.model,
       name: a.name,
-      health: fresh ? ECON.startHealth : 80,
+      health: fresh ? ECON.startHealth : health,
       touchedWeek: week,
       ...(kind === 'house' ? { inspectionUntil: week + ECON.houseInspectionWeeks } : {}),
       ...(kind === 'plane' ? { sinceInspection: 4 } : {}),
@@ -453,6 +480,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   if (o.role !== a.role) {
     if (!a.cover) return fail('Not your trade. Use Lend a hand.');
     if ((s.coversUsed[a.role] ?? 0) >= 1) return fail('You already lent a hand this week.');
+    if (o.kind === 'project') return fail('Crew project: each trade does its own part.');
     if (o.deferrals < 1) return fail('Lend a hand is for jobs that have already waited a week.');
     s.coversUsed[a.role] = (s.coversUsed[a.role] ?? 0) + 1;
     player.covers += 1;
@@ -488,7 +516,12 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     if (o.kind === 'codeprep' && cr >= 1) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
   }
 
-  if (o.kind === 'auction') {
+  if (o.kind === 'project') {
+    // the floatplane auction is real capex: the winning deposit leaves the bank
+    if (o.puzzle === 'auction' && Number(a.data?.kits ?? 0) > 0) s.cash -= Math.max(0, Number(a.data?.spent ?? 0));
+    feed(s, o.role, 'good', `${player.name} finished their part: ${o.title} (${Math.round(a.score * 100)}%).`, now);
+    finishProjectIfDone(s, now);
+  } else if (o.kind === 'auction') {
     const room = Math.max(0, ECON.maxParts - s.parts.stock - s.parts.inTransit);
     const kitsWon = Math.max(0, Math.floor(Number(a.data?.kits ?? 0)));
     const spent = Math.max(0, Number(a.data?.spent ?? 0));
@@ -723,7 +756,7 @@ function autoRun(s: IslandState, role: Role) {
     return;
   }
   const ready = s.orders
-    .filter((o) => o.role === role && o.status === 'ready')
+    .filter((o) => o.role === role && o.status === 'ready' && o.kind !== 'project') // crew projects wait for the crew
     .sort((a, b) => urgency(s, b) - urgency(s, a))
     .slice(0, 2);
   for (const o of ready) {
@@ -916,6 +949,7 @@ export function resolveWeek(s: IslandState, now: number) {
   // 8. carry-over
   for (const o of s.orders) {
     if (!open(o)) continue;
+    if (o.kind === 'project') continue; // crew projects wait for the crew
     if (o.role === 'fin' || o.gain === 0) {
       o.status = 'cancelled'; // desk tasks and load sheets are for this week only
       continue;
@@ -931,7 +965,8 @@ export function resolveWeek(s: IslandState, now: number) {
     }
   }
   // prune old closed orders
-  s.orders = s.orders.filter((o) => open(o) || (o.result?.week ?? o.createdWeek) >= W - 1);
+  const projectIds = new Set(Object.values(s.project?.orders ?? {}));
+  s.orders = s.orders.filter((o) => open(o) || projectIds.has(o.id) || (o.result?.week ?? o.createdWeek) >= W - 1);
 
   // 9. decay + storm
   const shield = s.modifiers.some((m) => m.kind === 'stormShield' && m.until >= W) ? 0.5 : 1;
@@ -1031,15 +1066,11 @@ export function resolveWeek(s: IslandState, now: number) {
   if (gradeXp) for (const role of ROLES) gainXp(s, role, gradeXp);
   s.pendingBonus = grade === 'A' ? Math.round(ECON.aGradeBonus * revenue) : null;
 
-  // 16. tier up
-  let tierUp: number | undefined;
-  if (tierUnlocked(s)) {
-    s.tier += 1;
-    tierUp = s.tier;
-    st.tierReachedWeek[s.tier] = W;
-    addTierAssets(s, s.tier, W);
-    line('all', 'good', `Tier ${s.tier} unlocked: ${tierDef(s.tier).name}!`);
-  }
+  // 16. tier up: qualifying opens a crew project; the tier arrives when all three finish their part
+  const tierUp = Number(Object.entries(st.tierReachedWeek).find(([t, w]) => w === W && Number(t) > 1)?.[0]) || undefined;
+  finishProjectIfDone(s, now);
+  if (tierUnlocked(s) && !s.project) startProject(s);
+  if (s.project) line('all', 'info', `Crew project open: ${s.project.title}.`);
 
   // 17. story card every 3-week B+ streak
   if (st.streakBPlus >= 3 && st.streakBPlus % 3 === 0 && !s.story) {

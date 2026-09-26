@@ -228,6 +228,8 @@ export interface IslandState {
   ntfy?: string;
   /** safety calls for this week: assetId → role that grounded / red-tagged it */
   tags?: Record<string, Role>;
+  /** the crew project that builds the next tier: one job per trade */
+  project?: { tier: number; title: string; orders: Partial<Record<Role, string>> } | null;
 }
 
 export type Action =

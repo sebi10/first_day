@@ -11,6 +11,7 @@ import { nextTierProgress } from '../sim/progression';
 import { ROLES, type Grade, type IslandState, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
 import { Btn, Icon, Seg, TierDots, usd } from './kit';
+import { CrewProject } from './home';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
 import { shareWeek } from './share';
 import { C, ROLE_TINT } from './theme';
@@ -54,6 +55,7 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
       )}
 
       {s.story && !s.story.chosen && <StoryCard ctl={ctl} />}
+      <CrewProject ctl={ctl} />
 
       {next && (
         <div class="card col" style={{ gap: 8 }}>
@@ -66,7 +68,7 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
               <span class="num">{i.label}</span>
             </div>
           ))}
-          <span class="label">Autopilot weeks don't count: nobody wins alone.</span>
+          <span class="label">Autopilot weeks don't count. When you qualify, the tier is built as a crew project: one job each.</span>
         </div>
       )}
       {!next && (

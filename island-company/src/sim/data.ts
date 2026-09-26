@@ -341,6 +341,42 @@ export const STORIES = [
   },
 ] as const;
 
+/** Each new tier is built together: one real job per trade. */
+export const PROJECTS: Record<number, { title: string; jobs: Record<Role, { title: string; puzzle: PuzzleId }> }> = {
+  2: {
+    title: 'Commission the cargo plane and cottages 3–4',
+    jobs: {
+      mech: { title: 'First cargo load sheet', puzzle: 'balance' },
+      elec: { title: 'Put cottages 3–4 on the panel', puzzle: 'panel' },
+      fin: { title: 'Pay the builders (three-way match)', puzzle: 'invoice' },
+    },
+  },
+  3: {
+    title: 'Build the generator house and ferry dock',
+    jobs: {
+      mech: { title: 'Torque the generator mounts', puzzle: 'torque' },
+      elec: { title: 'Commission the generator circuits', puzzle: 'meter' },
+      fin: { title: 'Finance plan: 4-week cash forecast', puzzle: 'forecast' },
+    },
+  },
+  4: {
+    title: 'Bring in the floatplane and the villas',
+    jobs: {
+      mech: { title: 'Safety-wire the float fittings', puzzle: 'safetywire' },
+      elec: { title: 'Run conduit to the villas', puzzle: 'conduit' },
+      fin: { title: 'Win the floatplane at auction', puzzle: 'auction' },
+    },
+  },
+  5: {
+    title: 'Open the Lodge',
+    jobs: {
+      mech: { title: 'Acceptance inspection: lodge deck beams', puzzle: 'crack' },
+      elec: { title: 'Wire the lodge GFCIs', puzzle: 'wireup' },
+      fin: { title: 'Opening budget review', puzzle: 'variance' },
+    },
+  },
+};
+
 export const ROLE_LABEL: Record<Role, string> = { mech: 'Mechanic', elec: 'Electrician', fin: 'Analyst' };
 export const ROLE_LONG: Record<Role, string> = {
   mech: 'A&P mechanic',

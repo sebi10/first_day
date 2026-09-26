@@ -299,3 +299,22 @@ describe('crew decisions', () => {
     expect(s2.assets.find((a) => a.id === wb!.assetId)!.health).toBe(s.assets.find((a) => a.id === wb!.assetId)!.health);
   });
 });
+
+describe('crew projects', () => {
+  it('qualifying opens one job per trade; the tier arrives when all three finish', () => {
+    let s = started();
+    s.stats.weeksBPlus = 4; // qualifies for tier 2
+    s = apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
+    expect(s.tier).toBe(1);
+    expect(s.project?.tier).toBe(2);
+    const ids = s.project!.orders;
+    // autopilot never does your part; lend a hand can't either
+    s.orders.find((o) => o.id === ids.elec)!.deferrals = 1;
+    expect(apply(s, { t: 'complete', role: 'mech', orderId: ids.elec!, score: 1, perfect: true, cover: true }, NOW).error).toMatch(/own part/);
+    for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'complete', role: r, orderId: ids[r]!, score: 0.9, perfect: false }, NOW).s;
+    expect(s.tier).toBe(2);
+    expect(s.project).toBeNull();
+    const cargo = s.assets.find((a) => a.model === 'cargo')!;
+    expect(cargo.health).toBe(Math.round(60 + 30 * 0.9));
+  });
+});

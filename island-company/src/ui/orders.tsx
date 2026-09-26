@@ -55,6 +55,7 @@ export function OrderCard({ s, o, onOpen }: { s: IslandState; o: Order; onOpen(o
           {o.parts > 0 && <span class="label">· {o.parts} kit</span>}
         </span>
         <span class="row wrap" style={{ gap: 6 }}>
+          {o.kind === 'project' && <span class="chip palm">Crew project</span>}
           {statusChip(s, o)}
           {carried && (
             <span class={`chip ${risk >= 0.3 ? 'rust' : ''}`}>

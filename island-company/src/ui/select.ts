@@ -57,13 +57,16 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   const tier = assist ? Math.max(3, o.tier) : grace ? 1 : o.tier;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
   const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.kind };
-  if (o.kind === 'auction') {
+  if (o.kind === 'project' && o.puzzle === 'auction') {
+    // floatplane deposit: same auction, bigger stakes
+    context.market = { low: 3000, high: 7000, fair: 4800, cap: Math.min(5600, Math.max(0, s.cash - ECON.freezeBelow)) };
+  } else if (o.kind === 'auction') {
     const { low, high } = ECON.partMarket;
     const f = 1 + 0.1 * (s.tier - 1);
     const fair = Math.round(((low + high) / 2) * f);
     context.market = { low: Math.round(low * f), high: Math.round(high * f), fair, cap: Math.min(Math.round(listPrice(s) * 0.92), Math.max(0, s.cash - ECON.freezeBelow)) };
   }
-  if (o.kind === 'forecast') Object.assign(context, forecastContext(s));
+  if (o.puzzle === 'forecast') Object.assign(context, forecastContext(s));
   return {
     puzzle: o.puzzle,
     seed: hashSeed(o.seed, role),

@@ -315,10 +315,53 @@ function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: bool
                 </span>
               </div>
             )}
+            <CrewProject ctl={ctl} onPlay={onPlay} />
             {r === 'fin' ? <Desk ctl={ctl} onPlay={onPlay} /> : <OpsPanel ctl={ctl} role={r} onPlay={onPlay} />}
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The next tier is built together: one job per trade, shown to everyone. */
+export function CrewProject({ ctl, onPlay }: { ctl: Ctl; onPlay?(o: Order): void }) {
+  const { s, role } = ctl;
+  const p = s.project;
+  if (!p) return null;
+  const parts = ROLES.map((r) => ({ r, o: s.orders.find((x) => x.id === p.orders[r]) }));
+  const mine = parts.find((x) => x.r === role)?.o;
+  return (
+    <div class="card col" style={{ gap: 10, borderTop: `6px solid ${C.palm}` }}>
+      <span class="chip palm" style={{ alignSelf: 'flex-start' }}>
+        Crew project · tier {p.tier} {tierDef(p.tier).name}
+      </span>
+      <h3>{p.title}</h3>
+      {parts.map(({ r, o }) => (
+        <div class="row" key={r} style={{ gap: 10 }}>
+          <span class="avatar" style={{ ['--tint' as string]: ROLE_TINT[r], width: 28, height: 28, fontSize: 12 }}>
+            {(s.players[r]?.name ?? '?')[0]}
+          </span>
+          <span class="grow" style={{ fontSize: 15 }}>
+            {o?.title ?? '—'}
+            <div class="label">{s.players[r]?.name ?? ROLE_LABEL[r]}</div>
+          </span>
+          {o?.status === 'done' ? (
+            <b style={{ color: C.palm }}>✓ {Math.round((o.result?.score ?? 0) * 100)}%</b>
+          ) : (
+            <span class="label">to do</span>
+          )}
+        </div>
+      ))}
+      {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && (
+        <Btn block onClick={() => onPlay(mine)}>
+          Do your part ▸
+        </Btn>
+      )}
+      <span class="label">
+        Tier {p.tier} opens the moment all three are done. Each of you does your own part: autopilot and lend-a-hand can't. New buildings start at 60–90 health, set by
+        your average score.
+      </span>
     </div>
   );
 }

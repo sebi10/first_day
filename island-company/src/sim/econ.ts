@@ -135,6 +135,7 @@ export function credit(score: number, perfects: number) {
 }
 
 export function urgency(s: IslandState, o: Order) {
+  if (o.kind === 'project') return 1000; // the crew's shared build always comes first
   const a = s.assets.find((x) => x.id === o.assetId);
   return o.deferrals * 30 + o.tier * 10 + (a ? 100 - a.health : 0) + (o.kind === 'codeprep' || o.kind === 'inspect100' ? 40 : 0);
 }
