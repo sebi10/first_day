@@ -38,6 +38,8 @@ export function useIsland(ref: IslandRef) {
     window.addEventListener('ic:dropped', on);
     return () => window.removeEventListener('ic:dropped', on);
   }, [ref.id]);
+  // a session re-created after it died has a new id: follow it
+  useEffect(() => store.onUid?.(setUid), [ref.mode]);
   useEffect(() => {
     store
       .uid()

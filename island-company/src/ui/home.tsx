@@ -5,7 +5,7 @@ import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
 import { powered, tierDef, urgency } from '../sim/econ';
-import { ROLES, type Order, type Role, type WeekReport } from '../sim/types';
+import { ROLES, type IslandState, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
 import { Desk } from './desk';
@@ -50,7 +50,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
 
   if (s === undefined) return <Loading text="Loading island…" />;
   if (s === null) return <Loading text="Island not found." back />;
-  if (!role) return <Loading text={uid ? 'This device has no seat on this island. Use Join with a code.' : 'Connecting…'} back={!!uid} />;
+  if (!role) return uid ? <NoSeat s={s} /> : <Loading text="Connecting…" />;
 
   const ctl: Ctl = { s, ref: islandRef, uid, role, sync, dispatch };
   const me = s.players[role]!;
@@ -123,6 +123,30 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
           ))}
         </div>
       </Sheet>
+    </div>
+  );
+}
+
+/** This device can read the island but holds no seat: never joined, or its sign-in was reset. */
+function NoSeat({ s }: { s: IslandState }) {
+  return (
+    <div class="screen single" style={{ paddingTop: 48 }}>
+      <div class="card col" style={{ gap: 10 }}>
+        <h2>Relink this device</h2>
+        <span class="muted">
+          This device isn't linked to a seat on {s.name}. That happens when its sign-in is reset (browser storage cleared, or its account removed in Firebase). Your progress
+          is safe on the island.
+        </span>
+        <span class="muted">
+          Get your <b>seat code</b> from any crewmate's <b>Me → Crew and devices</b> (or your other device), then relink.
+        </span>
+        <Btn block onClick={() => (location.hash = `#/join/${s.id}`)}>
+          Relink with my seat code
+        </Btn>
+        <Btn block kind="ghost" onClick={() => (location.hash = '#/')}>
+          Back to start
+        </Btn>
+      </div>
     </div>
   );
 }

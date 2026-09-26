@@ -12,6 +12,8 @@ export interface IslandStore {
   mode: Mode;
   /** stable id for this device/player */
   uid(): Promise<string>;
+  /** the id can change if the session had to be re-created (online only) */
+  onUid?(cb: (uid: string) => void): () => void;
   create(o: { name: string; role: Role; playerName: string; passAndPlay?: boolean; names?: Partial<Record<Role, string>> }): Promise<string>;
   load(id: string): Promise<IslandState | null>;
   subscribe(id: string, cb: (s: IslandState | null) => void): () => void;

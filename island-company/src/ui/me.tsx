@@ -277,6 +277,19 @@ function Devices({ ctl }: { ctl: Ctl }) {
       <span class="label num">
         Linked devices: {1 + (me.devices?.length ?? 0)} · island value {usd(s.cash)}
       </span>
+      <div class="divider" />
+      <b>Crew seat codes</b>
+      <span class="label">If a crewmate's phone loses its sign-in, read them their code so they can relink (Join with a code → their seat → code).</span>
+      {ROLES.filter((r) => r !== role && s.players[r]).map((r) => (
+        <div class="row spread" key={r}>
+          <span class="label">
+            {s.players[r]!.name} · {ROLE_LABEL[r]}
+          </span>
+          <b class="code num" style={{ letterSpacing: '0.12em' }}>
+            {s.players[r]!.seatKey}
+          </b>
+        </div>
+      ))}
       {ROLES.some((r) => s.players[r]?.uid.startsWith(PP_UID.mech.slice(0, 3))) && (
         <span class="label">Unclaimed pass-and-play seats: anyone joining with the invite link can take them over, progress intact.</span>
       )}
