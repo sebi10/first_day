@@ -296,6 +296,12 @@ export type DefectRule = {
   fix: { puzzle: PuzzleId; title: string; parts?: number; job?: string; cost?: number };
   /** redo the original afterwards (default true; paperwork that is redone every week anyway says false) */
   redo?: boolean;
+  /**
+   * A mistake that is there whatever the rest of the job was like (the wrong
+   * manual value, a part with no approval): it always leaves the defect. The
+   * score still sets how bad it is.
+   */
+  sure?: boolean;
 };
 
 /**
@@ -407,6 +413,57 @@ export const DEFECT_RULES: Record<string, DefectRule> = {
     ],
     found: 'hot-start damage in the turbine hot section',
     fix: { puzzle: 'crack', title: 'Hot-section inspection: borescope the vanes and blades, penetrant on the CT disk', parts: 1, job: 'hotsection', cost: 3 },
+  },
+  // Card-driven values: the task card prints both effectivities, and the one
+  // worked to was the other S/N block's (or the other side of the SB). The
+  // puzzle reports 'eff:<torque key>'; defectVariant falls back to 'eff'.
+  'torque:eff': {
+    incident: ['Fasteners on {a} found at the wrong torque: set to the manual value for the other effectivity', 'Fasteners on {a}, torqued to the other effectivity’s value, backed off in service'],
+    found: 'fasteners torqued to the manual value for the other effectivity',
+    fix: { puzzle: 'teardown', title: 'Replace the fasteners and check the holes for elongation', job: 'wheel' },
+    sure: true,
+  },
+  'torque:eff:tieNut': {
+    incident: [
+      'Wheel tie-bolt nuts on {a} found at the wrong torque at the walkaround: torqued to the value for the other S/N block',
+      'A wheel on {a}, its tie bolts torqued to the other S/N block’s value, separated at the halves on the landing roll',
+    ],
+    found: 'wheel tie-bolt nuts torqued to the value for the other S/N block',
+    fix: { puzzle: 'teardown', title: 'Replace the tie bolts and nuts, check the wheel halves for fretting', job: 'wheel' },
+    sure: true,
+  },
+  'torque:eff:propBolt': {
+    incident: [
+      'Pilot wrote up a vibration on {a}: prop bolts torqued to the value for the other side of the SB (dry / lubricated threads mixed up)',
+      'Prop bolts on {a}, torqued to the other side of the SB’s value, backed off in flight: heavy vibration, precautionary landing',
+    ],
+    found: 'prop bolts torqued to the value for the other side of the SB',
+    fix: { puzzle: 'teardown', title: 'Pull the prop, replace the bolts, inspect the flange for fretting', job: 'prop' },
+    sure: true,
+  },
+  // the accumulator precharged to the other S/N block's value: the brakes run out of stored pressure early
+  'hydraulics:eff': {
+    incident: [
+      'Pilot wrote up the brake accumulator on {a} running down after two or three applications: precharged to the other S/N block’s value',
+      'Brake pressure on {a} ran out on the landing roll, the accumulator precharged to the other S/N block’s value: it ran off onto the grass',
+    ],
+    found: 'the brake accumulator precharged to the value for the other S/N block',
+    fix: { puzzle: 'crack', title: 'Inspect the wheel half and gear leg for overheat and side-load damage', job: 'gear' },
+    sure: true,
+  },
+  // The part chain: an STC / field-approval (ICA) part put on with a logbook
+  // entry, no engineering authorization. It's the right part, so nothing
+  // breaks: the records are what's wrong, and a ramp check or the next full
+  // inspection finds it.
+  'ipc:unapproved': {
+    incident: [
+      'Ramp check on {a}: the FAA inspector found an ICA part installed with no engineering authorization on record. Grounded until the EA is issued',
+      'The insurer’s audit after a hard landing on {a} found an ICA part installed with no engineering authorization: the claim was cut',
+    ],
+    found: 'an ICA part installed with no engineering authorization on record',
+    fix: { puzzle: 'logbook', title: 'Get the engineering authorization for the installed part (research the records)' },
+    redo: false,
+    sure: true,
   },
 };
 
@@ -551,7 +608,11 @@ export function defectRule(puzzle: string, role: Role, kind?: string, variant?: 
 /** The failure mode a puzzle reports in its result (`data.defect`), kept only when a rule exists for it. */
 export function defectVariant(puzzle: string, data?: Record<string, unknown>): string | undefined {
   const v = data?.defect;
-  return typeof v === 'string' && DEFECT_RULES[`${puzzle}:${v}`] ? v : undefined;
+  if (typeof v !== 'string') return undefined;
+  if (DEFECT_RULES[`${puzzle}:${v}`]) return v;
+  // 'eff:tieNut' with no row of its own is still an 'eff'
+  const head = v.split(':')[0];
+  return DEFECT_RULES[`${puzzle}:${head}`] ? head : undefined;
 }
 
 /** "Pilot wrote up a vibration on Twin N-12: …" */
@@ -658,6 +719,41 @@ export const REPORTS: ReportDef[] = [
 ];
 
 export const REPORT_BY_KEY: Record<string, ReportDef> = Object.fromEntries(REPORTS.map((r) => [r.key, r]));
+
+// ---------------------------------------------------------------------------
+// The part chain: the mechanic's workflow, "I get a task, I get a manual, I
+// follow manual. If part is gone or missing or damaged: IPC. If part no exist,
+// I check the maintenance logs, then get engineering approval to put the part
+// on the airplane." A job on a plane finds a part it can't finish without;
+// the plane is grounded until the part is installed. See src/sim/chain.ts.
+
+export const CHAIN = {
+  /** nothing is found before this week, nor before this island tier */
+  fromWeek: 3,
+  minTier: 2,
+  /** chance an eligible job finds a part it can't finish without (one open chain at a time) */
+  chance: 0.3,
+  /** weeks after a chain closes before another can open on the island */
+  rest: 2,
+  /** share of the island's planes that carry one STC or field-approved alteration on an IPC assembly */
+  plantShare: 0.5,
+  /** of those, the share that went on under a field-approved Form 337 (the rest: an STC) */
+  fieldShare: 0.3,
+  /** the jobs that open a part chain, by the ATA they work on */
+  kinds: { tires: '32-40', corrosion: '32-40', prop: '61-10', wire: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, string>,
+  /** list price of the part at tier 1 (USD); 'sg' is the turbine's starter-generator exchange */
+  price: { lining: 240, propBolt: 360, filter: 110, resCap: 130, radio: 950, generator: 760, sg: 1350 } as Record<string, number>,
+  /** an STC holder's (ICA) part costs this much more than the OEM part */
+  icaMult: 1.35,
+  /** price rises this much per island tier above 1 */
+  perTier: 0.1,
+  /** engineering review fee (EA on data on file): base + per island tier above 2 */
+  fee: 380,
+  feePerTier: 40,
+  /** a wrong part sent back: restocking fee, a share of its price (at least `restockMin`) */
+  restock: 0.15,
+  restockMin: 40,
+};
 
 export type Tool = { id: string; level: number; name: string; puzzle: PuzzleId; effect: string };
 

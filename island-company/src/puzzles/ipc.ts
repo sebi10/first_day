@@ -216,6 +216,22 @@ export type IpcModel = {
   premarked: boolean;
   /** a current SB compliance list is in the records (tier 5: logbooks only) */
   compliance: boolean;
+  /**
+   * Launched by the part chain: the lookup is the first step of it. The slip
+   * has "Not in the IPC" (the research is the next step, in the logbooks), and
+   * the ICA parts can't be ordered from here: they need engineering first.
+   */
+  chain?: boolean;
+};
+
+/** the chain's part (an IPC tag) → the case that looks it up */
+const CHAIN_CASE: Record<string, (model: PlaneModel) => string> = {
+  lining: () => 'lining',
+  propBolt: () => 'propBolt',
+  filter: () => 'filter',
+  resCap: () => 'resCap',
+  radio: () => 'radio',
+  generator: (m) => (m === 'cargo' ? 'sg' : 'alternator'),
 };
 
 const ASSET_OF: Record<PlaneModel, string> = { twin: 'p1', cargo: 'p2', float: 'p3' };
@@ -399,7 +415,12 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
   };
   let ata: Ata;
   let planted = false;
-  if (key) {
+  const chainCase = ctx.chain?.step === 'lookup' && key ? CHAIN_CASE[ctx.chain.tag]?.(model) : undefined;
+  if (chainCase && key) {
+    // the part chain: this airplane, this assembly, this part. An alteration on it means "not in the IPC"
+    ata = ammTaskFor(ac, key).ata;
+    planted = !!gp && gp.ata === ata;
+  } else if (key) {
     ata = ammTaskFor(ac, key).ata;
     if (gp?.ata === ata) {
       if (wantPlant || (t >= 4 && !freeAt(ata).length)) planted = true;
@@ -422,6 +443,8 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
   if (planted) {
     const item = baseItem(fig.rows.find((x) => x.pn === ac.plant!.ipcPn)!.item);
     pick = solved.find((x) => x.c.item === item)!;
+  } else if (chainCase && solved.some((x) => x.c.key === chainCase)) {
+    pick = solved.find((x) => x.c.key === chainCase)!;
   } else {
     // teaching tiers stay on their one idea; from tier 2 a near miss can still come up, so a
     // mechanic who gets the same kind of work order does not always get the same part
@@ -435,7 +458,8 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
   const { c, task, mult, multWhy, s } = pick;
   const side = r.pick(['L/H', 'R/H'] as const);
   const prefix = c.sided === 'wheel' || (c.sided === 'engine' && ac.model === 'twin') ? `${side} ` : '';
-  const sq = c.squawk(prefix);
+  // the chain's squawk is what the job found (and what is on the airplane)
+  const sq = chainCase && ctx.chain?.found ? ctx.chain.found : c.squawk(prefix);
   const squawk = sq.charAt(0).toUpperCase() + sq.slice(1);
   const marks = {
     ab: fig.effCodes.find((e) => (e.code === 'A' || e.code === 'B') && e.applies)!.code as 'A' | 'B',
@@ -518,6 +542,7 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
     circled: t <= 2,
     premarked: t <= 1,
     compliance: t <= 4,
+    ...(chainCase ? { chain: true } : {}),
   };
 }
 
@@ -557,6 +582,8 @@ export type IpcAttempt = {
   cite?: string;
   /** planted case: an IPC part already came back "not the part on this airplane" */
   revealed?: boolean;
+  /** part chain: "not in the IPC" (the logbook research is next) */
+  notipc?: boolean;
 };
 /** soft: a pointer (a part the AMM calls for, an SB to log) that costs nothing */
 export type IpcNote = { ok: boolean; text: string; soft?: boolean };
@@ -624,6 +651,25 @@ export function wouldReveal(m: IpcModel, a: Pick<IpcAttempt, 'lines' | 'revealed
 }
 
 export function scoreIpc(m: IpcModel, a: IpcAttempt): IpcScore {
+  if (a.notipc) {
+    // the part chain's other answer: the part isn't in this book, research the records
+    const p = m.ac.plant;
+    return m.planted
+      ? {
+          score: 1,
+          fault: null,
+          notes: [{ ok: true, text: `Not in the IPC: ${m.ac.registration} carries ${p?.stc ? `STC ${p.stc}` : 'a field-approved alteration'} (${p?.holder}) on ${m.ata}. The logbooks and engineering are next.` }],
+          summary: 'Not in the IPC: research the records',
+          parts: { pn: 1, qty: 1, reason: 1 },
+        }
+      : {
+          score: 0.1,
+          fault: null,
+          notes: [{ ok: false, text: `The part is in IPC Fig ${m.fig.fig}: ${m.expect[0].pn} (item ${m.expect[0].item}). Nothing on ${m.ac.registration} replaced it.` }],
+          summary: `Sent to research, but it's in the IPC: ${m.expect[0].pn}`,
+          parts: { pn: 0, qty: 0, reason: 0 },
+        };
+  }
   const notes: IpcNote[] = [];
   const flaws: string[] = [];
   let fault: string | null = null;
@@ -1297,6 +1343,8 @@ const CSS = `
 .ipcz .lx{width:44px;height:44px;font-size:16px;color:${C.inkSoft}}
 .ipcz .iorder{align-self:stretch;min-height:48px;border-radius:14px;background:${C.seaDeep};color:${C.white};font-size:16px;font-weight:900;letter-spacing:.3px;box-shadow:0 2px 0 rgba(0,0,0,.18)}
 .ipcz .iorder[disabled]{background:${C.sandDeep};color:rgba(31,42,48,.45);box-shadow:none}
+.ipcz .inot{grid-column:1/-1;min-height:44px;border-radius:12px;background:${C.paper};color:${C.ink};font-size:14px;font-weight:800;box-shadow:inset 0 0 0 2px rgba(31,42,48,.22)}
+.ipcz .inot[disabled]{opacity:.5}
 .ipcz .apr{grid-column:1/-1;display:flex;align-items:center;gap:8px;background:${C.white};border-radius:12px;padding:4px 4px 4px 10px;box-shadow:inset 0 0 0 2px ${C.mech}}
 .ipcz .apr div{flex:1;min-width:0;display:flex;flex-direction:column}
 .ipcz .apr b{font-size:11px;letter-spacing:.6px}
@@ -1635,7 +1683,8 @@ export const ipc: PuzzleDef = {
         <div class="slh"><span>PARTS REQUEST</span><span>${esc(ac.registration)} · ${esc(m.ata)}</span></div>
         <div class="lines">${lh || `<div class="empty">${m.tier === 0 ? 'Tap the part’s row, then “Add to request”.' : 'Empty. Select a row, then Add.'}</div>`}</div>
         <button class="iorder" data-act="order" ${lines.length && !finished ? '' : 'disabled'}>Order</button>
-        ${apr}`;
+        ${apr}
+        ${m.chain ? `<button class="inot" data-act="notipc" ${finished ? 'disabled' : ''}>Not in the IPC · research the records</button>` : ''}`;
     }
 
     /** the P/N flies from where it was picked into its line on the slip */
@@ -1667,6 +1716,12 @@ export const ipc: PuzzleDef = {
 
     function addLine(src: 'ipc' | 'ica', r: IpcRow, from?: DOMRect) {
       if (finished) return;
+      // part chain: an alteration's parts go on only with engineering's approval, and that's the research step
+      if (m.chain && src === 'ica') {
+        host.fx.tap();
+        host.status('ICA parts need engineering approval: send it for research (Not in the IPC)');
+        return;
+      }
       const have = lines.find((l) => l.pn === r.pn && l.src === src);
       if (have) {
         host.fx.tap();
@@ -1696,7 +1751,7 @@ export const ipc: PuzzleDef = {
       if (!m.teach) return;
       let t: string;
       // blind: the coach follows your own steps, never what the answer needs
-      if (blind) {
+      if (blind && !m.chain) {
         if (selItem === null && !lines.length) t = 'Tap the circled callout. Then decide which rows fit this airplane.';
         else if (!m.premarked && (!marks.ab || !marks.cd)) t = `Mark the effectivity codes: S/N from the data plate, ${sbFig} from the Records.`;
         else if (!lines.length) t = 'Read the notes (NP, SUPSD BY), pick the row whose EFF fits, then Add it to the request.';
@@ -1709,7 +1764,9 @@ export const ipc: PuzzleDef = {
       const has = (e: Expected) => lines.some((l) => e.accept.includes(l.pn) || l.pn === e.old?.pn);
       // what the book or the AMM still wants on the request: the SB set, then the AMM parts
       const next = [...m.expect.slice(1), ...m.optional].find((e) => !has(e));
-      if (m.planted) {
+      if (m.chain && (m.planted || blind)) {
+        t = `Is the part on ${ac.registration} the one this IPC lists? Check the Records (337s): if an alteration replaced it, it's “Not in the IPC”, and the logbooks come next.`;
+      } else if (m.planted) {
         const ica = lines.some(approvalLine);
         if (!ica) t = `Not in this IPC? Records → 337s: find the STC on ATA ${m.ata}, open its ICA and add the part.`;
         else if (!cite) t = 'Cite entry: the logbook entry that recorded the STC installation.';
@@ -1892,7 +1949,7 @@ export const ipc: PuzzleDef = {
           <div class="istamp" style="color:${C.mech}">DOESN’T FIT</div>
           <div class="vn"><i>!</i><span>At the airplane: the unit installed is ${esc(alt.holder)} P/N ${esc(main.pn)}, ${esc(main.nomen)}. IPC Fig ${fig.fig} does not list it.</span></div>
           <div class="vn"><i>→</i><span>The part does not exist in this book. Check the logged history of this airplane, then get engineering approval.</span></div>
-          <div class="vbtns"><button data-act="vclose">Back to the IPC</button><button class="pri" data-act="vlogs">Open the logbooks</button></div>`);
+          <div class="vbtns"><button data-act="vclose">Back to the IPC</button>${m.chain ? '<button class="pri" data-act="notipc">Not in the IPC: research it</button>' : '<button class="pri" data-act="vlogs">Open the logbooks</button>'}</div>`);
         host.status('Not in the IPC: research the records');
         return;
       }
@@ -1902,7 +1959,21 @@ export const ipc: PuzzleDef = {
     function finish(a: IpcAttempt) {
       finished = true;
       const sc = scoreIpc(m, a);
-      const res = result(sc.score, sc.summary, { pn: sc.parts.pn, qty: sc.parts.qty, reason: sc.parts.reason, fault: sc.fault, case: m.caseKey, planted: m.planted });
+      // the part chain moves on with what was ordered (right or wrong shows at receiving)
+      const main = a.lines.find((l) => l.src === 'ipc' && baseItem(fig.rows.find((r) => r.pn === l.pn)?.item ?? '') === m.item) ?? a.lines.find((l) => l.src === 'ipc');
+      const chainOut = m.chain ? { chain: a.notipc ? { outcome: 'notipc' } : main ? { outcome: 'pn', pn: main.pn, qty: main.qty } : { outcome: 'none' } } : {};
+      const res = result(sc.score, sc.summary, { pn: sc.parts.pn, qty: sc.parts.qty, reason: sc.parts.reason, fault: sc.fault, case: m.caseKey, planted: m.planted, ...chainOut });
+      if (blind && a.notipc) {
+        showCard(`
+          <div class="istamp" style="color:${C.seaDeep}">NOT IN IPC</div>
+          <div class="vn"><i>·</i><span>${esc(ac.registration)} · ${esc(m.ata)} · ${esc(m.squawk)}</span></div>
+          <div class="vn"><i>→</i><span>Research ${esc(ac.registration)}'s logbooks for how the part got there, then engineering.</span></div>`);
+        refreshSlip();
+        host.fx.snap();
+        host.status('Sent for research');
+        settle(host, res, 1600);
+        return;
+      }
       if (blind) {
         // the stamped request is the paperwork: what you ordered and the approval you cited, nothing on whether it was right
         const citeEntry = cite ? ac.log.find((e) => e.id === cite) : undefined;
@@ -1922,7 +1993,7 @@ export const ipc: PuzzleDef = {
         settle(host, res, 1600);
         return;
       }
-      const stampTxt = sc.fault ? 'WRONG PART' : m.planted && sc.parts.pn > 0 && sc.parts.reason < 1 ? 'HELD' : res.score >= 0.6 ? 'PULLED' : 'NOT RIGHT';
+      const stampTxt = a.notipc ? (res.score >= 0.6 ? 'NOT IN IPC' : 'IT IS IN THE IPC') : sc.fault ? 'WRONG PART' : m.planted && sc.parts.pn > 0 && sc.parts.reason < 1 ? 'HELD' : res.score >= 0.6 ? 'PULLED' : 'NOT RIGHT';
       const col = sc.fault || res.score < 0.6 ? C.rust : C.palm;
       showCard(`
         <div class="istamp" style="color:${col}">${stampTxt}</div>
@@ -2359,6 +2430,10 @@ export const ipc: PuzzleDef = {
         return;
       }
       if (act === 'order') return order();
+      if (act === 'notipc') {
+        if (finished || host.paused()) return;
+        return finish({ ...attempt(), notipc: true });
+      }
       const sqEl = t.closest<HTMLElement>('.sq');
       if (sqEl) {
         sqEl.classList.toggle('open');
@@ -2549,7 +2624,8 @@ export const ipc: PuzzleDef = {
         if (finished) return result(scoreIpc(m, attempt()).score, 'Time');
         finished = true;
         const sc = scoreIpc(m, attempt());
-        return result(sc.score, sc.summary, { pn: sc.parts.pn, qty: sc.parts.qty, reason: sc.parts.reason, fault: sc.fault, case: m.caseKey, planted: m.planted, timeUp: true });
+        // part chain: time ran out before anything was ordered or sent for research
+        return result(sc.score, sc.summary, { pn: sc.parts.pn, qty: sc.parts.qty, reason: sc.parts.reason, fault: sc.fault, case: m.caseKey, planted: m.planted, timeUp: true, ...(m.chain ? { chain: { outcome: 'none' } } : {}) });
       },
       destroy() {
         cancelPending();

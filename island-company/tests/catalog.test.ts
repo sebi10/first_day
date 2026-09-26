@@ -8,7 +8,8 @@ import { PUZZLES } from '../src/puzzles';
 import type { PuzzleId } from '../src/puzzles/types';
 import { aircraftOf } from '../src/sim/aircraft';
 import { CATALOG, CATALOG_BY_KIND, FIN_TASKS, MODELS, PROJECTS, TOOLS } from '../src/sim/data';
-import { createIsland } from '../src/sim/engine';
+import { apply, chainWouldOpen, createIsland } from '../src/sim/engine';
+import { hashSeed } from '../src/sim/rng';
 import type { Asset, Order } from '../src/sim/types';
 import { islandAircraft, launchFor } from '../src/ui/select';
 
@@ -27,8 +28,9 @@ describe('catalog wiring', () => {
     for (const t of Object.values(FIN_TASKS)) expect(PUZZLES[t.puzzle].role).toBe('fin');
   });
 
-  // the paperwork puzzles are not work orders of their own: the part chain (a squawk → the
-  // IPC → the logbooks and an engineering approval) launches them on the job it belongs to
+  // the paperwork puzzles are not work orders of their own: the part chain (src/sim/chain.ts: a job
+  // finds a part → the IPC lookup → the logbook research and an engineering approval → install)
+  // launches them as its steps, on the plane the job was on
   const CHAIN: ReadonlySet<PuzzleId> = new Set<PuzzleId>(['ipc', 'logbook']);
 
   it('every mechanic puzzle is on the work-order catalog (the part-chain puzzles are launched by the chain)', () => {
@@ -74,6 +76,32 @@ describe('catalog wiring', () => {
   });
 });
 
+describe('the part chain launches the paperwork puzzles', () => {
+  it('its lookup is the IPC and its research the logbooks, on the island airplane with its alteration', () => {
+    let s = createIsland({ id: 'pc', name: 'Chain Isle', now: 1_700_000_000_000, tz: 'UTC', seed: 11, creator: { uid: 'a', name: 'Ana', role: 'mech' } });
+    s = apply(s, { t: 'join', uid: 'b', name: 'Ben', role: 'elec' }, 1_700_000_000_000).s;
+    s = apply(s, { t: 'join', uid: 'c', name: 'Cy', role: 'fin' }, 1_700_000_000_000).s;
+    for (const r of ['mech', 'elec', 'fin'] as const) s = apply(s, { t: 'week0Done', role: r }, 1_700_000_000_000).s;
+    s.week = 6;
+    s.tier = 2;
+    s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 70, touchedWeek: 6, sinceInspection: 0 });
+    s.orders = [];
+    const job = { id: 'j', role: 'mech', kind: 'tires', assetId: 'p2', title: 'Tire and brake', puzzle: 'torque', tier: 2, cost: 320, parts: 0, gain: 10, createdWeek: 6, deferrals: 0, lastDeferredWeek: null, status: 'ready', seed: 0 } as Order;
+    s.orders.push(job);
+    for (let i = 0; i < 400 && !chainWouldOpen(s, job, 'mech'); i++) job.seed = hashSeed('cat', i);
+    s = apply(s, { t: 'complete', role: 'mech', orderId: 'j', score: 0.9, perfect: false, week: 6 }, 1_700_000_000_000).s;
+    const look = s.orders.find((o) => o.id === s.chain!.stepId)!;
+    expect(look.puzzle).toBe('ipc');
+    const l = launchFor(s, look, 'mech');
+    expect(l.context!.chain!.step).toBe('lookup');
+    expect(l.context!.aircraft).toBe(islandAircraft(11, s.assets.find((a) => a.id === 'p2')!));
+    s = apply(s, { t: 'complete', role: 'mech', orderId: look.id, score: 0.9, perfect: false, week: 6, data: { chain: { outcome: 'notipc' } } }, 1_700_000_000_000).s;
+    const research = s.orders.find((o) => o.id === s.chain!.stepId)!;
+    expect(research.puzzle).toBe('logbook');
+    expect(launchFor(s, research, 'mech').context!.chain!.step).toBe('research');
+  });
+});
+
 describe('launch wiring', () => {
   it("a paperwork puzzle on a plane gets the island's own airplane, built once; other jobs don't pay for it", () => {
     const base = createIsland({ id: 'lw', name: 'Launch Isle', now: 1_700_000_000_000, tz: 'UTC', seed: 4242, creator: { uid: 'a', name: 'Ana', role: 'mech' } });
@@ -90,7 +118,9 @@ describe('launch wiring', () => {
       expect(launchFor(s, order(puzzle, 'tires'), 'mech').context!.aircraft).toBe(a);
       expect(islandAircraft(4242, cargo)).toBe(a);
     }
+    // a card-driven job gets the task card's numbers, not the whole airplane
     expect(launchFor(s, order('torque', 'tires'), 'mech').context!.aircraft).toBeUndefined();
+    expect(launchFor(s, order('torque', 'tires'), 'mech').context!.card!.torque!.key).toBe('tieNut');
     // the island doc never carries it
     expect(JSON.stringify(s)).not.toContain('registration');
   });

@@ -37,7 +37,7 @@ export type PuzzleLaunch = {
   /** blind sign-off: a real job at puzzle tier 2+ gives no verdict (the engine still gets the true score) */
   blind?: boolean;
   /** blind: the entry the sealed job shows (a logbook entry, a closed work order, a filed task) */
-  signoff?: { by: string; week: number; header: string; stamp: string; later: string };
+  signoff?: { by: string; week: number; header: string; stamp: string; later: string; /** the part chain opened: the job stopped for a part */ stopped?: boolean };
 };
 
 const SEEN = 'ic.seen.';
@@ -321,7 +321,7 @@ export function PuzzleHost({
               </div>
             </div>
           )}
-          {blind && (sealed || res) && <SealedEntry launch={launch} />}
+          {blind && (sealed || res) && <SealedEntry launch={launch} res={res ?? held.current} />}
           {res && blind && (
             <div class="result">
               <div class="card col" style={{ gap: 10 }}>
@@ -330,8 +330,8 @@ export function PuzzleHost({
                     <Icon name="pen" size={30} />
                   </div>
                   <div class="col" style={{ gap: 2 }}>
-                    <h2>Signed off</h2>
-                    <span class="muted">No verdict on a real job.</span>
+                    <h2>{launch.signoff?.stopped ? 'Work stopped' : 'Signed off'}</h2>
+                    <span class="muted">{launch.signoff?.stopped ? 'A part is needed before it can be signed off.' : 'No verdict on a real job.'}</span>
                   </div>
                 </div>
                 <div class="label">{launch.signoff?.later ?? 'How good it was shows up later: in the asset’s health, an inspection, or an incident.'}</div>
@@ -370,9 +370,23 @@ export function PuzzleHost({
   );
 }
 
+/** What a part chain step handed in (a fact, not a verdict): the P/N ordered, or where the request went. */
+function handedIn(r: PuzzleResult | null): string | null {
+  const c = r?.data?.chain as { outcome?: string; pn?: string | null; route?: string | null } | undefined;
+  if (!c) return null;
+  if (c.outcome === 'notipc') return 'Not in the IPC: sent for research in the logbooks';
+  if (c.outcome === 'pn' && c.pn) return `Ordered P/N ${c.pn}`;
+  if (c.outcome === 'none') return 'Nothing ordered';
+  if (c.route === 'eng' || c.route === 'new') return 'Request sent to engineering';
+  if ((c.route === 'ipc' || c.route === 'pma') && c.pn) return `Logbook entry signed: P/N ${c.pn} to go on`;
+  if ('route' in c) return 'Nothing handed in';
+  return null;
+}
+
 /** The sealed job: a logbook entry, not a score. */
-function SealedEntry({ launch }: { launch: PuzzleLaunch }) {
+function SealedEntry({ launch, res }: { launch: PuzzleLaunch; res?: PuzzleResult | null }) {
   const so = launch.signoff;
+  const what = handedIn(res ?? null);
   return (
     <div class="sealed" role="status">
       <div class="logentry">
@@ -382,6 +396,7 @@ function SealedEntry({ launch }: { launch: PuzzleLaunch }) {
         </span>
         <b style={{ fontSize: 17, lineHeight: 1.25 }}>{launch.title}</b>
         {launch.subtitle && <span class="label">{launch.subtitle}</span>}
+        {what && <span style={{ fontSize: 15, fontWeight: 700 }}>{what}</span>}
         <div class="row spread" style={{ marginTop: 6, alignItems: 'flex-end' }}>
           <span class="col" style={{ gap: 0 }}>
             <span class="label">Signed</span>

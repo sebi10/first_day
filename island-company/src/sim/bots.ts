@@ -1,5 +1,6 @@
 // Scripted players for the paper sim (scripts/balance.ts) and tests.
 // They call the same reducer as real phones, so balance numbers are real.
+import { botChainData, islandAircraft, openChain } from './chain';
 import { ECON, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
 import { charterLoad, expectedDeferralCost, logistic, occupancy, urgency } from './econ';
@@ -81,11 +82,30 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
   // repairs and redos are real jobs and take a slot
   const reports = ready.filter((o) => o.kind === 'report');
   const jobs = ready.filter((o) => o.kind !== 'report').slice(0, bot.perTurn ?? 4);
-  for (const o of [...reports, ...jobs]) {
+  const play = (o: (typeof ready)[number]) => {
     const sc = score(r, skill);
-    s = step(s, { t: 'complete', role, orderId: o.id, score: sc, perfect: sc >= 0.95 }, now);
+    s = step(s, { t: 'complete', role, orderId: o.id, score: sc, perfect: sc >= 0.95, data: chainData(s, o, skill, r) }, now);
+  };
+  for (const o of [...reports, ...jobs]) play(o);
+  // a job that found a part: the IPC lookup comes straight after it, if there's a slot left (the plane is down)
+  let extra = Math.max(1, (bot.perTurn ?? 4) - jobs.length);
+  for (let guard = 0; guard < 3 && extra > 0; guard++) {
+    const c = openChain(s);
+    const o = c?.stepId ? s.orders.find((x) => x.id === c.stepId && x.role === role && x.status === 'ready') : undefined;
+    if (!o) break;
+    play(o);
+    extra--;
   }
   return s;
+}
+
+/** A part chain's lookup or research: what the bot hands in, by its skill (src/sim/chain.ts). */
+function chainData(s: IslandState, o: IslandState['orders'][number], skill: number, r: Rng): Record<string, unknown> | undefined {
+  const c = openChain(s);
+  if (!c || !o.chain || c.id !== o.chain.id || (o.chain.step !== 'lookup' && o.chain.step !== 'research')) return undefined;
+  const asset = s.assets.find((a) => a.id === c.assetId);
+  if (!asset) return undefined;
+  return botChainData(islandAircraft(s.seed, asset), c, o.chain.step, skill, r);
 }
 
 function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
@@ -103,11 +123,14 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     const asset = s.assets.find((a) => a.id === o.assetId);
     const exp = expectedDeferralCost(s, o).cost;
     // a known defect's repair is safety work: the defect is still in service
-    const critical = (asset && asset.health < 70) || o.kind === 'inspect100' || o.kind === 'codeprep' || o.kind === 'repair' || o.deferrals >= 2;
+    // so is a part for a plane that's down, and engineering's fee to get it approved
+    const critical = (asset && asset.health < 70) || o.kind === 'inspect100' || o.kind === 'codeprep' || o.kind === 'repair' || !!o.chain || o.deferrals >= 2;
     const worth = exp >= o.cost * 0.6 || critical;
     // like a person would: cheap safety-critical work gets approved even when cash is tight
     const cheapCritical = critical && o.cost <= 600 && s.cash - o.cost >= ECON.freezeBelow;
-    if ((worth && s.cash - o.cost >= reserve) || cheapCritical) s = step(s, { t: 'approve', orderId: o.id }, now);
+    // the part for a grounded plane is what gets the revenue back: find the money
+    const aog = !!o.chain && s.cash - o.cost >= 0;
+    if ((worth && s.cash - o.cost >= reserve) || cheapCritical || aog) s = step(s, { t: 'approve', orderId: o.id }, now);
     else if (o.lastDeferredWeek !== s.week) s = step(s, { t: 'defer', orderId: o.id, reason: s.cash - o.cost < reserve ? 'cash' : 'priority' }, now);
   }
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);

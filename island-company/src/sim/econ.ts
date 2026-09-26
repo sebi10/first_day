@@ -33,8 +33,12 @@ export function charterLoad(s: IslandState, rate: number, week = s.week) {
 
 /** safety calls: a grounded plane or a red-tagged house is out of service this week */
 export const isTagged = (s: IslandState, id: string) => !!s.tags?.[id];
+/** a plane waiting on a part (the open part chain): not airworthy until it's installed */
+export const isAog = (s: IslandState, id: string) => !!s.chain && s.chain.step !== 'done' && s.chain.assetId === id;
+/** out of service (a safety call, or AOG for a part): no flights or guests, and nothing can fail in service */
+export const outOfService = (s: IslandState, id: string) => isTagged(s, id) || isAog(s, id);
 export function capOf(s: IslandState, p: Asset, weather: Weather = s.weather) {
-  return isTagged(s, p.id) ? 0 : planeCapacity(p, s.tier, weather);
+  return outOfService(s, p.id) ? 0 : planeCapacity(p, s.tier, weather);
 }
 
 export const rateBounds = (base: number, receivership: boolean) => ({
@@ -213,7 +217,9 @@ export function urgency(s: IslandState, o: Order) {
     // a crewmate is stuck until it's fixed; a known defect is still in service
     (o.kind === 'report' ? 150 : 0) +
     (o.kind === 'repair' ? 40 : 0) +
-    (o.redo ? 15 : 0)
+    (o.redo ? 15 : 0) +
+    // a plane is down until the part chain is through
+    (o.chain ? 120 : 0)
   );
 }
 

@@ -8,6 +8,7 @@ import { powered, tierDef, urgency } from '../sim/econ';
 import { ROLES, type IslandState, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
+import { ChainBanner } from './chain';
 import { Desk } from './desk';
 import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
@@ -344,6 +345,7 @@ function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: bool
                 </span>
               </div>
             )}
+            <ChainBanner s={s} role={r} />
             <CrewProject ctl={ctl} onPlay={onPlay} />
             {r === 'fin' ? <Desk ctl={ctl} onPlay={onPlay} /> : <OpsPanel ctl={ctl} role={r} onPlay={onPlay} />}
           </>

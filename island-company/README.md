@@ -72,7 +72,7 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 - Each new tier is a **crew project**: one real job per trade, and the tier opens when all three are done. See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full crew briefing.
 - Resolution is deterministic: the three turns plus a seeded incident roll. The seed is shown on the board review, so any week can be replayed.
 
-## Puzzles (17: seven for the mechanic, five each for the electrician and the analyst, all modelled on the real job)
+## Puzzles (19: nine for the mechanic, five each for the electrician and the analyst, all modelled on the real job)
 
 | Mechanic | Electrician | Analyst |
 | --- | --- | --- |
@@ -83,8 +83,14 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 | Safety wire (tightening direction, twists/inch) | Conduit bending (offsets, saddles, 360° rule) | Three-way match (PO / receipt / invoice) |
 | Hydraulic servicing (discharge the accumulator, placard fluid to FULL, nitrogen precharge, bleed) | | |
 | Ground power start (cart set to the placard, plug seated, volts checked; turbine ITT from tier 4) | | |
+| IPC lookup (part chain: the P/N for this S/N and SB status, or "not in the IPC") | | |
+| Logbook research (part chain: how the assembly got there, and the engineering request) | | |
 
 Difficulty comes from the order's tier (1–5), which climbs as the island grows. It never depends on your level. Levels unlock **tools** that change how a puzzle plays (for example the click-type wrench, non-aqueous developer, clamp meter and driver tree): convenience or raw readings to interpret, never the answer. From tier 3 the teaching aids are gone, so real trade knowledge is what separates the three of you.
+
+**The manual.** Every mechanic job on a plane opens with its AMM task card: the airplane's data plate (S/N, SBs complied with) and the card's torques, servicing values and consumables with both effectivities printed. Tiers 0–2 mark this airplane's line; from tier 3 you match the S/N and SB status yourself. The torque and hydraulic puzzles use the card's values. Working to the other effectivity's value leaves a hidden defect.
+
+**The part chain** (from week 3 at tier 2). Sometimes a job on a plane finds a part it can't be finished without. The plane is grounded, and all three seats play it out. The mechanic looks the part up in the IPC for that S/N, and the analyst approves the AOG purchase. If the part isn't in the IPC, the mechanic researches the logbooks (an STC or a field-approved 337), and the analyst pays engineering, whose answer comes when the week resolves. When the part arrives, the mechanic installs it and finishes the original job. A wrong P/N is caught at receiving and sent back with a restocking fee. A part put on without engineering approval turns up at a later inspection. See [docs/ONBOARDING.md](docs/ONBOARDING.md) §5 and *The manual and the part chain* in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 From puzzle tier 2 a real work order is **signed off blind**, whatever the puzzle (hydraulic servicing and the ground power start included): no score, no ✓/✗, no "wrong" while you work and no reveal at the end. What the instruments and the part show stays (a gauge needle, fluid spilling over, sparks from a live plug). Careless work can leave a hidden defect that surfaces weeks later as a write-up or a failure, traced back to whoever signed it off; then comes a repair and the original job again. See [docs/ONBOARDING.md](docs/ONBOARDING.md) and the *Consequences* section of [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -96,12 +102,15 @@ npm run balance      # paper sim: 10 scripted teams x 26 weeks x 30 seeds
 npm run typecheck
 npm run build        # dist/ with an offline service worker
 open http://localhost:5173/lab.html?p=torque&tier=3&seed=1   # puzzle lab (&blind=1: as a real job, no verdict)
+#   &card=1&job=prop              torque / hydraulics on the island plane's AMM task card (both effectivities)
+#   &chain=lookup&plant=32-40     the part chain's IPC lookup on a plane with an STC on its brakes (&via=field: a 337)
+#   p=logbook&chain=research&plant=32-40   the chain's logbook research
 node scripts/e2e.mjs shots/          # scripted playtest (phone); add `desktop` for 1280x820
 ```
 
 | Path | What |
 | --- | --- |
-| `src/sim/` | Pure, deterministic engine: `engine.ts` (reducer + weekly resolution), `econ.ts` (demand curves, risk), `data.ts` (**every tunable number**), `bots.ts` (paper-sim players) |
+| `src/sim/` | Pure, deterministic engine: `engine.ts` (reducer + weekly resolution, the part chain's steps), `econ.ts` (demand curves, risk), `data.ts` (**every tunable number**), `bots.ts` (paper-sim players), `aircraft.ts` (each plane's seeded records, IPC and AMM task cards), `chain.ts` (the part chain's airplane side: what's found, which P/N fits, prices, whose move) |
 | `src/puzzles/` | 17 canvas puzzles, each a pure `generate/score` model plus a view |
 | `src/net/` | `local.ts` (this device), `firebase.ts` (Firestore single-doc transactions + offline outbox), `session.ts` |
 | `src/ui/` | Preact screens: island SVG, role panels, analyst desk, board review, week 0 |

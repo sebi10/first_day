@@ -1,12 +1,12 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
 import type { PuzzleId } from '../puzzles/types';
-import { aircraftOf, type Aircraft } from '../sim/aircraft';
+import { chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { ECON, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
-import { forecastContext, listPrice } from '../sim/engine';
+import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
 import { flightsAvailable, flightsPerPlane, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
-import type { Asset, IslandState, Order, Role } from '../sim/types';
+import type { IslandState, Order, Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
 
 export type Block = { from: Role; to: Role; text: string };
@@ -28,6 +28,13 @@ export function blocks(s: IslandState): Block[] {
   if (powered(s).gridDown) out.push({ from: 'elec', to: 'mech', text: 'grid down: hangar tools offline' });
   if (houses(s).length && housesRentable(s) === 0) out.push({ from: 'elec', to: 'fin', text: 'no rentable houses: no revenue' });
   if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
+  // the part chain: a grounded plane waits on whoever's move it is (the mechanic waits on the analyst's card)
+  const ch = openChain(s);
+  if (ch) {
+    const m = chainMove(s, ch);
+    const asset = s.assets.find((a) => a.id === ch.assetId);
+    if (m.who === 'fin') out.push({ from: 'fin', to: 'mech', text: `${m.text} (${asset?.name ?? 'a plane'} is AOG)` });
+  }
   // a crewmate's report: the fixer holds the reporter up until it's fixed
   for (const o of openReports(s)) {
     const rep = o.report!;
@@ -79,22 +86,11 @@ function statusRank(o: Order) {
 /** the mechanic puzzles that read the airplane's own records (PuzzleContext.aircraft) */
 const READS_AIRCRAFT: ReadonlySet<PuzzleId> = new Set<PuzzleId>(['ipc', 'logbook']);
 
-/**
- * The island's own airplane: identity, logbooks, IPC and AMM, derived from the
- * island seed and the asset (never stored in the island doc). Building one
- * writes years of logbooks, so each is built once and kept.
- */
-const fleet = new Map<string, Aircraft>();
-export function islandAircraft(seed: number, asset: Pick<Asset, 'id' | 'model'>): Aircraft {
-  const key = `${seed}|${asset.id}|${asset.model}`;
-  let ac = fleet.get(key);
-  if (!ac) {
-    // a device only ever sees a few islands: a small cap keeps a long session bounded
-    if (fleet.size >= 12) fleet.clear();
-    fleet.set(key, (ac = aircraftOf(seed, asset.id, asset.model)));
-  }
-  return ac;
-}
+/** the island's own airplane (src/sim/chain.ts): derived from the seed, with its alteration, built once per device */
+export { islandAircraft };
+
+/** puzzles that work to the task card's numbers (both effectivities printed; the mechanic matches S/N and SB status) */
+const CARD_DRIVEN: ReadonlySet<PuzzleId> = new Set<PuzzleId>(['torque', 'hydraulics']);
 
 export function launchFor(s: IslandState, o: Order, role: Role, assist = false): PuzzleLaunch {
   const p = s.players[role];
@@ -104,6 +100,8 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   const tier = launchTier(s, o, role, assist);
   // a real job at tier 2+: no verdict now, it shows up later
   const blind = isBlind(s, o, role, assist);
+  // the part chain: this sign-off will find a part it can't finish without (seeded, never by the score)
+  const stops = !assist && chainWouldOpen(s, o, role);
   const reporter = o.report ? (s.players[o.report.by]?.name ?? ROLE_LABEL[o.report.by]) : null;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
   // a repair or a report names the assembly / part / device it's about; otherwise the kind says it.
@@ -123,6 +121,15 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   if (o.puzzle === 'forecast') Object.assign(context, forecastContext(s));
   // paperwork on a plane: the island's own airplane (twin / cargo / float), its records as they are
   if (asset?.kind === 'plane' && READS_AIRCRAFT.has(o.puzzle)) context.aircraft = islandAircraft(s.seed, asset);
+  // the part chain's lookup and research: this part, as the job found it
+  const ch = openChain(s);
+  if (ch && o.chain && o.chain.id === ch.id && (o.chain.step === 'lookup' || o.chain.step === 'research'))
+    context.chain = { step: o.chain.step, tag: ch.tag, item: ch.item, found: ch.found ?? '' };
+  // the manual: torque and servicing values come from the plane's own task card (marked while the game teaches)
+  if (asset?.kind === 'plane' && o.role === 'mech' && CARD_DRIVEN.has(o.puzzle)) {
+    const card = manualCard(islandAircraft(s.seed, asset), o.job ?? o.kind, o.puzzle, tier <= 2);
+    if (card) context.card = card;
+  }
   return {
     puzzle: o.puzzle,
     seed: hashSeed(o.seed, role),
@@ -140,7 +147,14 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
           by: p?.name ?? ROLE_LABEL[role],
           week: s.week,
           ...signoffWords(o, role),
-          later: asset
+          ...(stops ? { header: 'Work stopped', stamp: 'Part needed', stopped: true } : {}),
+          later: stops
+            ? `The job found a part it can't be finished without: ${asset?.name ?? 'the plane'} is grounded until it's on. Next: look it up in the IPC.`
+            : o.chain?.step === 'lookup'
+              ? 'What you ordered shows when it arrives; a part sent for research, when engineering answers.'
+              : o.chain?.step === 'research'
+                ? 'Engineering answers when the week resolves (after the analyst approves the review fee).'
+                : asset
             ? `How good it was shows up later: in ${asset.name}'s health, an inspection, or an incident.`
             : o.report
               ? `How good it was shows up later: if the fix doesn't hold, ${reporter} will be back.`
@@ -160,6 +174,9 @@ function signoffWords(o: Order, role: Role): { header: string; stamp: string } {
   if (kind === 'wb' || o.kind === 'wb') return { header: 'Load sheet', stamp: 'Released' };
   if (o.kind === 'inspect100' || o.kind === 'corrosion' || o.kind === 'spar') return { header: 'Logbook entry', stamp: 'Airworthy' };
   if (o.report || o.kind === 'project') return { header: 'Shop log', stamp: 'Work complete' };
+  // the part chain's paperwork
+  if (o.chain?.step === 'lookup') return { header: 'IPC lookup', stamp: 'Handed in' };
+  if (o.chain?.step === 'research') return { header: 'Logbook research', stamp: 'Handed in' };
   // a ground power start is line work, not maintenance: no logbook entry, no return to service
   if (o.kind === 'gpustart') return { header: 'Line log', stamp: 'Work complete' };
   return { header: 'Logbook entry', stamp: 'Return to service' };
