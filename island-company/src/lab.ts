@@ -2,7 +2,13 @@
 // /lab.html?p=torque&tier=3&seed=1&tools=clickWrench,gaugeDamper
 //   &blind=1  blind sign-off (no verdict while you work)   &job=prop  the scenario a work order picks
 //   &asset=Cargo%20C-7  which plane (paperwork puzzles build that airplane's records from it)
-import type { PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
+//   &card=1  card-driven torque / hydraulic servicing: the island plane's AMM task card (both effectivities)
+//   &chain=lookup|research&tag=lining  the part chain's IPC lookup or logbook research (&plant=32-40&via=stc|field: the plane carries that alteration)
+//   &isl=7  the island seed the plane (and its card) comes from
+import type { PuzzleContext, PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
+import { aircraftOf, type Ata, type PlantVia } from './sim/aircraft';
+import { chainFind, manualCard } from './sim/chain';
+import { rng } from './sim/rng';
 import { fx } from './ui/feedback';
 import '@fontsource-variable/manrope';
 import './styles.css';
@@ -40,7 +46,7 @@ function show(r: PuzzleResult) {
   res.textContent = blind ? 'Signed off · no verdict on a real job' : `score ${r.score.toFixed(2)}${r.perfect ? ' PERFECT' : ''} — ${r.summary} ${r.data ? JSON.stringify(r.data) : ''}`;
 }
 
-const context = {
+const context: PuzzleContext = {
   market: { low: 220, high: 460, fair: 330, cap: 380 },
   cashHistory: [8000, 8600, 9100, 8700, 9800],
   projection: [10400, 11100, 11500, 12300],
@@ -49,6 +55,21 @@ const context = {
   assetName: q.get('asset') ?? 'Twin N-12',
   job,
 };
+
+// the island's plane: its task card, or the part chain on it
+const asset = context.assetName!.toLowerCase();
+const model = asset.includes('cargo') ? 'cargo' : asset.includes('float') ? 'float' : 'twin';
+const plant = q.get('plant') as Ata | null;
+const ac = aircraftOf(Number(q.get('isl') ?? 7), model === 'twin' ? 'p1' : model === 'cargo' ? 'p2' : 'p3', model, plant ? { plant, via: (q.get('via') ?? 'stc') as PlantVia } : {});
+if (q.has('card')) context.card = manualCard(ac, job ?? (id === 'hydraulics' ? 'hydraulics' : 'tires'), id, tier <= 2);
+const chainStep = q.get('chain');
+if (chainStep === 'lookup' || chainStep === 'research') {
+  const ata = (plant ?? ({ tires: '32-40', prop: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, Ata>)[job ?? 'tires'] ?? '32-40') as Ata;
+  const f = chainFind(ac, ata, rng(seed));
+  context.aircraft = ac;
+  context.job = job ?? { '32-40': 'tires', '61-10': 'prop', '29-10': 'hydraulics', '23-10': 'avionics', '24-30': 'alternator' }[ata];
+  context.chain = { step: chainStep, tag: q.get('tag') ?? f.tag, item: f.item, found: f.found };
+}
 
 const inst = def.mount(
   {

@@ -1,10 +1,11 @@
 // Mechanic hangar / electrician cottages: assets, work orders, covering.
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
-import { houseBlocker, orderCost, orderTier, planeCapacity, powered } from '../sim/econ';
+import { houseBlocker, isAog, orderCost, orderTier, planeCapacity, powered } from '../sim/econ';
 import { squawkable } from '../sim/engine';
 import type { Asset, Order, Role } from '../sim/types';
 import { Btn, Health, Icon, Sheet, TierDots, usd } from './kit';
+import { hasManual, ManualSection } from './manual';
 import { OrderCard, OrderDetail } from './orders';
 import { capNow, openOrders } from './select';
 import type { Ctl } from './useIsland';
@@ -22,9 +23,10 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
   const cap = capNow(s, role);
   const capped = gridCapped || !!cap?.full;
 
-  // a repair, a redo or a crewmate's report opens its story first (why it exists), with a Start button
+  // a repair, a redo or a crewmate's report opens its story first (why it exists), with a Start button;
+  // a job on a plane opens its manual (the task card) first
   const open = (o: Order) => {
-    if (o.status === 'ready' && !turn?.ended && !capped && !hasOrigin(o)) onPlay(o);
+    if (o.status === 'ready' && !turn?.ended && !capped && !hasOrigin(o) && !hasManual(s, o)) onPlay(o);
     else setSel(o);
   };
 
@@ -41,7 +43,8 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
           s.assets
             .filter((a) => a.kind === 'plane')
             .map((p) => {
-              const cap = planeCapacity(p, s.tier, s.weather);
+              const aog = isAog(s, p.id);
+              const cap = aog ? 0 : planeCapacity(p, s.tier, s.weather);
               const grounded = !!s.tags?.[p.id];
               return (
                 <div class="asset" key={p.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
@@ -51,6 +54,7 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
                   </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     <b class={`num ${cap === 0 && !grounded ? 'fault' : ''}`}>{grounded ? 'GND' : cap === 0 ? 'AOG' : `${cap} fl`}</b>
+                    {aog && <span class="label fault">for a part</span>}
                     <span class="label num">{p.sinceInspection ?? 0}/{ECON.planeInspectionFlights} insp</span>
                   </span>
                   <SafetyCall ctl={ctl} role={role} id={p.id} on={grounded} word="Ground" />
@@ -106,7 +110,7 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
       </div>
       {orders.length === 0 && <div class="card muted">Queue clear. Nice.</div>}
       {orders.map((o) => (
-        <OrderCard key={o.id} s={s} o={o} onOpen={open} held={capped || !!turn?.ended} />
+        <OrderCard key={o.id} s={s} o={o} onOpen={open} held={capped || !!turn?.ended} me={role} />
       ))}
 
       <CoverSection ctl={ctl} role={role} onPlay={onPlay} />
@@ -165,6 +169,8 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
                 Start the job ▸
               </Btn>
             )}
+            {/* the task card: read it before the job (the puzzle works to its numbers) */}
+            {sel.status !== 'done' && sel.status !== 'cancelled' && <ManualSection s={s} o={s.orders.find((x) => x.id === sel.id) ?? sel} />}
             <Btn kind="soft" block onClick={() => setSel(null)}>
               Close
             </Btn>
@@ -176,7 +182,7 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
 }
 
 /** Orders whose detail explains why they exist: open it before the puzzle. */
-export const hasOrigin = (o: Order) => !!(o.repair || o.redo || o.report);
+export const hasOrigin = (o: Order) => !!(o.repair || o.redo || o.report || o.chain);
 
 /** A crewmate's unfixed report holds this seat to fewer jobs: say so before a puzzle is wasted. */
 export function CapNotice({ cap }: { cap: NonNullable<ReturnType<typeof capNow>> }) {

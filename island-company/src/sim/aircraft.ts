@@ -2497,8 +2497,29 @@ export type AmmTask = {
   steps: AmmStep[];
   /** every torque the task uses, both effectivities printed; applies marks this aircraft's */
   torques: TorqueSpec[];
+  /** servicing values (accumulator precharge, approved fluid), both effectivities printed; applies marks this aircraft's */
+  servicing: ServiceSpec[];
   ipcFig: number;
 };
+
+/** A servicing value the card prints by effectivity: a nitrogen precharge, the approved fluids. */
+export type ServiceSpec = {
+  key: 'precharge' | 'fluid';
+  what: string;
+  /** as printed: "800 psi at 70°F", "MIL-PRF-5606 only" */
+  text: string;
+  /** precharge: psi at `refTemp` °F */
+  psi?: number;
+  refTemp?: number;
+  /** fluid: the specifications approved ('MIL-PRF-5606', 'MIL-PRF-83282') */
+  fluids?: string[];
+  eff?: 'A' | 'B' | 'C' | 'D';
+  effText?: string;
+  applies: boolean;
+};
+
+/** Brake / gear accumulator nitrogen precharge by S/N block (psi at 70°F): [A, B] */
+const PRECHARGE: Record<PlaneModel, [number, number]> = { twin: [800, 900], cargo: [900, 1000], float: [750, 850] };
 
 const TASKS: Record<AmmTaskKey, { ata: Ata; sub: string; block: number }> = {
   wheel: { ata: '32-40', sub: '01', block: 401 },
@@ -2539,7 +2560,21 @@ type Card = Pick<AmmTask, 'title' | 'warnings' | 'cautions' | 'tools'> & {
   steps: [string, string, string?][];
   consumables: [('A' | 'B' | 'C' | 'D')?, string?][];
   effNotes: [('A' | 'B' | 'C' | 'D')?, string?][];
+  /** servicing values by effectivity: a precharge in psi at 70°F, or the approved fluid specs */
+  servicing?: ['A' | 'B' | 'C' | 'D', 'precharge' | 'fluid', number | string[]][];
 };
+
+function servicingOf(env: Env, fig: IpcFigure, c: Card): ServiceSpec[] {
+  return (c.servicing ?? []).map(([code, key, v]) => {
+    const base = { eff: code, effText: fig.effCodes.find((e) => e.code === code)!.text, applies: effOk(code, env) };
+    if (key === 'precharge') {
+      const psi = v as number;
+      return { key, what: 'Brake accumulator nitrogen precharge (hydraulic side at 0 psi)', text: `${psi} psi at 70°F`, psi, refTemp: 70, ...base };
+    }
+    const fluids = v as string[];
+    return { key, what: 'Hydraulic fluid', text: fluids.length > 1 ? fluids.join(' or ') : `${fluids[0]} only`, fluids, ...base };
+  });
+}
 
 function card(model: PlaneModel, key: AmmTaskKey): Card {
   const s = SPECS[model];
@@ -2617,13 +2652,37 @@ function card(model: PlaneModel, key: AmmTaskKey): Card {
       return {
         title: 'Hydraulic Power Pack — Servicing and Filter Replacement',
         warnings: [`Aircraft on jacks with the ${s.hydraulics} DOWN and locked; pull the GEAR PUMP breaker before opening the pack.`],
-        cautions: ['MIL-PRF-5606 (red) only. Never mix with MIL-PRF-83282 or phosphate-ester fluid.', 'Relieve system pressure before removing the filter bowl.'],
-        tools: ['Jacks', 'Torque wrench, 20-200 in-lb', 'Safety-wire pliers', 'Clean container'],
-        consumables: [[undefined, 'Hydraulic fluid MIL-PRF-5606'], [undefined, 'Safety wire MS20995C32'], ['A', 'Reservoir capacity 1.3 qt (DH-xx02-3)'], ['B', 'Reservoir capacity 1.6 qt (DH-xx02-5)']],
-        effNotes: [['C', 'POST SB: vented filler cap; do not plug the vent.'], ['D', 'PRE SB: solid filler cap; check it for fluid seepage in turbulence reports.']],
+        cautions: [
+          'Only the fluid the effectivity lists (red: petroleum or synthetic hydrocarbon base). Never phosphate-ester (Skydrol) or automotive brake fluid.',
+          'Relieve system pressure before removing the filter bowl.',
+          'Charge the accumulator with dry nitrogen only. Never shop air or oxygen.',
+        ],
+        tools: ['Jacks', 'Torque wrench, 20-200 in-lb', 'Safety-wire pliers', 'Clean container', 'Nitrogen charging kit and gauge'],
+        consumables: [
+          ['D', 'Hydraulic fluid: MIL-PRF-5606 only (PRE SB)'],
+          ['C', 'Hydraulic fluid: MIL-PRF-5606 or MIL-PRF-83282 (POST SB)'],
+          [undefined, 'Safety wire MS20995C32'],
+          [undefined, 'Nitrogen, dry (BB-N-411)'],
+          ['A', 'Reservoir capacity 1.3 qt (DH-xx02-3)'],
+          ['B', 'Reservoir capacity 1.6 qt (DH-xx02-5)'],
+        ],
+        effNotes: [
+          ['C', 'POST SB: vented filler cap; do not plug the vent. MIL-PRF-83282 approved as an alternate fluid.'],
+          ['D', 'PRE SB: solid filler cap; check it for fluid seepage in turbulence reports. MIL-PRF-5606 only.'],
+          ['A', 'Accumulator precharge: the A value (smaller accumulator).'],
+          ['B', 'Accumulator precharge: the B value (larger accumulator).'],
+        ],
+        servicing: [
+          ['A', 'precharge', PRECHARGE[model][0]],
+          ['B', 'precharge', PRECHARGE[model][1]],
+          ['D', 'fluid', ['MIL-PRF-5606']],
+          ['C', 'fluid', ['MIL-PRF-5606', 'MIL-PRF-83282']],
+        ],
         steps: [
           ['Preparation', 'Pull the GEAR PUMP circuit breaker; open the access panel.'],
           ['Preparation', 'Relieve residual pressure through the emergency release valve.'],
+          ['Accumulator', 'Pump the brakes until the hydraulic gauge reads 0 (accumulator discharged).'],
+          ['Accumulator', 'Check the nitrogen precharge; set it to the effectivity value, corrected for the ramp temperature (gas law, absolute temperature).'],
           ['Filter', 'Cut the safety wire; remove the filter bowl.'],
           ['Filter', 'Replace the filter element and the bowl O-ring (per IPC).'],
           ['Filter', 'Reinstall the bowl and torque it.', 'filterBowl'],
@@ -2739,6 +2798,7 @@ export function ammTaskFor(ac: Aircraft, task: string): AmmTask {
     consumables: c.consumables.map(([code, text]) => eff(env, fig, code, text!)),
     steps: c.steps.map(([phase, text, torque], i) => (torque ? { n: i + 1, phase, text, torque } : { n: i + 1, phase, text })),
     torques: torquesAt(ac.model, ata, env).filter((t) => used.has(t.key)),
+    servicing: servicingOf(env, fig, c),
     ipcFig: fig.fig,
   };
 }

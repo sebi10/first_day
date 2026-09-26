@@ -28,6 +28,10 @@ const click = async (name, opts = {}) => {
   await page.waitForTimeout(opts.wait ?? 200);
 };
 const finishPuzzle = async () => {
+  // a mechanic job on a plane opens its detail first (the manual), then Start
+  await page.waitForTimeout(300);
+  const start = page.locator('.sheet button:has-text("Start the job")');
+  if (!(await page.locator('.phost-body').count()) && (await start.count())) await start.first().click();
   await page.waitForSelector('.phost-body', { timeout: 5000 });
   await page.waitForTimeout(400);
   // dismiss first-encounter overlay if present

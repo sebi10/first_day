@@ -117,6 +117,66 @@ export interface RepairInfo {
   foundIn?: string;
 }
 
+/** Where a part chain stands (see src/sim/chain.ts). */
+export type ChainStep = 'lookup' | 'research' | 'buy' | 'fee' | 'review' | 'transit' | 'install' | 'done';
+
+/**
+ * The part chain: a job on a plane found a part gone, missing or damaged. The
+ * job is blocked and the plane is not airworthy until the part is installed.
+ * The mechanic looks it up in the IPC (and, if it isn't there, researches the
+ * logbooks for the alteration that put it on), the analyst buys it (and pays
+ * engineering to review the approval), it rides the normal delivery, and the
+ * mechanic installs it and finishes the job. At most one on the island.
+ * Wrong answers are never flagged at once: they come back at receiving, from
+ * engineering a week later, or as a hidden defect.
+ */
+export interface PartChain {
+  id: string;
+  /** the job it stopped (blocked until the part is installed; then it is the install step) */
+  orderId: string;
+  assetId: string;
+  /** that job's title */
+  title: string;
+  /** IPC chapter-section and the IPC tag of the part (see src/sim/aircraft.ts) */
+  ata: string;
+  tag: string;
+  /** "brake linings", as the mechanic says it */
+  item: string;
+  how: 'gone' | 'missing' | 'damaged';
+  /** what the job found, as the squawk on the lookup reads (what is on the airplane) */
+  found?: string;
+  /** who found it, and when */
+  by: string;
+  week: number;
+  step: ChainStep;
+  /** the order that carries the current step (lookup, research, buy, fee) */
+  stepId?: string;
+  /** the P/N on order, in transit, or waiting to go on */
+  pn?: string;
+  /** where that P/N came from: the IPC lookup, engineering's authorization (EA), or a logbook entry that skipped engineering */
+  src?: 'ipc' | 'eng' | 'entry';
+  /** the request the research sent to engineering: what it cites and (hidden until the answer) whether it holds */
+  request?: { cite?: string; ok: boolean; reason: string; costly?: boolean };
+  /** engineering answers when this week resolves */
+  due?: number;
+  /** engineering approved the part in this week, on this approval */
+  approvedWeek?: number;
+  cite?: string;
+  /** why the chain is back at a lookup or research: the part that went back, or engineering's reason (cleared when that step is handed in) */
+  back?: string;
+  /** wrong parts sent back, requests engineering returned */
+  returns: number;
+  rejects: number;
+  /** parts, fees, restocking and the boat */
+  spent: number;
+  /** resolved weeks the plane sat grounded */
+  aogWeeks: number;
+  /** step 'done': the week the part went on */
+  closedWeek?: number;
+  /** step 'done': the story, for that week's review */
+  story?: string;
+}
+
 export interface Order {
   id: string;
   role: Role;
@@ -154,6 +214,8 @@ export interface Order {
   repair?: RepairInfo;
   /** the original job done again after its repair (cost 0, already paid): the sign-off it replaces, and what it cost then */
   redo?: { week: number; by: Role; name: string; cost: number };
+  /** part chain: the job it stopped ('job'), or one of its steps */
+  chain?: { id: string; step: 'job' | 'lookup' | 'research' | 'buy' | 'fee' };
 }
 
 export interface Player {
@@ -352,6 +414,8 @@ export interface IslandState {
   project?: { tier: number; title: string; orders: Partial<Record<Role, string>> } | null;
   /** hidden defects from signed-off jobs (never shown until found or surfaced; resolved ones are removed) */
   defects?: Defect[];
+  /** the part chain, open or the last one closed (step 'done'); older islands have none */
+  chain?: PartChain | null;
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */

@@ -23,7 +23,7 @@ Short on time? Anyone can try the whole game alone first with *New island → 1 
 | Your zone | Hangar, airstrip, 2 planes (1 at tier 1) | 4 cottages (2 at tier 1), the grid, later a generator | The office: cash, prices, approvals, parts |
 | Your number | Flights available | Houses rentable | Repairs approved |
 | If you slip | No flights → no guests, no parts | No power / closed houses → no revenue, hangar tools offline | Undecided cards become deferrals → incident risk for everyone |
-| Your jobs (puzzles) | Torque sequence, crack hunt (UV penetrant, one tap circles an indication), engine teardown, weight and balance, safety wire, hydraulic servicing, ground power start | Circuit trace, panel load, wire-up, multimeter diagnosis, conduit bending | Variance find, parts auction, cash forecast, bank reconciliation, three-way match |
+| Your jobs (puzzles) | Torque sequence, crack hunt (UV penetrant, one tap circles an indication), engine teardown, weight and balance, safety wire, hydraulic servicing, ground power start; when a part is missing: the IPC lookup and logbook research | Circuit trace, panel load, wire-up, multimeter diagnosis, conduit bending | Variance find, parts auction, cash forecast, bank reconciliation, three-way match |
 
 Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hints are gone and your real-world know-how does the work.
 
@@ -50,7 +50,27 @@ On the job, nobody grades you. From tier 2 every real work order is **signed off
 
 Tier 1 jobs, week 0, the weekly challenge and Lend a hand still show your score. They're for learning.
 
-## 5. Crewmates' problems (cross-trade reports)
+## 5. Mechanic: the manual, and when a part is missing
+
+**Every job on a plane starts with the manual.** Tap the job: under *Start the job* is the **Manual**. At the top is the airplane's data plate: registration, model, **S/N**, year, and the **SBs complied with**. Below it is the AMM task card: task number, effectivity, warnings and cautions, the procedure, and the torques, servicing values and consumables. The card prints **both effectivities**, as a real manual does, for example the wheel tie-bolt nuts at *A · S/N 208C00001 THRU 208C00309: 190–200 in-lb* and *B · S/N 208C00310 AND ON: 170–180 in-lb*, or the hydraulic fluid *PRE SB IC208-29-03: MIL-PRF-5606 only* and *POST SB: MIL-PRF-5606 or MIL-PRF-83282*.
+
+- Up to tier 2 the card marks your airplane's line (◀ this airplane).
+- From tier 3 nothing is marked. Read the S/N off the plate and check the SB record, the way you would on the ramp.
+- The torque wrench, the hydraulic fluid and the nitrogen precharge in the puzzle use this card's numbers. From tier 3 both lines are offered. Work to the other effectivity's value and the job signs off as normal, but it leaves a hidden defect for sure.
+
+**When a job finds a part (the part chain, from week 3 at tier 2).** Sometimes, when you sign off a job on a plane, you find a part that is gone or damaged. The screen says **Work stopped · Part needed**, and the plane is **grounded (AOG)** until the part is on. Everyone sees a banner on the island screen with the plane, the part, the steps, and whose move it is.
+
+1. **IPC lookup** (mechanic). The squawk tells you what's on the airplane (*"brake assy P/N 30-86A (Clearwater Wheel & Brake)"*). Find the part for **this S/N and SB status** in the IPC and order it. If the assembly on the airplane isn't in the IPC at all, tap **Not in the IPC · research the records**.
+2. **Buy** (analyst). An AOG card lands on the desk. No counter-offer: "if it waits, the plane stays grounded". The part rides the next cargo flight, or the boat.
+3. If it wasn't in the IPC: **logbook research** (mechanic). Find in the logbooks how that assembly got there (an STC, or a field-approved Form 337). Then ask engineering to approve the part, citing it.
+4. **Engineering fee** (analyst, a few hundred dollars). Engineering answers when the week resolves. It either approves the part, and a Buy card for it comes to the analyst, or returns the request with a reason, and you research again.
+5. **Install** (mechanic). *Install <P/N>, then finish <the job>*. This is the original job; it pays once, and the plane is back in service.
+
+Nothing tells you a P/N is wrong when you order it. A part that isn't effective for the airplane is caught **at receiving** when it arrives: it goes back with a restocking fee, and you look it up again. A part put on from a logbook entry alone, without engineering's approval, flies, and a later inspection finds it. The board review tells the whole story: how long the plane sat, why, and what it cost.
+
+You get one chain at a time, with a breather after each. It never falls on the island's only guest plane: that one keeps its spares on the shelf.
+
+## 6. Crewmates' problems (cross-trade reports)
 
 From week 3 the island throws up problems one trade has and another has to fix. All three of you report and all three fix:
 
@@ -60,11 +80,11 @@ From week 3 the island throws up problems one trade has and another has to fix. 
 
 A report lands on the fixer's list, ready, no approval. While it's open it either **slows the reporter down** (2 jobs a turn, or 1 desk task) or **costs cash every week**. Tap it to see who's waiting on you, then *Start*. A fix that doesn't hold comes back a week or two later. A money leak that comes back also charges the weeks it only looked fixed. Autopilot patches a slow-down, but a money leak waits for a person.
 
-## 6. Lend a hand
+## 7. Lend a hand
 
 Once a week you can try another trade's job that has already waited a week (*Lend a hand* on your panel). It's always expert difficulty: no tools, no rule text, and you do see the score. Under 60% botches it: the asset takes −6 and the job stays open for its owner. You can't fix your own report this way: the trade you reported it to has to (the third crewmate can help). Only do it if you actually know how.
 
-## 7. Getting better together
+## 8. Getting better together
 
 - **Board → Weekly challenge:** the same puzzle and seed for all three this week. Try each other's trades and compare. No XP; bragging only.
 - **Streaks:** every third B+ week in a row brings a story card. Two of three votes decide it.
@@ -73,7 +93,7 @@ Once a week you can try another trade's job that has already waited a week (*Len
 - **Crew projects:** qualifying for the next tier (tier 2: 4 full-crew B+ weeks) opens one job per trade. The tier arrives when all three are done, and your average score sets how healthy the new buildings start. Nobody can do your part for you.
 - **Cash trouble:** under $2,000 only safety-critical work gets approved. Two weeks below zero puts the island in receivership, with one bridge loan to climb out.
 
-## 8. What to test and report
+## 9. What to test and report
 
 After each of your first 3 days, send one message in the group chat:
 

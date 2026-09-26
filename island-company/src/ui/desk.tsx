@@ -69,6 +69,7 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           key={o.id}
           s={s}
           o={o}
+          me="fin"
           held={ended || !!cap?.full}
           onOpen={(x) => {
             if (hasOrigin(x)) return setSel(x);
@@ -188,7 +189,8 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
 
   const exp = expectedDeferralCost(s, top);
   const asset = s.assets.find((a) => a.id === top.assetId);
-  const counterUsed = !!top.pushedBack;
+  // a part or an engineering fee has no cheaper fix
+  const counterUsed = !!top.pushedBack || !!top.chain;
   const off = drag.leaving === 'right' ? 'translate(420px, 0) rotate(18deg)' : drag.leaving === 'left' ? 'translate(-420px, 0) rotate(-18deg)' : drag.leaving === 'up' ? 'translate(0, -320px)' : '';
   const tf = off || `translate(${drag.x}px, ${Math.min(0, drag.y)}px) rotate(${drag.x / 18}deg)`;
   const hint = drag.x > 50 ? 'APPROVE' : drag.x < -50 ? 'DEFER' : drag.y < -50 && !counterUsed ? 'COUNTER' : '';
@@ -240,6 +242,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               </span>
               {/* a known defect is still in service: the card has no room for the story, the owner's detail has it */}
               {top.repair && <span class="chip ink">Repair</span>}
+              {top.chain && <span class="chip rust">AOG</span>}
             </span>
             <span style={{ flex: 'none' }}>
               <TierDots tier={top.tier} />
@@ -255,13 +258,24 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               <span class="label">Approve</span>
               <b class="num" style={{ fontSize: 24 }}>{usd(top.cost)}</b>
             </div>
-            <div class="col" style={{ gap: 0 }}>
-              <span class="label">Expected cost of deferring</span>
-              <b class={`num ${exp.cost > top.cost ? 'fault' : ''}`} style={{ fontSize: 24 }}>
-                {usd(exp.cost)}
-              </b>
-              <span class="label num">{Math.round(exp.p * 100)}% incident risk next week</span>
-            </div>
+            {top.chain ? (
+              // a grounded plane's part never rolls an incident: what deferring costs is the plane on the ground
+              <div class="col" style={{ gap: 0 }}>
+                <span class="label">If it waits</span>
+                <b class="fault" style={{ fontSize: 17, lineHeight: 1.2 }}>
+                  {asset?.name ?? 'The plane'} stays grounded
+                </b>
+                <span class="label">{top.chain.step === 'fee' ? 'engineering answers a week after it’s paid' : 'no flights until the part is on'}</span>
+              </div>
+            ) : (
+              <div class="col" style={{ gap: 0 }}>
+                <span class="label">Expected cost of deferring</span>
+                <b class={`num ${exp.cost > top.cost ? 'fault' : ''}`} style={{ fontSize: 24 }}>
+                  {usd(exp.cost)}
+                </b>
+                <span class="label num">{Math.round(exp.p * 100)}% incident risk next week</span>
+              </div>
+            )}
           </div>
           {top.repair && <span class="chip rust">Known defect{top.repair.via === 'incident' ? ' · failed in service' : ' · found by an inspection'}</span>}
           {top.squawk && <span class="chip">✎ Written up by {top.squawk}: their call that it needs this</span>}

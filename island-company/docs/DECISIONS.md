@@ -211,10 +211,83 @@ Three more branches merged on top: the new island art (`island.tsx`, `ui/island/
 | IPC lookup | "DOESN'T FIT" at the airplane (the IPC part on an STC airplane goes to stores as ordered, scored as the wrong part), the coach line that knew whether the part on the request was the answer (it now follows your own steps), the PULLED / HELD / WRONG PART stamp, ✓/✗ notes, the "why", the ✓ on a cited entry, verdict sounds, the flourish | the figure, the book's notes and effectivity codes, the records and ICAs, and your request stamped ORDERED with the lines and the approval it cites |
 | Logbook research | engineering's review and the inspector's buy-back (no returns: the paperwork goes in once), ✗ on fields, the EA issued / Returned / Not airworthy stamp, verdict sounds, the flourish | the books, the IPC sheet, the lead's note (tier 2), and your request or your signed entry, stamped *Sent to engineering* / *Signed* |
 
-- Not on the catalog yet. `ipc` and `logbook` are the part chain's puzzles (a squawk, then the IPC, then the logbooks and an engineering approval). `tests/catalog.test.ts` lists them as chain puzzles until the chain launches them.
+- Not catalog jobs. `ipc` and `logbook` are the part chain's puzzles (a job finds a part, then the IPC, then the logbooks and an engineering approval): the chain launches them (see *The manual and the part chain* below), and `tests/catalog.test.ts` checks that it does.
 - `launchFor` hands a paperwork puzzle on a plane the island's own airplane: `context.aircraft = aircraftOf(seed, asset.id, asset.model)`. It is derived from the seed, never stored in the island doc, and built once per island and plane (`islandAircraft`). Other jobs don't build it. An airplane given without a plant never gets an IPC "part no exist" case. The logbook puzzle plants its case on that airplane's identity.
 - The paperwork puzzles are HTML, so `tests/blind.test.ts` mounts them on a small DOM (`tests/minidom.ts`) and clicks through the same way with and without `blind`.
 - Balance is unchanged by the merge. The paper sim does not play puzzles, and the standard and robust runs match the numbers above.
+
+## The manual and the part chain (Phase B)
+
+An A&P described the real workflow: *"When I get a task I get a manual. I follow manual. If part is gone or missing or damaged: IPC. If part no exist, I check in previous logged items on airplane, the maintenance logs, and then get engineering approval to put part on airplane."* It is now three game systems across all three seats.
+
+### 1. The manual
+
+- Every mechanic job on a plane opens its detail first, with a **Manual** section under *Start the job*: the airplane's data plate (registration, model, S/N, year, the SBs complied with) and the AMM task card for the job (`taskCardFor(islandAircraft(seed, asset), job)`, derived from the island seed and never stored). The card shows the task number, effectivity, warnings and cautions, the procedure, and the torques, servicing values and consumables with **both effectivities** as the manual prints them.
+- Tiers 0–2 mark the line for this airplane (◀ this airplane); from tier 3 nothing is marked, and the plate and the SB record say which line applies.
+- **Card-driven values.** The torque puzzle (tire and brake, prop bolts) and hydraulic servicing take their numbers from that card (`context.card`, built by `manualCard`): the torque band is the S/N's line; the hydraulic placard is the card's approved fluid by SB status (pre-SB: MIL-PRF-5606 only; post-SB: 5606 or 83282) and the accumulator precharge by S/N block (A/B). From tier 3 both lines are shown and nothing says which is this airplane's.
+- **The wrong effectivity is a sure hidden defect.** A blind sign-off (tier ≥ 2) worked to the other line leaves a defect with its own words: `torque:eff` (and `:tieNut` / `:propBolt`), `hydraulics:eff`. These rules are `sure: true` in `DEFECT_RULES`: a wrong-line job always plants one, because it is a definite error, not a slip.
+- A plane job the island's manual set has no card for (the 100-hr inspection, the charter load sheet) shows the data plate only. Jobs off a plane have no Manual section.
+
+### 2. The part chain
+
+**Trigger.** A mechanic signs off an eligible job on a plane (32-40: tire and brake, wheel-half penetrant check; 61-10: prop bolt re-torque, safety-wiring the prop bolts; 29-10: brake hydraulic servicing; 23-10: com radio swap; 24-30: alternator replacement) and the job finds a part it can't be finished without. Conditions: week ≥ 3, island tier ≥ 2, not in the mechanic's grace weeks, not a repair, redo, report or crew-project job, no chain already open, and 2 weeks' rest after the last one closed. Then a roll seeded from the order and the week (`rng(hashSeed(o.seed, 'chain', week)).chance(0.3)`), never the score. It is not a new action: `complete` opens it, so the existing week stamp covers it.
+
+**What it does.** The job is not signed off. It shows *Work stopped · Part needed* instead of a logbook entry and waits (`waiting_part`). The plane is **grounded** (`outOfService`: no flights, no capacity) until the part is on. Every seat gets a banner at the top of the island screen (the plane, the part, a stepper *Found → IPC → (Logbooks → Engineering) → Buy → Delivery → Install*, and whose move it is: *Your move: …* or *Waiting on Cy: approve the part*). Chips on every step's card say the same, and ntfy pings the crew when the step changes.
+
+| Step | Who | What |
+| --- | --- | --- |
+| IPC lookup | mechanic | The IPC puzzle on this airplane (its S/N and SB status), with the squawk: *"L/H brake linings worn below minimum … On the airplane: brake assy P/N 30-86A (Clearwater Wheel & Brake)."* Hand in a P/N, or *Not in the IPC · research the records*. Blind from tier 2. |
+| Buy | analyst | An AOG card on the desk: *Buy 066-22500 LINING … for N658VN*, "If it waits: Cargo C-7 stays grounded". No counter-offer. It rides the next cargo flight, or the boat if there is none. |
+| Logbook research | mechanic | Only when the part isn't in the IPC. The logbook puzzle on this airplane finds how the assembly got there (an STC, a field-approved 337) and sends engineering a request citing it, or signs on a part from the records alone. |
+| Engineering fee | analyst | An AOG card: $380 + $40 per tier above 2. Engineering answers when the week resolves. |
+| Engineering answer | (resolve) | Approved: *"Engineering approved <P/N> for <reg> on <STC>: EA issued"*, then a Buy card for the right P/N. Rejected: *"Engineering returned the request: <reason>"* and a new research order (or back to the IPC, if the part was in the IPC all along). |
+| Install | mechanic | *Install <P/N>, then finish <job>*. The original job's own puzzle. It completes the original job with its normal gain (paid once), and the plane is back in service. |
+
+**Wrong answers surface later, never at hand-in.**
+
+- **A P/N that doesn't fit** (not effective for this S/N or SB status, superseded one-way, the IPC part for an assembly an STC replaced, not the right item, NP) is caught **at receiving** when the week resolves. It goes back with a 15% restocking fee (at least $40), and a new lookup (or research) opens. The banner says why: *"Sent back at receiving: P/N 066-22600 is not effective for N658VN's SB status (EFF C: POST SB IC208-32-07; INTCHG code 3, only as the SB set)."*
+- **An ICA part put on from a logbook entry alone** (no engineering authorization) goes on and flies. It leaves a sure hidden defect (`ipc:unapproved`) that a later inspection finds. The repair is logbook research for the authorization.
+- **"Not in the IPC" when it is** costs the engineering fee and a week, then *"back to the IPC"*.
+
+**Who carries what.** The island doc stores only `s.chain` (the open chain, or the last closed one with its story) and `o.chain` on the orders it made. The airplane (records, IPC, plant) is rebuilt from the island seed. Whether the plane carries an alteration is `plantFor(islandSeed, assetId, model)`: about half the planes carry one STC or field-approved 337 on an assembly the chain can reach (30% of those are field approvals). Old island docs without these fields load unchanged (`s.chain` absent = no chain).
+
+**The review tells the story.** *"Back in service: Cargo C-7 sat 2 weeks for brake linings: STC SA01600SE found in the logbooks, engineering approved week 8. $1,090 in parts and fees."*
+
+**Bots and autopilot play it.** A bot mechanic does the lookup or research at its skill (`botChainData`: right P/N or "not in the IPC" by skill, a wrong P/N or a bad cite otherwise) as an extra step in the same turn. A bot analyst approves an AOG card whenever cash covers it. Autopilot never does the lookup or the research, because they wait for a person. It does approve AOG cards (cash permitting) and installs a part that has arrived, so an absent analyst never gridlocks a chain.
+
+**Decision: no chain on the island's only guest plane.** Through tier 3 the twin is the only plane that brings guests. Grounding it for 2+ weeks at tier 2 emptied every house and sent the three-friends crew into a cash death spiral: the analyst couldn't afford the part, so the plane stayed down, so there was no revenue. The only guest plane "keeps its spares on the shelf". Chains fall on the cargo plane, and from tier 4 on either plane once the floatplane shares the guests. The same run also made AOG cards something bots and autopilot always approve when cash covers them.
+
+| Tuning (`CHAIN` in `src/sim/data.ts`) | Value |
+| --- | --- |
+| From week / island tier | 3 / 2 |
+| Chance an eligible sign-off finds a part | 0.3 (one open chain; 2 weeks' rest after one closes) |
+| Planes with an alteration / of those field-approved | 0.5 / 0.3 |
+| Part list price at tier 1 | lining $240, prop bolts $360, filter $110, reservoir cap $130, radio $950, generator $760, starter-generator $1,350; +10% per tier; ICA part ×1.35 |
+| Engineering fee | $380 + $40 per tier above 2 |
+| Restocking fee | 15% of the part, at least $40 |
+
+Per closed chain in the paper sim (30 seeds): three friends and all average get 1.07 chains a game, the plane is grounded 2.2 resolved weeks, it costs about $950 in parts, fees and restocking, 0.13 parts go back at receiving, and 6–13% of chains are not in the IPC. All good gets 1.73 chains a game.
+
+### 3. Balance with the chain (26 weeks × 30 seeds, medians)
+
+| Team | Tier at wk 26 | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk |
+| --- | --- | --- | --- | --- | --- | --- |
+| All good | 5 | 5 / 8 / 16 / 21 | 98% | $6,735 | 0 | $11,685 |
+| All average | 5 | 7 / 11 / 16 / 22 | 92% | $6,554 | 0 | $9,540 |
+| **Three friends** | 5 | 8 / 11 / 16 / 22 | 87% | $2,867 | 0 | $9,148 |
+| Naive analyst | 3 | 5 / 14 / — / — | 98% | $6,176 | 0 | $5,151 |
+| Any role absent / any solo player / nobody | 1 | — | 37–100% | down to −$152k | up to 413 of 780 | |
+
+Before the chain, three friends reached tier 5 in week 21 with a minimum of $6,050, and all average in week 22. The chain costs the three friends about a week and $3k of headroom, and nothing goes below $0.
+
+Robustness (`npm run balance -- robust`: 26 weeks × 90 seeds × 4 crews per team):
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 23 / 24 / 24 / 23 | 21 / 28 / 24 / 20 | 2 / 1 / 1 / 2 | −$7,178 / −$8,099 / −$4,035 / −$3,911 |
+| All average | – / a / b / c | 22 / 22 / 22 / 22 | 16 / 14 / 16 / 6 | 0 / 0 / 0 / 0 | $2,450 / $4,354 / $5,802 / $4,403 |
+
+Before the chain (same run): three friends reached tier 5 in weeks 22/23/22/23, missed it in 14/20/15/11 of 90, and had 2/0/0/2 weeks below $0. All average: week 22, missed in 5/11/2/3, with 0/0/0/4 weeks below $0. The chain adds about a week to the slowest crews and 6–11 more misses per 90 games. It adds two single negative weeks for the three friends: late-game cash dips while a plane is down. Left as is because the standard run is clean. The first knob is `CHAIN.chance`, and the next is the rest weeks.
 
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 

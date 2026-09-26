@@ -3,6 +3,7 @@ import { defectRule, ECON, incidentText, ROLE_LABEL } from '../sim/data';
 import { deferralRisk, expectedDeferralCost } from '../sim/econ';
 import { isEmergency, tracedTo } from '../sim/engine';
 import type { IslandState, Order, Role } from '../sim/types';
+import { ChainChip, ChainOrigin } from './chain';
 import { Icon, TierDots, usd } from './kit';
 import { capWords, reportSaid } from './select';
 import { C, ROLE_TINT } from './theme';
@@ -11,7 +12,13 @@ const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
 
 const PUZZLE_ICON: Record<Role, string> = { mech: 'wrench', elec: 'bolt', fin: 'chart' };
 
-export function statusChip(s: IslandState, o: Order) {
+export function statusChip(s: IslandState, o: Order, me?: Role) {
+  // the part chain says where it stands (and whose move it is), not "waiting for part"
+  const c = s.chain && o.chain && s.chain.id === o.chain.id && s.chain.step !== 'done' ? s.chain : null;
+  if (c && o.status !== 'done' && o.status !== 'cancelled' && (o.status !== 'ready' || o.chain!.step === 'job')) {
+    if (o.chain!.step === 'job' && o.status === 'ready') return <span class="chip sea">Ready · install the part</span>;
+    return <ChainChip s={s} c={c} me={me} />;
+  }
   switch (o.status) {
     case 'ready':
       return <span class="chip sea">Ready</span>;
@@ -40,6 +47,7 @@ function OriginChips({ s, o }: { s: IslandState; o: Order }) {
   const rep = o.report;
   return (
     <>
+      {o.chain && <span class="chip rust">AOG · part chain</span>}
       {o.repair && <span class="chip ink">Repair · from week {o.repair.defect.week}</span>}
       {o.redo && <span class="chip ink">Redo · week {o.redo.week} sign-off</span>}
       {rep && (
@@ -64,10 +72,11 @@ function ReportEffect({ s, o }: { s: IslandState; o: Order }) {
 }
 
 /** `held`: this seat can't start anything right now (turn over, or a per-turn limit): a ready card isn't highlighted. */
-export function OrderCard({ s, o, onOpen, held }: { s: IslandState; o: Order; onOpen(o: Order): void; held?: boolean }) {
+export function OrderCard({ s, o, onOpen, held, me }: { s: IslandState; o: Order; onOpen(o: Order): void; held?: boolean; /** the seat looking at it ("Your move") */ me?: Role }) {
   const asset = s.assets.find((a) => a.id === o.assetId);
   // reports carry forward but never roll deferral incidents: their cost is the effect chip
-  const carried = o.deferrals > 0 && o.status !== 'done' && o.kind !== 'report';
+  // (a part chain's steps never roll one either: the grounded plane is the cost)
+  const carried = o.deferrals > 0 && o.status !== 'done' && o.kind !== 'report' && !o.chain;
   const risk = carried ? deferralRisk(o, o.lastDeferredWeek === s.week ? 0 : 1) : 0;
   const cls = `card order ${o.status === 'ready' && !held ? 'ready' : ''} ${o.status === 'done' ? 'done' : ''} ${o.status === 'ready' && held ? 'held' : ''}`;
   return (
@@ -95,7 +104,7 @@ export function OrderCard({ s, o, onOpen, held }: { s: IslandState; o: Order; on
           {o.kind === 'project' && <span class="chip palm">Crew project</span>}
           {o.squawk && <span class="chip">✎ {o.squawk}</span>}
           <OriginChips s={s} o={o} />
-          {statusChip(s, o)}
+          {statusChip(s, o, me)}
           <ReportEffect s={s} o={o} />
           {carried && (
             <span class={`chip ${risk >= 0.3 ? 'rust' : ''}`}>
@@ -119,7 +128,7 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       </div>
       <span class="muted">
         {asset
-          ? `${asset.name} · health ${Math.round(asset.health)}${o.status === 'done' ? '' : ` → up to ${Math.min(100, Math.round(asset.health + o.gain))}`}`
+          ? `${asset.name} · health ${Math.round(asset.health)}${o.status === 'done' || o.gain <= 0 ? '' : ` → up to ${Math.min(100, Math.round(asset.health + o.gain))}`}`
           : o.report
             ? `Cross-trade report · ${nameOf(s, o.report.by)} (${ROLE_LABEL[o.report.by]}) → ${nameOf(s, o.role)}`
             : o.kind === 'project'
@@ -128,19 +137,21 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       </span>
       <div class="row wrap" style={{ gap: 6 }}>
         <OriginChips s={s} o={o} />
-        {statusChip(s, o)}
+        {statusChip(s, o, role)}
         {o.cost > 0 && <span class="chip">{o.report ? 'Paid' : 'Cost'} {usd(o.cost)}</span>}
         {o.parts > 0 && <span class="chip">Needs {o.parts} parts kit</span>}
       </div>
       <Origin s={s} o={o} />
-      {o.status === 'pending' && (
+      <ChainOrigin s={s} o={o} me={role} />
+      {o.status === 'pending' && !o.chain && (
         <p class="muted" style={{ margin: 0 }}>
           {role === 'fin'
             ? 'Swipe it on your desk.'
             : `Waiting on the analyst. If it slips a week: ${Math.round(e.p * 100)}% incident risk, expected cost ${usd(e.cost)}.`}
         </p>
       )}
-      {o.status === 'waiting_part' && (
+      {o.status === 'pending' && o.chain && role === 'fin' && <p class="muted" style={{ margin: 0 }}>A grounded plane waits on it: approve it on your desk (it goes through a cash freeze).</p>}
+      {o.status === 'waiting_part' && !o.chain && (
         <p class="muted" style={{ margin: 0 }}>
           Approved. The kit rides the next {s.assets.some((a) => a.model === 'cargo') ? 'cargo' : 'guest'} flight ({s.parts.inTransit} in transit, {s.parts.stock} in stock).
           {s.parts.inTransit === 0 ? ` Nothing is in transit: ${ROLE_LABEL.fin} needs to buy one.` : ''}

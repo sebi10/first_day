@@ -47,7 +47,39 @@ export interface PuzzleContext {
    * and alterations. Paperwork puzzles use it as-is; without it they build one from the seed.
    */
   aircraft?: Aircraft;
+  /** the task card's values for this airplane (card-driven torque and hydraulic servicing) */
+  card?: ManualCard;
+  /** launched by the part chain (src/sim/chain.ts): the IPC lookup or the logbook research for this part */
+  chain?: { step: 'lookup' | 'research'; tag: string; item: string; found: string };
 }
+
+/** One value as the manual prints it, with the effectivity it applies to. */
+export type CardLine = {
+  /** effectivity code (A/B by S/N, C/D by SB); none = all */
+  eff?: string;
+  /** "S/N 310R0001 THRU 310R0519", "POST Beaumont SB 219" */
+  effText?: string;
+  /** true on the line for this airplane's S/N and SB status */
+  applies: boolean;
+};
+
+/**
+ * The AMM task card's numbers for this airplane, both effectivities printed as
+ * the manual prints them. Tiers 0-2 mark the one that applies (`marked`); from
+ * tier 3, matching the S/N and SB status is the mechanic's job.
+ */
+export type ManualCard = {
+  reg: string;
+  serial: string;
+  /** "AMM 32-40-01" */
+  task: string;
+  marked: boolean;
+  /** SBs complied with on this airplane (the records the card's C/D lines depend on) */
+  sbs: string[];
+  torque?: { key: string; what: string; lines: (CardLine & { lo: number; hi: number; unit: string; note?: string })[] };
+  precharge?: { what: string; lines: (CardLine & { psi: number; refTemp: number })[] };
+  fluid?: { lines: (CardLine & { fluids: string[] })[] };
+};
 
 export interface PuzzleParams {
   seed: number;

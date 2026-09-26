@@ -78,7 +78,13 @@ import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from '.
 // Model
 // ---------------------------------------------------------------------------
 
-export type LbCase = 'stc' | 'field' | 'sb' | 'sbpre' | 'pma' | 'none';
+/**
+ * oem (the part chain only): the IPC lookup said "not in the IPC", but nothing
+ * replaced the assembly: the records show the OEM part, and the IPC part in
+ * force is the answer (a logbook entry citing the IPC; engineering would say
+ * it isn't needed).
+ */
+export type LbCase = 'stc' | 'field' | 'sb' | 'sbpre' | 'pma' | 'none' | 'oem';
 /**
  * ipc  Maintenance: IPC part, logbook entry (14 CFR 43.9)
  * pma  FAA-PMA part, logbook entry citing its eligibility (GMM 4.7(b): no EA)
@@ -539,7 +545,13 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
   let kase: LbCase | undefined;
   let ata: Ata | undefined;
   let ac: Aircraft | undefined;
-  if (given?.plant) {
+  // the part chain researches this airplane's own records for its own part, whatever they show
+  const chainTag = context?.chain?.step === 'research' ? context.chain.tag : undefined;
+  if (given && chainTag && fixedAta && (!given.plant || given.plant.via === 'pma' || given.plant.ata !== fixedAta)) {
+    kase = 'oem';
+    ata = fixedAta;
+    ac = given;
+  } else if (given?.plant) {
     kase = given.plant.via;
     ata = given.plant.ata;
     ac = given;
@@ -569,7 +581,7 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
 
   const ipc = ipcFor(ac, ata);
   const plant = ac.plant;
-  const tag = kase === 'sb' || kase === 'sbpre' ? SB_TAG[ata] : kase === 'pma' ? PMA_TAG[ata] : plantPart(model, ata).tag;
+  const tag = kase === 'oem' ? chainTag! : kase === 'sb' || kase === 'sbpre' ? SB_TAG[ata] : kase === 'pma' ? PMA_TAG[ata] : plantPart(model, ata).tag;
   const rows = ipc.rows.filter((x) => x.tag === tag);
   const ipcRow = rowFor(ipc, tag)!;
   const insp = model === 'cargo' ? 'phase inspection' : '100-hour';
@@ -625,6 +637,17 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
     partial = lin.slice(0, -1).map((x) => x.id);
     eligible = [found];
     approvalRef = figSb(model, ata).id;
+  } else if (kase === 'oem') {
+    // the OEM part is on the airplane: the last time it (or the part it supersedes) was logged going on says so
+    found = ipcRow.pn;
+    const forward = rows.filter((x) => x.pn === found || x.supsdBy?.pn === found || (x.applies && x.supsdBy && x.supsdBy.code !== 3)).map((x) => x.pn);
+    eligible = [...new Set([found, ...rows.filter((x) => x.applies && x.supsdBy && x.supsdBy.code !== 3).map((x) => x.supsdBy!.pn)])];
+    const onAta = ac.log.filter((e) => e.ata === ata);
+    const logged = onAta.filter((e) => e.pns?.some((q) => q.on && (forward.includes(q.on) || eligible.includes(q.on))));
+    const pick = logged[logged.length - 1] ?? sbEntries(ac, ata).pop() ?? onAta[onAta.length - 1];
+    answer = pick?.id ?? 'none';
+    partial = onAta.filter((e) => e.id !== answer).map((e) => e.id);
+    approvalRef = `IPC Fig ${ipc.fig} item ${ipcRow.item}`;
   } else {
     // none: the kit's part is on the airplane and nothing in the books says how
     found = plantPart(model, ata).pn;
@@ -692,7 +715,7 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
     addPn(kit.kit, 'conversion kit');
     addPn(plantRows(model, ata).find((x) => x.indent >= 2 && x.pn !== found)?.pn, 'kit detail part');
   } else addPn(kit.pn, `${kit.holder} (STC kit part)`);
-  if ((kase === 'sb' || kase === 'sbpre' || kase === 'pma') && (tag === 'lining' || tag === 'filter')) {
+  if ((kase === 'sb' || kase === 'sbpre' || kase === 'pma' || kase === 'oem') && (tag === 'lining' || tag === 'filter')) {
     // a PMA part for the other effectivity: right maker, wrong configuration
     const otherRow = rows.find((x) => x.pn !== ipcRow.pn) ?? ipcRow;
     addPn(tag === 'lining' ? `RF${otherRow.pn}` : `PF${otherRow.pn.replace(/^DH-/, '')}`, 'PMA, other effectivity');
@@ -766,6 +789,7 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
     sbpre: `The post-SB lining is INTCHG code 3: it goes on only with the SB set. Is ${figSb(model, ata).id} on record? The last lining change says what is on the airplane.`,
     pma: 'An FAA-PMA part replaces an OEM part and carries its own eligibility list. Find the entry where it went on.',
     none: 'If nothing in the books (or the 337 file) explains a part, it is an unrecorded alteration.',
+    oem: `Sent here from the IPC lookup. Is there an alteration on ${ata} in the records at all? If the books only ever show the IPC part going on, the IPC part is the answer.`,
   };
   const where = bookHint(ata, kase, jobPos);
   const fieldHints: Partial<Record<FieldId, string>> =
@@ -776,7 +800,7 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
           ref: 'Cite what makes the part eligible for this airplane.',
           data: 'Cite the approval named in the entry you highlighted.',
           date: 'The Form 337 date is in that entry.',
-          work: kase === 'sb' || kase === 'sbpre' || kase === 'pma' ? 'Say what the work order asks for, the way the manual words it.' : 'Replacing a part in an alteration is maintenance, not a new alteration.',
+          work: kase === 'sb' || kase === 'sbpre' || kase === 'pma' || kase === 'oem' ? 'Say what the work order asks for, the way the manual words it.' : 'Replacing a part in an alteration is maintenance, not a new alteration.',
         }
       : {};
 
@@ -842,9 +866,10 @@ export function routeOutcome(m: LbModel, route: LbRoute, values: Partial<Record<
   if (route === 'ipc' || route === 'pma') {
     // a logbook entry puts the part on now: only a part the airplane's approval already covers
     if (route === 'pma' && k !== 'pma') return 'serious';
-    if (k === 'sb' || k === 'sbpre' || k === 'pma') {
+    if (k === 'sb' || k === 'sbpre' || k === 'pma' || k === 'oem') {
       if (!values.pn || !m.eligible.includes(values.pn)) return 'serious';
-      return entry === 'none' ? 'serious' : 'right';
+      // (oem: the books show nothing but the IPC part: "nothing explains it" is a fair reading of them)
+      return entry === 'none' && k !== 'oem' ? 'serious' : 'right';
     }
     return 'serious';
   }
@@ -869,6 +894,7 @@ export function rightValues(m: LbModel, route: LbRoute, f: FieldId): string[] {
       return ['w0'];
     case 'pn':
       if (m.kase === 'pma') return route === 'pma' ? [m.found] : route === 'ipc' ? [m.ipcRow.pn] : [m.found, m.ipcRow.pn];
+      if (m.kase === 'oem') return m.eligible;
       return [m.found];
     case 'ref':
       return route === 'pma' ? ['pma'] : [`ipc:${m.ipcRow.item}`];
@@ -951,7 +977,8 @@ export function reviewLogbook(m: LbModel, route: LbRoute, values: Partial<Record
     for (const f of FIELDS_FOR[route]) check(f);
     if (o === 'serious') return { verdict: 'serious', problems, ...seriousOf(m, route, values, entry) };
     // the inspector buys back the work only when the records show the part is the right one for this airplane
-    if (!supports(m, entry)) {
+    // (oem: an IPC part in force needs no record behind it beyond the figure)
+    if (!supports(m, entry) && m.kase !== 'oem') {
       problems.push({ field: 'entry', msg: generic ? 'Inspector: the entry you rely on does not establish this part for this airplane.' : entryTeach(m) });
       return { verdict: 'returned', problems, note: 'Inspector: not signed off. Show the record the part rests on.' };
     }
@@ -970,7 +997,9 @@ export function reviewLogbook(m: LbModel, route: LbRoute, values: Partial<Record
         ? `FAA-PMA ${m.found} is eligible (${m.pmaText}), logged ${when}: GMM 4.7(b), no EA`
         : m.kase === 'sbpre'
           ? `${m.found} is IPC Fig ${m.ipc.fig} item ${m.ipcRow.item}, in force pre-${m.approvalRef} (no SB on record; last lining change ${when})`
-          : `${m.found} is IPC Fig ${m.ipc.fig} item ${m.ipcRow.item}, effective after ${m.approvalRef} (${book} log, ${when})`;
+          : m.kase === 'oem'
+            ? `${m.found} is IPC Fig ${m.ipc.fig} item ${m.ipcRow.item}, in the IPC for this aircraft; nothing in its records replaced it`
+            : `${m.found} is IPC Fig ${m.ipc.fig} item ${m.ipcRow.item}, effective after ${m.approvalRef} (${book} log, ${when})`;
     return { verdict: 'unneeded', problems, note: `Not needed: ${why}. A logbook entry would have done. One day lost.` };
   }
   if (o === 'costly') {
@@ -1159,12 +1188,13 @@ function summarize(m: LbModel, a: LbAnswer, entry: number, outcome: Outcome | nu
 }
 
 function caseWord(k: LbCase): string {
-  return k === 'stc' ? 'STC' : k === 'field' ? 'field-approval' : k === 'sb' ? 'SB' : k === 'sbpre' ? 'lining' : k === 'pma' ? 'PMA' : 'installation';
+  return k === 'stc' ? 'STC' : k === 'field' ? 'field-approval' : k === 'sb' ? 'SB' : k === 'sbpre' ? 'lining' : k === 'pma' ? 'PMA' : k === 'oem' ? 'part' : 'installation';
 }
 
 /** the answer a perfect mechanic hands in (tests, and the lab's cheat) */
 export function idealAnswer(m: LbModel): { entry: string; route: LbRoute; values: Partial<Record<FieldId, string>> } {
   const route: LbRoute = m.kase === 'stc' || m.kase === 'field' ? 'eng' : m.kase === 'none' ? 'new' : m.kase === 'pma' ? 'pma' : 'ipc';
+  // (oem: the IPC part in force, on a logbook entry citing the figure)
   const values: Partial<Record<FieldId, string>> = {};
   for (const f of FIELDS_FOR[route]) values[f] = rightValues(m, route, f)[0];
   return { entry: m.answer, route, values };
@@ -1434,6 +1464,7 @@ export const logbook: PuzzleDef = {
     const r = rng(hashSeed('lb-ui', p.seed));
     const bare = m.tier >= 3;
     const sbLike = m.kase === 'sb' || m.kase === 'sbpre';
+    const oem = m.kase === 'oem';
     type Screen = 'intro' | 'logs' | 'approve';
     let screen: Screen = 'intro';
     const bookOf = new Map(m.books.map((b) => [b.key, b]));
@@ -1494,7 +1525,7 @@ export const logbook: PuzzleDef = {
         `<button class="lb-step ${cls}" data-step="${id}"${disabled ? ' disabled' : ''}><b>${title}</b><small>${sub}</small></button>`;
       trail.innerHTML =
         step('manual', 'Manual', `✓ MM ${m.task.taskNo}`, '') +
-        step('ipc', 'IPC', bare ? `Fig ${m.ipc.fig}` : sbLike ? `? Fig ${m.ipc.fig}` : `✗ Fig ${m.ipc.fig}`, bare || sbLike ? '' : 'no') +
+        step('ipc', 'IPC', bare ? `Fig ${m.ipc.fig}` : sbLike || oem ? `? Fig ${m.ipc.fig}` : `✗ Fig ${m.ipc.fig}`, bare || sbLike || oem ? '' : 'no') +
         step('logs', 'Logs', entry ? (entry === 'none' ? 'no record' : `🖍 ${fmtDate(entryById.get(entry)!.date)}`) : 'research', screen === 'logs' ? 'on' : '') +
         step('approve', 'Approval', route ? ROUTE_WORD[route] : 'choose path', screen === 'approve' ? 'on' : '', !canApprove);
     }
@@ -1516,6 +1547,8 @@ export const logbook: PuzzleDef = {
     // tiers 0–2 say what the IPC shows; from tier 3 the mechanic has the part in hand, the stores slip, and the figure
     const ipcLine = bare
       ? `The part that came off is stamped <span class="lb-pn">${esc(m.found)}</span>. Stores pulled <span class="lb-pn">${esc(m.stores)}</span> per Fig ${m.ipc.fig}. Check the figure before it goes on.`
+      : oem
+        ? `Sent here from the IPC lookup as “not in the IPC”. Fig ${m.ipc.fig} lists <span class="lb-pn">${esc(m.ipcRow.pn)}</span> (item ${esc(m.ipcRow.item)}). On the airplane: <span class="lb-pn">${esc(m.found)}</span>. What do the records say?`
       : sbLike
         ? `Fig ${m.ipc.fig} lists ${m.rows.map((x) => `<span class="lb-pn">${esc(x.pn)}</span> (item ${esc(x.item)}, eff ${esc(x.eff || 'all')})`).join(' and ')}. Stores pulled <span class="lb-pn">${esc(m.issued!)}</span>. On the airplane: <span class="lb-pn">${esc(m.found)}</span>. Which one applies?`
         : `Fig ${m.ipc.fig} lists <span class="lb-pn">${esc(m.ipcRow.pn)}</span> (item ${esc(m.ipcRow.item)}). On the airplane: <span class="lb-pn">${esc(m.found)}</span>${m.kase === 'pma' ? ', marked FAA-PMA' : ''}. <b>Not in the IPC.</b>`;
@@ -1527,7 +1560,7 @@ export const logbook: PuzzleDef = {
 </div>
 <div class="lb-card lb-path">
   <div class="lb-pi"><i class="ok">✓</i><div><b>Manual.</b> ${esc(m.task.ref.replace('IAW ', ''))}: ${esc(m.task.title)}. <span style="color:${C.inkSoft}">“${esc(m.task.notes[1])}”</span></div></div>
-  <div class="lb-pi"><i class="${bare || sbLike ? 'go' : 'no'}">${bare || sbLike ? '?' : '✗'}</i><div><b>IPC.</b> ${ipcLine}</div></div>
+  <div class="lb-pi"><i class="${bare || sbLike || oem ? 'go' : 'no'}">${bare || sbLike || oem ? '?' : '✗'}</i><div><b>IPC.</b> ${ipcLine}</div></div>
   <div class="lb-pi"><i class="go">3</i><div><b>Logs.</b> Find the entry that explains what is on the airplane, and swipe the highlighter across it. If nothing does, say so.</div></div>
   <div class="lb-pi"><i>4</i><div><b>Approval.</b> Choose how the replacement gets approved and fill the paperwork.</div></div>
 </div>
@@ -2137,7 +2170,20 @@ ${body}
     }
     function finalResult(submitted: boolean): PuzzleResult {
       const s = scoreLogbook(m, answer(submitted));
-      return result(s.score, s.summary, { kase: m.kase, ata: m.ata, entry: s.entry, route: s.route, fields: s.fields, serious: s.serious, returns });
+      return result(s.score, s.summary, { kase: m.kase, ata: m.ata, entry: s.entry, route: s.route, fields: s.fields, serious: s.serious, returns, ...chainOut(submitted) });
+    }
+    /**
+     * Part chain: what goes to engineering (or onto the airplane with a logbook
+     * entry). Engineering's answer is the review a real one would give, and it
+     * arrives when the week resolves, not now.
+     */
+    function chainOut(submitted: boolean): Record<string, unknown> {
+      if (!p.context?.chain) return {};
+      if (!submitted || !route) return { chain: { route: null } };
+      const rv = reviewLogbook(m, route, values, entry);
+      const data = values.data ? m.opts.data.find((o) => o.id === values.data)?.label : undefined;
+      const cite = data ? `${data}${values.date ? `, Form 337 dated ${fmtDate(values.date)}` : ''}` : undefined;
+      return { chain: { route, verdict: rv.verdict, reason: rv.problems[0]?.msg ?? rv.note, pn: values.pn ?? null, ...(cite ? { cite } : {}) } };
     }
 
     function status(text?: string) {

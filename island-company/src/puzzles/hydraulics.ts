@@ -27,7 +27,7 @@
 // pump the brakes down again and recheck the level before sign-off.
 import { hashSeed, rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, fitLabel, label, loop, markInput, pointer, roundRect, settle, shade, stage } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { result, type ManualCard, type PuzzleDef, type PuzzleResult } from './types';
 
 // ---------------------------------------------------------------------------
 // Fluids. MIL-PRF-5606 (red, mineral base) is the light-aircraft norm and runs on
@@ -104,7 +104,21 @@ export type Precharge = {
   /** what the gauge should read today, psi */
   target: number;
   tol: number;
+  /** card-driven: today's targets for the task card's other effectivity lines (the wrong S/N block's value) */
+  others?: number[];
 };
+
+/** Card-driven servicing: the task card's lines, both effectivities as printed (tiers 0-2 mark this airplane's). */
+export type HydCard = {
+  task: string;
+  plate: string;
+  marked: boolean;
+  sbs: string[];
+  fluid: { eff?: string; effText?: string; fluids: FluidId[]; applies: boolean }[];
+  precharge: { eff?: string; effText?: string; psi: number; refTemp: number; applies: boolean }[];
+};
+
+const FLUID_OF: Record<string, FluidId> = { 'MIL-PRF-5606': 'mil5606', 'MIL-PRF-83282': 'mil83282' };
 
 export type HydModel = {
   tier: number;
@@ -148,6 +162,8 @@ export type HydModel = {
   placardFluid: string;
   /** tier 4+: older aircraft carry the superseded MIL-H or the NATO designation */
   placardStyle: PlacardStyle;
+  /** card-driven (a job on an island plane): the fluid and the precharge come from its AMM task card */
+  card?: HydCard;
 };
 
 export type PlacardStyle = 'prf' | 'milh' | 'nato';
@@ -175,11 +191,24 @@ export function hydPressure(m: HydModel, p0: number, vf: number): number {
   return vf > 1e-6 ? (p0 * m.accVol) / (m.accVol - vf) : 0;
 }
 
-export function generateHydraulics(seed: number, tier: number, _tools: string[] = []): HydModel {
+export function generateHydraulics(seed: number, tier: number, _tools: string[] = [], manual?: ManualCard): HydModel {
   const t = clamp(Math.round(tier), 0, 5);
   const r = rng(hashSeed('hydraulics', seed, t));
   const teach = t <= 2;
-  const allow83282 = t >= 2 && r.chance(0.5);
+  // card-driven: the approved fluids are the task card's line for this airplane's SB status
+  const card: HydCard | undefined =
+    manual && (manual.fluid || manual.precharge)
+      ? {
+          task: manual.task,
+          plate: `${manual.reg} · S/N ${manual.serial}`,
+          marked: manual.marked,
+          sbs: manual.sbs,
+          fluid: (manual.fluid?.lines ?? []).map((l) => ({ ...l, fluids: l.fluids.map((f) => FLUID_OF[f]).filter(Boolean) })),
+          precharge: (manual.precharge?.lines ?? []).map((l) => ({ ...l })),
+        }
+      : undefined;
+  const cardFluids = card?.fluid.find((l) => l.applies)?.fluids;
+  const allow83282 = cardFluids ? cardFluids.includes('mil83282') : t >= 2 && r.chance(0.5);
   const approved: FluidId[] = allow83282 ? ['mil5606', 'mil83282'] : ['mil5606'];
   let shelf: FluidId[];
   if (t <= 1) shelf = ['mil5606', 'skydrol', 'dot3'];
@@ -195,16 +224,19 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
   const sysPsi = t <= 2 ? 1500 : r.pick([1500, 1650, 1800]);
   let precharge: Precharge | null = null;
   let p0 = 800;
+  const cardPc = card?.precharge.find((l) => l.applies);
   if (t >= 3) {
-    const unit: 'F' | 'C' = t >= 5 ? 'C' : 'F';
-    const ref = r.pick([750, 800, 900, 1000]);
-    const refTemp = unit === 'F' ? 70 : 21;
+    // the task card prints psi at 70°F
+    const unit: 'F' | 'C' = t >= 5 && !cardPc ? 'C' : 'F';
+    const ref = cardPc ? (r.pick([750, 800, 900, 1000]), cardPc.psi) : r.pick([750, 800, 900, 1000]);
+    const refTemp = cardPc ? cardPc.refTemp : unit === 'F' ? 70 : 21;
     // a hot island ramp: the correction is always well over the tolerance, so
     // copying the placard number is out of limits
     const ramp = unit === 'F' ? r.int(95, 106) : r.int(32, 40);
     const target = prechargeAt(ref, refTemp, ramp, unit);
     const ptol = [20, 20, 20, 20, 15, 12][t];
     precharge = { ref, refTemp, unit, ramp, target, tol: ptol };
+    if (card) precharge.others = card.precharge.filter((l) => !l.applies).map((l) => prechargeAt(l.psi, l.refTemp, ramp, unit));
     // leaked down or overcharged, well outside the band
     const off = r.range(70, 170) * (r.chance(0.5) ? 1 : -1);
     p0 = clamp(Math.round((target + off) / 5) * 5, 350, Math.round(sysPsi * 0.78));
@@ -228,7 +260,8 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
   // Older aircraft carry the superseded designation. Then the vegetable-base
   // MIL-H-7644 on the shelf is the near miss, and the cans' MIL-PRF numbers are
   // the right ones only if you know the history.
-  const placardStyle: PlacardStyle = t >= 5 ? r.pick<PlacardStyle>(['prf', 'milh', 'nato']) : t === 4 ? r.pick<PlacardStyle>(['prf', 'milh']) : 'prf';
+  // (the task card prints the MIL-PRF numbers)
+  const placardStyle: PlacardStyle = card ? 'prf' : t >= 5 ? r.pick<PlacardStyle>(['prf', 'milh', 'nato']) : t === 4 ? r.pick<PlacardStyle>(['prf', 'milh']) : 'prf';
   if (placardStyle !== 'prf' && !shelf.includes('veg')) {
     const k = shelf.findIndex((f) => f === 'turbine' || f === 'dot3');
     shelf[k] = 'veg';
@@ -259,7 +292,16 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
     bleed,
     placardFluid,
     placardStyle,
+    ...(card ? { card } : {}),
   };
+}
+
+/** card-driven: the precharge left at the other S/N block's value (in its limits, out of this airplane's) */
+export function prechargeOther(m: HydModel, psi: number): boolean {
+  const pc = m.precharge;
+  if (!pc?.others?.length) return false;
+  const lim = PRECHARGE_LIMIT * pc.tol;
+  return Math.abs(psi - pc.target) > lim && pc.others.some((o) => Math.abs(psi - o) <= lim);
 }
 
 // ---------------------------------------------------------------------------
@@ -561,7 +603,7 @@ export const hydraulics: PuzzleDef = {
   term: 'Accumulator: nitrogen-charged tank that stores hydraulic pressure. Discharge it before checking fluid.',
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 12,
   mount(host, p) {
-    const m = generateHydraulics(p.seed, p.tier, p.tools);
+    const m = generateHydraulics(p.seed, p.tier, p.tools, p.context?.card);
     const blind = !!p.blind;
     // the step banner ticks itself off (a verdict on the level): blind, it is a static work card
     const tracker = m.teach && !blind;
@@ -669,7 +711,9 @@ export const hydraulics: PuzzleDef = {
       const w = st.w;
       const h = st.h;
       const pad = 12;
-      const extra = m.teach ? 1 : 1 + (m.precharge ? 1 : 0) + (m.bleed ? 1 : 0);
+      // card-driven: a line per fluid and precharge effectivity, plus the records line when the SB decides
+      const cardRows = m.card ? m.card.fluid.length + (m.precharge ? m.card.precharge.length : 0) + (m.bleed ? 1 : 0) : 0;
+      const extra = m.card ? cardRows : m.teach ? 1 : 1 + (m.precharge ? 1 : 0) + (m.bleed ? 1 : 0);
       const headH = Math.max(88, 46 + 17 * extra);
       const head: R = { x: pad, y: 8, w: w - pad * 2 - 100, h: headH };
       const gauge = { cx: w - pad - 46, cy: 8 + headH / 2, r: 40 };
@@ -877,8 +921,8 @@ export const hydraulics: PuzzleDef = {
         psi: Math.round(sys.p0),
         target: m.precharge ? Math.round(m.precharge.target) : undefined,
         spilled: +spilled.toFixed(3),
-        // what went wrong, for the hidden defect it leaves (DEFECT_RULES 'hydraulics:fluid')
-        ...(contaminated ? { defect: 'fluid' } : {}),
+        // what went wrong, for the hidden defect it leaves (DEFECT_RULES 'hydraulics:fluid' / 'hydraulics:eff')
+        ...(contaminated ? { defect: 'fluid' } : prechargeOther(m, sys.p0) ? { defect: 'eff' } : {}),
       });
     };
     function finishWith(ms?: number) {
@@ -1242,6 +1286,7 @@ export const hydraulics: PuzzleDef = {
       }
       const x = r.x + 12;
       const mw = r.w - 22;
+      if (m.card) return drawCardLines(r, x, mw);
       fitLabel(ctx, `${aircraft.toUpperCase()} · HYDRAULIC SERVICE`, x, r.y + 15, mw, { size: 9.5, weight: 800, color: C.inkSoft, align: 'left' });
       fitLabel(ctx, `FLUID  ${m.placardFluid}`, x, r.y + 33, mw, { size: 13, weight: 900, color: C.ink, align: 'left' });
       let y = r.y + 52;
@@ -1265,6 +1310,30 @@ export const hydraulics: PuzzleDef = {
         }
         if (m.bleed) fitLabel(ctx, 'SQUAWK: LH BRAKE SOFT, SPONGY', x, y, mw, { size: 10.5, weight: 900, color: C.rust, align: 'left' });
       }
+    }
+
+    /**
+     * Card-driven: the AMM task card's servicing values, both effectivities as
+     * printed. Tiers 0-2 mark this airplane's line; from tier 3 the S/N on the
+     * plate and the SB list decide, and that's the mechanic's to read.
+     */
+    function drawCardLines(r: R, x: number, mw: number) {
+      const cd = m.card!;
+      fitLabel(ctx, `${cd.task} · ${cd.plate}`, x, r.y + 14, mw, { size: 10, weight: 900, color: C.ink, align: 'left' });
+      fitLabel(ctx, cd.sbs.length ? `SBs on record: ${cd.sbs.join(', ')}` : 'SBs on record: none', x, r.y + 28, mw, { size: 9, weight: 700, color: C.inkSoft, align: 'left' });
+      let y = r.y + 45;
+      const row = (applies: boolean, text: string) => {
+        const mark = cd.marked && applies;
+        ctx.globalAlpha = cd.marked && !applies ? 0.45 : 1;
+        fitLabel(ctx, `${mark ? '▶ ' : ''}${text}`, x, y, mw, { size: 10.5, weight: mark ? 900 : 800, color: mark ? C.seaDeep : C.ink, align: 'left' });
+        ctx.globalAlpha = 1;
+        y += 17;
+      };
+      // the placard's shorthand for the manual's lines: "S/N 310R0001–310R0759", "5606 or 83282"
+      const short = (x = '') => x.replace(/ THRU /, '–').replace(/ AND ON$/, ' and on');
+      for (const l of cd.fluid) row(l.applies, `FLUID ${l.eff ?? ''} · ${short(l.effText)}: ${l.fluids.map((f) => FLUIDS[f].name.replace(/^MIL-PRF-/, '')).join(' or ')}${l.fluids.length === 1 ? ' only' : ''}`);
+      if (m.precharge) for (const l of cd.precharge) row(l.applies, `N₂ ${l.eff ?? ''} · ${short(l.effText)}: ${fmt(l.psi)} PSI @ ${l.refTemp}°F`);
+      if (m.bleed) fitLabel(ctx, 'SQUAWK: LH BRAKE SOFT, SPONGY', x, y, mw, { size: 10.5, weight: 900, color: C.rust, align: 'left' });
     }
 
     function dial(cx: number, cy: number, r: number, v: number, max: number, o: { major: number; minor: number; face?: string; lbl?: (n: number) => string }) {
