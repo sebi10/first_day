@@ -6,7 +6,7 @@
 // delivery billed for what arrived is fine; "2/10 net 30" means 2% off if paid
 // within 10 days — worth taking when cash allows.
 import { rng, type Rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, shade, stage } from './kit';
+import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, shade, stage, tnum } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 export type InvIssue = 'qty' | 'price' | 'dupe' | 'freight' | 'tax';
@@ -535,31 +535,6 @@ function invResult(m: InvModel, ds: (InvDecision | undefined)[]): PuzzleResult {
 type Rect = { x: number; y: number; w: number; h: number };
 const inRect = (r: Rect, x: number, y: number, slop = 0) =>
   x >= r.x - slop && x <= r.x + r.w + slop && y >= r.y - slop && y <= r.y + r.h + slop;
-const isDigit = (ch: string) => ch >= '0' && ch <= '9';
-
-/** Canvas has no tabular-nums: lay digits out on a fixed advance so columns never jitter. */
-function tnum(
-  ctx: CanvasRenderingContext2D,
-  str: string,
-  x: number,
-  y: number,
-  o: { size?: number; weight?: number; color?: string; align?: 'left' | 'right' | 'center' } = {},
-): number {
-  ctx.font = `${o.weight ?? 700} ${o.size ?? 14}px ${FONT}`;
-  ctx.fillStyle = o.color ?? C.ink;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  const dw = ctx.measureText('0').width;
-  const chars = [...str];
-  const ws = chars.map((ch) => (isDigit(ch) ? dw : ctx.measureText(ch).width));
-  const total = sum(ws);
-  let cx = o.align === 'right' ? x - total : o.align === 'center' ? x - total / 2 : x;
-  chars.forEach((ch, i) => {
-    ctx.fillText(ch, cx + (isDigit(ch) ? (dw - ctx.measureText(ch).width) / 2 : 0), y);
-    cx += ws[i];
-  });
-  return total;
-}
 
 function text(
   ctx: CanvasRenderingContext2D,

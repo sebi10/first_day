@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
@@ -14,15 +15,35 @@ function serviceWorker(): Plugin {
       outDir = c.build.outDir;
     },
     writeBundle(_, bundle) {
-      // the puzzle lab is a dev tool: keep it out of the offline cache
-      const files = Object.keys(bundle).filter((f) => !f.endsWith('.map') && f !== 'lab.html' && !f.startsWith('assets/lab-'));
+      // Precache only what every player needs offline. Left out (cached on first use instead):
+      // the puzzle lab (dev tool), the Firebase SDK (online islands only) and the
+      // non-Latin font subsets (the browser fetches them only if that script appears).
+      const skip = (f: string) =>
+        f.endsWith('.map') || f === 'lab.html' || f.startsWith('assets/lab-') || /firebase|index\.esm/i.test(f) || /(cyrillic|greek|vietnamese)/.test(f);
+      const files = Object.keys(bundle).filter((f) => !skip(f));
       const statics = ['./', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon.svg'];
-      const version = Date.now().toString(36);
+      // same files → same cache name: a deploy that changes nothing re-downloads nothing
+      const version = createHash('sha1').update(JSON.stringify(files.sort())).digest('hex').slice(0, 10);
       const sw = `// generated at build time
 const CACHE = 'island-${version}';
 const PRECACHE = ${JSON.stringify([...statics, ...files.map((f) => './' + f)])};
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    (async () => {
+      const c = await caches.open(CACHE);
+      await Promise.all(
+        PRECACHE.map(async (u) => {
+          // hashed assets never change: reuse the copy from the previous version
+          const old = u.includes('/assets/') ? await caches.match(u, { ignoreVary: true }) : null;
+          if (old) return c.put(u, old);
+          const res = await fetch(u, { cache: 'reload' });
+          if (!res.ok) throw new Error('precache ' + u);
+          return c.put(u, res);
+        }),
+      );
+      await self.skipWaiting();
+    })(),
+  );
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -33,11 +54,19 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return; // Firestore, ntfy: network only
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('./index.html').then((r) => r || caches.match('./'))));
+    // fresh page if the network answers within 1.5 s, else the cached app (flaky Wi-Fi shouldn't cost 4 s)
+    e.respondWith(
+      (async () => {
+        const cached = (await caches.match('./index.html', { ignoreVary: true })) || (await caches.match('./', { ignoreVary: true }));
+        const net = fetch(req);
+        if (!cached) return net;
+        return Promise.race([net.then((r) => (r.ok ? r : cached)).catch(() => cached), new Promise((r) => setTimeout(() => r(cached), 1500))]);
+      })(),
+    );
     return;
   }
   e.respondWith(
-    caches.match(req).then(
+    caches.match(req, { ignoreVary: true }).then(
       (hit) =>
         hit ||
         fetch(req).then((res) => {

@@ -5,8 +5,9 @@ import { settings } from './settings';
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 
-function audio(): AudioContext | null {
-  if (!settings.get().sound) return null;
+let sleepT: ReturnType<typeof setTimeout> | undefined;
+
+function create() {
   if (!ctx) {
     try {
       // iOS 17+: respect the silent switch and duck under calls.
@@ -17,11 +18,30 @@ function audio(): AudioContext | null {
       master.gain.value = 0.5;
       master.connect(ctx.destination);
     } catch {
-      return null;
+      ctx = null;
     }
   }
-  if (ctx.state === 'suspended') void ctx.resume();
   return ctx;
+}
+
+// Build the context while the browser is idle (creating it costs ~60 ms, a hitch on
+// the first tap), wake it per sound, and let it sleep after 2 s of silence so the
+// phone's audio hardware can power down.
+if (typeof window !== 'undefined') {
+  const early = () => settings.get().sound && create();
+  const w = window as Window & { requestIdleCallback?: (f: () => void) => void };
+  if (w.requestIdleCallback) w.requestIdleCallback(early);
+  else setTimeout(early, 1500);
+}
+
+function audio(): AudioContext | null {
+  if (!settings.get().sound) return null;
+  const a = create();
+  if (!a) return null;
+  if (a.state === 'suspended') void a.resume();
+  clearTimeout(sleepT);
+  sleepT = setTimeout(() => void a.suspend().catch(() => {}), 2000);
+  return a;
 }
 
 function tone(freq: number, dur: number, type: OscillatorType = 'sine', vol = 0.3, slideTo?: number, delay = 0) {

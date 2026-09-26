@@ -256,8 +256,8 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
   },
   async dispatch(id, a) {
     // offline: validate locally, queue, show the result optimistically
-    const queue = () => {
-      const base = cached(id);
+    const queue = (from = cached(id)) => {
+      const base = from;
       if (!base) return { error: 'Offline and no local copy yet.' };
       const r = apply(base, a, Date.now());
       if (r.error) return { error: r.error };
@@ -268,14 +268,27 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
     };
     // known offline: don't wait seconds for a transaction to time out
     if (!navigator.onLine) return queue();
+    // online: show the move now (same reducer), the server confirms or corrects a round trip later
+    const base = cached(id);
+    if (base) {
+      const local = apply(base, a, Date.now());
+      if (local.error) return { error: local.error };
+      if (local.s !== base) publish(id, local.s);
+    }
     try {
       const r = await transact(id, a);
-      if (r.error) return { error: r.error };
+      if (r.error) {
+        void firebaseStore.load(id); // roll back to the server's truth
+        return { error: r.error };
+      }
       if (r.state) publish(id, r.state);
       return {};
     } catch (e) {
-      if (!isNetworkError(e)) return { error: String((e as Error)?.message ?? e) };
-      return queue();
+      if (!isNetworkError(e)) {
+        void firebaseStore.load(id);
+        return { error: String((e as Error)?.message ?? e) };
+      }
+      return queue(base); // queue on top of the pre-move state, not the optimistic one
     }
   },
   status(cb) {

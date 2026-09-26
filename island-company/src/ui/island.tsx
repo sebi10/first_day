@@ -1,6 +1,6 @@
 // The island is the progress bar. Painterly low-poly SVG, readable with no
 // text: rust tags = faults, dim windows = no power, empty runway = grounded.
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
 import { houseRentable, planeCapacity, powered } from '../sim/econ';
 import type { Asset, IslandState, Role } from '../sim/types';
@@ -108,6 +108,50 @@ function House({ a, tint, lit, dim, big, lodge }: { a: Asset; tint: string; lit:
   );
 }
 
+// Ambient motion is decoration, so it must cost nothing when nobody is looking:
+// it stops after 20 s without input, off-screen, in a background tab, and under
+// a full-screen overlay (puzzle, review). Any input wakes it.
+const IDLE_MS = 20_000;
+let lastInput = typeof performance !== 'undefined' ? performance.now() : 0;
+const wakers = new Set<() => void>();
+if (typeof window !== 'undefined') {
+  const poke = () => {
+    const wasIdle = performance.now() - lastInput > IDLE_MS;
+    lastInput = performance.now();
+    if (wasIdle) wakers.forEach((f) => f());
+  };
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll']) window.addEventListener(ev, poke, { passive: true, capture: true });
+}
+
+function useStill(ref: { current: SVGSVGElement | null }) {
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let visible = true;
+    const check = () => {
+      const covered = [...document.querySelectorAll('.overlay')].some((o) => !o.contains(el));
+      const s = !visible || document.hidden || covered || performance.now() - lastInput > IDLE_MS;
+      setStill(s);
+      if (s) el.pauseAnimations?.();
+      else el.unpauseAnimations?.();
+    };
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(([e]) => ((visible = e.isIntersecting), check())) : null;
+    io?.observe(el);
+    const t = setInterval(check, 1000);
+    wakers.add(check);
+    document.addEventListener('visibilitychange', check);
+    check();
+    return () => {
+      io?.disconnect();
+      clearInterval(t);
+      wakers.delete(check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, []);
+  return still;
+}
+
 export function Island({
   s,
   focus,
@@ -123,6 +167,8 @@ export function Island({
 }) {
   const phase = phaseProp ?? phaseOf();
   const motion = !reduceMotion;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const still = useStill(svgRef);
   const pw = powered(s);
   const players = s.players;
   const hangarColor = cosmeticColor('mech', players.mech?.cosmetic);
@@ -155,7 +201,7 @@ export function Island({
   const floatPlane = planes.find((p) => p.model === 'float');
 
   return (
-    <svg viewBox="0 0 400 300" role="img" aria-label={`${s.name}: ${planes.length} planes, ${houses.length} houses, tier ${s.tier}`} onClick={onTap}>
+    <svg ref={svgRef} class={still ? 'still' : undefined} viewBox="0 0 400 300" role="img" aria-label={`${s.name}: ${planes.length} planes, ${houses.length} houses, tier ${s.tier}`} onClick={onTap}>
       <defs>
         <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stop-color="#3a8ea4" />

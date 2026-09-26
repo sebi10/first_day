@@ -413,6 +413,11 @@ h3 {
 .smoke {
   animation: rise 2.4s ease-out infinite;
 }
+/* ambient island motion pauses when idle, covered or off-screen */
+.still,
+.still * {
+  animation-play-state: paused !important;
+}
 .reduce-motion *,
 .reduce-motion *::before {
   animation: none !important;

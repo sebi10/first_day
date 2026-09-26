@@ -135,7 +135,8 @@ await sebLaptop.finishPuzzle();
 await sebLaptop.page.waitForTimeout(1500);
 await seb.click('Island', { exact: true });
 await seb.page.waitForTimeout(2500);
-const phoneSeesDone = await seb.page.locator('.order.done', { hasText: jobTitle }).count();
+// a near-empty hand-in is a rework (job stays open), a real one closes it: either way the phone must show it
+const phoneSeesDone = (await seb.page.locator('.order.done', { hasText: jobTitle }).count()) + (await seb.page.getByText(`${jobTitle}`, { exact: false }).filter({ hasText: /Rework|finished/ }).count());
 console.log(`job "${jobTitle}" done on laptop → visible on phone: ${phoneSeesDone > 0}`);
 await seb.shot('phone-after-laptop-job');
 

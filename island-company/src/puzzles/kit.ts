@@ -48,17 +48,40 @@ export function stage(el: HTMLElement): Stage {
   return s;
 }
 
+// Canvas redraws cost battery. The host suspends puzzle loops while its help
+// card or result card covers the puzzle, and a puzzle nobody has touched draws
+// at 30 fps after 1.5 s and 10 fps after 4 s (animations stay time-based, so they
+// just step coarser). A puzzle whose clock runs on its own (the auction) opts out.
+let suspended = false;
+let lastInput = 0;
+export function suspendLoops(on: boolean) {
+  suspended = on;
+}
+export function markInput() {
+  lastInput = performance.now();
+}
+
 /** requestAnimationFrame loop; dt in seconds (clamped). Returns stop(). */
-export function loop(frame: (t: number, dt: number) => void): () => void {
+export function loop(frame: (t: number, dt: number) => void, o: { live?: boolean } = {}): () => void {
   let raf = 0;
   let last = performance.now();
   let alive = true;
+  let n = 0;
   const tick = (now: number) => {
     if (!alive) return;
-    const dt = Math.min(0.05, (now - last) / 1000);
+    raf = requestAnimationFrame(tick);
+    if (suspended) {
+      last = now;
+      return;
+    }
+    n++;
+    if (!o.live) {
+      const quiet = now - lastInput;
+      if ((quiet > 4000 && n % 6) || (quiet > 1500 && n % 2)) return;
+    }
+    const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     frame(now / 1000, dt);
-    raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
   return () => {
@@ -79,6 +102,7 @@ export function pointer(
   };
   const down = (e: PointerEvent) => {
     e.preventDefault();
+    markInput();
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -88,9 +112,11 @@ export function pointer(
   };
   const move = (e: PointerEvent) => {
     e.preventDefault();
+    markInput();
     h.move?.(local(e));
   };
   const up = (e: PointerEvent) => {
+    markInput();
     h.up?.(local(e));
   };
   canvas.addEventListener('pointerdown', down);
@@ -166,6 +192,45 @@ export function fitLabel(
 export function settle(host: { done(r: PuzzleResult): void; hold?(r: PuzzleResult, ms: number): void }, res: PuzzleResult, ms: number) {
   if (host.hold) host.hold(res, ms);
   else setTimeout(() => host.done(res), ms);
+}
+
+// Glyph widths per font, measured once (measureText per character per frame
+// was the ledger puzzles' biggest cost). Cleared when a web font finishes loading.
+const glyphW = new Map<string, Map<string, number>>();
+if (typeof document !== 'undefined') document.fonts?.addEventListener?.('loadingdone', () => glyphW.clear());
+function gw(ctx: CanvasRenderingContext2D, font: string, ch: string) {
+  let m = glyphW.get(font);
+  if (!m) glyphW.set(font, (m = new Map()));
+  let w = m.get(ch);
+  if (w === undefined) m.set(ch, (w = ctx.measureText(ch).width));
+  return w;
+}
+const isDigit = (ch: string) => ch >= '0' && ch <= '9';
+
+/** Canvas has no tabular-nums: lay digits out on a fixed advance so columns never jitter. Returns the width. */
+export function tnum(
+  ctx: CanvasRenderingContext2D,
+  str: string,
+  x: number,
+  y: number,
+  o: { size?: number; weight?: number; color?: string; align?: 'left' | 'right' | 'center' } = {},
+): number {
+  const font = `${o.weight ?? 700} ${o.size ?? 14}px ${FONT}`;
+  ctx.font = font;
+  ctx.fillStyle = o.color ?? C.ink;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const dw = gw(ctx, font, '0');
+  const chars = [...str];
+  let total = 0;
+  for (const ch of chars) total += isDigit(ch) ? dw : gw(ctx, font, ch);
+  let cx = o.align === 'right' ? x - total : o.align === 'center' ? x - total / 2 : x;
+  for (const ch of chars) {
+    const w = isDigit(ch) ? dw : gw(ctx, font, ch);
+    ctx.fillText(ch, cx + (isDigit(ch) ? (dw - gw(ctx, font, ch)) / 2 : 0), y);
+    cx += w;
+  }
+  return total;
 }
 
 /** Painterly backdrop: soft vertical gradient in sand, used behind every puzzle */

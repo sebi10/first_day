@@ -220,7 +220,7 @@ export const auction: PuzzleDef = {
         }
       }
       draw();
-    });
+    }, { live: true }); // the price ticks on its own: keep full frame rate
 
     function draw() {
       const g = geo();

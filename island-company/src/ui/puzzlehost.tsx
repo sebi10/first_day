@@ -6,6 +6,7 @@
 //  - Handing in early asks first; one attempt per job, as always.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PUZZLES } from '../puzzles';
+import { markInput, suspendLoops } from '../puzzles/kit';
 import { PASS, type PuzzleContext, type PuzzleId, type PuzzleInstance, type PuzzleResult } from '../puzzles/types';
 import { REWORK_BELOW, workCredit } from '../sim/econ';
 import { fx } from './feedback';
@@ -62,6 +63,7 @@ export function PuzzleHost({
   const timed = launch.tier > 0;
   const total = def.seconds(launch.tier) * (settings.get().timerBoost ? 1.5 : 1) * 1000;
   const [left, setLeft] = useState(1);
+  const shownLeft = useRef(1);
   const elapsed = useRef(0);
   const finished = useRef(false);
   /** a solved puzzle's result, locked in while its finish animation plays */
@@ -128,6 +130,20 @@ export function PuzzleHost({
   const howtoRef = useRef(howto);
   howtoRef.current = howto;
 
+  // nothing to animate under the help card or the result card
+  useEffect(() => {
+    suspendLoops(!!howto || !!res);
+  }, [howto, res]);
+  useEffect(() => {
+    markInput();
+    const onKey = () => markInput();
+    window.addEventListener('keydown', onKey);
+    return () => {
+      suspendLoops(false);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
   // timer: runs only after the first touch, and never while help is open
   useEffect(() => {
     if (!timed) return;
@@ -139,12 +155,17 @@ export function PuzzleHost({
       if (startedRef.current && !pausedRef.current && !howtoRef.current && !finished.current && !held.current) {
         elapsed.current += dt;
         const l = Math.max(0, 1 - elapsed.current / total);
-        setLeft(l);
+        // re-render only when the bar moves a visible amount (not 60×/s)
+        if (Math.abs(l - shownLeft.current) >= 0.004 || l === 0) {
+          shownLeft.current = l;
+          setLeft(l);
+        }
         if (l <= 0 && inst.current) {
           fx.bad();
           settleNow();
         }
       }
+      if (finished.current) return; // clock done: stop ticking
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
