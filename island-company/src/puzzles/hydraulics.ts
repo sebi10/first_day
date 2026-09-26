@@ -7,6 +7,16 @@
 // and from tier 4 a spongy brake has to be bled without running the reservoir dry.
 // Tiers 0-2 explain the placard and number the steps; from tier 3 only the
 // placard, the cans and the gauges are on screen.
+//
+// The brakes are POWER brakes (Twin Otter, Aero Commander): the pedal only
+// meters accumulator pressure through a brake valve. Each application uses some
+// accumulator fluid, which returns to the reservoir, so pumping the pedal
+// discharges the accumulator. With the accumulator discharged the pedal moves
+// nothing. Bleed pressure comes from the hand pump: with the pedal up it charges
+// the accumulator (press the pedal to push that through the open bleeder), with
+// the pedal held down it pumps straight through the brake. Either way the bleed
+// empties the reservoir and can leave the accumulator charged, so afterwards you
+// pump the brakes down again and recheck the level before sign-off.
 import { hashSeed, rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, fitLabel, label, loop, markInput, pointer, roundRect, settle, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
@@ -121,8 +131,28 @@ export type HydModel = {
   precharge: Precharge | null;
   /** heat of compression shown on the gas gauge per psi added (tier 4+) */
   heat: number;
-  /** tier 4+: bubbles expelled per bleed stroke, in order */
-  bleed: { air: number[]; strokeVol: number } | null;
+  /**
+   * tier 4+: bubbles carried out by each slug of fluid pushed through the open
+   * bleeder, in order; the fluid one bleed slug takes, and one hand-pump stroke
+   */
+  bleed: { air: number[]; slugVol: number; pumpVol: number } | null;
+  /** the fluid line on the servicing placard, as that aircraft carries it */
+  placardFluid: string;
+  /** tier 4+: older aircraft carry the superseded MIL-H or the NATO designation */
+  placardStyle: PlacardStyle;
+};
+
+export type PlacardStyle = 'prf' | 'milh' | 'nato';
+
+/**
+ * How a placard names the approved fluids. MIL-H-5606 / MIL-H-83282 were
+ * superseded by MIL-PRF-5606 / MIL-PRF-83282 (same fluids); NATO codes H-515 and
+ * H-537 are the same two. The cans on the shelf always print MIL-PRF.
+ */
+export const PLACARD_NAMES: Record<PlacardStyle, [string, string]> = {
+  prf: ['MIL-PRF-5606', 'MIL-PRF-83282'],
+  milh: ['MIL-H-5606', 'MIL-H-83282'],
+  nato: ['NATO H-515', 'H-537'],
 };
 
 export const absTemp = (t: number, unit: 'F' | 'C') => (unit === 'F' ? t + 459.67 : t + 273.15);
@@ -161,8 +191,9 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
     const unit: 'F' | 'C' = t >= 5 ? 'C' : 'F';
     const ref = r.pick([750, 800, 900, 1000]);
     const refTemp = unit === 'F' ? 70 : 21;
-    // a hot island ramp: the correction is always bigger than the tolerance
-    const ramp = unit === 'F' ? r.int(90, 104) : r.int(32, 40);
+    // a hot island ramp: the correction is always well over the tolerance, so
+    // copying the placard number is out of limits
+    const ramp = unit === 'F' ? r.int(95, 106) : r.int(32, 40);
     const target = prechargeAt(ref, refTemp, ramp, unit);
     const ptol = [20, 20, 20, 20, 15, 12][t];
     precharge = { ref, refTemp, unit, ramp, target, tol: ptol };
@@ -180,10 +211,22 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
   if (t >= 4) {
     const air = t === 4 ? [4, 3, 2, 2, 1, 1] : [4, 3, 3, 2, 2, 1, 1];
     if (r.chance(0.5)) air.splice(r.int(1, 3), 0, 2);
-    // tier 5: one last bubble after the first clear stroke; pump a few clear ones before closing
+    // tier 5: one last bubble after the first clear slug; run a few clear ones before closing
     if (t >= 5) air.push(0, 1);
-    bleed = { air, strokeVol: 0.1 };
+    // a full bleed takes about as much fluid as the reservoir holds: keep it topped up
+    bleed = { air, slugVol: 0.06, pumpVol: 0.06 };
   }
+
+  // Older aircraft carry the superseded designation. Then the vegetable-base
+  // MIL-H-7644 on the shelf is the near miss, and the cans' MIL-PRF numbers are
+  // the right ones only if you know the history.
+  const placardStyle: PlacardStyle = t >= 5 ? r.pick<PlacardStyle>(['prf', 'milh', 'nato']) : t === 4 ? r.pick<PlacardStyle>(['prf', 'milh']) : 'prf';
+  if (placardStyle !== 'prf' && !shelf.includes('veg')) {
+    const k = shelf.findIndex((f) => f === 'turbine' || f === 'dot3');
+    shelf[k] = 'veg';
+  }
+  const names = PLACARD_NAMES[placardStyle];
+  const placardFluid = allow83282 ? `${names[0]} OR ${names[1]}` : names[0];
 
   return {
     tier: t,
@@ -206,7 +249,117 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
     precharge,
     heat: t >= 5 ? 0.14 : t >= 4 ? 0.1 : 0,
     bleed,
+    placardFluid,
+    placardStyle,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The live system: what the pedal, the hand pump and the bleeder do. Pure, so
+// the tests can pump it without a browser.
+// ---------------------------------------------------------------------------
+
+export type HydState = {
+  /** reservoir level as the sight glass shows it */
+  res: number;
+  /** fluid stored in the accumulator */
+  vf: number;
+  /** settled nitrogen charge, psi at ramp temperature */
+  p0: number;
+  bleederOpen: boolean;
+  /** bubbles each coming slug still carries out of the brake line */
+  airQ: number[];
+  bleedStrokes: number;
+  ranDry: number;
+  /** the hand pump is sucking at the standpipe */
+  dry: boolean;
+  /** fluid poured while the accumulator held fluid (a top-up during a bleed is forgiven by the next slug) */
+  underPressure: number;
+};
+
+export function initState(m: HydModel): HydState {
+  return {
+    res: m.level0,
+    vf: m.vf0,
+    p0: m.p0,
+    bleederOpen: false,
+    airQ: m.bleed ? [...m.bleed.air] : [],
+    bleedStrokes: 0,
+    ranDry: 0,
+    dry: false,
+    underPressure: 0,
+  };
+}
+
+/** Fluid the accumulator holds at system pressure (the relief valve setting). */
+export function accCapacity(m: HydModel, p0: number): number {
+  return Math.max(0, m.accVol * (1 - p0 / m.sysPsi));
+}
+
+export type Flow =
+  /** nothing moved: no pressure behind the brake valve */
+  | { kind: 'idle' }
+  /** a brake application: accumulator fluid through the brake and back to the reservoir */
+  | { kind: 'return'; dv: number; zero: boolean }
+  /** fluid out through the open bleeder; a weak dribble flushes nothing */
+  | { kind: 'flush'; dv: number; bubbles: number; air: boolean; weak: boolean; zero: boolean }
+  /** hand pump into the accumulator */
+  | { kind: 'charge'; dv: number; air: boolean }
+  /** accumulator already at system pressure: the relief valve cracks */
+  | { kind: 'relief' };
+
+function flush(m: HydModel, s: HydState, dv: number, air: boolean, zero: boolean): Flow {
+  const weak = !air && dv < m.bleed!.slugVol * 0.35;
+  let bubbles = 0;
+  if (!weak) {
+    s.bleedStrokes++;
+    bubbles = s.airQ.length ? s.airQ.shift()! : 0;
+    // topping up to keep ahead of the bleed is part of the job, not a level check
+    s.underPressure = 0;
+  }
+  return { kind: 'flush', dv, bubbles, air, weak, zero };
+}
+
+/** One press of the brake pedal (power brakes: it only meters accumulator pressure). */
+export function pedalStroke(m: HydModel, s: HydState): Flow {
+  if (s.vf <= 1e-6) return { kind: 'idle' };
+  if (m.bleed && s.bleederOpen) {
+    const dv = Math.min(s.vf, m.bleed.slugVol);
+    s.vf -= dv;
+    if (s.vf < 1e-6) s.vf = 0;
+    return flush(m, s, dv, false, s.vf === 0);
+  }
+  const dv = Math.min(s.vf, m.strokeVol);
+  s.vf -= dv;
+  if (s.vf < 1e-6) s.vf = 0;
+  s.res += dv;
+  return { kind: 'return', dv, zero: s.vf === 0 };
+}
+
+/**
+ * One stroke of the hand pump, drawing from the reservoir. With the pedal held
+ * down and the bleeder open the path is open and it pushes straight out the
+ * bleeder; otherwise it charges the accumulator up to the relief setting.
+ */
+export function pumpStroke(m: HydModel, s: HydState, pedalDown: boolean): Flow {
+  if (!m.bleed) return { kind: 'idle' };
+  if (s.dry && s.res > m.outlet + m.bleed.pumpVol) s.dry = false;
+  const through = s.bleederOpen && pedalDown;
+  const want = through ? m.bleed.pumpVol : Math.min(m.bleed.pumpVol, accCapacity(m, s.p0) - s.vf);
+  if (want < 1e-4) return { kind: 'relief' };
+  const take = Math.min(want, Math.max(0, s.res - m.outlet));
+  s.res -= take;
+  let air = false;
+  if (take < want - 1e-6) {
+    // sucked the reservoir down to the standpipe: air into the pump and on to the brake
+    air = true;
+    s.airQ.unshift(...(s.dry ? [2] : [3, 2, 2]));
+    if (!s.dry) s.ranDry++;
+    s.dry = true;
+  }
+  if (through) return flush(m, s, take, air, false);
+  s.vf += take;
+  return { kind: 'charge', dv: take, air };
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +433,14 @@ export function prechargeCredit(m: HydModel, psi: number): number {
   return clamp(0.6 * (1 - (err - pc.tol) / (3 * pc.tol)), 0, 1);
 }
 
+/** A precharge this far off is out of limits: not airworthy, so not a pass (a near miss still passes). */
+export const PRECHARGE_LIMIT = 1.5;
+
+/** Air still in the brake line that a mechanic would not sign off (the odd last bubble is a pass, not a perfect). */
+export function unbled(m: HydModel, r: Pick<HydRun, 'bleedStrokes' | 'airLeft'>): boolean {
+  return !!m.bleed && (r.bleedStrokes === 0 || r.airLeft > 1);
+}
+
 export function bleedCredit(m: HydModel, r: HydRun): number {
   if (!m.bleed) return 1;
   if (r.bleedStrokes === 0) return 0;
@@ -313,11 +474,14 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
   if (r.shopAir) s -= 0.2;
   if (r.n2UnderPressure && m.precharge) s -= 0.08;
   s -= Math.min(0.18, 0.06 * r.wrongPicks);
-  // airworthiness items: a precharge far out of limits, or the squawk not worked, is not a pass
-  const pcOut = !!m.precharge && Math.abs(r.precharge - m.precharge.target) > 3 * m.precharge.tol;
-  const airTotal = m.bleed ? m.bleed.air.reduce((a, b) => a + b, 0) : 0;
-  const notBled = !!m.bleed && (r.bleedStrokes === 0 || r.airLeft >= airTotal);
-  if (pcOut || notBled) s = Math.min(s, 0.55);
+  // airworthiness items: a precharge out of limits (e.g. the placard number
+  // copied without the temperature correction), or a spongy brake signed off
+  // with air still in the line, is not a pass
+  const pcOut = !!m.precharge && Math.abs(r.precharge - m.precharge.target) > PRECHARGE_LIMIT * m.precharge.tol;
+  const notBled = unbled(m, r);
+  // and a reservoir nowhere near FULL is not serviced, however well the rest went
+  const levelOut = lc === 0;
+  if (pcOut || notBled || levelOut) s = Math.min(s, 0.55);
   if (r.airFrac > 0.05) s = Math.min(s, 0.5);
   if (r.oxygen) s = Math.min(s, 0.2);
   if (r.contaminated) s = Math.min(s, 0.3);
@@ -366,7 +530,7 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
 type Scene = 'res' | 'acc' | 'brake';
 type Gas = 'n2' | 'air' | 'o2';
 type R = { x: number; y: number; w: number; h: number };
-type Grip = { kind: 'pedal' | 'syringe' | 'charge' | 'vent' } | { kind: 'can'; x0: number; y0: number; t0: number; base: number; moved: boolean };
+type Grip = { kind: 'pedal' | 'pump' | 'syringe' | 'charge' | 'vent' } | { kind: 'can'; x0: number; y0: number; t0: number; base: number; moved: boolean };
 
 const GASES: { id: Gas; name: string; sub: string; body: string; shoulder: string }[] = [
   { id: 'n2', name: 'NITROGEN', sub: 'N₂ · 2,200 psi', body: '#5d6a70', shoulder: '#1F2A30' },
@@ -374,7 +538,7 @@ const GASES: { id: Gas; name: string; sub: string; body: string; shoulder: strin
   { id: 'o2', name: 'OXYGEN', sub: 'O₂ · 1,850 psi', body: '#3f7d4e', shoulder: '#2f5f3b' },
 ];
 const LABEL_TINTS = ['#e9dfc8', '#d7e0e3', '#e6d0a6', '#dde3d6'];
-const SCENE_NAME: Record<Scene, string> = { res: 'Reservoir', acc: 'Accumulator', brake: 'Brake' };
+const SCENE_NAME: Record<Scene, string> = { res: 'Reservoir', acc: 'Accum.', brake: 'Brake' };
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 const inR = (x: number, y: number, r: R, pad = 0) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
@@ -401,28 +565,25 @@ export const hydraulics: PuzzleDef = {
     const aircraft = p.context?.assetName ?? 'Light twin';
 
     // --- physical state ---
-    let res = m.level0; // reservoir level
-    let vf = m.vf0; // fluid in the accumulator
-    let p0 = m.p0; // settled gas charge at ramp temperature
+    // reservoir level, accumulator fluid, gas charge, bleeder and brake-line air
+    const sys = initState(m);
     let heat = 0; // transient on the gas gauge (heat of compression)
     let gasAir = 0; // part of p0 that came from shop air
     let capOn = true;
     let funnel = 0;
     let funnelFluid: FluidId | null = null;
     const poured: Partial<Record<FluidId, number>> = {};
-    let underPressure = 0;
     let spilled = 0;
     let held = -1; // shelf index of the can in hand
     let tilt = 0; // 0..1 of TILT
     let pedal = 0; // 0 up .. 1 floor
     let pedalPress = false;
     let pedalArmed = true;
-    let bleederOpen = false;
-    const airQ = m.bleed ? [...m.bleed.air] : [];
-    let bleedStrokes = 0;
-    let ranDry = 0;
-    let dry = false;
-    const slugs: { t: number; bubbles: number; air: boolean }[] = [];
+    let pump = 0; // hand-pump lever, 0 up .. 1 down
+    let pumpPress = false;
+    let pumpArmed = true;
+    let reliefT = -9;
+    const slugs: { t: number; bubbles: number; air: boolean; weak: boolean }[] = [];
     let jar = 0.3;
     let hose: Gas | null = null;
     let hoseT = -9;
@@ -442,12 +603,12 @@ export const hydraulics: PuzzleDef = {
     const shakes = new Map<string, number>();
     let toast: { text: string; t: number; alert: boolean } | null = null;
     const grips = new Map<number, Grip>();
-    let hydShown = hydPressure(m, p0, vf);
-    let gasShown = hydShown || p0;
+    let hydShown = hydPressure(m, sys.p0, sys.vf);
+    let gasShown = hydShown || sys.p0;
     let lastStatus = '';
 
-    const hydPsi = () => hydPressure(m, p0, vf);
-    const gasPsi = () => Math.max(0, (vf > 1e-6 ? hydPsi() : p0) + heat);
+    const hydPsi = () => hydPressure(m, sys.p0, sys.vf);
+    const gasPsi = () => Math.max(0, (sys.vf > 1e-6 ? hydPsi() : sys.p0) + heat);
     const holding = (k: Grip['kind']) => {
       for (const g of grips.values()) if (g.kind === k) return true;
       return false;
@@ -460,17 +621,17 @@ export const hydraulics: PuzzleDef = {
     };
     const say = (text: string, alert = false) => (toast = { text, t: clock, alert });
     const approvedName = m.approved.length > 1 ? '5606 or 83282' : 'MIL-PRF-5606';
-    const levelOk = () => Math.abs(res + vf - m.full) <= m.tol;
+    const levelOk = () => Math.abs(sys.res + sys.vf - m.full) <= m.tol;
 
     // --- teaching steps (tiers 0-2) ---
     const steps = () => [
-      { text: 'Pump the brakes to 0 psi', done: vf <= 0 },
-      { text: 'Take the filler cap off', done: !capOn || (levelOk() && vf <= 0) },
+      { text: 'Pump the brakes to 0 psi', done: sys.vf <= 0 },
+      { text: 'Take the filler cap off', done: !capOn || (levelOk() && sys.vf <= 0) },
       {
-        text: vf <= 0 && res > m.full + m.tol ? 'Too full: syringe it down to FULL' : `Pour ${approvedName} up to FULL`,
-        done: levelOk() && vf <= 0,
+        text: sys.vf <= 0 && sys.res > m.full + m.tol ? 'Too full: syringe it down to FULL' : `Pour ${approvedName} up to FULL`,
+        done: levelOk() && sys.vf <= 0,
       },
-      { text: 'Refit the filler cap', done: levelOk() && vf <= 0 && capOn },
+      { text: 'Refit the filler cap', done: levelOk() && sys.vf <= 0 && capOn },
       { text: 'Sign off', done: false },
     ];
     const curStep = () => steps().findIndex((s) => !s.done);
@@ -508,23 +669,26 @@ export const hydraulics: PuzzleDef = {
 
     const resGeo = (g: G) => {
       const wk = g.work;
-      const band = m.teach ? 34 : 0; // step banner
+      const band = m.teach ? (wk.h < 300 ? 30 : 34) : 0; // step banner
       const cx = wk.x + wk.w * 0.47;
-      const canRoom = clamp(wk.h * 0.28, 112, 130);
+      // the tank and its sight glass get the height first (a ~120 px glass on a
+      // 560 px stage); the can in hand rests beside the funnel, so it needs little
+      const canRoom = clamp((wk.h - band) * 0.35 - 20, 68, 112);
       const tankTop = wk.y + band + canRoom;
-      const tank: R = { x: cx - 48, y: tankTop, w: 96, h: Math.max(110, wk.y + wk.h - tankTop - 4) };
-      const glass: R = { x: cx - 13, y: tank.y + 24, w: 26, h: tank.h - 44 };
+      const tank: R = { x: cx - 48, y: tankTop, w: 96, h: Math.max(90, wk.y + wk.h - tankTop - 4) };
+      const glass: R = { x: cx - 13, y: tank.y + 22, w: 26, h: tank.h - 40 };
       const fx = cx - 20;
       const neck: R = { x: fx - 14, y: tank.y - 14, w: 28, h: 14 };
-      const pivot = { x: fx + 44, y: neck.y - 38 };
-      const canBox: R = { x: pivot.x - 12, y: pivot.y - 84, w: 80, h: 96 };
-      const capRest = { x: tank.x + tank.w - 20, y: tank.y + 12 };
+      // the can in hand hangs from its spout just right of the funnel and tips about it
+      const spout = { x: cx + 30, y: neck.y - 46 };
+      const canBox: R = { x: spout.x - 9, y: spout.y - 5, w: 56, h: 82 };
+      const capRest = { x: tank.x - 30, y: tank.y + 26 };
       const ph = clamp(wk.h * 0.34, 104, 136);
-      const pedalR: R = { x: wk.x + wk.w - 74, y: tank.y + tank.h * 0.35, w: 70, h: ph };
-      const syringe: R = { x: wk.x + 4, y: wk.y + wk.h - 64, w: 76, h: 56 };
-      const banner: R = { x: wk.x, y: wk.y, w: wk.w, h: 28 };
-      const loupeC = { x: wk.x + 44, y: glass.y + glass.h * (1 - m.full), r: 36 };
-      return { cx, tank, glass, fx, neck, pivot, canBox, capRest, pedalR, syringe, banner, loupeC };
+      const pedalR: R = { x: wk.x + wk.w - 74, y: Math.min(tank.y + tank.h * 0.35, wk.y + wk.h - ph), w: 70, h: ph };
+      const syringe: R = { x: wk.x + 4, y: wk.y + band + 4, w: 76, h: 56 };
+      const banner: R = { x: wk.x, y: wk.y, w: wk.w, h: band - 6 };
+      const loupeC = { x: wk.x + 40, y: glass.y + glass.h * (1 - m.full), r: 32 };
+      return { cx, tank, glass, fx, neck, spout, canBox, capRest, pedalR, syringe, banner, loupeC };
     };
 
     const shelfSlots = (g: G) => {
@@ -546,9 +710,12 @@ export const hydraulics: PuzzleDef = {
       const acc: R = { x: gc.cx - 32, y: accTop, w: 64, h: Math.max(70, Math.min(150, wk.y + wk.h - accTop - 4)) };
       const valve = { x: acc.x - 12, y: acc.y + 22 };
       const room = wk.y + wk.h - (thermo.y + thermo.h);
-      const cr = clamp(room * 0.22, 30, 42);
-      const charge = { x: wk.x + 59, y: thermo.y + thermo.h + 14 + cr, r: cr };
-      const vent = { x: wk.x + 59, y: charge.y + cr + 22 + cr * 0.8, r: cr * 0.8 };
+      // charge wheel and vent knob stacked under the thermometer, or side by side
+      // when the stage is short, their captions clear of the supply caption
+      const stacked = room >= 60 + 3.6 * 30;
+      const cr = stacked ? clamp((room - 60) / 3.6, 30, 42) : clamp((room - 40) / 2, 24, 32);
+      const charge = { x: wk.x + (stacked ? 59 : 40), y: thermo.y + thermo.h + 14 + cr, r: cr };
+      const vent = stacked ? { x: wk.x + 59, y: charge.y + cr + 22 + cr * 0.8, r: cr * 0.8 } : { x: wk.x + 140, y: charge.y + cr * 0.2, r: cr * 0.8 };
       const n = GASES.length;
       const bw = Math.min(104, (g.shelf.w - 24) / n);
       const bottles = GASES.map((_, i) => ({ x: g.shelf.x + (g.shelf.w - bw * n - 12 * (n - 1)) / 2 + i * (bw + 12), y: g.shelf.y + 26, w: bw, h: g.shelf.h - 30 }) as R);
@@ -558,7 +725,10 @@ export const hydraulics: PuzzleDef = {
     const brakeGeo = (g: G) => {
       const top = g.work.y;
       const bottom = g.bar.y - 10;
-      const glass: R = { x: g.pad + 16, y: top + 30, w: 22, h: Math.min(250, (bottom - top) * 0.5) };
+      const ph = clamp((bottom - top) * 0.3, 110, 150);
+      const pedalR: R = { x: g.pad + 4, y: bottom - ph - 6, w: 70, h: ph };
+      // the glass ends above the pedal's caption
+      const glass: R = { x: g.pad + 16, y: top + 30, w: 22, h: Math.min(250, (bottom - top) * 0.5, pedalR.y - 36 - (top + 30)) };
       const wr = Math.min(100, g.w * 0.26, (bottom - top) * 0.21);
       const wheel = { cx: g.w * 0.56, cy: top + wr + 22, r: wr };
       const ca = -0.62;
@@ -567,9 +737,11 @@ export const hydraulics: PuzzleDef = {
       const wrench: R = { x: bleeder.x - 26, y: bleeder.y - 34, w: 92, h: 60 };
       const jh = clamp((bottom - top) * 0.22, 90, 128);
       const jar: R = { x: g.w - g.pad - 96, y: bottom - jh - 6, w: 88, h: jh };
-      const ph = clamp((bottom - top) * 0.3, 110, 150);
-      const pedalR: R = { x: g.pad + 34, y: bottom - ph - 6, w: 70, h: ph };
-      return { glass, wheel, cal, bleeder, wrench, jar, pedalR };
+      // the hand pump between the pedal and the jar
+      const px0 = pedalR.x + pedalR.w + 14;
+      const pw = Math.min(130, jar.x - 14 - px0);
+      const pumpR: R = { x: px0 + (jar.x - 14 - px0 - pw) / 2, y: bottom - ph * 0.85 - 6, w: pw, h: ph * 0.85 };
+      return { glass, wheel, cal, bleeder, wrench, jar, pedalR, pumpR };
     };
 
     const barButtons = (g: G) => {
@@ -603,50 +775,52 @@ export const hydraulics: PuzzleDef = {
       }
     }
 
-    function stroke() {
-      if (vf > 0) {
-        const dv = Math.min(vf, m.strokeVol);
-        vf -= dv;
-        if (vf < 1e-6) vf = 0;
-        res += dv;
-        returnT = clock;
-        if (vf === 0) {
-          zeroT = clock;
-          host.fx.thunk();
-        } else host.fx.tick();
-      } else if (!bleederOpen) host.fx.tick();
-      if (m.bleed && bleederOpen) {
-        bleedStrokes++;
-        let bubbles = airQ.length ? airQ.shift()! : 0;
-        let air = false;
-        if (res - m.outlet < m.bleed.strokeVol) {
-          // sucked the reservoir dry: air into the master cylinder, start over
-          res = Math.max(m.outlet - 0.04, res - m.bleed.strokeVol);
-          air = true;
-          bubbles += 4;
-          airQ.unshift(3, 2, 2);
-          if (!dry) ranDry++;
-          dry = true;
-          host.fx.fault();
-          if (m.teach) say('Reservoir ran dry: air drawn in', true);
-        } else res -= m.bleed.strokeVol;
-        slugs.push({ t: clock, bubbles, air });
-        jar = Math.min(0.9, jar + 0.05);
-        if (!air) host.fx.snap();
+    /** what the player sees and hears for one pedal or hand-pump stroke */
+    function show(f: Flow) {
+      switch (f.kind) {
+        case 'idle':
+          host.fx.tick();
+          break;
+        case 'relief':
+          reliefT = clock;
+          host.fx.tick();
+          break;
+        case 'return':
+          returnT = clock;
+          if (f.zero) {
+            zeroT = clock;
+            host.fx.thunk();
+          } else host.fx.tick();
+          break;
+        case 'charge':
+          if (f.air) host.fx.fault();
+          else host.fx.tick();
+          break;
+        case 'flush':
+          slugs.push({ t: clock, bubbles: f.bubbles, air: f.air, weak: f.weak });
+          jar = Math.min(0.9, jar + f.dv * 0.6);
+          if (f.air) host.fx.fault();
+          else if (f.weak) host.fx.tick();
+          else host.fx.snap();
+          if (f.zero) zeroT = clock;
+          break;
       }
       status();
     }
+    const stroke = () => show(pedalStroke(m, sys));
+    // the path through the brake is open only while the pedal is held to the floor
+    const pumpOnce = () => show(pumpStroke(m, sys, holding('pedal') && pedal > 0.8));
 
     function addGas(dpGauge: number, kind: 'n2' | 'air') {
-      const dp0 = vf > 1e-6 ? (dpGauge * (m.accVol - vf)) / m.accVol : dpGauge;
-      p0 += dp0;
+      const dp0 = sys.vf > 1e-6 ? (dpGauge * (m.accVol - sys.vf)) / m.accVol : dpGauge;
+      sys.p0 += dp0;
       if (kind === 'air') gasAir += dp0;
       heat += dpGauge * m.heat;
     }
     function ventGas(dpGauge: number) {
-      const dp0 = Math.min(p0, vf > 1e-6 ? (dpGauge * (m.accVol - vf)) / m.accVol : dpGauge);
-      if (p0 > 0) gasAir -= gasAir * (dp0 / p0);
-      p0 -= dp0;
+      const dp0 = Math.min(sys.p0, sys.vf > 1e-6 ? (dpGauge * (m.accVol - sys.vf)) / m.accVol : dpGauge);
+      if (sys.p0 > 0) gasAir -= gasAir * (dp0 / sys.p0);
+      sys.p0 -= dp0;
       heat -= dpGauge * m.heat * 0.8;
     }
 
@@ -661,27 +835,27 @@ export const hydraulics: PuzzleDef = {
     const run = (): HydRun => ({
       poured: { ...poured },
       contaminated,
-      underPressure,
-      level: res + vf + funnel,
+      underPressure: sys.underPressure,
+      level: sys.res + sys.vf + funnel,
       capOn,
-      vf,
-      precharge: p0,
+      vf: sys.vf,
+      precharge: sys.p0,
       n2UnderPressure,
       shopAir,
-      airFrac: p0 > 1 ? gasAir / p0 : 0,
+      airFrac: sys.p0 > 1 ? gasAir / sys.p0 : 0,
       oxygen,
-      bleedStrokes,
-      airLeft: airQ.reduce((a, b) => a + b, 0),
-      ranDry,
-      bleederOpen,
+      bleedStrokes: sys.bleedStrokes,
+      airLeft: sys.airQ.reduce((a, b) => a + b, 0),
+      ranDry: sys.ranDry,
+      bleederOpen: sys.bleederOpen,
       wrongPicks,
     });
     const makeResult = (): PuzzleResult => {
       const s = scoreHydraulics(m, run());
       return result(s.score, s.summary, {
-        level: +(res + vf + funnel).toFixed(3),
+        level: +(sys.res + sys.vf + funnel).toFixed(3),
         full: m.full,
-        psi: Math.round(p0),
+        psi: Math.round(sys.p0),
         target: m.precharge ? Math.round(m.precharge.target) : undefined,
         spilled: +spilled.toFixed(3),
       });
@@ -724,12 +898,25 @@ export const hydraulics: PuzzleDef = {
         // the can in hand (drag to tilt, tap to put back)
         if (held >= 0 && inR(x, y, rg.canBox, 8)) return { kind: 'can', x0: x, y0: y, t0: performance.now(), base: tilt, moved: false };
         // filler cap: on the neck, or resting on the tank
-        const onNeck = Math.abs(x - (rg.neck.x + rg.neck.w / 2)) < 30 && y > rg.neck.y - 34 && y < rg.neck.y + 26;
+        const onNeck = Math.abs(x - (rg.neck.x + rg.neck.w / 2)) < 26 && y > rg.neck.y - 34 && y < rg.neck.y + 26;
         const onRest = !capOn && Math.hypot(x - rg.capRest.x, y - rg.capRest.y) < 28;
         if (onNeck || onRest) {
+          if (!capOn && funnel > 0.002) {
+            // the funnel is still draining: the cap goes on after it has run through
+            shake('cap');
+            host.fx.bad();
+            if (m.teach) say('Let the funnel drain first');
+            return null;
+          }
+          if (!capOn && funnel > 0) {
+            // the last drops
+            sys.res += funnel;
+            if (funnelFluid) poured[funnelFluid] = (poured[funnelFluid] ?? 0) + funnel;
+            if (sys.vf > 1e-6) sys.underPressure += funnel;
+            funnel = 0;
+          }
           capOn = !capOn;
           host.fx.snap();
-          if (capOn && funnel > 0) funnel = 0;
           status();
           return null;
         }
@@ -766,14 +953,14 @@ export const hydraulics: PuzzleDef = {
             finishWith(1800);
             return null;
           }
-          if (vf > 1e-6) n2UnderPressure = true;
+          if (sys.vf > 1e-6) n2UnderPressure = true;
           if (hose === 'air') shopAir = true;
           host.fx.tap();
           return { kind: 'charge' };
         }
         if (Math.hypot(x - ag.vent.x, y - ag.vent.y) < ag.vent.r + 10) {
           holdT = 0;
-          if (vf > 1e-6) n2UnderPressure = true;
+          if (sys.vf > 1e-6) n2UnderPressure = true;
           host.fx.tap();
           return { kind: 'vent' };
         }
@@ -788,9 +975,14 @@ export const hydraulics: PuzzleDef = {
         }
       } else if (scene === 'brake') {
         const bg = brakeGeo(g);
-        if (inR(x, y, bg.pedalR, 10)) return pressPedal();
+        if (inR(x, y, bg.pedalR, 8)) return pressPedal();
+        if (inR(x, y, bg.pumpR, 6)) {
+          if (pump < 0.5) pumpArmed = true;
+          pumpPress = true;
+          return { kind: 'pump' };
+        }
         if (inR(x, y, bg.wrench, 6) || Math.hypot(x - bg.bleeder.x, y - bg.bleeder.y) < 34) {
-          bleederOpen = !bleederOpen;
+          sys.bleederOpen = !sys.bleederOpen;
           host.fx.snap();
           return null;
         }
@@ -857,6 +1049,20 @@ export const hydraulics: PuzzleDef = {
       } else pedal = Math.max(0, pedal - dt * 5);
       if (pedal < 0.35) pedalArmed = true;
 
+      // hand pump: one stroke per press, at the bottom of the lever's travel
+      const pumpHeld = holding('pump');
+      if (pumpPress || pumpHeld) {
+        pump = Math.min(1, pump + dt * 7);
+        if (pump >= 1) {
+          if (pumpArmed) {
+            pumpArmed = false;
+            pumpOnce();
+          }
+          if (!pumpHeld) pumpPress = false;
+        }
+      } else pump = Math.max(0, pump - dt * 5);
+      if (pump < 0.35) pumpArmed = true;
+
       // the can rights itself when let go
       const canGrip = [...grips.values()].some((g) => g.kind === 'can');
       if (!canGrip && tilt > 0) tilt = Math.max(0, tilt - dt * 3.5);
@@ -875,20 +1081,20 @@ export const hydraulics: PuzzleDef = {
         let d = funnel * (1 - Math.exp(-dt / m.funnelLag));
         if (funnel - d < 1e-4) d = funnel;
         funnel -= d;
-        res += d;
+        sys.res += d;
         poured[funnelFluid] = (poured[funnelFluid] ?? 0) + d;
-        if (vf > 1e-6) underPressure += d;
+        if (sys.vf > 1e-6) sys.underPressure += d;
         if (!FLUIDS[funnelFluid].compatible && (poured[funnelFluid] ?? 0) > 0.002) contaminate(funnelFluid);
       }
-      if (holding('syringe') && !capOn) res = Math.max(0, res - 0.06 * dt);
-      if (res > m.overflow) {
-        spilled += res - m.overflow;
-        res = m.overflow;
+      if (holding('syringe') && !capOn) sys.res = Math.max(0, sys.res - 0.06 * dt);
+      if (sys.res > m.overflow) {
+        spilled += sys.res - m.overflow;
+        sys.res = m.overflow;
       }
-      if (dry && res > m.outlet + (m.bleed?.strokeVol ?? 0)) dry = false;
+      if (sys.dry && sys.res > m.outlet + (m.bleed?.pumpVol ?? 0)) sys.dry = false;
       // teaching ding when the level reaches FULL (discharged)
       if (m.teach) {
-        const ok = vf <= 0 && levelOk();
+        const ok = sys.vf <= 0 && levelOk();
         if (ok && !fullDing) {
           host.fx.snap();
           say('At FULL');
@@ -925,7 +1131,7 @@ export const hydraulics: PuzzleDef = {
         step(dt);
       } else if (finished) clock += dt;
       // keep full frame rate while anything is moving
-      if (grips.size || funnel > 0 || pedal > 0 || tilt > 0 || Math.abs(heat) > 0.3 || slugs.length) markInput();
+      if (grips.size || funnel > 0 || pedal > 0 || pump > 0 || tilt > 0 || Math.abs(heat) > 0.3 || slugs.length) markInput();
       const hp = hydPsi();
       const gp = gasPsi();
       hydShown += (hp - hydShown) * (1 - Math.exp(-dt / 0.12));
@@ -947,7 +1153,7 @@ export const hydraulics: PuzzleDef = {
       else if (scene === 'acc') drawAccScene(g);
       else drawBrakeScene(g);
       drawBar(g);
-      if (toast && clock - toast.t < 2.2) {
+      if (toast && clock - toast.t < 2.2 && !contaminated && !oxygen) {
         const a = clamp((2.2 - (clock - toast.t)) / 0.4, 0, 1);
         ctx.globalAlpha = a;
         ctx.font = `800 13px ${FONT}`;
@@ -1010,8 +1216,7 @@ export const hydraulics: PuzzleDef = {
       const x = r.x + 12;
       const mw = r.w - 22;
       fitLabel(ctx, `${aircraft.toUpperCase()} · HYDRAULIC SERVICE`, x, r.y + 15, mw, { size: 9.5, weight: 800, color: C.inkSoft, align: 'left' });
-      const fluids = m.approved.length > 1 ? 'MIL-PRF-5606 OR MIL-PRF-83282' : 'MIL-PRF-5606';
-      fitLabel(ctx, `FLUID  ${fluids}`, x, r.y + 33, mw, { size: 13, weight: 900, color: C.ink, align: 'left' });
+      fitLabel(ctx, `FLUID  ${m.placardFluid}`, x, r.y + 33, mw, { size: 13, weight: 900, color: C.ink, align: 'left' });
       let y = r.y + 52;
       if (m.teach) {
         const txt = m.approved.length > 1 ? 'Either red fluid is fine · never Skydrol (purple)' : 'Red mineral-base fluid · never Skydrol (purple)';
@@ -1022,7 +1227,9 @@ export const hydraulics: PuzzleDef = {
         y += 19;
         fitLabel(ctx, 'SERVICE DEPRESSURIZED · FILL TO FULL', x, y + 2, mw, { size: 10, weight: 800, color: C.ink, align: 'left' });
       } else {
-        fitLabel(ctx, 'FILL RESERVOIR TO FULL MARK', x, y, mw, { size: 10.5, weight: 800, color: C.ink, align: 'left' });
+        // the condition the FULL mark is read at, as real placards state it (not a hint:
+        // you still have to know how to discharge it and why the glass reads low)
+        fitLabel(ctx, 'FILL TO FULL · HYD PRESS 0, ACCUM DISCHARGED', x, y, mw, { size: 10.5, weight: 800, color: C.ink, align: 'left' });
         y += 17;
         if (m.precharge) {
           const pc = m.precharge;
@@ -1055,7 +1262,7 @@ export const hydraulics: PuzzleDef = {
         ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
         ctx.lineTo(cx + Math.cos(a) * r * 0.95, cy + Math.sin(a) * r * 0.95);
         ctx.stroke();
-        if (maj && o.lbl) {
+        if (maj && o.lbl && o.lbl(n)) {
           const rl = r * 0.6;
           label(ctx, o.lbl(n), cx + Math.cos(a) * rl, cy + Math.sin(a) * rl, { size: Math.max(8, r * 0.14), weight: 800, color: C.inkSoft });
         }
@@ -1147,6 +1354,18 @@ export const hydraulics: PuzzleDef = {
     }
 
     function marks(r: R, side: 'right' | 'left', size = 10) {
+      if (m.bleed) {
+        // the pump's standpipe: below this line a stroke draws air
+        const y = glassY(r, m.outlet);
+        ctx.strokeStyle = 'rgba(31,42,48,.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(r.x + 2, y);
+        ctx.lineTo(r.x + r.w - 2, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       for (const [lv, name] of [
         [m.full, 'FULL'],
         [m.add, 'ADD'],
@@ -1179,7 +1398,7 @@ export const hydraulics: PuzzleDef = {
       ctx.moveTo(tank.x + 26, tank.y + tank.h - 2);
       ctx.lineTo(tank.x + 26, wk.y + wk.h + 4);
       ctx.stroke();
-      // supply line to the brake master cylinder
+      // return line from the brake valve
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(tank.x + tank.w - 4, rg.pedalR.y + 4);
@@ -1206,13 +1425,13 @@ export const hydraulics: PuzzleDef = {
       roundRect(ctx, glass.x - 6, glass.y - 7, glass.w + 12, glass.h + 14, 10);
       ctx.fillStyle = '#34444c';
       ctx.fill();
-      drawGlass(glass, res, fluidColor(), true, contaminated ? { amount: poured[contaminated] ?? 0, color: FLUIDS[contaminated].color } : undefined);
+      drawGlass(glass, sys.res, fluidColor(), true, contaminated ? { amount: poured[contaminated] ?? 0, color: FLUIDS[contaminated].color } : undefined);
       marks(glass, 'right');
-      if (m.teach && vf > 0) {
-        label(ctx, 'reads low', tank.x - 6, glassY(glass, res), { size: 10.5, weight: 800, color: C.sea, align: 'right' });
-        label(ctx, 'under pressure', tank.x - 6, glassY(glass, res) + 13, { size: 10.5, weight: 800, color: C.sea, align: 'right' });
+      if (m.teach && sys.vf > 0) {
+        label(ctx, 'reads low', tank.x - 6, glassY(glass, sys.res), { size: 10.5, weight: 800, color: C.sea, align: 'right' });
+        label(ctx, 'under pressure', tank.x - 6, glassY(glass, sys.res) + 13, { size: 10.5, weight: 800, color: C.sea, align: 'right' });
       }
-      if (m.tier <= 1 && vf <= 0 && levelOk()) label(ctx, '✓', glass.x - 14, glassY(glass, m.full), { size: 16, weight: 900, color: C.palm });
+      if (m.tier <= 1 && sys.vf <= 0 && levelOk()) label(ctx, '✓', glass.x - 14, glassY(glass, m.full), { size: 16, weight: 900, color: C.palm });
 
       // neck, funnel, cap
       const nk = rg.neck;
@@ -1249,7 +1468,7 @@ export const hydraulics: PuzzleDef = {
           ctx.restore();
         }
       }
-      const capAt = capOn ? { x: nk.x + nk.w / 2 + shakeX('cap'), y: nk.y - 7 } : rg.capRest;
+      const capAt = capOn ? { x: nk.x + nk.w / 2 + shakeX('cap'), y: nk.y - 7 } : { x: rg.capRest.x + shakeX('cap'), y: rg.capRest.y };
       roundRect(ctx, capAt.x - 18, capAt.y - 9, 36, 18, 5);
       ctx.fillStyle = C.ink;
       ctx.fill();
@@ -1305,7 +1524,7 @@ export const hydraulics: PuzzleDef = {
         ctx.translate(L.x, L.y);
         ctx.scale(z, z);
         ctx.translate(-(glass.x + glass.w / 2), -fy);
-        drawGlass(glass, res, fluidColor(), false);
+        drawGlass(glass, sys.res, fluidColor(), false);
         ctx.strokeStyle = C.ink;
         ctx.lineWidth = 0.7;
         ctx.beginPath();
@@ -1357,25 +1576,19 @@ export const hydraulics: PuzzleDef = {
     }
 
     function drawPedal(r: R) {
-      // travel: open bleeder = to the floor; air in the line = soft; otherwise firm
-      const soft = m.bleed && airQ.reduce((a, b) => a + b, 0) > 0;
-      const depth = bleederOpen ? 1 : soft ? 0.8 : 0.45;
-      const d = ease.inOutCubic(pedal) * depth * r.h * 0.34;
+      // Power brakes: the pedal works a brake valve, no master cylinder. Travel:
+      // open bleeder = to the floor; air in the line = soft; otherwise firm.
+      const soft = m.bleed && sys.airQ.reduce((a, b) => a + b, 0) > 0;
+      const depth = sys.bleederOpen ? 1 : soft ? 0.8 : 0.45;
+      const d = ease.inOutCubic(pedal) * depth * r.h * 0.26;
       label(ctx, 'BRAKE', r.x + r.w / 2, r.y - 14, { size: 10, weight: 900, color: C.inkSoft });
-      // master cylinder beside the pivot
-      roundRect(ctx, r.x - 6, r.y - 4, r.w / 2 - 2, 16, 5);
-      ctx.fillStyle = '#9aa4a8';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(31,42,48,.45)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
       // arm from a pivot above
       ctx.strokeStyle = '#56646b';
       ctx.lineWidth = 8;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(r.x + r.w / 2, r.y + 4);
-      ctx.lineTo(r.x + r.w / 2, r.y + r.h * 0.42 + d);
+      ctx.lineTo(r.x + r.w / 2, r.y + r.h * 0.38 + d);
       ctx.stroke();
       ctx.lineCap = 'butt';
       ctx.fillStyle = C.ink;
@@ -1383,20 +1596,88 @@ export const hydraulics: PuzzleDef = {
       ctx.arc(r.x + r.w / 2, r.y + 4, 6, 0, Math.PI * 2);
       ctx.fill();
       // pad
-      const py = r.y + r.h * 0.42 + d;
-      roundRect(ctx, r.x, py, r.w, r.h * 0.4, 10);
+      const py = r.y + r.h * 0.38 + d;
+      roundRect(ctx, r.x, py, r.w, r.h * 0.36, 10);
       ctx.fillStyle = '#3b464b';
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,.18)';
       ctx.lineWidth = 2;
       for (let i = 1; i < 5; i++) {
-        const yy = py + (r.h * 0.4 * i) / 5;
+        const yy = py + (r.h * 0.36 * i) / 5;
         ctx.beginPath();
         ctx.moveTo(r.x + 10, yy);
         ctx.lineTo(r.x + r.w - 10, yy);
         ctx.stroke();
       }
-      if (pedal === 0 && !finished) label(ctx, 'press', r.x + r.w / 2, py + r.h * 0.2, { size: 11, weight: 800, color: C.paper });
+      if (pedal === 0 && !finished) label(ctx, 'press', r.x + r.w / 2, py + r.h * 0.18, { size: 11, weight: 800, color: C.paper });
+    }
+
+    function drawHandPump(r: R) {
+      label(ctx, 'HAND PUMP', r.x + r.w / 2, r.y - 12, { size: 10, weight: 900, color: C.inkSoft });
+      // pump body on a base plate
+      const bx = r.x + 10;
+      const bw = 28;
+      const by = r.y + r.h * 0.4;
+      const bb = r.y + r.h - 4;
+      ctx.fillStyle = shade(C.ink, 0.25);
+      ctx.fillRect(r.x, bb - 6, 48, 8);
+      const gr = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+      gr.addColorStop(0, '#7f8b90');
+      gr.addColorStop(0.4, '#dfe4e6');
+      gr.addColorStop(1, '#7a868b');
+      roundRect(ctx, bx, by, bw, bb - by - 4, 6);
+      ctx.fillStyle = gr;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(31,42,48,.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // lever: pivots on the body, handle out to the right
+      const pv = { x: bx + bw / 2, y: by - 6 };
+      const th = ((-14 + 32 * ease.inOutCubic(pump)) * Math.PI) / 180;
+      const L = r.w - 30;
+      const gx = pv.x + Math.cos(th) * L;
+      const gy = pv.y + Math.sin(th) * L;
+      // piston rod into the body
+      const rx = pv.x + Math.cos(th) * 16;
+      const ry = pv.y + Math.sin(th) * 16;
+      ctx.strokeStyle = '#b9c1c4';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx, by + 10);
+      ctx.stroke();
+      ctx.strokeStyle = '#56646b';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pv.x - 8 * Math.cos(th), pv.y - 8 * Math.sin(th));
+      ctx.lineTo(gx, gy);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.fillStyle = C.ink;
+      ctx.beginPath();
+      ctx.arc(pv.x, pv.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      // rubber grip
+      ctx.save();
+      ctx.translate(gx, gy);
+      ctx.rotate(th);
+      roundRect(ctx, -26, -11, 40, 22, 11);
+      ctx.fillStyle = '#3b464b';
+      ctx.fill();
+      ctx.restore();
+      if (pump === 0 && !finished) label(ctx, 'press', gx - 6, gy + 24, { size: 11, weight: 800, color: C.inkSoft });
+      // relief valve cracking: a puff at the body
+      const k = (clock - reliefT) / 0.6;
+      if (k >= 0 && k < 1) {
+        ctx.strokeStyle = `rgba(86,100,107,${0.7 * (1 - k)})`;
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(bx + bw + 6 + k * 14, by + 14 + i * 6, 3 + k * 5, -0.8, 0.8);
+          ctx.stroke();
+        }
+      }
     }
 
     function drawSyringe(r: R) {
@@ -1546,21 +1827,26 @@ export const hydraulics: PuzzleDef = {
       const a = -tilt * TILT;
       const cw = 56;
       const ch = 72;
-      const pv = rg.pivot;
-      const flowing = !capOn && tilt > 0.4;
-      if (flowing) {
+      const sp = rg.spout;
+      // the can tips about its spout, so the stream always starts over the funnel
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(a);
+      ctx.translate(-9, ch + 5);
+      ctx.fillStyle = 'rgba(31,42,48,.12)';
+      ctx.fillRect(4, -2, cw, 6);
+      drawCan(f, held, cw, ch, { bare: tilt > 0.12 });
+      ctx.restore();
+      if (!capOn && tilt > 0.4) {
         const k = clamp((tilt - 0.4) / 0.5, 0, 1);
-        // spout: the can's top-left corner, rotated about the pivot
-        const sx = pv.x + ch * Math.sin(a) + 6 * Math.cos(a);
-        const sy = pv.y - ch * Math.cos(a) + 6 * Math.sin(a);
-        const tx = rg.fx;
-        const ty = rg.neck.y - 26;
+        const tx = rg.fx + 4;
+        const ty = rg.neck.y - 28;
         ctx.strokeStyle = FLUIDS[f].color;
         ctx.lineWidth = 2 + 5 * k;
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.quadraticCurveTo(sx - 4, (sy + ty) / 2, tx, ty);
+        ctx.moveTo(sp.x - 2, sp.y + 1);
+        ctx.quadraticCurveTo(sp.x - 26 - 8 * k, sp.y - 4, tx, ty);
         ctx.stroke();
         ctx.lineCap = 'butt';
         ctx.fillStyle = FLUIDS[f].color;
@@ -1571,16 +1857,8 @@ export const hydraulics: PuzzleDef = {
           ctx.fill();
         }
       }
-      ctx.save();
-      ctx.translate(pv.x, pv.y);
-      ctx.rotate(a);
-      // shadow
-      ctx.fillStyle = 'rgba(31,42,48,.12)';
-      ctx.fillRect(4, -2, cw, 6);
-      drawCan(f, held, cw, ch, { bare: tilt > 0.12 });
-      ctx.restore();
       if (tilt === 0 && !finished) {
-        label(ctx, '← tilt', pv.x + cw + 6, pv.y - ch / 2, { size: 11, weight: 800, color: C.inkSoft, align: 'left' });
+        label(ctx, '← tilt', sp.x - 9 + cw + 6, sp.y + 40, { size: 11, weight: 800, color: C.inkSoft, align: 'left' });
       }
     }
 
@@ -1648,7 +1926,8 @@ export const hydraulics: PuzzleDef = {
 
       // gas gauge (digital readout on the charging kit)
       const gc = ag.gc;
-      dial(gc.cx, gc.cy, gc.r, gasShown, 2000, { major: 500, minor: 50, lbl: (n) => fmt(n) });
+      // no 1,000 numeral: precharges are worked around there, under the needle (the readout gives the number)
+      dial(gc.cx, gc.cy, gc.r, gasShown, 2000, { major: 500, minor: 50, lbl: (n) => (n === 1000 ? '' : fmt(n)) });
       label(ctx, 'N₂ PSI', gc.cx, gc.cy + gc.r * 0.26, { size: Math.max(9, gc.r * 0.12), weight: 900, color: C.inkSoft });
       const lw = gc.r * 0.78;
       roundRect(ctx, gc.cx - lw / 2, gc.cy + gc.r * 0.5, lw, gc.r * 0.32, 5);
@@ -1799,9 +2078,9 @@ export const hydraulics: PuzzleDef = {
       roundRect(ctx, gl.x - 5, gl.y - 6, gl.w + 10, gl.h + 12, 9);
       ctx.fillStyle = '#34444c';
       ctx.fill();
-      drawGlass(gl, res, fluidColor(), true);
+      drawGlass(gl, sys.res, fluidColor(), true);
       marks(gl, 'right', 9.5);
-      if (dry && m.bleed) label(ctx, 'dry!', gl.x + gl.w / 2, gl.y + gl.h + 18, { size: 12, weight: 900, color: C.rust });
+      if (sys.dry) label(ctx, 'dry!', gl.x + gl.w + 8, gl.y + gl.h - 8, { size: 12, weight: 900, color: C.rust, align: 'left' });
 
       // wheel and disc brake
       const wh = bg.wheel;
@@ -1876,7 +2155,7 @@ export const hydraulics: PuzzleDef = {
       ctx.fillStyle = C.inkSoft;
       ctx.fillRect(jr.x - 4, jr.y - 4, jr.w + 8, 7);
       // hose body
-      const hoseFilled = bleedStrokes > 0;
+      const hoseFilled = sys.bleedStrokes > 0;
       ctx.lineCap = 'round';
       ctx.strokeStyle = 'rgba(31,42,48,.35)';
       ctx.lineWidth = 15;
@@ -1892,6 +2171,21 @@ export const hydraulics: PuzzleDef = {
       for (const sl of slugs) {
         const k = (clock - sl.t) / 1.3;
         if (k > 1.1) continue;
+        // the slug of fresh fluid running down the hose (a dribble barely moves)
+        const reach = sl.weak ? 0.3 : 1;
+        if (k < reach) {
+          ctx.strokeStyle = shade(fluidColor(), -0.12);
+          ctx.lineWidth = sl.weak ? 5 : 8;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          for (let j = 0; j <= 8; j++) {
+            const q = at(clamp(k - 0.16 + (j / 8) * 0.16, 0, 1));
+            if (j === 0) ctx.moveTo(q.x, q.y);
+            else ctx.lineTo(q.x, q.y);
+          }
+          ctx.stroke();
+          ctx.lineCap = 'butt';
+        }
         const n = sl.bubbles;
         for (let i = 0; i < n; i++) {
           const s = k - i * 0.08;
@@ -1929,7 +2223,7 @@ export const hydraulics: PuzzleDef = {
       ctx.stroke();
       ctx.save();
       ctx.translate(b.x, b.y);
-      ctx.rotate(bleederOpen ? -0.55 : 0);
+      ctx.rotate(sys.bleederOpen ? -0.55 : 0);
       ctx.fillStyle = C.mech;
       roundRect(ctx, 6, -7, 56, 14, 7);
       ctx.fill();
@@ -1944,14 +2238,20 @@ export const hydraulics: PuzzleDef = {
       ctx.restore();
       const lx = wh.cx - wh.r * 0.2;
       const ly = wh.cy + wh.r + 20;
-      label(ctx, bleederOpen ? 'Bleeder OPEN' : 'Bleeder closed', lx, ly, { size: 12.5, weight: 900, color: bleederOpen ? C.seaDeep : C.inkSoft, align: 'center' });
+      label(ctx, sys.bleederOpen ? 'Bleeder OPEN' : 'Bleeder closed', lx, ly, { size: 12.5, weight: 900, color: sys.bleederOpen ? C.seaDeep : C.inkSoft, align: 'center' });
       label(ctx, 'tap the wrench', lx, ly + 16, { size: 10, weight: 700, color: C.inkSoft, align: 'center' });
 
       drawPedal(bg.pedalR);
+      drawHandPump(bg.pumpR);
     }
 
     function drawBar(g: G) {
       const bb = barButtons(g);
+      // one shared size, so the tabs read alike
+      let size = 12.5;
+      ctx.font = `800 12.5px ${FONT}`;
+      for (const t of bb.tabs) size = Math.min(size, (12.5 * (t.r.w - 12)) / ctx.measureText(SCENE_NAME[t.scene]).width);
+      size = Math.max(9, size);
       for (const t of bb.tabs) {
         const on = t.scene === scene;
         roundRect(ctx, t.r.x, t.r.y, t.r.w, t.r.h, 12);
@@ -1962,7 +2262,7 @@ export const hydraulics: PuzzleDef = {
           ctx.lineWidth = 1;
           ctx.stroke();
         }
-        fitLabel(ctx, SCENE_NAME[t.scene], t.r.x + t.r.w / 2, t.r.y + t.r.h / 2, t.r.w - 10, { size: 12.5, weight: 800, color: on ? C.white : C.ink });
+        fitLabel(ctx, SCENE_NAME[t.scene], t.r.x + t.r.w / 2, t.r.y + t.r.h / 2, t.r.w - 10, { size, weight: 800, color: on ? C.white : C.ink });
       }
       const s = bb.sign;
       roundRect(ctx, s.x, s.y, s.w, s.h, s.h / 2);

@@ -2,14 +2,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   FLUIDS,
+  PLACARD_NAMES,
+  PRECHARGE_LIMIT,
   absTemp,
+  accCapacity,
   canKind,
   emptyRun,
   generateHydraulics,
   hydPressure,
+  initState,
   levelCredit,
+  pedalStroke,
   prechargeAt,
   prechargeCredit,
+  pumpStroke,
   scoreHydraulics,
   type HydModel,
   type HydRun,
@@ -87,8 +93,8 @@ describe('hydraulics model', () => {
     for (const t of [3, 4, 5]) {
       for (const s of seeds) {
         const pc = generateHydraulics(s, t).precharge!;
-        // the temperature correction always matters: bigger than the tolerance
-        expect(Math.abs(pc.target - pc.ref)).toBeGreaterThan(pc.tol);
+        // the temperature correction always matters: copying the placard number is out of limits
+        expect(Math.abs(pc.target - pc.ref)).toBeGreaterThan(PRECHARGE_LIMIT * pc.tol);
         // and the bottle as found is out of limits
         expect(Math.abs(generateHydraulics(s, t).p0 - pc.target)).toBeGreaterThan(pc.tol);
       }
@@ -162,6 +168,22 @@ describe('hydraulics scoring', () => {
     }
   });
 
+  it('a reservoir nowhere near FULL is not serviced, however good the precharge and the bleed', () => {
+    for (const t of tiers) {
+      for (const s of seeds.slice(0, 6)) {
+        const m = generateHydraulics(s, t);
+        // bled and charged, then signed off with the level halfway down after the bleed
+        const low = scoreHydraulics(m, clean(m, { level: m.add + 0.05 }));
+        expect(low.score).toBeLessThan(PASS);
+        expect(low.summary).toContain('underfilled');
+        // a big overfill (it vents when the system warms) fails too
+        expect(scoreHydraulics(m, clean(m, { level: m.full + m.tol + 0.1 })).score).toBeLessThan(PASS);
+        // a small miss still passes
+        expect(scoreHydraulics(m, clean(m, { level: m.full - m.tol - 0.03 })).score).toBeGreaterThanOrEqual(PASS);
+      }
+    }
+  });
+
   it('overfill is punished harder than the same underfill', () => {
     const m = generateHydraulics(2, 3);
     for (const d of [0.02, 0.05, 0.1]) {
@@ -198,16 +220,20 @@ describe('hydraulics scoring', () => {
     expect(scoreHydraulics(m, clean(m, { oxygen: true })).score).toBeLessThan(PASS);
   });
 
-  it('precharge: forgetting the temperature correction is never perfect; leaving it as found fails', () => {
+  it('precharge: the placard number without the temperature correction is out of limits and fails; a near miss passes', () => {
     for (const t of [3, 4, 5]) {
       for (const s of seeds) {
         const m = generateHydraulics(s, t);
         const pc = m.precharge!;
         expect(prechargeCredit(m, pc.target + pc.tol * 0.9)).toBe(1);
-        const uncorrected = scoreHydraulics(m, clean(m, { precharge: pc.ref })).score;
-        expect(uncorrected).toBeLessThan(PERFECT);
-        expect(uncorrected).toBeLessThan(scoreHydraulics(m, clean(m)).score);
+        const uncorrected = scoreHydraulics(m, clean(m, { precharge: pc.ref }));
+        expect(uncorrected.score).toBeLessThan(PASS);
+        expect(uncorrected.summary).toContain('out of limits');
         expect(scoreHydraulics(m, clean(m, { precharge: m.p0 })).score).toBeLessThan(PASS);
+        // just outside the band, inside the limit: a pass, not a perfect
+        const near = scoreHydraulics(m, clean(m, { precharge: pc.target - pc.tol * 1.4 })).score;
+        expect(near).toBeGreaterThanOrEqual(PASS);
+        expect(near).toBeLessThan(PERFECT);
       }
     }
     // worked with hydraulic pressure on: a procedure fault even if the number ends up right
@@ -220,6 +246,20 @@ describe('hydraulics scoring', () => {
       const m = generateHydraulics(6, t);
       const total = m.bleed!.air.reduce((a, b) => a + b, 0);
       expect(scoreHydraulics(m, clean(m, { bleedStrokes: 0, airLeft: total })).score).toBeLessThan(PASS);
+      // a token stroke or two with bubbles still coming and the pedal still soft is not a bleed
+      for (const s of seeds) {
+        const mm = generateHydraulics(s, t);
+        const air = mm.bleed!.air;
+        const all = air.reduce((a, b) => a + b, 0);
+        for (const strokes of [1, 2]) {
+          const left = all - air.slice(0, strokes).reduce((a, b) => a + b, 0);
+          const r = scoreHydraulics(mm, clean(mm, { bleedStrokes: strokes, airLeft: left }));
+          expect(r.score).toBeLessThan(PASS);
+          expect(r.summary).toContain('air left in the brake');
+        }
+        expect(scoreHydraulics(mm, clean(mm, { bleedStrokes: air.length - 1, airLeft: 2 })).score).toBeLessThan(PASS);
+      }
+      // the odd last bubble (tier 5 hides one behind a clear slug) is a pass, not a perfect
       const oneLeft = scoreHydraulics(m, clean(m, { airLeft: 1 })).score;
       expect(oneLeft).toBeLessThan(PERFECT);
       expect(oneLeft).toBeGreaterThanOrEqual(PASS);
@@ -230,10 +270,134 @@ describe('hydraulics scoring', () => {
     }
   });
 
+  it('older placards: the superseded MIL-H or NATO designation, never the can spec; MIL-H-7644 is the near miss', () => {
+    const styles = new Set<string>();
+    for (const t of tiers) {
+      for (const s of [...seeds, 13, 14, 15, 16, 17, 18, 19, 20]) {
+        const m = generateHydraulics(s, t);
+        styles.add(`${t}:${m.placardStyle}`);
+        if (t <= 3) expect(m.placardStyle).toBe('prf');
+        if (t === 4) expect(m.placardStyle).not.toBe('nato');
+        const [a, b] = PLACARD_NAMES[m.placardStyle];
+        expect(m.placardFluid).toBe(m.approved.length > 1 ? `${a} OR ${b}` : a);
+        if (m.placardStyle !== 'prf') {
+          // the decoy sits on the shelf, and no can prints the placard's designation
+          expect(m.shelf).toContain('veg');
+          for (const f of m.shelf) {
+            expect(FLUIDS[f].spec.includes(a)).toBe(false);
+            expect(FLUIDS[f].spec.includes(b)).toBe(false);
+          }
+          expect(m.shelf.some((f) => m.approved.includes(f))).toBe(true);
+          expect(m.shelf).toContain('skydrol');
+        }
+      }
+    }
+    expect(styles).toContain('4:milh');
+    expect(styles).toContain('5:nato');
+    expect(styles).toContain('5:milh');
+    // the history: MIL-H-5606 became MIL-PRF-5606, H-515 is 5606 and H-537 is 83282
+    expect(PLACARD_NAMES.milh).toEqual(['MIL-H-5606', 'MIL-H-83282']);
+    expect(PLACARD_NAMES.nato).toEqual(['NATO H-515', 'H-537']);
+  });
+
   it('the filler cap goes back on', () => {
     const m = generateHydraulics(2, 2);
     const r = scoreHydraulics(m, clean(m, { capOn: false }));
     expect(r.score).toBeLessThan(PERFECT);
     expect(r.summary).toContain('cap left off');
+  });
+});
+
+describe('hydraulics power brakes', () => {
+  it('the pedal discharges the accumulator into the reservoir; at 0 psi it moves nothing', () => {
+    for (const t of tiers) {
+      const m = generateHydraulics(7, t);
+      const s = initState(m);
+      const true0 = s.res + s.vf;
+      let n = 0;
+      while (s.vf > 0 && n < 20) {
+        expect(pedalStroke(m, s).kind).toBe('return');
+        n++;
+      }
+      expect(s.vf).toBe(0);
+      expect(s.res + s.vf).toBeCloseTo(true0, 9); // the glass now reads the true level
+      const before = { ...s };
+      // power brakes: no pressure, nothing flows, even with the bleeder open
+      s.bleederOpen = true;
+      expect(pedalStroke(m, s)).toEqual({ kind: 'idle' });
+      expect(s.res).toBe(before.res);
+      expect(s.bleedStrokes).toBe(0);
+    }
+  });
+
+  it('the hand pump charges the accumulator up to the relief setting', () => {
+    for (const t of [4, 5]) {
+      for (const seed of seeds) {
+        const m = generateHydraulics(seed, t);
+        const s = { ...initState(m), vf: 0, res: m.full };
+        let n = 0;
+        let f = pumpStroke(m, s, false);
+        while (f.kind === 'charge' && n < 20) {
+          n++;
+          f = pumpStroke(m, s, false);
+        }
+        expect(f.kind).toBe('relief');
+        expect(n).toBeGreaterThanOrEqual(1);
+        expect(s.vf).toBeCloseTo(accCapacity(m, s.p0), 9);
+        expect(hydPressure(m, s.p0, s.vf)).toBeCloseTo(m.sysPsi, 6);
+        // the glass drops by what went into the accumulator; nothing is lost
+        expect(s.res + s.vf).toBeCloseTo(m.full, 9);
+      }
+    }
+  });
+
+  it('bleeding: pressure through the open bleeder flushes one slug of air at a time', () => {
+    const m = generateHydraulics(3, 5);
+    const air = m.bleed!.air;
+    const s = { ...initState(m), vf: 0, res: 0.9 };
+    s.bleederOpen = true;
+    // pump with the pedal up: charges the accumulator (the brake valve is shut)
+    expect(pumpStroke(m, s, false).kind).toBe('charge');
+    // pedal: the accumulator pushes a slug out through the bleeder
+    const f1 = pedalStroke(m, s);
+    expect(f1.kind).toBe('flush');
+    expect(f1.kind === 'flush' && f1.bubbles).toBe(air[0]);
+    // pump with the pedal held to the floor: straight through the brake
+    const res = s.res;
+    const f2 = pumpStroke(m, s, true);
+    expect(f2.kind === 'flush' && f2.bubbles).toBe(air[1]);
+    expect(s.res).toBeCloseTo(res - m.bleed!.pumpVol, 9);
+    expect(s.bleedStrokes).toBe(2);
+    // closed bleeder: the pedal just returns fluid to the reservoir
+    s.bleederOpen = false;
+    pumpStroke(m, s, false);
+    expect(pedalStroke(m, s).kind).toBe('return');
+    expect(s.bleedStrokes).toBe(2);
+  });
+
+  it('a top-up to keep ahead of the bleed is not a pressurized level check', () => {
+    const m = generateHydraulics(3, 4);
+    const s = { ...initState(m), underPressure: 0.2, bleederOpen: true, res: 0.8 };
+    pedalStroke(m, s);
+    expect(s.underPressure).toBe(0);
+  });
+
+  it('pumping the reservoir down to the standpipe draws air into the brake', () => {
+    const m = generateHydraulics(3, 4);
+    const s = { ...initState(m), vf: 0, res: m.outlet + 0.02, bleederOpen: true };
+    const left = s.airQ.reduce((a, b) => a + b, 0);
+    const f = pumpStroke(m, s, true);
+    expect(f.kind === 'flush' && f.air).toBe(true);
+    expect(s.ranDry).toBe(1);
+    expect(s.dry).toBe(true);
+    expect(s.res).toBeCloseTo(m.outlet, 9);
+    // more air in the line than before, less the slug that just went out
+    expect(s.airQ.reduce((a, b) => a + b, 0)).toBeGreaterThan(left - m.bleed!.air[0]);
+    // topped up again, the next stroke is clean
+    s.res = 0.7;
+    const g = pumpStroke(m, s, true);
+    expect(g.kind === 'flush' && g.air).toBe(false);
+    expect(s.dry).toBe(false);
+    expect(s.ranDry).toBe(1);
   });
 });
