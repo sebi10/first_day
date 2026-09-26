@@ -1,7 +1,6 @@
 // What the island gains between tiers (src/sim/growth.ts flourishes), plus
 // the finished dock. Every piece has a reserved spot in geo.tsx SPOT.
 import { curve, DOCK, lin, P, SPOT, type Pt } from './geo';
-import { Saplings } from './flora';
 import { Dinghy, Yacht } from './craft';
 import { K, mix, tones } from './paint';
 import { blob } from './rocks';
@@ -27,12 +26,8 @@ export function Dock() {
       {/* shadow on the water */}
       <path d={`M${x0 + 5} ${y0 + 5}H${x1 + 5}V${y1 + 5}H${ax + hw + 5}V${ay}H${ax - hw + 5}V${y1 + 5}H${x0 + 5}Z`} fill="rgba(10,60,120,.24)" />
       {/* piles standing in the water, a ring of ripple round each */}
-      {piles.map(([x, y], i) => (
-        <g key={i}>
-          <ellipse cx={x + 1} cy={y + 4.4} rx={3.4} ry={1.2} fill="none" stroke="#fff" stroke-width=".9" opacity=".8" />
-          <path d={`M${x} ${y}v4.2`} stroke="#5a3a20" stroke-width="2.4" stroke-linecap="round" />
-        </g>
-      ))}
+      <path d={piles.map(([x, y]) => `M${x - 2.4} ${y + 4.4}a3.4 1.2 0 1 0 6.8 0a3.4 1.2 0 1 0 -6.8 0`).join('')} fill="none" stroke="#fff" stroke-width=".9" opacity=".8" />
+      <path d={piles.map(([x, y]) => `M${x} ${y}v4.2`).join('')} stroke="#5a3a20" stroke-width="2.4" stroke-linecap="round" />
       {/* the stem: a thin east edge, then the deck */}
       <path d={`M${ax + hw} ${y1}V${ay}h1.6V${y1}Z`} fill={K.woodDark} />
       <path d={`M${ax - hw} ${ay}V${y1}H${ax + hw}V${ay}Z`} fill={K.woodLight} />
@@ -63,11 +58,18 @@ export function Dock() {
   );
 }
 
+/** two floodlight masts on the apron's north edge, one over each stand */
+const MASTS: { at: Pt; pool: [number, number, number, number] }[] = [
+  { at: [256, 297], pool: [214, 339, 50, 23] },
+  { at: [334, 300], pool: [300, 338, 44, 21] },
+];
+const MAST_H = 32;
 /** apron props, as screen rects that bubbles keep off */
 export const APRON_PROPS: [number, number, number, number][] = [
   [220, 354, 262, 378], // fuel bowser
   [306, 358, 346, 380], // baggage train
   [88, 358, 116, 378], // drums
+  ...MASTS.map(({ at: [x, y] }): [number, number, number, number] => [x - 7, y - MAST_H - 4, x + 7, y + 2]),
 ];
 /** life on the apron: a fuel bowser, a baggage train and a stack of drums */
 export function ApronProps() {
@@ -97,12 +99,42 @@ export function ApronProps() {
           <path d="M-4 0.6a1.6 1.6 0 1 0 .1 0M4 0.6a1.6 1.6 0 1 0 .1 0" fill="#2f3438" />
         </g>
       ))}
+      {/* floodlight masts */}
+      <path d={MASTS.map(({ at: [x, y] }) => `M${x} ${y}V${y - MAST_H}`).join('')} stroke="#5f6a72" stroke-width="2" />
+      <path d={MASTS.map(({ at: [x, y] }) => `M${x - 6} ${y - MAST_H - 2}h12v3.6h-12z`).join('')} fill="#e3e8ea" stroke="#3f4a52" stroke-width=".8" />
       <g transform="translate(96 372)">
         <ellipse cx={8} cy={2} rx={13} ry={3} fill={K.shadow} />
         <path d="M-4 0v-8a4 1.6 0 0 1 8 0v8a4 1.6 0 0 1 -8 0zM5 1v-8a4 1.6 0 0 1 8 0v8a4 1.6 0 0 1 -8 0z" fill="#2e7c93" />
         <path d="M0 -8m-4 0a4 1.6 0 1 0 8 0a4 1.6 0 1 0 -8 0M9 -7m-4 0a4 1.6 0 1 0 8 0a4 1.6 0 1 0 -8 0" fill="#5aa7bd" />
         <path d="M-4 -3h8M5 -2h8" stroke="#1f5c6e" stroke-width=".9" />
       </g>
+    </g>
+  );
+}
+
+/** The airfield at night, drawn over the grade while the island has power:
+ *  warm light from the hangar (its door windows, or the open mouth while
+ *  the twin is worked on) spilling onto the forecourt, and the two
+ *  floodlights throwing a cone down onto a pool round each stand. */
+export function ApronLights({ hangar: [hx, hy], open }: { hangar: Pt; open: boolean }) {
+  const heads = MASTS.map(({ at: [x, y] }) => `M${x} ${y - MAST_H}h.01`).join('');
+  return (
+    <g>
+      <path d={`M${hx - 36} ${hy}L${hx + 36} ${hy}L${hx + 60} ${hy + 42}L${hx - 52} ${hy + 42}Z`} fill="url(#i-spill)" />
+      {open ? (
+        <path d={`M${hx - 34} ${hy}V${hy - 29}H${hx + 34}V${hy}Z`} fill="#ffcf6e" opacity=".8" />
+      ) : (
+        <path d={Array.from({ length: 5 }, (_, i) => `M${hx - 33 + i * 13.5} ${hy - 25}h9.5v4.4h-9.5z`).join('')} fill="#ffd966" stroke="#f0a848" stroke-width=".6" />
+      )}
+      <path
+        d={MASTS.map(({ at: [x, y], pool: [px, py, rx, ry] }) => `M${x - 5} ${y - MAST_H + 1}H${x + 5}L${px + rx * 0.75} ${py + ry * 0.62}L${px - rx * 0.9} ${py + ry * 0.3}Z`).join('')}
+        fill="url(#i-cone)"
+      />
+      {MASTS.map(({ pool: [px, py, rx, ry] }, i) => (
+        <ellipse key={i} cx={px} cy={py} rx={rx} ry={ry} fill="url(#i-pool)" />
+      ))}
+      <path d={heads} stroke="#ffe7a0" stroke-width="12" stroke-linecap="round" opacity=".4" />
+      <path d={MASTS.map(({ at: [x, y] }) => `M${x - 6} ${y - MAST_H - 2}h12v3.6h-12z`).join('')} fill="#fff8dc" />
     </g>
   );
 }
@@ -126,34 +158,16 @@ export function GardenBeds() {
   );
 }
 
-export function Bench({ x, y, flip }: { x: number; y: number; flip?: boolean }) {
-  return (
-    <g transform={`translate(${x} ${y})${flip ? ' scale(-1 1)' : ''}`}>
-      <ellipse cx={3} cy={1} rx={9} ry={2} fill={K.shadow} />
-      <path d="M-7 0v-4M7 0v-4" stroke="#4a4f55" stroke-width="1.6" />
-      <path d="M-8 -4h16v-2.4h-16z" fill={K.wood} />
-      <path d="M-8 -7.5h16v-3h-16z" fill={K.woodLight} />
-    </g>
-  );
-}
-
-export function Lamp({ x, y }: { x: number; y: number }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <ellipse cx={3} cy={1} rx={4} ry={1.4} fill={K.shadow} />
-      <path d="M0 0V-20" stroke="#3f4a52" stroke-width="1.8" />
-      <path d="M-3 -20h6l-1 -5h-4z" fill="#ffe89a" stroke="#3f4a52" stroke-width="1" />
-      <path d="M-3.5 -25h7" stroke="#3f4a52" stroke-width="1.6" />
-    </g>
-  );
-}
+export const Bench = ({ x, y, flip }: { x: number; y: number; flip?: boolean }) => <use href="#i-bench" transform={`translate(${x} ${y})${flip ? ' scale(-1 1)' : ''}`} />;
+export const Lamp = ({ x, y }: { x: number; y: number }) => <use href="#i-lamp" transform={`translate(${x} ${y})`} />;
 
 /** a newly planted palm grove: a freshly mown, irregular clearing in the
- *  grass, a ring of sandy mulch round each young palm, planted off-grid.
- *  Part of the ground, so the trees around it stand on top of it. */
+ *  grass, a ring of sandy mulch round each young palm, planted off-grid, and
+ *  each sapling's shadow. All ground: the mountain's foot is drawn over the
+ *  clearing's top, and the saplings (terrain.tsx) are y-sorted with the wood. */
 const GX = SPOT.grove.map((p) => p[0]), GY = SPOT.grove.map((p) => p[1]);
 const GC: Pt = [(Math.min(...GX) + Math.max(...GX)) / 2, (Math.min(...GY) + Math.max(...GY)) / 2];
-const CLEARING = curve(blob(GC[0], GC[1] + 2, (Math.max(...GX) - Math.min(...GX)) / 2 + 20, (Math.max(...GY) - Math.min(...GY)) / 2 + 14, 311, 11, 0.12));
+const CLEARING = curve(blob(GC[0] - 2, GC[1] + 4, (Math.max(...GX) - Math.min(...GX)) / 2 + 16, (Math.max(...GY) - Math.min(...GY)) / 2 + 12, 311, 11, 0.12));
 const ring = (x: number, y: number, rx: number, ry: number) => `M${x - rx} ${y}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0`;
 export function GroveField() {
   return (
@@ -161,12 +175,9 @@ export function GroveField() {
       <path d={CLEARING} fill={mix(K.grassLight, K.grassLighter, 0.5)} opacity=".75" />
       <path d={SPOT.grove.map(([x, y]) => ring(x + 1, y + 0.5, 9, 3.6)).join('')} fill="#e6cf98" />
       <path d={SPOT.grove.map(([x, y]) => ring(x + 1, y + 0.5, 5.6, 2.2)).join('')} fill="#c9a86a" />
+      <path d={SPOT.grove.map(([x, y]) => ring(x + 11, y + 1, 9, 2.8)).join('')} fill={K.shadow} />
     </g>
   );
-}
-/** the saplings, planted off-grid (y-sorted with everything else) */
-export function Grove() {
-  return <Saplings pts={[...SPOT.grove].sort((a, b) => a[1] - b[1])} />;
 }
 
 export function FishingBoats() {
@@ -530,38 +541,48 @@ export function Festoon({ lit }: { lit?: boolean }) {
   );
 }
 
-/** fireworks over the lagoon while the crew is celebrating, at night */
+/** fireworks while the crew is celebrating, at night: bursting over the
+ *  open sea north of the lagoon, their trails well clear of the moored
+ *  floatplane and the dock. Rays merged per colour; the sparks, the cores and
+ *  the trails of all three in one path each. */
 const BURSTS: [number, number, number, string, string][] = [
-  [226, 58, 26, '#ffd23f', '#fff4c0'],
-  [158, 92, 19, '#ff6fa8', '#ffd0e4'],
-  [284, 70, 15, '#7fe8ff', '#e0fbff'],
+  [212, 46, 24, '#ffd23f', '#fff4c0'],
+  [150, 76, 18, '#ff6fa8', '#ffd0e4'],
+  [272, 64, 15, '#7fe8ff', '#e0fbff'],
 ];
+const f1 = (n: number) => n.toFixed(1);
+const FIREWORKS = (() => {
+  const rays: string[] = [], tips: string[] = [], cores: string[] = [], trails: string[] = [];
+  BURSTS.forEach(([x, y, r], i) => {
+    const n = 14;
+    let d = '';
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2 + i * 0.4, c = Math.cos(a), s = Math.sin(a);
+      d += `M${f1(x + c * r * 0.34)} ${f1(y + s * r * 0.34)}L${f1(x + c * r)} ${f1(y + s * r)}`;
+      tips.push(`M${f1(x + c * (r + 3))} ${f1(y + s * (r + 3) + 1.5)}h.1`);
+    }
+    rays.push(d);
+    cores.push(`M${x} ${y}h.1`);
+    // the shell's trail: short, rising from open water under the burst
+    trails.push(`M${x + 2} ${y + r + 20}q-3 ${-(r * 0.4 + 6)} -2 ${-(r * 0.7 + 20)}`);
+  });
+  return { rays, tips: tips.join(''), cores: cores.join(''), trails: trails.join('') };
+})();
 export function Fireworks() {
   return (
     <g fill="none" stroke-linecap="round" pointer-events="none">
-      {BURSTS.map(([x, y, r, c, hi], i) => {
-        const n = 14;
-        const rays = Array.from({ length: n }, (_, k) => {
-          const a = (k / n) * Math.PI * 2 + i * 0.4;
-          const c1 = Math.cos(a), s1 = Math.sin(a);
-          return `M${(x + c1 * r * 0.34).toFixed(1)} ${(y + s1 * r * 0.34).toFixed(1)}L${(x + c1 * r).toFixed(1)} ${(y + s1 * r).toFixed(1)}`;
-        }).join('');
-        const tips = Array.from({ length: n }, (_, k) => {
-          const a = (k / n) * Math.PI * 2 + i * 0.4;
-          return `M${(x + Math.cos(a) * (r + 3)).toFixed(1)} ${(y + Math.sin(a) * (r + 3) + 1.5).toFixed(1)}h.1`;
-        }).join('');
-        return (
-          <g key={i}>
-            <circle cx={x} cy={y} r={r * 1.15} fill={c} opacity=".14" stroke="none" />
-            <path d={rays} stroke={c} stroke-width="2.2" />
-            <path d={rays} stroke={hi} stroke-width=".9" />
-            <path d={tips} stroke={hi} stroke-width="2.6" />
-            <circle cx={x} cy={y} r={2.6} fill="#fff" stroke="none" />
-            {/* the shell's trail up from the lagoon */}
-            <path d={`M${x + 2} ${y + r + 34}q-3 -${r * 0.6} -2 -${r + 30}`} stroke={c} stroke-width="1.2" stroke-dasharray="2 3" opacity=".7" />
-          </g>
-        );
-      })}
+      {BURSTS.map(([x, y, r, c], i) => (
+        <circle key={`h${i}`} cx={x} cy={y} r={r * 1.15} fill={c} opacity=".14" stroke="none" />
+      ))}
+      <path d={FIREWORKS.trails} stroke="#ffe7b0" stroke-width="1.2" stroke-dasharray="2 3" opacity=".6" />
+      {BURSTS.map(([, , , c], i) => (
+        <path key={`r${i}`} d={FIREWORKS.rays[i]} stroke={c} stroke-width="2.2" />
+      ))}
+      {BURSTS.map(([, , , , hi], i) => (
+        <path key={`i${i}`} d={FIREWORKS.rays[i]} stroke={hi} stroke-width=".9" />
+      ))}
+      <path d={FIREWORKS.tips} stroke="#fff6dc" stroke-width="2.6" />
+      <path d={FIREWORKS.cores} stroke="#fff" stroke-width="5.2" />
     </g>
   );
 }

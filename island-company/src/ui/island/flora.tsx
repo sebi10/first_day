@@ -34,7 +34,8 @@ function crown(size: number, flip: boolean) {
 }
 
 /** Palm with a curved trunk; (x, y) is where the trunk meets the ground. */
-export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind, storm }: { x: number; y: number; s?: number; lean?: number; motion: boolean; young?: boolean; pal?: { leaf: string; dark: string }; wind?: boolean; storm?: boolean }) {
+/** `night`: the trunk rings and the coconuts, which the night grade hides, are left out */
+export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind, storm, night }: { x: number; y: number; s?: number; lean?: number; motion: boolean; young?: boolean; pal?: { leaf: string; dark: string }; wind?: boolean; storm?: boolean; night?: boolean }) {
   const h = (young ? 20 : 40) * s;
   const lx = 9 * lean * s;
   const w = (young ? 2.2 : 3.6) * s;
@@ -45,38 +46,31 @@ export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind, storm }:
     <g transform={`translate(${r1(x)} ${r1(y)})${wind ? ` skewX(${storm ? -16 : -8})` : ''}`}>
       <ellipse cx={r1(lx + 12 * s)} cy={1.5} rx={r1(18 * s)} ry={r1(5 * s)} fill={K.shadow} />
       <path d={trunk} fill={K.trunk} />
-      <path d={mid} stroke={K.trunkDark} stroke-width={r1(w * 1.3)} stroke-dasharray="2 3.2" fill="none" opacity=".55" />
+      {!night && <path d={mid} stroke={K.trunkDark} stroke-width={r1(w * 1.3)} stroke-dasharray="2 3.2" fill="none" opacity=".55" />}
       <g transform={`translate(${r1(lx)} ${r1(-h)})${wind ? (storm ? ' rotate(22) skewX(-12)' : ' rotate(14) skewX(-8)') : ''}`}>
         <g class={motion ? 'sway' : undefined} style={motion ? { animationDelay: `${r1(-((x * 7 + y) % 50) / 10)}s` } : undefined}>
           <path d={cr.back} fill={pal?.dark ?? K.leafDark} />
           <path d={cr.front} fill={pal?.leaf ?? K.leaf} />
           <path d={cr.hi} fill={K.leafLight} opacity=".8" />
-          {!young && <path d="M-3 1a2.6 2.6 0 1 0 .1 0M2 2a2.6 2.6 0 1 0 .1 0" fill="#7a4d25" />}
+          {!young && !night && <path d="M-3 1a2.6 2.6 0 1 0 .1 0M2 2a2.6 2.6 0 1 0 .1 0" fill="#7a4d25" />}
         </g>
       </g>
     </g>
   );
 }
 
-/** A bed of young palms in four nodes (they are too small to sway). */
-export function Saplings({ pts }: { pts: [number, number][] }) {
-  const shadow: string[] = [], trunk: string[] = [], back: string[] = [], front: string[] = [];
-  pts.forEach(([x, y], i) => {
-    const flip = i % 2 === 1, lx = flip ? -5 : 5, h = 19, cx = x + lx, cy = y - h;
-    shadow.push(`M${r1(x + 2)} ${r1(y + 1)}a9 2.8 0 1 0 18 0a9 2.8 0 1 0 -18 0`);
-    trunk.push(`M${r1(x - 2)} ${y}Q${r1(x + lx * 0.1 - 2)} ${r1(y - h * 0.6)} ${r1(cx - 1)} ${r1(cy)}L${r1(cx + 1.2)} ${r1(cy)}Q${r1(x + lx * 0.1 + 2.4)} ${r1(y - h * 0.55)} ${r1(x + 2)} ${y}Z`);
-    [200, 250, 300, 345].forEach((a) => back.push(leaf(flip ? 180 - a : a, 10.5, 0.28, cx, cy)));
-    [160, 115, 25, 65].forEach((a) => front.push(leaf(flip ? 180 - a : a, 11, 0.34, cx, cy)));
-  });
-  return (
-    <>
-      <path d={shadow.join('')} fill={K.shadow} />
-      <path d={trunk.join('')} fill={K.trunk} />
-      <path d={back.join('')} fill={K.leafDark} />
-      <path d={front.join('')} fill={K.leaf} />
-    </>
-  );
-}
+/** A young palm (the palm-grove flourish), drawn once as a symbol: its trunk
+ *  base is (0, 0), crown leaning east (flip it for west). Each sapling is one
+ *  <use>, so it can be y-sorted with the trees around it; its ground shadow
+ *  is part of the grove's clearing. */
+const SAPLING = (() => {
+  const lx = 5, h = 19, cx = lx, cy = -h;
+  return {
+    trunk: `M-2 0Q${r1(lx * 0.1 - 2)} ${r1(-h * 0.6)} ${r1(cx - 1)} ${cy}L${r1(cx + 1.2)} ${cy}Q${r1(lx * 0.1 + 2.4)} ${r1(-h * 0.55)} 2 0Z`,
+    back: [200, 250, 300, 345].map((a) => leaf(a, 10.5, 0.28, cx, cy)).join(''),
+    front: [160, 115, 25, 65].map((a) => leaf(a, 11, 0.34, cx, cy)).join(''),
+  };
+})();
 
 /** Symbols shared by all scatter. Coordinates: (0,0) is the ground point. */
 export function FloraDefs() {
@@ -100,6 +94,23 @@ export function FloraDefs() {
         <path d="M-8 -4a6 6 0 1 0 .1 0M0 -8a7 7 0 1 0 .1 0M7 -4a5.5 5.5 0 1 0 .1 0" fill={K.treeDark} />
         <path d="M-7 -6a4.5 4.5 0 1 0 .1 0M-1 -10a5 5 0 1 0 .1 0" fill={K.tree} />
         <path d="M-2 -12a2.2 2.2 0 1 0 .1 0" fill={K.treeLight} />
+      </symbol>
+      <symbol id="i-sapling" overflow="visible">
+        <path d={SAPLING.trunk} fill={K.trunk} />
+        <path d={SAPLING.back} fill={K.leafDark} />
+        <path d={SAPLING.front} fill={K.leaf} />
+      </symbol>
+      {/* a square lamp post and a park bench (the benches flourish), one <use> each */}
+      <symbol id="i-lamp" overflow="visible">
+        <ellipse cx="3" cy="1" rx="4" ry="1.4" fill={K.shadow} />
+        <path d="M-3 -20h6l-1 -5h-4z" fill="#ffe89a" stroke="#3f4a52" stroke-width="1" />
+        <path d="M0 0V-20M-3.5 -25h7" stroke="#3f4a52" stroke-width="1.7" />
+      </symbol>
+      <symbol id="i-bench" overflow="visible">
+        <ellipse cx="3" cy="1" rx="9" ry="2" fill={K.shadow} />
+        <path d="M-7 0v-4M7 0v-4" stroke="#4a4f55" stroke-width="1.6" />
+        <path d="M-8 -4h16v-2.4h-16z" fill={K.wood} />
+        <path d="M-8 -7.5h16v-3h-16z" fill={K.woodLight} />
       </symbol>
       <symbol id="i-mush" overflow="visible">
         <rect x="-1.4" y="-4" width="2.8" height="4" rx="1" fill="#fff3e0" />

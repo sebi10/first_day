@@ -11,9 +11,12 @@ import {
 import { GroveField } from './extras';
 import { FloraDefs, Palm, Use } from './flora';
 import { K, mix } from './paint';
-import { blob, Boulder, ridge, Rock, RockRow, ROCK } from './rocks';
+import { blob, boulder, ridge, Rock, RockRow, ROCK } from './rocks';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
+/** a rounded rectangle as path data, so rows of them merge into one node */
+const rrect = (x: number, y: number, w: number, h: number, r: number) =>
+  `M${r1(x + r)} ${r1(y)}h${r1(w - 2 * r)}a${r} ${r} 0 0 1 ${r} ${r}v${r1(h - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${r}h${r1(-(w - 2 * r))}a${r} ${r} 0 0 1 ${-r} ${-r}v${r1(-(h - 2 * r))}a${r} ${r} 0 0 1 ${r} ${-r}z`;
 const COAST_D = curve(COAST);
 const PLATEAU_D = curve(PLATEAU);
 const TERRACE_D = curve(TERRACE);
@@ -445,15 +448,8 @@ function BeachSteps({ paved }: { paved: boolean }) {
   return (
     <g>
       <path d={`M${x - 11} ${y - 2}h22l2 ${LIP + 5}h-26z`} fill={paved ? K.stoneDark : K.dirtEdge} />
-      {Array.from({ length: 4 }, (_, i) => {
-        const sy = y + i * 4;
-        return (
-          <g key={i}>
-            <rect x={x - 9 - i * 0.4} y={sy} width={18 + i * 0.8} height={4.4} rx={1} fill={face} />
-            <rect x={x - 9 - i * 0.4} y={sy - 0.4} width={18 + i * 0.8} height={2.6} rx={1} fill={top} />
-          </g>
-        );
-      })}
+      <path d={Array.from({ length: 4 }, (_, i) => rrect(x - 9 - i * 0.4, y + i * 4, 18 + i * 0.8, 4.4, 1)).join('')} fill={face} />
+      <path d={Array.from({ length: 4 }, (_, i) => rrect(x - 9 - i * 0.4, y + i * 4 - 0.4, 18 + i * 0.8, 2.6, 1)).join('')} fill={top} />
       <path d={`M${x - 6} ${y + 20}q2 8 -1 16M${x + 5} ${y + 20}q3 8 1 16`} stroke={K.sandWet} stroke-width="3" fill="none" stroke-linecap="round" opacity=".6" />
     </g>
   );
@@ -465,21 +461,26 @@ function Steps() {
     <g>
       <path d="M612 300Q614 270 618 244" stroke={K.stoneDark} stroke-width="14" fill="none" stroke-linecap="round" />
       <path d="M612 300Q614 270 618 244" stroke={K.stone} stroke-width="10" fill="none" stroke-linecap="round" />
-      {Array.from({ length: 7 }, (_, i) => {
-        const x = 618 + i * 1.2, y = 240 - i * 4.4;
-        return (
-          <g key={i}>
-            <rect x={x - 9} y={y - 2} width={18} height={5} rx={1.5} fill={K.stoneDark} />
-            <rect x={x - 9} y={y - 3.5} width={18} height={3.5} rx={1.5} fill={K.stoneLight} />
-          </g>
-        );
-      })}
+      {/* treads: the risers (dark) merged into one path, then the tops */}
+      {['dark', 'light'].map((k) => (
+        <path
+          key={k}
+          d={Array.from({ length: 7 }, (_, i) => {
+            const x = 618 + i * 1.2, y = 240 - i * 4.4;
+            return k === 'dark' ? rrect(x - 9, y - 2, 18, 5, 1.5) : rrect(x - 9, y - 3.5, 18, 3.5, 1.5);
+          })
+            .reverse()
+            .join('')}
+          fill={k === 'dark' ? K.stoneDark : K.stoneLight}
+        />
+      ))}
     </g>
   );
 }
 
 // ------------------------------------------------------------ airfield ---
-function Airfield({ weather, motion }: { weather: Weather; motion: boolean }) {
+/** `night`: the apron's concrete goes darker and cooler, so the floodlight pools read */
+function Airfield({ weather, motion, night }: { weather: Weather; motion: boolean; night: boolean }) {
   const L = RUNWAY_LEN, w = RUNWAY.w;
   const bars = (x: number) => Array.from({ length: 6 }, (_, i) => `M${x} ${r1(-w / 2 + 4 + i * 5.4)}h14`).join('');
   const stands = [POS.p1, POS.p2].map(([x, y]) => `M${x} ${y + 22}V${y - 26}M${x - 13} ${y + 24}h26`).join('');
@@ -489,8 +490,8 @@ function Airfield({ weather, motion }: { weather: Weather; motion: boolean }) {
       {/* the runway's mown verge goes under the taxiway, which runs right up to the runway edge */}
       <rect x={-L / 2 - 6} y={-w / 2 - 5} width={L + 12} height={w + 10} rx={4} fill={K.grassDark} opacity=".6" transform={rw} />
       {/* apron and taxiway, with the hangar's forecourt painted on */}
-      <path d={lin(APRON, true) + lin(TAXIWAY, true)} fill={K.concreteDark} transform="translate(0 3)" />
-      <path d={lin(APRON, true) + lin(TAXIWAY, true)} fill={K.concrete} />
+      <path d={lin(APRON, true) + lin(TAXIWAY, true)} fill={night ? mix(K.concreteDark, '#3e4658', 0.25) : K.concreteDark} transform="translate(0 3)" />
+      <path d={lin(APRON, true) + lin(TAXIWAY, true)} fill={night ? mix(K.concrete, '#4e586c', 0.24) : K.concrete} />
       <path d={lin(inset(APRON, () => 3), true)} fill="none" stroke="#fff" stroke-width="1" opacity=".45" />
       <path d={lin(inset(HANGAR_PAD, () => 3), true)} fill="none" stroke="#f2c230" stroke-width="1.6" stroke-dasharray="7 4" opacity=".9" />
       {/* parking stands and the taxi line */}
@@ -552,15 +553,12 @@ const PALMS: [number, number, number, number][] = [
 
 /** rocks standing in the shallows, with a ring of foam */
 const SEA_ROCKS: [number, number, number][] = [[18, 250, 9], [790, 300, 8], [790, 500, 10], [100, 560, 8], [600, 560, 7], [22, 168, 8], [770, 110, 7]];
+const SEA_ROCK_ROW = SEA_ROCKS.map(([x, y, r], i) => boulder(x, y, r, i * 53 + 7));
 function SeaRocks() {
   return (
     <g>
-      {SEA_ROCKS.map(([x, y, r], i) => (
-        <g key={i}>
-          <ellipse cx={x} cy={y + 1} rx={r * 1.7} ry={r * 0.7} fill="#fff" opacity=".75" />
-          <Boulder x={x} y={y} r={r} seed={i * 53 + 7} />
-        </g>
-      ))}
+      <path d={SEA_ROCKS.map(([x, y, r]) => ell(x, y + 1, r * 1.7, r * 0.7)).join('')} fill="#fff" opacity=".75" />
+      <RockRow rocks={SEA_ROCK_ROW} />
     </g>
   );
 }
@@ -582,53 +580,66 @@ function Lookout() {
   );
 }
 
+/** trees felled when the villas are built (tier 4): the west villa's pool terrace reaches them */
+const VILLA_FELLED: Pt[] = [[548, 470]];
 /** tier each future asset arrives: its lot keeps a few trees until it is staked out */
 const LOT_TREES: { tier: number; pts: Pt[] }[] = [
   { tier: 4, pts: [[590, 440], [616, 452], [690, 434], [668, 452], [712, 444]] },
   { tier: 5, pts: [[630, 180], [676, 176], [700, 190]] },
 ];
 
-function Scatter({ motion, wind, storm, tier }: { motion: boolean; wind: boolean; storm: boolean; tier: number }) {
+/** the young palms of the grove flourish, sorted in with the wood: a round
+ *  tree that would share a canopy with one of them was cleared for the grove */
+const GROVE_CLEAR = 25;
+function Scatter({ motion, wind, storm, tier, night, grove, site }: { motion: boolean; wind: boolean; storm: boolean; tier: number; night: boolean; grove: boolean; site: boolean }) {
   const zones = ZONES;
   const tufts = scatter(11, 90, onGrass, zones, 14);
   const flowers = scatter(12, 48, onGrass, zones, 17);
   const bushes = scatter(13, 30, onGrass, LOW, 22);
   const beach = scatter(14, 34, onBeach, zones, 20);
+  const felled = (p: Pt) => (grove && SPOT.grove.some((g) => Math.hypot(p[0] - g[0], p[1] - g[1]) < GROVE_CLEAR)) || (tier >= 4 && VILLA_FELLED.some((q) => q[0] === p[0] && q[1] === p[1]));
+  // each tree keeps its kind, size and facing (from its place in the list) when others are felled
   const trees = TREE_SPOTS.filter((p) => clearOf(p, TALL));
   const lots = LOT_TREES.filter((l) => tier < l.tier - 2).flatMap((l) => l.pts);
   const cols = [K.pink, K.yellow, '#ffffff', K.orange, K.purple];
   const items: { y: number; el: preact.JSX.Element }[] = [];
-  [...trees, ...lots].forEach(([x, y], i) => items.push({ y, el: <Use key={`t${i}`} id={i % 4 === 3 ? 'i-pine' : 'i-tree'} x={x} y={y} s={0.9 + (i % 3) * 0.12} flip={i % 2 === 1} /> }));
+  [...trees, ...lots].forEach(([x, y], i) => {
+    if (!felled([x, y])) items.push({ y, el: <Use key={`t${i}`} id={i % 4 === 3 ? 'i-pine' : 'i-tree'} x={x} y={y} s={0.9 + (i % 3) * 0.12} flip={i % 2 === 1} /> });
+  });
   bushes.forEach(([x, y], i) => items.push({ y, el: <Use key={`b${i}`} id="i-bush" x={x} y={y} s={0.8 + (i % 3) * 0.15} flip={i % 2 === 0} /> }));
-  PALMS.filter(([x, y]) => clearOf([x, y], TALL)).forEach(([x, y, s, l], i) => items.push({ y, el: <Palm key={`p${i}`} x={x} y={y} s={s} lean={l} motion={motion} wind={wind} storm={storm} /> }));
+  // while the generator's shed goes up, the two beach palms in front of its plot are cut back
+  const palms = PALMS.filter(([x, y]) => clearOf([x, y], TALL) && !(site && Math.hypot(x - POS.gen[0], y - POS.gen[1]) < 56));
+  palms.forEach(([x, y, s, l], i) => items.push({ y, el: <Palm key={`p${i}`} x={x} y={y} s={s} lean={l} motion={motion} wind={wind} storm={storm} night={night} /> }));
+  if (grove) SPOT.grove.forEach(([x, y], i) => items.push({ y, el: <Use key={`g${i}`} id="i-sapling" x={x} y={y} flip={i % 2 === 1} /> }));
   items.sort((a, b) => a.y - b.y);
   return (
     <g>
-      {/* small scatter merged into a few paths: hundreds of bits, a handful of nodes */}
-      <path d={tufts.filter((_, i) => i % 3).map(([x, y]) => `M${r1(x - 4)} ${r1(y)}q1 -5 -2 -8M${r1(x)} ${r1(y)}q0 -6 1 -10M${r1(x + 3)} ${r1(y)}q1 -4 4 -7`).join('')} stroke={K.grassDarker} stroke-width="1.6" fill="none" stroke-linecap="round" />
-      <path d={tufts.filter((_, i) => !(i % 3)).map(([x, y]) => `M${r1(x - 3)} ${r1(y)}q0 -4 -3 -6M${r1(x)} ${r1(y)}q1 -5 3 -8M${r1(x + 3)} ${r1(y)}q2 -2 4 -3`).join('')} stroke={K.grassLighter} stroke-width="1.5" fill="none" stroke-linecap="round" />
-      {cols.map((c, ci) => (
-        <path key={c} d={flowers.filter((_, i) => i % cols.length === ci).map(([x, y]) => dot(x - 5, y - 2, 2.3) + dot(x + 1, y - 5, 2.5) + dot(x + 4, y, 2.2) + dot(x - 1, y + 1, 2)).join('')} fill={c} />
-      ))}
-      <path d={flowers.map(([x, y]) => dot(x - 5, y - 2.4, 0.9) + dot(x + 1, y - 5.4, 0.9)).join('')} fill="#fff6c8" />
+      {/* small scatter merged into a few paths: hundreds of bits, a handful of
+          nodes (at night the grade hides them, so they are left out) */}
+      {!night && <path d={tufts.filter((_, i) => i % 3).map(([x, y]) => `M${r1(x - 4)} ${r1(y)}q1 -5 -2 -8M${r1(x)} ${r1(y)}q0 -6 1 -10M${r1(x + 3)} ${r1(y)}q1 -4 4 -7`).join('')} stroke={K.grassDarker} stroke-width="1.6" fill="none" stroke-linecap="round" />}
+      {!night && <path d={tufts.filter((_, i) => !(i % 3)).map(([x, y]) => `M${r1(x - 3)} ${r1(y)}q0 -4 -3 -6M${r1(x)} ${r1(y)}q1 -5 3 -8M${r1(x + 3)} ${r1(y)}q2 -2 4 -3`).join('')} stroke={K.grassLighter} stroke-width="1.5" fill="none" stroke-linecap="round" />}
+      {!night &&
+        cols.map((c, ci) => (
+          <path key={c} d={flowers.filter((_, i) => i % cols.length === ci).map(([x, y]) => dot(x - 5, y - 2, 2.3) + dot(x + 1, y - 5, 2.5) + dot(x + 4, y, 2.2) + dot(x - 1, y + 1, 2)).join('')} fill={c} />
+        ))}
+      {!night && <path d={flowers.map(([x, y]) => dot(x - 5, y - 2.4, 0.9) + dot(x + 1, y - 5.4, 0.9)).join('')} fill="#fff6c8" />}
       <path d={beach.filter((_, i) => i % 4 === 0 || i % 4 === 3).map(([x, y]) => `M${r1(x - 4)} ${r1(y)}q0 -3 4 -3q4 0 4 3z`).join('')} fill="#c9b8a0" />
       <path d={beach.filter((_, i) => i % 4 === 1).map(([x, y]) => `M${r1(x)} ${r1(y - 5)}l1.4 3.4l3.6 .2l-2.8 2.4l1 3.6l-3.2 -2l-3.2 2l1 -3.6l-2.8 -2.4l3.6 -.2z`).join('')} fill="#ff8a5c" />
       <path d={beach.filter((_, i) => i % 4 === 2).map(([x, y]) => `M${r1(x - 3)} ${r1(y)}q3 -6 6 0z`).join('')} fill="#fff0e6" stroke="#f0b8a0" stroke-width=".6" />
-      {[
-        [470, 250], [300, 250], [590, 262], [720, 260],
-      ].map(([x, y], i) => (
-        <Use key={i} id="i-mush" x={x} y={y} />
-      ))}
+      {!night &&
+        [
+          [470, 250], [300, 250], [590, 262], [720, 260],
+        ].map(([x, y], i) => <Use key={i} id="i-mush" x={x} y={y} />)}
       {/* shore boulders */}
-      {[
-        [58, 330, 9, 1], [70, 372, 6, 2], [748, 236, 8, 3], [756, 330, 9, 4], [760, 440, 7, 5], [96, 118, 7, 6], [680, 512, 7, 7], [268, 132, 6, 8],
-      ].map(([x, y, r, s]) => (
-        <Boulder key={s} x={x} y={y} r={r} seed={s * 97} pal={{ ...ROCK, top: mix(K.rockTop, K.sand, 0.15) }} />
-      ))}
+      <RockRow rocks={SHORE_ROCKS} pal={SHORE_PAL} />
       {items.map((it) => it.el)}
     </g>
   );
 }
+const SHORE_ROCKS = [
+  [58, 330, 9, 1], [70, 372, 6, 2], [748, 236, 8, 3], [756, 330, 9, 4], [760, 440, 7, 5], [96, 118, 7, 6], [680, 512, 7, 7], [268, 132, 6, 8],
+].map(([x, y, r, s]) => boulder(x, y, r, s * 97));
+const SHORE_PAL = { ...ROCK, top: mix(K.rockTop, K.sand, 0.15) };
 const dot = (x: number, y: number, r: number) => `M${r1(x - r)} ${r1(y)}a${r} ${r} 0 1 0 ${r1(2 * r)} 0a${r} ${r} 0 1 0 ${r1(-2 * r)} 0`;
 const clearOf = (p: Pt, zones: Zone[]) =>
   zones.every((z) => ('c' in z ? Math.hypot(p[0] - z.c[0], p[1] - z.c[1]) >= z.r * 0.8 : 'line' in z ? lineDist(p, z.line) >= z.r : !inPoly(p, z.poly)));
@@ -648,7 +659,8 @@ function Puddles() {
   );
 }
 
-export function Terrain({ tier, weather, motion, paved, night, grove }: { tier: number; weather: Weather; motion: boolean; paved: boolean; night: boolean; grove: boolean }) {
+/** `site`: the generator's shed is being built (its plot is cleared of palms) */
+export function Terrain({ tier, weather, motion, paved, night, grove, site }: { tier: number; weather: Weather; motion: boolean; paved: boolean; night: boolean; grove: boolean; site: boolean }) {
   return (
     <g>
       <Sea motion={motion} weather={weather} />
@@ -658,6 +670,8 @@ export function Terrain({ tier, weather, motion, paved, night, grove }: { tier: 
       <Plateau night={night} />
       <Terrace />
       <River />
+      {/* the grove's clearing is ground: the mountain's foot stands on it */}
+      {grove && <GroveField />}
       <Mountain />
       <Falls motion={motion} />
       <Lookout />
@@ -670,10 +684,9 @@ export function Terrain({ tier, weather, motion, paved, night, grove }: { tier: 
       {BRIDGES.map((b, i) => (
         <Bridge key={i} {...b} />
       ))}
-      <Airfield weather={weather} motion={motion} />
-      {grove && <GroveField />}
+      <Airfield weather={weather} motion={motion} night={night} />
       {weather === 'storm' && <Puddles />}
-      <Scatter motion={motion} wind={weather !== 'clear'} storm={weather === 'storm'} tier={tier} />
+      <Scatter motion={motion} wind={weather !== 'clear'} storm={weather === 'storm'} tier={tier} night={night} grove={grove} site={site} />
     </g>
   );
 }

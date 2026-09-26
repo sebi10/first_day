@@ -1,7 +1,7 @@
 // Build sites for tiers still to come. Subtle while they are only planned
 // (cleared plot, survey stakes, a buoy); a real construction site while the
 // crew project is under way: 0 stakes, string lines and lumber, 1 slabs
-// poured, 2 timber frames and scaffolding (with a little crane on big jobs).
+// poured, 2 timber frames and scaffolding (and a tower crane on the houses).
 import { DOCK, lin, P, type Pt, type V3 } from './geo';
 import { K, mix } from './paint';
 import { box, post, seg } from './solid';
@@ -72,10 +72,12 @@ function Scaffold({ w, h }: { w: number; h: number }) {
   );
 }
 
-/** a tower crane standing on the site's west side, its jib reaching east over the frame */
-function Crane({ x, h }: { x: number; h: number }) {
+/** a tower crane standing on the site's west side, its jib reaching east over
+ *  the frame; `z` = how far back it stands (a big plot's crane stands at the
+ *  front corner, so its jib stays below the houses up the slope behind) */
+function Crane({ x, h, z = 22 }: { x: number; h: number; z?: number }) {
   const top = h + 34;
-  const [bx, by] = P([x, 0, 22]);
+  const [bx, by] = P([x, 0, z]);
   return (
     <g transform={`translate(${bx} ${by})`}>
       <path d="M-6 1h12v-3h-12z" fill="#6b7176" />
@@ -142,10 +144,14 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
   }
   const slab = box(-w, w, 0, 3, 0, d);
   const k = big ? 1 : 1.2;
-  // the barrier along the front; the generator's plot is by the lip, where the beach steps go down
-  const by = kind === 'gen' ? 11 : 18;
+  // the generator's plot is by the lip, where the beach steps go down: the
+  // works sit a little up and east of it, the barrier clear of the steps, and
+  // the shed is too small a job for a crane
+  const gen = kind === 'gen';
+  const by = gen ? 11 : 18;
+  const [ox, oy] = gen ? [7, -6] : [0, 0];
   return (
-    <g transform={`translate(${x} ${y}) scale(${k})`}>
+    <g transform={`translate(${x + ox} ${y + oy}) scale(${k})`}>
       <path d={quad(-w - 6, w + 6, -6, d + 6)} fill={K.dirt} />
       <path d={quad(-w - 3, w + 3, -3, d + 3)} fill={K.dirtLight} opacity=".6" />
       {stage >= 1 && (
@@ -157,8 +163,8 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
       <Stakes w={w} d={d} lines={stage === 0} />
       {stage === 2 && <Frame w={w} d={d} h={h} />}
       {stage === 2 && <Scaffold w={w} h={h} />}
-      {stage === 2 && <Crane x={-w - 3} h={big ? h : h * 0.7} />}
-      <Lumber x={-w - 4} z={-20} />
+      {stage === 2 && !gen && (big ? <Crane x={-w - 2} h={h} z={-8} /> : <Crane x={-w - 3} h={h * 0.7} />)}
+      <Lumber x={big ? -w + 6 : -w - 4} z={-20} />
       {/* sand pile and a barrier along the front */}
       <path d={`M${w - 2} 14q7 -12 14 0z`} fill="#e3c27e" />
       <path d={`M${w + 1} 10q4 -6 7 -1`} stroke="#f6e2b0" stroke-width="1.4" fill="none" />

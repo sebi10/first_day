@@ -92,3 +92,7 @@ export const tones = (c: string) => ({ hi: shade(c, 0.28), mid: c, lo: shade(c, 
 export function weather(c: string, wear: number) {
   return wear <= 0 ? c : mix(c, '#b3a797', Math.min(0.6, wear * 0.8));
 }
+/** a roof that has seen some weather: greyed and darkened toward khaki */
+export function aged(c: string, wear: number) {
+  return wear <= 0 ? c : mix(c, '#8a8572', Math.min(0.5, wear * 0.6));
+}

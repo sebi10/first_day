@@ -1,7 +1,7 @@
 // Buildings, each drawn at its front-centre ground point in the oblique
 // projection: light roof top, mid front, dark east side. Care wears the paint.
 import { face, P, type V3 } from './geo';
-import { K, mix, shade, tones, weather } from './paint';
+import { aged, K, mix, shade, tones, weather } from './paint';
 import { box, gable, gableZ, hip, post, seg, shadowOf } from './solid';
 
 export type Win = 'glass' | 'lit' | 'shut' | 'dark';
@@ -34,14 +34,32 @@ function Windows({ rects, w }: { rects: WinRect[]; w: Win }) {
   );
 }
 
-/** faded patches when the island is poorly kept */
+/** peeling paint when the island is poorly kept: patches of bare plaster
+ *  with a lifted white lip along their top and a drip or two below, stronger
+ *  the more worn the place is */
 function Wear({ wear, spots }: { wear: number; spots: [number, number, number][] }) {
   if (wear < 0.25) return null;
+  const o = Math.min(0.9, 0.3 + wear);
+  const patch = ([x, y, r]: [number, number, number]) => `M${x - r * 1.3} ${y}q${r * 0.5} ${-r} ${r * 1.3} ${-r * 0.6}q${r} ${r * 0.1} ${r * 1.3} ${r * 0.8}q${-r * 0.8} ${r * 0.7} ${-r * 1.8} ${r * 0.2}z`;
   return (
-    <>
-      <path d={spots.map(([x, y, r]) => `M${x - r * 1.3} ${y}q${r * 0.5} ${-r} ${r * 1.3} ${-r * 0.6}q${r} ${r * 0.1} ${r * 1.3} ${r * 0.8}q${-r * 0.8} ${r * 0.7} ${-r * 1.8} ${r * 0.2}z`).join('')} fill="#8f7f6a" opacity={Math.min(0.5, wear * 0.7)} />
-      <path d={spots.map(([x, y, r]) => `M${x + r * 0.2} ${y + r * 0.4}v${r * 1.4}M${x + r * 0.7} ${y + r * 0.2}v${r}`).join('')} stroke="#7d6e5c" stroke-width="1.1" opacity={Math.min(0.5, wear * 0.7)} />
-    </>
+    <g opacity={o}>
+      <path d={spots.map(patch).join('')} fill="#b59c78" />
+      <path d={spots.map(([x, y, r]) => `M${x - r * 1.3} ${y}q${r * 0.5} ${-r} ${r * 1.3} ${-r * 0.6}q${r} ${r * 0.1} ${r * 1.3} ${r * 0.8}`).join('')} stroke="#fffaf0" stroke-width=".9" fill="none" />
+      <path d={spots.map(([x, y, r]) => `M${x + r * 0.2} ${y + r * 0.4}v${r * 1.4}M${x + r * 0.7} ${y + r * 0.2}v${r}`).join('')} stroke="#7d6e5c" stroke-width="1.1" />
+    </g>
+  );
+}
+/** a roof in need of care: a plank gone (a dark gap) and one patched in a
+ *  paler, odd colour; `gap` and `odd` = [x, y, width] of each on the front slope */
+function RoofWear({ wear, lo, mid, gap, odd }: { wear: number; lo: string; mid: string; gap: [number, number, number]; odd: [number, number, number] }) {
+  if (wear < 0.25) return null;
+  const o = Math.min(1, 0.45 + wear);
+  const plank = ([x, y, w]: [number, number, number], h: number) => `M${x} ${y}h${w}l.5 ${h}h${-w}z`;
+  return (
+    <g opacity={o}>
+      <path d={plank(gap, 2.6)} fill={lo} />
+      <path d={plank(odd, 3)} fill={mix(mid, '#e9e2b8', 0.55)} stroke={lo} stroke-width=".5" />
+    </g>
   );
 }
 
@@ -138,7 +156,7 @@ export function Cottage({ tint, win, wear, open, fault = {}, motion = false }: H
   const w = 20, d = 26, h = 18, rh = 16, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const r = gable(-w, w, h, 0, d, rh, o);
-  const roof = tones(weather(tint, wear * 0.7));
+  const roof = tones(aged(tint, wear));
   const thatch = tint.toLowerCase() === '#e6d0a6';
   const wall = weather(K.wall, wear);
   return (
@@ -157,7 +175,7 @@ export function Cottage({ tint, win, wear, open, fault = {}, motion = false }: H
       <path d={r.front} fill={thatch ? mix(roof.mid, '#f3d57e', 0.35) : roof.mid} />
       <path d={r.courses(thatch ? 4 : 3)} stroke={roof.lo} stroke-width={thatch ? 1.6 : 1.1} opacity=".55" fill="none" />
       <path d={r.ridge} stroke={roof.hi} stroke-width="3" stroke-linecap="round" />
-      {wear >= 0.25 && <path d={`M-10 ${-24}l6 -1l1 4l-6 1z`} fill={roof.dk} opacity=".45" />}
+      <RoofWear wear={wear} lo={roof.dk} mid={roof.mid} gap={[-5, -31, 9]} odd={[7.5, -23.8, 10]} />
       <Faults f={fault} motion={motion} g={{ w, h, door: [-4.5, -11.5, 4.5, 0], shutter: [-17, -12.5], patches: [[-8, -27], [4, -22]], crack: [11, -17], board: [-27, 6], smoke: SMOKE_AT.cottage }} />
     </g>
   );
@@ -168,7 +186,7 @@ export function Villa({ tint, win, wear, open, fault = {}, motion = false }: Hou
   const w = 30, d = 32, h = 32, rh = 13, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const r = hip(-w, w, h, 0, d, rh, o, 14);
-  const roof = tones(weather(tint, wear * 0.7));
+  const roof = tones(aged(tint, wear));
   const wall = weather('#ffffff', wear * 0.9);
   const bal = box(-w + 2, w - 2, 14, 16.5, -8, 0);
   return (
@@ -194,6 +212,7 @@ export function Villa({ tint, win, wear, open, fault = {}, motion = false }: Hou
       <path d={r.east} fill={roof.lo} />
       <path d={r.front} fill={roof.mid} />
       <path d={r.ridge} stroke={roof.hi} stroke-width="2.4" stroke-linecap="round" />
+      <RoofWear wear={wear} lo={roof.dk} mid={roof.mid} gap={[-12, -40, 8]} odd={[8, -35, 10]} />
       <path d={`M${pt([w - 8, h + 6, d * 0.7])}v-10h5v10z`} fill={weather('#e9e2d6', wear)} />
       <Faults f={fault} motion={motion} g={{ w, h, door: [-6, -13, 6, 0], shutter: [-26, -29], patches: [[-12, -40], [2, -38]], crack: [20, -26], board: [-40, 8], smoke: SMOKE_AT.villa }} />
     </g>
@@ -211,7 +230,7 @@ export function Lodge({ tint, win, wear, open, fault = {}, motion = false }: Hou
   // a dressed-stone retaining wall holds the peak's boulders back from the terrace
   const wall = box(-w - 36, -w - 29, 0, 13, -8, 46);
   const courses = [4.4, 8.8].map((y) => `M${pt([-w - 29, y, -8])}L${pt([-w - 29, y, 46])}`).join('') + [4, 16, 28, 40].map((z, i) => `M${pt([-w - 29, i % 2 ? 4.4 : 0, z])}v-4.4`).join('');
-  const roof = tones(weather(tint, wear * 0.7));
+  const roof = tones(aged(tint, wear));
   const timber = weather('#c98a52', wear);
   const deck = box(-w - 4, w + 4, 0, 4, -14, 0);
   return (
@@ -242,6 +261,7 @@ export function Lodge({ tint, win, wear, open, fault = {}, motion = false }: Hou
       <path d="M0 -46V-20M-7 -33H7" stroke="#fff4dc" stroke-width="1.2" />
       {win === 'glass' && <path d="M-9 -22l6 -12" stroke="#fff" stroke-width="1.4" opacity=".8" />}
       <path d={r.eaves} stroke={roof.dk} stroke-width="2.4" fill="none" stroke-linejoin="round" />
+      <RoofWear wear={wear} lo={roof.dk} mid={roof.hi} gap={[-27, -28, 8]} odd={[20, -36, 9]} />
       <Wear wear={wear} spots={[[-18, -10, 5], [16, -14, 5]]} />
       {/* stone chimney rising out of the east slope, just clear of the ridge, with a cap */}
       {(() => {
@@ -271,8 +291,13 @@ export function Hangar({ tint, wear, doorOpen }: { tint: string; wear: number; d
   const w = 50, d = 54, h = 22, ah = 20;
   const bx = P([0, 0, d]); // back shift
   const [sx, sy] = bx;
-  const roof = tones(weather(tint, wear * 0.7));
+  const roof = tones(aged(tint, wear));
   const side = box(-w, w, 0, h, 0, d);
+  // rust running down the barrel roof between the ribs, the more worn the more of it
+  const onArch = (t: number, k: number) => `${Math.round((w * Math.cos(t) + sx * k) * 10) / 10} ${Math.round((-h - ah * Math.sin(t) + sy * k) * 10) / 10}`;
+  const rust = [
+    [0.14, 1.25, 0.8], [0.22, 2.0, 2.45], [0.45, 1.05, 0.62], [0.52, 2.3, 2.75], [0.78, 1.5, 1.05], [0.86, 2.55, 2.9], [0.35, 1.7, 2.1],
+  ].map(([k, a, b]) => `M${onArch(a, k)}L${onArch(b, k)}`).join('');
   const arch = (dx: number, dy: number, rev = false) =>
     rev ? `L${w + dx} ${-h + dy}A${w} ${ah} 0 0 0 ${-w + dx} ${-h + dy}` : `M${-w + dx} ${-h + dy}A${w} ${ah} 0 0 1 ${w + dx} ${-h + dy}`;
   const ribs = [0.33, 0.66].map((k) => `M${-w + sx * k} ${-h + sy * k}A${w} ${ah} 0 0 1 ${w + sx * k} ${-h + sy * k}`).join('');
@@ -284,6 +309,7 @@ export function Hangar({ tint, wear, doorOpen }: { tint: string; wear: number; d
       <path d={arch(0, 0) + arch(sx, sy, true) + 'Z'} fill={roof.mid} />
       <path d={`M${-w} ${-h}A${w} ${ah} 0 0 1 ${-w * 0.2} ${-h - ah * 0.98}L${-w * 0.2 + sx} ${-h - ah * 0.98 + sy}A${w} ${ah} 0 0 0 ${-w + sx} ${-h + sy}Z`} fill={roof.hi} />
       <path d={ribs} stroke={roof.lo} stroke-width="1.6" fill="none" opacity=".7" />
+      {wear >= 0.25 && <path d={rust} stroke="#7e3a18" stroke-width="2.2" stroke-linecap="round" fill="none" opacity={Math.min(0.85, 0.3 + wear)} />}
       {/* facade */}
       <path d={`M${-w} 0V${-h}A${w} ${ah} 0 0 1 ${w} ${-h}V0Z`} fill={weather('#ece6da', wear)} />
       <path d={`M${-w} ${-h}A${w} ${ah} 0 0 1 ${w} ${-h}`} stroke={roof.lo} stroke-width="3" fill="none" />
@@ -308,7 +334,7 @@ export function Office({ tint, win, wear, flag, motion }: { tint: string; win: W
   const w = 32, d = 32, h = 34, rh = 14, o = 4;
   const b = box(-w, w, 0, h, 0, d);
   const r = hip(-w, w, h, 0, d, rh, o, 14);
-  const roof = tones(weather('#3f6fb5', wear * 0.6));
+  const roof = tones(aged('#3f6fb5', wear * 0.8));
   const wall = weather('#fde9b8', wear);
   const aw = tones(weather(tint, wear * 0.6));
   // striped awning from the wall (y 17) out to the valance (y 12, z -10)

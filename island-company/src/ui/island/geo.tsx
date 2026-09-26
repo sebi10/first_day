@@ -167,8 +167,9 @@ export const POS: Record<string, Pt> = {
   h2: [680, 276],
   h3: [600, 384],
   h4: [690, 378],
-  h5: [694, 454],
-  h6: [602, 462],
+  // the villas on the south-east headland, a lawn's width apart
+  h5: [697, 454],
+  h6: [594, 462],
   h7: [666, 190], // on its own terrace, its retaining wall clear of the peak's boulders
   g1: [474, 398],
   gen: [462, 478],
@@ -178,7 +179,7 @@ export const POS: Record<string, Pt> = {
 
 /** where each plane is worked on when it is AOG: every plane has its own spot */
 export const AOG_SPOT: Record<string, Pt> = {
-  p1: [160, 346], // on jacks on the apron, just out of the hangar mouth
+  p1: [162, 352], // on jacks on the apron, out of the hangar mouth (room for its bubble above)
   p2: [300, 340], // on jacks on its own stand
   p3: [222, 128], // at its mooring, cowling open, mechanic on the dock
 };
@@ -254,7 +255,8 @@ export function viewOf(b: Box | null): Box {
 /** flourish spots (growth.ts), placed clear of every asset and path */
 export const SPOT = {
   garden: [[366, 290], [472, 290]] as Pt[],
-  grove: [[256, 200], [284, 205], [307, 213], [245, 222], [270, 227], [294, 235], [254, 247], [279, 251], [305, 244]] as Pt[],
+  // off-grid, west of the mountain foot's boulders (they reach down to y ~221 east of x 290)
+  grove: [[256, 200], [284, 205], [245, 222], [270, 227], [294, 235], [230, 236], [254, 247], [279, 251], [305, 244]] as Pt[],
   boats: [[106, 474], [132, 496]] as Pt[],
   bar: [318, 526] as Pt,
   fountain: [420, 332] as Pt,

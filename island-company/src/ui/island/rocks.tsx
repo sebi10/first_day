@@ -62,7 +62,7 @@ export function Rock({ top, h, pal = ROCK, topFill, hi = true, cracks = true, sm
 
 /** A whole row of boulders in five nodes: faces merged per tone, then the
  *  tops, then their highlights (rows barely overlap, so order holds). */
-export function RockRow({ rocks, pal = ROCK }: { rocks: { top: Pt[]; h: number }[]; pal?: RockPal }) {
+export function RockRow({ rocks, pal = ROCK }: { rocks: { top: Pt[]; h: number; hi?: boolean }[]; pal?: RockPal }) {
   const light: string[] = [], mid: string[] = [], dark: string[] = [], tops: string[] = [], his: string[] = [];
   for (const r of rocks) {
     const f = extrude(r.top, r.h);
@@ -70,7 +70,7 @@ export function RockRow({ rocks, pal = ROCK }: { rocks: { top: Pt[]; h: number }
     mid.push(f.mid);
     dark.push(f.dark);
     tops.push(lin(r.top, true));
-    his.push(lin(inset(r.top, 0.55, -0.12 * r.h, -0.1 * r.h), true));
+    if (r.hi !== false) his.push(lin(inset(r.top, 0.55, -0.12 * r.h, -0.1 * r.h), true));
   }
   return (
     <>
@@ -78,15 +78,13 @@ export function RockRow({ rocks, pal = ROCK }: { rocks: { top: Pt[]; h: number }
       <path d={mid.join('')} fill={pal.mid} />
       <path d={dark.join('')} fill={pal.dark} />
       <path d={tops.join('')} fill={pal.top} />
-      <path d={his.join('')} fill={pal.hi} opacity=".75" />
+      {his.length > 0 && <path d={his.join('')} fill={pal.hi} opacity=".75" />}
     </>
   );
 }
 
-/** a small loose boulder */
-export function Boulder({ x, y, r, seed, pal = ROCK }: { x: number; y: number; r: number; seed: number; pal?: RockPal }) {
-  return <Rock top={blob(x, y - r * 0.5, r, r * 0.55, seed, 6, 0.22)} h={r * 0.7} pal={pal} cracks={false} hi={r >= 9} />;
-}
+/** small loose boulders, all of them in five nodes (a RockRow) */
+export const boulder = (x: number, y: number, r: number, seed: number) => ({ top: blob(x, y - r * 0.5, r, r * 0.55, seed, 6, 0.22), h: r * 0.7, hi: r >= 9 });
 
 /** a row of stacked boulders along a ledge's front edge (points run east to west) */
 export function ridge(edge: Pt[], h: number, seed: number, step = 24, size = 1): { top: Pt[]; h: number; key: number }[] {

@@ -2,8 +2,10 @@
 // chunky rounded bubble with a pointer down to the asset and one bold
 // pictogram. Rust = out of service (the only alert hue), sunflower = warning.
 // Positioned by an outer <g transform>, counter-scaled against the zoom by a
-// middle <g>, bobbed by an inner <g>. spread() pushes bodies apart (and off
-// the runway) while every pointer keeps aiming at its asset.
+// middle <g>, bobbed by an inner <g>. spread() lifts bodies clear of each
+// other (and off the runway) while every pointer keeps aiming at its asset:
+// a bubble that had to move gets a longer, stretched pointer, never a
+// dotted leader line.
 import { K } from './paint';
 
 export type Icon = 'wrench' | 'cone' | 'noflight' | 'noentry' | 'broken' | 'clipboard' | 'bolt-off' | 'bolt' | 'cash' | 'warn';
@@ -105,8 +107,9 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
 
 /** body size in local units (before scale) */
 const BW = 46, BH = 34, TIP = 3;
-/** past this, a tail becomes a short stub and a dotted leader to the asset */
-const TAIL_MAX = 26;
+/** a tail's length with the body in its home spot, and the most spread()
+ *  lets it stretch (about 12 px more on a phone) */
+const TAIL_HOME = 10, TAIL_MAX = 24;
 export const bubbleK = (scale: number, small?: boolean) => scale * (small ? 0.88 : 1.1);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -123,13 +126,11 @@ function tailOf(bx: number, by: number) {
   const c = clamp(-TIP, top + 12, bot - 9);
   return { below: false, ax: side, ay: c, len: Math.hypot(side, -TIP - c) };
 }
-/** how far a tail runs past the cap, in local units */
-const tailExcess = (bx: number, by: number) => Math.max(0, tailOf(bx, by).len - TAIL_MAX);
 
 /** (x, y) = where the pointer touches the asset; (dx, dy) moves the body. The
  *  tail leaves the body on the side that faces the asset, so a bubble that
  *  had to slide aside keeps an angled tail back to what it is about. */
-export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 0, dy = 0, delay = 0 }: { x: number; y: number; icon: Icon; tone?: Tone; small?: boolean; scale: number; motion: boolean; dx?: number; dy?: number; delay?: number }) {
+export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 0, dy = 0, delay = 0, count }: { x: number; y: number; icon: Icon; tone?: Tone; small?: boolean; scale: number; motion: boolean; dx?: number; dy?: number; delay?: number; count?: number }) {
   const t = TONE[tone];
   const k = bubbleK(scale, small);
   const bx = Math.round((dx / k) * 10) / 10, by = Math.round((dy / k) * 10) / 10;
@@ -137,24 +138,15 @@ export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 
   const l = bx - BW / 2, r = bx + BW / 2;
   const body = `M${bx - 11} ${top}H${bx + 11}A12 12 0 0 1 ${r} ${top + 12}V${bot - 12}A12 12 0 0 1 ${bx + 11} ${bot}H${bx - 11}A12 12 0 0 1 ${l} ${bot - 12}V${top + 12}A12 12 0 0 1 ${bx - 11} ${top}Z`;
   const tl = tailOf(bx, by);
-  // a tail that would run long stops short, and a dotted leader finishes the
-  // way to a dot on the asset (a game bubble, not a diagram callout)
-  const long = tl.len > TAIL_MAX;
-  const f = long ? 12 / tl.len : 1;
-  const tipX = Math.round((tl.ax + (0 - tl.ax) * f) * 10) / 10, tipY = Math.round((tl.ay + (-TIP - tl.ay) * f) * 10) / 10;
-  const ptr = tl.below ? `M${tl.ax - 7} ${tl.ay}L${tipX} ${tipY}L${tl.ax + 7} ${tl.ay}Z` : `M${tl.ax} ${tl.ay - 6}L${tipX} ${tipY}L${tl.ax} ${tl.ay + 6}Z`;
+  // the pointer always runs all the way to the asset: a bubble that had to
+  // move gets a longer tail, a little slimmer so it still reads as a pointer
+  const hw = Math.round(Math.max(4.6, (tl.below ? 7 : 6) - Math.max(0, tl.len - 16) * 0.16) * 10) / 10;
+  const ptr = tl.below ? `M${tl.ax - hw} ${tl.ay}L0 ${-TIP}L${tl.ax + hw} ${tl.ay}Z` : `M${tl.ax} ${Math.round((tl.ay - hw) * 10) / 10}L0 ${-TIP}L${tl.ax} ${Math.round((tl.ay + hw) * 10) / 10}Z`;
   return (
     <g transform={`translate(${Math.round(x)} ${Math.round(y)})`}>
       <g class="bub-scale" style={{ transform: `scale(${k})` }}>
         <g class={motion ? 'bob' : undefined} style={delay ? { animationDelay: `${-delay}s` } : undefined}>
           <ellipse cx={3} cy={-1} rx={8} ry={2.6} fill="rgba(0,0,0,.22)" />
-          {long && (
-            <>
-              <path d={`M${tipX} ${tipY}L0 ${-TIP}`} stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-dasharray=".1 5" />
-              <path d={`M${tipX} ${tipY}L0 ${-TIP}`} stroke={t.body} stroke-width="2.6" stroke-linecap="round" stroke-dasharray=".1 5" />
-              <circle cx={0} cy={-TIP} r={3} fill={t.body} stroke="#fff" stroke-width="1.6" />
-            </>
-          )}
           <path d={body + ptr} fill={t.base} transform="translate(0 3.5)" />
           <path d={body + ptr} fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round" />
           <path d={body + ptr} fill={t.body} />
@@ -162,6 +154,15 @@ export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 
           <g transform={`translate(${bx} ${(top + bot) / 2})`}>
             <Glyph icon={icon} ink={t.ink} sub={t.sub} />
           </g>
+          {/* how many assets this one fault takes out (the grid: every house) */}
+          {count !== undefined && (
+            <g transform={`translate(${r - 3} ${top + 3})`}>
+              <rect x={-12} y={-8} width={24} height={16} rx={8} fill={K.ink} stroke="#fff" stroke-width="2" />
+              <text y={3.8} text-anchor="middle" font-size="11" font-weight="800" fill="#fff">
+                ×{count}
+              </text>
+            </g>
+          )}
         </g>
       </g>
     </g>
@@ -169,16 +170,19 @@ export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 
 }
 
 export type Rect = [number, number, number, number];
-/** a footprint bubbles keep off; `owner` = the asset it belongs to (its own bubble may sit on it) */
-export type KeepOut = { r: Rect; owner?: string };
+/** a footprint bubbles keep off; `owner` = the asset it belongs to (its own
+ *  bubble may sit on it); `w` = how much it matters (default 1: buildings,
+ *  the runway, smoke; props, stalls and the fountain are cheaper to cover) */
+export type KeepOut = { r: Rect; owner?: string; w?: number };
 /** (dx, dy) is the preferred offset on the way in; `fixed` bubbles stay put and the others avoid them */
 export type Placed = { x: number; y: number; k: number; dx: number; dy: number; owner?: string; fixed?: boolean };
 
 /** body offsets to try, in units of the bubble's scale: up to 60 aside and
- *  64 up, nearest (sideways counts 1.25x) first */
+ *  48 up, nearest first; moving straight up is cheapest (the pointer just
+ *  gets longer), sideways counts double */
 const OFFSETS: [number, number, number][] = (() => {
   const o: [number, number, number][] = [];
-  for (let oy = 0; oy <= 64; oy += 3) for (let ox = -60; ox <= 60; ox += 3) o.push([ox, oy, Math.abs(ox) * 1.25 + oy]);
+  for (let oy = 0; oy <= 48; oy += 3) for (let ox = -60; ox <= 60; ox += 3) o.push([ox, oy, Math.abs(ox) * 2 + oy]);
   return o.sort((a, b) => a[2] - b[2]);
 })();
 const area = (a: Rect, b: Rect) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
@@ -212,13 +216,15 @@ export function spread<T extends Placed>(bs: T[], keepOut: KeepOut[] = [], view:
         let cost = move;
         for (let j = 0; j < keepOut.length && cost < best; j++) {
           const ko = keepOut[j];
-          if (ko.owner === undefined || ko.owner !== b.owner) cost += area(q, ko.r) / k2;
+          if (ko.owner === undefined || ko.owner !== b.owner) cost += (area(q, ko.r) * (ko.w ?? 1)) / k2;
         }
         for (let j = 0; j < bs.length && cost < best; j++) if (j !== i) cost += (2.5 * area(q, boxAt(bs[j], bs[j].dx, bs[j].dy))) / k2;
         const out = Math.max(0, view[0] + 2 - q[0]) + Math.max(0, q[2] - view[2] + 2) + Math.max(0, view[1] + 2 - q[1]);
         cost += (out * 60) / b.k;
-        // a long tail reads as a diagram callout: keep bubbles near their asset
-        cost += tailExcess(dx / b.k, dy / b.k) * 9;
+        // keep bubbles near their asset: every unit of pointer costs, and
+        // past TAIL_MAX a bubble reads as a diagram callout
+        const len = tailOf(dx / b.k, dy / b.k).len;
+        cost += Math.max(0, len - TAIL_HOME) * 2 + Math.max(0, len - TAIL_MAX) * 60;
         if (cost < best) (best = cost), (bx = dx), (by = dy);
       }
       b.dx = bx;
