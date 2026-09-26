@@ -9,9 +9,12 @@
 //  - an identity (N-number, type-certificate data, serial number, engines, props)
 //  - a compliance record (service bulletins and ADs complied with, STCs / FAA
 //    Form 337 major alterations)
-//  - logbooks (airframe, engine, propeller): dated, tach / total time, a 43.9
-//    description, the reference it was done to, and a signature with a
-//    certificate number, with plenty of ordinary noise to read through
+//  - logbooks (airframe, engine, propeller; the twin keeps one per engine and
+//    one per propeller, headed with that unit's S/N): dated, tach / total
+//    time, a 43.9 description, the reference it was done to, and a signature
+//    with a certificate number, with plenty of ordinary noise to read through.
+//    Each inspection is written in every book; the alternator / starter-
+//    generator is an engine accessory and goes in the engine book.
 //  - an Illustrated Parts Catalog per assembly (ipcFor): figure art for an
 //    exploded view and ATA-style parts-list rows (fig-item, part number,
 //    indented nomenclature, effectivity code, units per assembly, SUPSD BY /
@@ -27,7 +30,10 @@
 // { plant, via: 'field' } puts the same kit on under an FSDO field approval
 // (the 337 is the approval; the STC it borrowed data from does not list this
 // model), and { plant, via: 'pma' } makes the last lining / filter change an
-// FAA-PMA part instead (no alteration at all).
+// FAA-PMA part instead (no alteration at all). The operator's parts control
+// shows in the books: after a kit goes on, each ICA part replaced since went
+// on under a company engineering authorization ("P/N eligibility per EA
+// 24-114"), and the part the job needs has not been replaced since the kit.
 import { hashSeed, rng, type Rng } from './rng';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +53,8 @@ export const ATA_TITLE: Record<Ata, string> = {
 };
 
 export type LogBook = 'airframe' | 'engine' | 'propeller';
+/** a twin's engines and propellers each have their own logbook */
+export type Pos = 'LH' | 'RH';
 export type LogKind =
   | 'annual'
   | '100hr'
@@ -76,6 +84,8 @@ export type LogEntry = {
   /** ISO yyyy-mm-dd (display with fmtDate) */
   date: string;
   book: LogBook;
+  /** twin engine / propeller books: whose book (each engine and each propeller has its own) */
+  pos?: Pos;
   kind: LogKind;
   /** tach time (piston) or Hobbs (turbine) at the entry */
   tach: number;
@@ -168,8 +178,10 @@ export type Plant = {
   ica: string;
   /** '' for pma */
   form337: string;
-  /** logbook entry that recorded the installation */
+  /** logbook entry that recorded the installation (a twin: the LH unit's book) */
   entryId: string;
+  /** the same installation recorded in the other unit's book (a twin's RH engine / propeller) */
+  alsoEntryIds: string[];
   /** later entries that cite the STC / ICA */
   laterEntryIds: string[];
   /** plain name of the part the job needs, e.g. "Brake lining" */
@@ -181,6 +193,16 @@ export type Plant = {
 };
 
 export type EngineRec = { position: string; model: string; serial: string; tsmoh: number; tbo: number };
+/** one propeller that is or was on the airplane during these books */
+export type PropUnit = {
+  position: 'LH' | 'RH' | 'Prop';
+  maker: string;
+  /** hub / blade model, as the data plate reads */
+  model: string;
+  serial: string;
+  /** ISO date it went on, when that is in these books (a planted propeller STC) */
+  installed?: string;
+};
 
 export type Aircraft = {
   assetId: string;
@@ -207,6 +229,8 @@ export type Aircraft = {
   engines: EngineRec[];
   propMaker: string;
   prop: { hub: string; blades: string; count: number };
+  /** every propeller in these books, oldest first per position (propAt picks the one for a date) */
+  props: PropUnit[];
   /** manufacturer's maintenance manual / IPC titles */
   manual: string;
   ipcTitle: string;
@@ -957,15 +981,16 @@ type PlantDef = {
   weightLb: number;
   /** why an AD on the old assembly no longer applies: "Beaumont propeller removed" */
   removed: string;
-  /** words for the logbook entry: what came off, what went on */
-  off: (fig: IpcFigure) => string;
-  on: string;
+  /** words for the logbook entry: what came off, what went on (pos: one side of a twin, in that unit's book) */
+  off: (fig: IpcFigure, pos?: Pos) => string;
+  on: (pos?: Pos) => string;
 };
 
 function plantDef(model: PlaneModel, ata: Ata): PlantDef {
   const { k, bladeCount } = SPECS[model];
-  const off = (tags: string[], label: string) => (fig: IpcFigure) =>
-    `${label} P/N ${tags.map((t) => rowFor(fig, t)?.pn).filter(Boolean).join(', ')}`;
+  const twin = model === 'twin';
+  const off = (tags: string[], label: string, one?: string) => (fig: IpcFigure, pos?: Pos) =>
+    `${pos && one ? `${pos} ${one}` : label} P/N ${tags.map((t) => rowFor(fig, t)?.pn).filter(Boolean).join(', ')}`;
   switch (ata) {
     case '32-40': {
       const v = 'V5KA31';
@@ -989,7 +1014,7 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
         weightLb: 2.4,
         removed: 'OEM brakes removed',
         off: off(['brake', 'disc'], 'main brake assemblies and discs'),
-        on: `Kestner heavy-duty brake kit P/N KA-${k}30-K (brakes KA-${k}31, vented discs KA-${k}32, linings KA-66-${k}HD)`,
+        on: () => `Kestner heavy-duty brake kit P/N KA-${k}30-K (brakes KA-${k}31, vented discs KA-${k}32, linings KA-66-${k}HD)`,
       };
     }
     case '61-10': {
@@ -1013,8 +1038,8 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
         icaNotes: ['Mounting bolts: 80–85 ft-lb, threads lubricated (ICA value)', 'Blade track within 1/8 in', 'Composite blades: erosion shield inspection each 100 hr'],
         weightLb: -6.8,
         removed: 'Beaumont propeller removed',
-        off: off(['propeller'], 'propeller'),
-        on: `Seaboard 4-blade composite propeller P/N SPC-4${k}H/SC${k}4 with mounting bolts SPC-4413-${k}L`,
+        off: off(['propeller'], twin ? 'LH and RH propellers' : 'propeller', 'propeller'),
+        on: (pos) => `${twin && !pos ? 'LH and RH ' : ''}Seaboard 4-blade composite propeller${twin && !pos ? 's' : ''} P/N SPC-4${k}H/SC${k}4 with mounting bolts SPC-4413-${k}L`,
       };
     }
     case '29-10': {
@@ -1038,7 +1063,7 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
         weightLb: -1.6,
         removed: 'Delmar power pack removed',
         off: off(['powerPack'], 'hydraulic power pack'),
-        on: `Marlin power pack P/N MH-300-${k} (kit MH-300-${k}K)`,
+        on: () => `Marlin power pack P/N MH-300-${k} (kit MH-300-${k}K)`,
       };
     }
     case '23-10': {
@@ -1062,7 +1087,7 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
         weightLb: 1.3,
         removed: 'Tern com removed',
         off: off(['radio', 'tray'], 'VHF com and mounting tray'),
-        on: 'Nexus GPS/NAV/COM P/N NX-430-00 in tray NX-430-MT, GPS antenna NX-ANT-7',
+        on: () => 'Nexus GPS/NAV/COM P/N NX-430-00 in tray NX-430-MT, GPS antenna NX-ANT-7',
       };
     }
     case '24-30': {
@@ -1086,7 +1111,7 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
           weightLb: -4.1,
           removed: 'Halden starter-generator removed',
           off: off(['generator'], 'starter-generator'),
-          on: `Voltmark brushless starter-generator P/N VM-SG300-${k} with GCU VM-GCU-3`,
+          on: () => `Voltmark brushless starter-generator P/N VM-SG300-${k} with GCU VM-GCU-3`,
         };
       return {
         holder: 'Voltmark Power Systems',
@@ -1105,8 +1130,8 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
         icaNotes: ['Internally regulated: the external regulator is removed and placarded INOP', 'Pulley nut 450–550 in-lb (ICA value)'],
         weightLb: -3.2,
         removed: 'Halden alternator removed',
-        off: off(['generator'], model === 'twin' ? 'LH and RH alternators' : 'alternator'),
-        on: `Voltmark alternator${model === 'twin' ? 's' : ''} P/N VM-70-28-${k} (kit VM-${k}K)`,
+        off: off(['generator'], twin ? 'LH and RH alternators' : 'alternator', 'alternator'),
+        on: (pos) => `Voltmark alternator${twin && !pos ? 's' : ''} P/N VM-70-28-${k} (kit VM-${k}K)`,
       };
     }
   }
@@ -1120,6 +1145,11 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
 export function plantPart(model: PlaneModel, ata: Ata): { holder: string; title: string; ica: string; item: string; tag: string; pn: string; kit: string } {
   const d = plantDef(model, ata);
   return { holder: d.holder, title: d.title, ica: d.icaDoc, item: d.item, tag: d.tag, pn: d.rows.find((x) => x.tag === d.tag)!.pn, kit: d.rows[0].pn };
+}
+
+/** The STC holder's ICA parts list for the kit that replaces this assembly (same row format as the IPC). */
+export function plantRows(model: PlaneModel, ata: Ata): IpcRow[] {
+  return plantDef(model, ata).rows.map((x) => rowFrom(x, { snB: true, postSb: true }));
 }
 
 /** An FAA-PMA replacement for one IPC part: the PMA holder's number carries the OEM number it replaces. */
@@ -1287,6 +1317,8 @@ type Ctx = {
   alts: Alteration[];
   plant?: PlantState;
   pma?: PmaState;
+  /** propeller serials per position ('LH' / 'RH' on the twin, 'Prop' otherwise): the OEM unit, and the STC unit a planted 61-10 conversion puts on */
+  propSn: Record<string, { oem: string; stc: string }>;
 };
 
 const envAt = (c: Ctx, ata: Ata, day: number): Env => ({ snB: c.snB[ata], postSb: c.sbDay[ata] !== undefined && day >= c.sbDay[ata]! });
@@ -1305,10 +1337,41 @@ const tq = (t: { lo: number; hi: number; unit: string }) => `${t.lo}-${t.hi} ${t
 
 type Who = 'ia' | 'crew' | 'shop' | 'avionics';
 type Body = { text: string; ref: string; pns?: LogEntry['pns']; cert?: string };
-type Ev = { day: number; book: LogBook; kind: LogKind; ata?: string; key: string; who: Who; body(c: Ctx): Body };
+type Ev = {
+  day: number;
+  book: LogBook;
+  kind: LogKind;
+  ata?: string;
+  key: string;
+  who: Who;
+  /**
+   * twin engine / propeller books: whose book. Unset (or 'both') writes the
+   * entry in each unit's book, the way a shop logs work done to both engines.
+   */
+  pos?: Pos | 'both';
+  /** crew signer stream: entries that share it are signed by the same mechanic (one inspection, three books) */
+  sig?: string;
+  body(c: Ctx, pos?: Pos): Body;
+};
 
-const bookFor = (ata: string): LogBook => (ata.startsWith('61') ? 'propeller' : /^(7[1-9]|8[0-5])/.test(ata) ? 'engine' : 'airframe');
+/**
+ * Which logbook an ATA chapter goes in: propeller (61), engine (71-85, and the
+ * engine-driven alternator / starter-generator, 24-30), or airframe.
+ */
+export const bookFor = (ata: string): LogBook => (ata.startsWith('61') ? 'propeller' : /^(7[1-9]|8[0-5])/.test(ata) || ata.startsWith('24-3') ? 'engine' : 'airframe');
 const mm = (c: Ctx, task: string) => `IAW ${c.s.family} MM ${task}`;
+/** the propeller serial for a position on a date (after a planted propeller STC, the new unit) */
+const propSnAt = (c: Ctx, day: number, pos?: Pos) => {
+  const u = c.propSn[pos ?? 'Prop'] ?? Object.values(c.propSn)[0];
+  return plantedAt(c, '61-10', day) ? u.stc : u.oem;
+};
+/**
+ * The company engineering authorization that added one ICA part to this tail's
+ * approved parts list (GMM parts control for a part the IPC does not list).
+ * One per part number: every later replacement of that P/N cites the same EA.
+ */
+const eaNo = (p: PlantState, pn: string) => `EA ${isoOf(p.day).slice(2, 4)}-${pad(100 + (hashSeed(p.basis, pn, 'ea') % 800), 3)}`;
+const eaLine = (ea: string) => `P/N eligibility per ${ea} (Engineering).`;
 /** how a record cites the approval the planted assembly rests on */
 const approvalCite = (p: PlantState) => (p.via === 'stc' ? `STC ${p.stc}` : `Form 337 dated ${fmtDate(p.alt.form337)} (field approval)`);
 const icaRef = (p: PlantState) => (p.via === 'stc' ? `IAW ${p.def.icaDoc} (STC ${p.stc})` : `IAW ICA attached to ${approvalCite(p)}`);
@@ -1327,6 +1390,9 @@ function compression(seed: number): string {
   return Array.from({ length: 6 }, () => r.int(68, 78)).join('/');
 }
 
+/** alterations installed before this day whose ICA inspection goes in this book (the book that recorded the installation) */
+const altsIn = (c: Ctx, day: number, book: LogBook) => c.alts.filter((a) => dayOf(a.date) < day && (a.displaces ? bookFor(a.ata) : 'airframe') === book);
+
 function inspBody(c: Ctx, day: number, type: 'annual' | '100hr', over: number): Body {
   const { s, m } = c;
   const tt = c.clock.ttAt(day);
@@ -1334,14 +1400,12 @@ function inspBody(c: Ctx, day: number, type: 'annual' | '100hr', over: number): 
     `${type === 'annual' ? 'Annual' : '100-hour'} inspection IAW 14 CFR Part 43 App. D and ${s.family} MM Chapter 5 inspection guide.`,
   ];
   if (over) out.push(`Inspection was ${hrs(over)} hr overdue: flown to the maintenance base IAW 14 CFR 91.409(b); the overflight counts toward the next 100 hr.`);
-  for (const ad of adsOf(m)) if (ad.atInspection) out.push(adText(c, day, ad, tt));
-  out.push(`Oil and filter changed${m === 'twin' ? ', both engines' : ''}; filters opened, no metal.`);
-  if (m === 'twin') out.push(`Compression LH ${compression(hashSeed(day, 'L'))}, RH ${compression(hashSeed(day, 'R'))} (/80).`);
-  else out.push(`Compression ${compression(hashSeed(day, 'E'))} (/80).`);
+  for (const ad of adsOf(m)) if (ad.atInspection && bookFor(ad.ata) === 'airframe') out.push(adText(c, day, ad, tt));
   if (type === 'annual') {
     out.push('ELT inspected IAW 14 CFR 91.207(d).');
-    for (const a of c.alts) if (dayOf(a.date) < day) out.push(altInspected(a));
+    for (const a of altsIn(c, day, 'airframe')) out.push(altInspected(a));
   }
+  out.push(`${m === 'twin' ? 'Engines and propellers' : 'Engine and propeller'}: see engine and propeller logbooks.`);
   return {
     text: out.join(' '),
     ref: `IAW ${s.family} MM Ch. 5; 14 CFR 43 App. D`,
@@ -1349,16 +1413,82 @@ function inspBody(c: Ctx, day: number, type: 'annual' | '100hr', over: number): 
   };
 }
 
+/** the engine's part of an annual / 100-hour, in that engine's logbook */
+function engineInspBody(c: Ctx, day: number, type: 'annual' | '100hr', pos?: Pos): Body {
+  const { s, m } = c;
+  const q = rng(hashSeed(day, 'eng-insp', pos ?? 'E'));
+  const extra = q.shuffle([
+    'Magneto timing checked, 22° BTC.',
+    'Spark plugs cleaned, gapped and rotated.',
+    'Induction and exhaust systems inspected, no leaks.',
+    'Engine mounts and baffles inspected.',
+    `Fuel injector nozzles cleaned; unmetered fuel pressure within limits.`,
+  ]).slice(0, 2);
+  const out = [
+    `${type === 'annual' ? 'Annual' : '100-hour'} inspection of ${pos ? `${pos} engine` : 'engine'} IAW 14 CFR Part 43 App. D and the ${s.engineMaker} ${s.engineModel} maintenance manual.`,
+    `Compression ${compression(hashSeed(day, pos ? pos[0] : 'E'))} (/80).`,
+    `Oil and filter changed (${m === 'twin' ? 12 : 11} qt SAE J1899 20W-50); filter opened, no metal.`,
+    ...extra,
+  ];
+  if (type === 'annual') for (const a of altsIn(c, day, 'engine')) out.push(altInspected(a));
+  return {
+    text: out.join(' '),
+    ref: `IAW ${s.engineMaker} ${s.engineModel} MM; 14 CFR 43 App. D`,
+    cert: `I certify that this engine has been inspected in accordance with ${type === 'annual' ? 'an annual' : 'a 100-hour'} inspection and was determined to be in airworthy condition.`,
+  };
+}
+
+/** the propeller's part of an inspection, in that propeller's logbook */
+function propInspBody(c: Ctx, day: number, type: 'annual' | '100hr' | 'phase', pos?: Pos, n = 0): Body {
+  const { s, m } = c;
+  const tt = c.clock.ttAt(day);
+  const p = plantedAt(c, '61-10', day);
+  const unit = `${pos ? `${pos} propeller` : 'propeller'} S/N ${propSnAt(c, day, pos)}`;
+  const out = [
+    type === 'phase'
+      ? `Phase ${n} inspection, ${unit}, IAW ${s.family} MM Chapter 5 and the approved aircraft inspection program.`
+      : `${type === 'annual' ? 'Annual' : '100-hour'} inspection of ${unit} IAW 14 CFR Part 43 App. D.`,
+  ];
+  const q = rng(hashSeed(day, 'prop-insp', pos ?? 'P'));
+  if (p) out.push(`Composite blades, erosion shields and blade retention inspected per ICA; spinner and bulkheads secure. Track within 1/8 in.`);
+  else if (m === 'cargo') out.push(q.pick(['Blades inspected, leading-edge erosion dressed within limits.', 'Blades inspected, no nicks.']) + ' Beta feedback ring and carbon block inspected; spinner and bulkhead secure.');
+  else out.push(q.pick(['Blades inspected, two leading-edge nicks dressed within limits.', 'Blades inspected, no nicks or erosion beyond limits.', 'Blades inspected, erosion dressed and touched up.']) + ' Hub, spinner and bulkheads inspected; mounting bolt safety wire secure.');
+  for (const ad of adsOf(m)) if (ad.atInspection && bookFor(ad.ata) === 'propeller') out.push(adText(c, day, ad, tt));
+  if (type === 'annual' || (type === 'phase' && n === 1)) for (const a of altsIn(c, day, 'propeller')) out.push(altInspected(a));
+  const what = type === 'phase' ? `Phase ${n} of the approved aircraft inspection program` : type === 'annual' ? 'an annual inspection' : 'a 100-hour inspection';
+  return {
+    text: out.join(' '),
+    ref: p ? `${icaRef(p)}; 14 CFR 43 App. D` : `IAW ${s.family} MM Ch. 5; Beaumont propeller manual 61-00`,
+    cert: `I certify that this propeller has been inspected in accordance with ${what} and was determined to be in airworthy condition.`,
+  };
+}
+
 function phaseBody(c: Ctx, day: number, n: number): Body {
   const tt = c.clock.ttAt(day);
   const out = [`Phase ${n} inspection IAW ${c.s.family} MM Chapter 5, approved aircraft inspection program (14 CFR 91.409(f)).`];
-  out.push('Engine oil level and chip detector checked: clean. Compressor wash accomplished.');
-  for (const ad of adsOf(c.m)) if (ad.atInspection) out.push(adText(c, day, ad, tt));
-  if (n === 1) for (const a of c.alts) if (dayOf(a.date) < day) out.push(altInspected(a));
+  for (const ad of adsOf(c.m)) if (ad.atInspection && bookFor(ad.ata) === 'airframe') out.push(adText(c, day, ad, tt));
+  if (n === 1) for (const a of altsIn(c, day, 'airframe')) out.push(altInspected(a));
+  out.push('Engine and propeller: see engine and propeller logbooks.');
   return {
     text: out.join(' '),
     ref: `IAW ${c.s.family} MM Ch. 5 (AAIP Phase ${n})`,
     cert: `I certify that this aircraft has been inspected in accordance with Phase ${n} of the approved aircraft inspection program and was determined to be in airworthy condition.`,
+  };
+}
+
+/** the turbine's engine items of a phase, in the engine logbook */
+function phaseEngineBody(c: Ctx, day: number, n: number): Body {
+  const { s } = c;
+  const out = [
+    `Phase ${n} inspection, engine, IAW ${s.engineMaker} ${s.engineModel} maintenance manual and the approved aircraft inspection program.`,
+    'Oil level and chip detector checked: clean. Compressor wash accomplished.',
+    n % 2 ? 'Engine mounts, fuel and oil lines inspected; no leaks.' : 'Igniter plugs and fuel nozzles inspected; start and generator output normal on the ground run.',
+  ];
+  if (n === 1) for (const a of altsIn(c, day, 'engine')) out.push(altInspected(a));
+  return {
+    text: out.join(' '),
+    ref: `IAW ${s.engineMaker} ${s.engineModel} MM; AAIP Phase ${n}`,
+    cert: `I certify that this engine has been inspected in accordance with Phase ${n} of the approved aircraft inspection program and was determined to be in airworthy condition.`,
   };
 }
 
@@ -1367,6 +1497,13 @@ function inspectionEvents(c: Ctx, r: Rng, startDay: number, endDay: number, ttSt
   const { clock } = c;
   const evs: Ev[] = [];
   const insp: { day: number; tt: number }[] = [];
+  // one inspection, recorded in each book: airframe, engine(s), propeller(s), signed by the same mechanic
+  const trio = (day: number, kind: 'annual' | '100hr' | 'phase', who: Who, af: (cx: Ctx) => Body, eng: (cx: Ctx, pos?: Pos) => Body, prop: (cx: Ctx, pos?: Pos) => Body) => {
+    const sig = `insp${day}`;
+    evs.push({ day, book: 'airframe', kind, ata: '05-20', key: kind, who, sig, body: af });
+    evs.push({ day, book: 'engine', kind, ata: '05-20', key: kind, who, sig, body: eng });
+    evs.push({ day, book: 'propeller', kind, ata: '61-10', key: kind, who, sig, body: prop });
+  };
   if (c.s.inspection === 'phase') {
     let phase = r.int(1, 4);
     let last = ttStart - r.range(20, 180);
@@ -1374,7 +1511,7 @@ function inspectionEvents(c: Ctx, r: Rng, startDay: number, endDay: number, ttSt
       const day = clock.dayAt(last + 200 - r.range(0.5, 12));
       if (day > endDay) break;
       const n = phase;
-      evs.push({ day, book: 'airframe', kind: 'phase', ata: '05-20', key: 'phase', who: r.chance(0.5) ? 'shop' : 'ia', body: (cx) => phaseBody(cx, day, n) });
+      trio(day, 'phase', r.chance(0.5) ? 'shop' : 'ia', (cx) => phaseBody(cx, day, n), (cx) => phaseEngineBody(cx, day, n), (cx, pos) => propInspBody(cx, day, 'phase', pos, n));
       last = clock.ttAt(day);
       insp.push({ day, tt: last });
       phase = (phase % 4) + 1;
@@ -1400,7 +1537,7 @@ function inspectionEvents(c: Ctx, r: Rng, startDay: number, endDay: number, ttSt
     if (nextAnnual <= d100) {
       if (nextAnnual > endDay) break;
       const day = nextAnnual;
-      evs.push({ day, book: 'airframe', kind: 'annual', ata: '05-20', key: 'annual', who: 'ia', body: (cx) => inspBody(cx, day, 'annual', 0) });
+      trio(day, 'annual', 'ia', (cx) => inspBody(cx, day, 'annual', 0), (cx, pos) => engineInspBody(cx, day, 'annual', pos), (cx, pos) => propInspBody(cx, day, 'annual', pos));
       last = clock.ttAt(day);
       insp.push({ day, tt: last });
       nextAnnual = anniversary(++year);
@@ -1408,7 +1545,7 @@ function inspectionEvents(c: Ctx, r: Rng, startDay: number, endDay: number, ttSt
       if (d100 > endDay) break;
       const day = d100;
       const o = over;
-      evs.push({ day, book: 'airframe', kind: '100hr', ata: '05-20', key: '100hr', who: r.chance(0.3) ? 'ia' : 'crew', body: (cx) => inspBody(cx, day, '100hr', o) });
+      trio(day, '100hr', r.chance(0.3) ? 'ia' : 'crew', (cx) => inspBody(cx, day, '100hr', o), (cx, pos) => engineInspBody(cx, day, '100hr', pos), (cx, pos) => propInspBody(cx, day, '100hr', pos));
       last = over ? last + 100 : clock.ttAt(day);
       insp.push({ day, tt: clock.ttAt(day) });
     }
@@ -1434,8 +1571,9 @@ function oilEvents(c: Ctx, r: Rng, insp: { day: number; tt: number }[], endDay: 
       ata: '79-00',
       key: 'oil',
       who: 'crew',
+      sig: `oil${day}`,
       body: () => ({
-        text: `Oil and filter changed${c.m === 'twin' ? ', LH and RH engines' : ''}: ${qt} qt SAE J1899 20W-50 ashless dispersant; filter P/N BAE-481${c.s.k} opened and inspected, no metal. Oil screens clean.`,
+        text: `Oil and filter changed: ${qt} qt SAE J1899 20W-50 ashless dispersant; filter P/N BAE-481${c.s.k} opened and inspected, no metal. Oil screens clean.`,
         ref: `IAW ${c.s.engineMaker} ${c.s.engineModel} maintenance manual, oil servicing`,
         pns: [{ on: `BAE-481${c.s.k}` }],
       }),
@@ -1491,12 +1629,25 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
       day, book: 'airframe', kind: 'brake', ata: '32-40', key: 'lining', who: 'crew',
       body: (cx) => {
         const p = plantedAt(cx, '32-40', day);
-        if (p)
+        if (p) {
+          // metallic linings outlast the OEM ones: since the kit went on they have only been measured,
+          // and the ICA parts replaced so far went on by company engineering authorization (GMM parts control)
+          const q = rng(hashSeed(day, 'kit-brake'));
+          const side = q.pick(['LH', 'RH']);
+          const worn = Math.max(0.15, 0.3 - (cx.clock.ttAt(day) - cx.clock.ttAt(p.day)) * 0.00016 - q.range(0, 0.02));
+          const lin = `Linings measured ${worn.toFixed(2).replace(/^0/, '')} in (ICA minimum .125 in).`;
+          if (q.chance(0.5))
+            return {
+              text: `${side} brake chattering on taxi. Back plate bolts P/N ${plantPn(p, 'backPlateBolt')} found below torque; re-torqued 110-120 in-lb per ICA. ${lin} Discs within ICA limits. Taxi check normal.`,
+              ref: icaRef(p),
+            };
+          const ea = eaNo(p, plantPn(p, 'disc')!);
           return {
-            text: `Brake linings at ICA minimum. Replaced LH and RH linings with P/N ${plantPn(p, 'lining')}, riveted with ${plantPn(p, 'rivet')}. Back plate bolts torqued 110-120 in-lb per ICA. Linings conditioned.`,
-            ref: icaRef(p),
-            pns: [{ on: plantPn(p, 'lining') }],
+            text: `${side} vented disc worn below ICA minimum thickness. Replaced ${side} disc with P/N ${plantPn(p, 'disc')}; new back plate bolts P/N ${plantPn(p, 'backPlateBolt')} torqued 110-120 in-lb per ICA. ${lin} ${eaLine(ea)}`,
+            ref: `${icaRef(p)}; ${ea}`,
+            pns: [{ on: plantPn(p, 'disc') }, { on: plantPn(p, 'backPlateBolt') }],
           };
+        }
         const env = envAt(cx, '32-40', day);
         const fig = buildFigure(m, '32-40', env);
         const lining = rowFor(fig, 'lining')!.pn;
@@ -1520,45 +1671,84 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
   const pr = r('prop');
   if (s.inspection !== 'phase' && pr.chance(0.6)) {
     const day = startDay + pr.int(Math.round(span * 0.1), Math.round(span * 0.95));
+    const pos = m === 'twin' ? (sideOf(day, false) as Pos) : undefined;
     evs.push({
-      day, book: 'propeller', kind: 'component', ata: '61-10', key: 'prop', who: 'crew',
+      day, book: 'propeller', kind: 'component', ata: '61-10', key: 'prop', who: 'crew', pos,
       body: (cx) => {
         const p = plantedAt(cx, '61-10', day);
-        if (p)
+        const unit = `${pos ? `${pos} propeller` : 'Propeller'} S/N ${propSnAt(cx, day, pos)}`;
+        if (p) {
+          // the bolts came off with it and went back on: the new bolt set the job needs is their first replacement
+          if (rng(hashSeed(day, 'kit-prop')).chance(0.5)) {
+            const ea = eaNo(p, plantPn(p, 'spinner')!);
+            return {
+              text: `${unit} removed: spinner dome cracked at two screw holes. Replaced spinner assembly with P/N ${plantPn(p, 'spinner')} per ICA. ${eaLine(ea)} Propeller reinstalled; mounting bolts P/N ${plantPn(p, 'propBolt')} inspected serviceable and reused, torqued 80-85 ft-lb and safety wired. Track within 1/8 in.`,
+              ref: `${icaRef(p)}; ${ea}`,
+              pns: [{ on: plantPn(p, 'spinner') }],
+            };
+          }
           return {
-            text: `Propeller removed for blade erosion shield repair per ICA. Reinstalled with mounting bolts P/N ${plantPn(p, 'propBolt')} torqued 80-85 ft-lb and safety wired. Track within 1/8 in.`,
+            text: `${unit} removed for blade erosion shield repair per ICA (composite blades). Reinstalled with new hub O-ring P/N ${plantPn(p, 'hubOring')}; mounting bolts P/N ${plantPn(p, 'propBolt')} inspected serviceable and reused, torqued 80-85 ft-lb and safety wired. Track within 1/8 in.`,
             ref: icaRef(p),
-            pns: [{ on: plantPn(p, 'propBolt') }],
           };
+        }
         const env = envAt(cx, '61-10', day);
         const fig = buildFigure(m, '61-10', env);
         const prop = rowFor(fig, 'propeller')!.pn;
         const bolt = rowFor(fig, 'propBolt')!.pn;
-        const side = m === 'twin' ? `${sideOf(day, false)} ` : '';
         return {
-          text: `${side}Propeller removed and sent for overhaul (calendar limit). Installed overhauled propeller P/N ${prop} S/N ${sn(hashSeed(day, 'prop'), 'FN')}, new hub O-ring P/N ${rowFor(fig, 'hubOring')!.pn}. Mounting bolts P/N ${bolt} torqued ${tq(torqueOf(m, '61-10', env, 'propBolt'))} and safety wired. Track within 1/16 in; dynamic balance 0.07 ips.`,
+          text: `${unit} removed and sent for overhaul (calendar limit); overhauled by a Beaumont-authorized repair station (8130-3 on file) and reinstalled, 0.0 hr since overhaul. New hub O-ring P/N ${rowFor(fig, 'hubOring')!.pn}. Mounting bolts P/N ${bolt} torqued ${tq(torqueOf(m, '61-10', env, 'propBolt'))} and safety wired. Track within 1/16 in; dynamic balance 0.07 ips.`,
           ref: mm(cx, '61-10-01'),
           pns: [{ on: prop }, { on: bolt }],
         };
       },
     });
   }
+  // propeller: dynamic balance and spinner work between inspections
+  const pb = r('prop-balance');
+  for (let i = pb.int(1, 3); i > 0; i--) {
+    const day = startDay + pb.int(20, span - 10);
+    const pos = m === 'twin' ? (pb.pick(['LH', 'RH']) as Pos) : undefined;
+    const before = r1(pb.range(0.25, 0.6));
+    const after = r1(pb.range(0.03, 0.09) * 10) / 10;
+    const weights = pb.int(1, 3);
+    evs.push({
+      day, book: 'propeller', kind: 'repair', ata: '61-10', key: 'balance', who: 'crew', pos,
+      body: (cx) => {
+        const p = plantedAt(cx, '61-10', day);
+        return {
+          text: `${pos ? `${pos} propeller` : 'Propeller'} S/N ${propSnAt(cx, day, pos)}: vibration in cruise reported. Dynamic balance ${before.toFixed(2)} ips; ${weights} balance weight${weights > 1 ? 's' : ''} added at the spinner bulkhead, ${after.toFixed(2)} ips after. Spinner screws torqued 20-25 in-lb.`,
+          ref: p ? icaRef(p) : mm(cx, '61-10-02'),
+        };
+      },
+    });
+  }
 
-  // alternator / starter-generator changes
+  // alternator / starter-generator changes: engine accessories, in the engine logbook
   const ar = r('alternator');
   for (let i = ar.int(0, 2); i > 0; i--) {
     const day = startDay + ar.int(30, span - 5);
+    const pos = m === 'twin' ? (sideOf(day, false) as Pos) : undefined;
     evs.push({
-      day, book: 'airframe', kind: 'component', ata: '24-30', key: 'alt', who: 'crew',
+      day, book: bookFor('24-30'), kind: 'component', ata: '24-30', key: 'alt', who: 'crew', pos,
       body: (cx) => {
         const p = plantedAt(cx, '24-30', day);
-        const side = m === 'twin' ? `${sideOf(day, false)} ` : '';
-        if (p)
+        const side = pos ? `${pos} ` : '';
+        if (p) {
+          // the converted unit itself has not failed yet: the ICA parts replaced so far went on by engineering authorization
+          const ea = eaNo(p, m === 'cargo' ? 'VM-GCU-3' : plantPn(p, 'belt')!);
+          if (m === 'cargo')
+            return {
+              text: `Repeated GEN OV trips; GCU fault log reviewed per ICA. Replaced generator control unit P/N ${p.def.rows.find((x) => x.pn.startsWith('VM-GCU'))!.pn}. ${eaLine(ea)} Ground run: start and generator output normal, no faults logged.`,
+              ref: `${icaRef(p)}; ${ea}`,
+              pns: [{ on: p.def.rows.find((x) => x.pn.startsWith('VM-GCU'))!.pn }],
+            };
           return {
-            text: `${side}${p.def.item.toLowerCase()} no output. Replaced with exchange unit P/N ${plantPn(p, 'generator')} per ICA. Ground run normal.`,
-            ref: icaRef(p),
-            pns: [{ on: plantPn(p, 'generator') }],
+            text: `${side}alternator belt glazed and slipping. Replaced V-belt with P/N ${plantPn(p, 'belt')} per ICA, tensioned 11-13 ft-lb slip (new belt). ${eaLine(ea)} Ground run 28.2 V.`,
+            ref: `${icaRef(p)}; ${ea}`,
+            pns: [{ on: plantPn(p, 'belt') }],
           };
+        }
         const env = envAt(cx, '24-30', day);
         const pn = rowFor(buildFigure(m, '24-30', env), 'generator')!.pn;
         const a = sn(hashSeed(day, 'a1'), 'H');
@@ -1570,7 +1760,7 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
             pns: [{ off: pn, on: pn }],
           };
         return {
-          text: `${side}alternator no output (open diode). Removed P/N ${pn} S/N ${a}, installed P/N ${pn} S/N ${b}. Pulley nut torqued ${tq(torqueOf(m, '24-30', env, 'pulleyNut'))}, used belt tensioned 7-9 ft-lb slip. Ground run 28.1 V.`,
+          text: `${side}alternator no output (open diode). Removed P/N ${pn} S/N ${a}, installed exchange unit P/N ${pn} S/N ${b}. Pulley nut torqued ${tq(torqueOf(m, '24-30', env, 'pulleyNut'))}, used belt tensioned 7-9 ft-lb slip. Ground run 28.1 V.`,
           ref: mm(cx, '24-30-01'),
           pns: [{ off: pn, on: pn }],
         };
@@ -1586,11 +1776,20 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
       day, book: 'airframe', kind: 'component', ata: '23-10', key: 'radio', who: 'avionics',
       body: (cx) => {
         const p = plantedAt(cx, '23-10', day);
-        if (p)
+        if (p) {
+          if (rng(hashSeed(day, 'kit-radio')).chance(0.5)) {
+            const ea = eaNo(p, plantPn(p, 'connector')!);
+            return {
+              text: `GPS/NAV/COM transmit intermittent. Unit P/N ${plantPn(p, 'radio')} pulled; two bent pins in the tray connector. Replaced connector kit with P/N ${plantPn(p, 'connector')} per ICA. ${eaLine(ea)} Unit reinstalled, cam lock seated per ICA. Ops check good.`,
+              ref: `${icaRef(p)}; ${ea}`,
+              pns: [{ on: plantPn(p, 'connector') }],
+            };
+          }
           return {
             text: `GPS/NAV/COM P/N ${plantPn(p, 'radio')} removed for navigation database update and reinstalled; cam lock seated per ICA. Ops check good.`,
             ref: icaRef(p),
           };
+        }
         const radio = pnAt(cx, '23-10', day, 'radio');
         return {
           text: `Com transmit intermittent. Removed VHF com P/N ${radio} S/N ${sn(hashSeed(day, 'com'), 'T')}; bench repaired and reinstalled. Tray connector pins inspected, good. Ops check good on ground and tower frequencies.`,
@@ -1607,12 +1806,22 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
       day, book: 'airframe', kind: 'component', ata: '29-10', key: 'hyd', who: 'crew',
       body: (cx) => {
         const p = plantedAt(cx, '29-10', day);
-        if (p)
+        if (p) {
+          // the element is on condition (bypass indicator) in the ICA: it has not been due since the conversion
+          const run = rng(day).int(6, 9);
+          if (rng(hashSeed(day, 'kit-hyd')).chance(0.5)) {
+            const ea = eaNo(p, plantPn(p, 'resCap')!);
+            return {
+              text: `Power pack serviced per ICA: fluid sample clean; filter bypass indicator not extended (element on condition per ICA). Vented filler cap cracked; replaced with P/N ${plantPn(p, 'resCap')}. ${eaLine(ea)} Reservoir filled, MIL-PRF-5606. Gear swing on jacks normal, pump run ${run} s.`,
+              ref: `${icaRef(p)}; ${ea}`,
+              pns: [{ on: plantPn(p, 'resCap') }],
+            };
+          }
           return {
-            text: `Power pack serviced per ICA: filter element P/N ${plantPn(p, 'filter')} and bowl O-ring P/N ${plantPn(p, 'bowlOring')} replaced, bowl torqued 70-80 in-lb and safety wired. Reservoir filled, MIL-PRF-5606. Gear swing on jacks normal, pump run 7 s.`,
+            text: `Power pack serviced per ICA: fluid sample clean; filter bypass indicator not extended (element on condition per ICA). Reservoir filled, MIL-PRF-5606. Gear swing on jacks normal, pump run ${run} s.`,
             ref: icaRef(p),
-            pns: [{ on: plantPn(p, 'filter') }],
           };
+        }
         const env = envAt(cx, '29-10', day);
         const fig = buildFigure(m, '29-10', env);
         const filter = rowFor(fig, 'filter')!.pn;
@@ -1680,7 +1889,8 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
   for (const i of picks) {
     const [ata, text] = pool[i];
     const day = startDay + sr.int(10, span - 3);
-    evs.push({ day, book: bookFor(ata), kind: 'repair', ata, key: 'repair', who: 'crew', body: (cx) => ({ text, ref: mm(cx, `${ata}-00`) }) });
+    const pos = m === 'twin' && bookFor(ata) === 'engine' ? (sideOf(day, false) as Pos) : undefined;
+    evs.push({ day, book: bookFor(ata), kind: 'repair', ata, key: 'repair', who: 'crew', pos, body: (cx) => ({ text, ref: mm(cx, `${ata}-00`) }) });
   }
   return evs;
 }
@@ -1755,7 +1965,10 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
   const ttOf = (day: number) => r1(day >= startDay ? clock.ttAt(day) : Math.max(1, (ttStart * (day - builtDay)) / (startDay - builtDay)));
 
   const snB = Object.fromEntries(IPC_ATAS.map((a) => [a, snNum >= s.brk[a]])) as Record<Ata, boolean>;
-  const ctx: Ctx = { m, s, snB, sbDay: {}, clock, alts: [] };
+  // propeller serials: the OEM units, and the ones a planted propeller STC would put on
+  const psr = R('props');
+  const propSn = Object.fromEntries((m === 'twin' ? ['LH', 'RH'] : ['Prop']).map((p) => [p, { oem: `FN${psr.int(10000, 99999)}`, stc: `SP${psr.int(10000, 99999)}` }]));
+  const ctx: Ctx = { m, s, snB, sbDay: {}, clock, alts: [], propSn };
   const evs: Ev[] = [];
   /** 40% of old compliance happened before the current logbook was opened */
   const whenDone = (r: Rng, lateFrac: number) =>
@@ -1866,16 +2079,25 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
     if (!field) alt.stc = stc;
     plant = { ata, day, via, stc: field ? '' : stc, basis: stc, def, alt };
     alterations.push(alt);
-    const w = `${def.weightLb > 0 ? '+' : ''}${def.weightLb} lb`;
+    // a twin's propellers and alternators are both converted: one 337, an entry in each unit's book
+    const both = m === 'twin' && bookFor(ata) !== 'airframe';
+    const lb = (n: number) => `${n > 0 ? '+' : ''}${r1(n)} lb`;
+    const w = both ? `${lb(def.weightLb * 2)}, LH and RH` : lb(def.weightLb);
     evs.push({
       day, book: bookFor(ata), kind: 'stc', ata, key: 'plant', who: 'ia',
-      body: (cx) => ({
-        text: field
-          ? `Removed ${def.off(figAt(cx, ata, day - 1))}. Installed ${def.on} IAW FAA Form 337 dated ${d337}, field approved by the Honolulu FSDO (block 3). Data: ${def.holder} STC ${stc} data used as the basis (${s.designation} is not on the STC approved model list), with DER-approved data on FAA Form 8110-3. Weight and balance revised (${w}), equipment list updated, ICA attached to the Form 337 and inserted in aircraft records.`
-          : `Removed ${def.off(figAt(cx, ata, day - 1))}. Installed ${def.on} IAW STC ${stc} (${def.holder}) and ${def.icaDoc}. Weight and balance revised (${w}), equipment list updated, ICA inserted in aircraft records. See FAA Form 337 dated ${d337}.`,
-        ref: field ? `per FAA Form 337 (field approval) dated ${d337}` : `per STC ${stc}, Form 337 dated ${d337}`,
-        pns: [{ off: rowFor(figAt(cx, ata, day - 1), def.tag)?.pn, on: def.rows.find((x) => x.tag === def.tag)!.pn }],
-      }),
+      body: (cx, pos) => {
+        const before = figAt(cx, ata, day - 1);
+        const sns = ata === '61-10' ? { off: ` S/N ${cx.propSn[pos ?? 'Prop'].oem}`, on: ` New propeller S/N ${cx.propSn[pos ?? 'Prop'].stc}.` } : { off: '', on: '' };
+        const swap = `Removed ${def.off(before, pos)}${sns.off}. Installed ${def.on(pos)}`;
+        return {
+          // a field approval: the 337 is the approval (block 3); the STC holder's data is only the data it approved
+          text: field
+            ? `${swap} IAW FAA Form 337 dated ${d337}, field approved by the Honolulu FSDO (block 3); ${def.holder} STC ${stc} data used as acceptable data with the holder's permission letter.${sns.on} Weight and balance revised (${w}), equipment list updated, ICA attached to the Form 337 and inserted in aircraft records.`
+            : `${swap} IAW STC ${stc} (${def.holder}) and ${def.icaDoc}.${sns.on} Weight and balance revised (${w}), equipment list updated, ICA inserted in aircraft records. See FAA Form 337 dated ${d337}.`,
+          ref: field ? `per FAA Form 337 (field approval) dated ${d337}` : `per STC ${stc}, Form 337 dated ${d337}`,
+          pns: [{ off: rowFor(before, def.tag)?.pn, on: def.rows.find((x) => x.tag === def.tag)!.pn }],
+        };
+      },
     });
   }
   ctx.plant = plant;
@@ -1954,21 +2176,27 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
   const avionics = station(cr);
   const inLog = evs.filter((e) => e.day >= startDay && e.day <= asOfDay).sort((a, b) => a.day - b.day);
   const seen = new Map<string, number>();
-  const log: LogEntry[] = inLog.map((e) => {
-    const iso = isoOf(e.day);
-    const stem = `${e.book[0].toUpperCase()}${iso.replace(/-/g, '')}-${e.key}`;
-    const n = (seen.get(stem) ?? 0) + 1;
-    seen.set(stem, n);
-    const eid = n > 1 ? `${stem}-${n}` : stem;
-    const who = e.who === 'ia' ? crew[0] : e.who === 'shop' ? shop : e.who === 'avionics' ? avionics : rng(hashSeed(base, 'sig', eid)).pick(crew);
-    const b = e.body(ctx);
-    const tt = r1(clock.ttAt(e.day));
-    const entry: LogEntry = { id: eid, date: iso, book: e.book, kind: e.kind, tach: r1(tt - tachOffset), tt, text: b.text, ref: b.ref, signer: who, signature: signatureOf(who) };
-    if (e.ata) entry.ata = e.ata;
-    if (b.pns) entry.pns = b.pns;
-    if (b.cert) entry.cert = b.cert;
-    return entry;
-  });
+  // a twin's engines and propellers each have their own book: work on both is written in each
+  const unitsOf = (e: Ev): (Pos | undefined)[] => (m === 'twin' && e.book !== 'airframe' ? (e.pos === 'LH' || e.pos === 'RH' ? [e.pos] : ['LH', 'RH']) : [undefined]);
+  const log: LogEntry[] = inLog.flatMap((e) =>
+    unitsOf(e).map((pos) => {
+      const iso = isoOf(e.day);
+      const stem = `${e.book[0].toUpperCase()}${pos ? pos[0] : ''}${iso.replace(/-/g, '')}-${e.key}`;
+      const n = (seen.get(stem) ?? 0) + 1;
+      seen.set(stem, n);
+      const eid = n > 1 ? `${stem}-${n}` : stem;
+      const sig = e.sig ?? `${e.book}${iso}${e.key}${n}`;
+      const who = e.who === 'ia' ? crew[0] : e.who === 'shop' ? shop : e.who === 'avionics' ? avionics : rng(hashSeed(base, 'sig', sig)).pick(crew);
+      const b = e.body(ctx, pos);
+      const tt = r1(clock.ttAt(e.day));
+      const entry: LogEntry = { id: eid, date: iso, book: e.book, kind: e.kind, tach: r1(tt - tachOffset), tt, text: b.text, ref: b.ref, signer: who, signature: signatureOf(who) };
+      if (pos) entry.pos = pos;
+      if (e.ata) entry.ata = e.ata;
+      if (b.pns) entry.pns = b.pns;
+      if (b.cert) entry.cert = b.cert;
+      return entry;
+    }),
+  );
 
   const ttNow = r1(clock.ttAt(asOfDay));
   const ac: Aircraft = {
@@ -1993,6 +2221,12 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
     engines,
     propMaker: VENDORS.beaumont.name,
     prop: { hub: s.propHub, blades: s.propBlades, count: s.bladeCount },
+    props: Object.entries(propSn).flatMap(([position, u]) => {
+      const oem: PropUnit = { position: position as PropUnit['position'], maker: VENDORS.beaumont.name, model: `${s.propHub}/${s.propBlades}`, serial: u.oem };
+      if (plant?.ata !== '61-10') return [oem];
+      const k = s.k;
+      return [oem, { position: position as PropUnit['position'], maker: plant.def.holder, model: `SPC-4${k}H/SC${k}4`, serial: u.stc, installed: isoOf(plant.day) }];
+    }),
     manual: `${s.family} Maintenance Manual`,
     ipcTitle: `${s.family} Illustrated Parts Catalog`,
     sbs,
@@ -2002,7 +2236,8 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
     log,
   };
   if (plant) {
-    const entry = log.find((e) => e.id.endsWith('-plant'))!;
+    const installs = log.filter((e) => e.id.endsWith('-plant'));
+    const entry = installs[0];
     const current = buildFigure(m, plant.ata, envAt(ctx, plant.ata, asOfDay));
     // later records cite the STC number, or for a field approval the 337 by its date
     const cite = plant.via === 'stc' ? plant.stc : `Form 337 dated ${fmtDate(plant.alt.form337)}`;
@@ -2016,6 +2251,7 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
       ica: plant.alt.ica,
       form337: plant.alt.form337,
       entryId: entry.id,
+      alsoEntryIds: installs.slice(1).map((e) => e.id),
       laterEntryIds: log.filter((e) => e.date > entry.date && (e.text.includes(cite) || e.ref.includes(cite))).map((e) => e.id),
       item: plant.def.item,
       ipcPn: rowFor(current, plant.def.tag)!.pn,
@@ -2036,6 +2272,7 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
       ica: q.def.eligibility,
       form337: '',
       entryId: entry.id,
+      alsoEntryIds: [],
       laterEntryIds: [],
       item: q.def.item,
       ipcPn: rowFor(current, q.def.tag)!.pn,
@@ -2048,6 +2285,19 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
 // ---------------------------------------------------------------------------
 // Lookups a puzzle uses
 // ---------------------------------------------------------------------------
+
+/** the propeller at a position on a date ('LH' / 'RH' on the twin; anything else means the only one) */
+export function propAt(ac: Aircraft, pos: string | undefined, date: string): PropUnit {
+  const units = ac.props.filter((u) => (ac.model === 'twin' ? u.position === (pos ?? 'LH') : true));
+  return [...units].reverse().find((u) => !u.installed || u.installed <= date) ?? units[0];
+}
+
+/** the serial number a logbook is kept for: the airframe, one engine, or one propeller (on that date) */
+export function bookSerial(ac: Aircraft, book: LogBook, pos: Pos | undefined, date: string): string {
+  if (book === 'airframe') return ac.serial;
+  if (book === 'engine') return (ac.engines.find((e) => e.position === pos) ?? ac.engines[0]).serial;
+  return propAt(ac, pos, date).serial;
+}
 
 /** "32-40", "32-40-01", "ATA 32-40" -> '32-40' */
 export function ataOf(x: string): Ata {
