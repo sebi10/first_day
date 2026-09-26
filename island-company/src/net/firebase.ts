@@ -13,6 +13,9 @@ type Cfg = { apiKey: string; authDomain?: string; projectId: string; appId?: str
 
 const CFG_KEY = 'ic.firebase.config';
 
+/** True when the deploy baked the project config in: players never need the setup screen. */
+export const configBakedIn = () => !!(import.meta.env.VITE_FB_API_KEY && import.meta.env.VITE_FB_PROJECT_ID);
+
 export function firebaseConfig(): Cfg | null {
   const env = import.meta.env;
   if (env.VITE_FB_API_KEY && env.VITE_FB_PROJECT_ID)

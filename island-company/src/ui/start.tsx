@@ -1,6 +1,6 @@
 // Start: your islands, new island, join by code, online setup.
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { saveFirebaseConfig } from '../net/firebase';
+import { configBakedIn, saveFirebaseConfig } from '../net/firebase';
 import { onlineAvailable, sessions, storeFor } from '../net/session';
 import type { Mode } from '../net/store';
 import { ROLE_LABEL, ROLE_LONG } from '../sim/data';
@@ -109,12 +109,15 @@ export function Start({ joinCode }: { joinCode?: string }) {
           iPhone: Safari → Share → Add to Home Screen. Android: Chrome menu → Install app. Computer: Chrome/Edge → install icon in the address bar. Runs full screen, works
           offline.
         </span>
-        <div class="row spread">
-          <span class="label">{onlineAvailable() ? '✓ Online play is set up' : 'Online play: not set up yet'}</span>
-          <Btn small kind="soft" onClick={() => setSheet('setup')}>
-            Online setup
-          </Btn>
-        </div>
+        {/* only self-hosted builds without a baked-in Firebase config need the setup screen */}
+        {!configBakedIn() && (
+          <div class="row spread">
+            <span class="label">{onlineAvailable() ? '✓ Online play is set up' : 'Online play: not set up yet'}</span>
+            <Btn small kind="soft" onClick={() => setSheet('setup')}>
+              Online setup
+            </Btn>
+          </div>
+        )}
       </div>
 
       <NewIsland open={sheet === 'new'} onClose={() => setSheet(null)} playerName={name.trim()} />
