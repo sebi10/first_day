@@ -407,6 +407,30 @@ describe('ipc: "if part no exist" — logbook, ICA, engineering approval', () =>
     expect(m.why.join(' ')).toContain(fmtDate(m.ac.plant!.form337));
   });
 
+  it("the island airplane's own paper trail: a field-approved kit is the case on its 337, an FAA-PMA part is not a case", () => {
+    for (const model of ['twin', 'cargo', 'float'] as PlaneModel[]) {
+      const field = aircraftOf(41, 'p1', model, { plant: '32-40', via: 'field' });
+      const t5 = Array.from({ length: 12 }, (_, i) => generateIpc(i + 1, 5, [], { aircraft: field }));
+      const hits = t5.filter((m) => m.planted);
+      expect(hits.length, model).toBeGreaterThan(0);
+      for (const m of hits) {
+        expect(m.ac).toBe(field);
+        expect(m.expect[0].pn).toBe(field.plant!.neededPn);
+        expect(m.why.join(' ')).toContain(`field-approved Form 337 dated ${fmtDate(field.plant!.form337)}`);
+        expect(m.why.join(' ')).not.toContain('STC undefined');
+        const s = scoreIpc(m, perfectAttempt(m));
+        expect(s.score, s.notes.map((n) => n.text).join(' | ')).toBe(1);
+      }
+      const pma = aircraftOf(41, 'p1', model, { plant: '32-40', via: 'pma' });
+      if (!pma.plant) continue;
+      for (let seed = 1; seed <= 8; seed++) {
+        const m = generateIpc(seed, 5, [], { aircraft: pma, job: 'tires' });
+        expect(m.planted).toBe(false);
+        expect(scoreIpc(m, perfectAttempt(m)).score).toBe(1);
+      }
+    }
+  });
+
   it('the records an IA reads: AD entries state the method of compliance, a field approval names its applicant', () => {
     for (const model of ['twin', 'cargo', 'float'] as PlaneModel[]) {
       const ac = aircraftOf(12, 'p', model);

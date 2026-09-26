@@ -3,6 +3,7 @@ import { balance } from './balance';
 import { conduit } from './conduit';
 import { invoice } from './invoice';
 import { ipc } from './ipc';
+import { logbook } from './logbook';
 import { meter } from './meter';
 import { reconcile } from './reconcile';
 import { safetywire } from './safetywire';
@@ -37,4 +38,5 @@ export const PUZZLES: Record<PuzzleId, PuzzleDef> = {
   hydraulics,
   gpu,
   ipc,
+  logbook,
 };

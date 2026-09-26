@@ -22,7 +22,8 @@ export type PuzzleId =
   | 'hydraulics'
   | 'gpu'
   // aircraft paperwork
-  | 'ipc';
+  | 'ipc'
+  | 'logbook';
 
 export type PuzzleRole = 'mech' | 'elec' | 'fin';
 
@@ -42,8 +43,8 @@ export interface PuzzleContext {
   /** the work-order kind that launched it (e.g. "alternator", "cylinder") so a puzzle can pick the real procedure */
   job?: string;
   /**
-   * the airplane's records (src/sim/aircraft.ts aircraftOf): identity, logbooks, IPC and AMM.
-   * Paperwork puzzles use it as-is; without it they build one from the seed.
+   * the airplane's paper trail (src/sim/aircraft.ts aircraftOf): identity, logbooks, IPC, AMM
+   * and alterations. Paperwork puzzles use it as-is; without it they build one from the seed.
    */
   aircraft?: Aircraft;
 }

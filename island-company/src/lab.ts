@@ -1,7 +1,7 @@
 // Puzzle lab: mount one puzzle with a fake host.
 // /lab.html?p=torque&tier=3&seed=1&tools=clickWrench,gaugeDamper
 //   &blind=1  blind sign-off (no verdict while you work)   &job=prop  the scenario a work order picks
-//   &asset=Cargo%20C-7  the asset name (paperwork puzzles build that airplane's records from it)
+//   &asset=Cargo%20C-7  which plane (paperwork puzzles build that airplane's records from it)
 import type { PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
 import { fx } from './ui/feedback';
 import '@fontsource-variable/manrope';

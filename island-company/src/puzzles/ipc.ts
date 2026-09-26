@@ -381,7 +381,8 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
   // touch, or to another assembly.
   const plantRoll = r.next();
   const wantPlant = t >= 4 && plantRoll < (t >= 5 ? 0.5 : 0.35);
-  const gp = given?.plant;
+  // an FAA-PMA part is an approved replacement for the IPC part: that assembly is an ordinary IPC job
+  const gp = given?.plant?.via === 'pma' ? undefined : given?.plant;
   const key = ctx.job ? taskKeyFor(ctx.job) : undefined;
   const memo = new Map<Ata, ReturnType<typeof solveCases>>();
   const freeAt = (a: Ata) => memo.get(a) ?? memo.set(a, solveCases(ac, a, t).filter((x) => x.free)).get(a)!;
@@ -448,9 +449,14 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
     const p = ac.plant!;
     const row = alteration!.parts!.find((x) => x.pn === p.neededPn)!;
     expect = [{ role: 'main', pn: row.pn, qty: upaOf(row) * mult, qtyWhy: qtyText({ ...fig, rows: alteration!.parts! }, row, mult, multWhy), item: row.item, nomen: row.nomen, accept: [row.pn] }];
-    why.push(`${ac.registration} carries STC ${p.stc} (${p.holder}), Form 337 dated ${fmtDate(p.form337)}: ${lcFirst(alteration!.title)}.`);
+    const field = !alteration!.stc;
+    why.push(
+      field
+        ? `${ac.registration} carries ${p.holder}'s kit on a field-approved Form 337 dated ${fmtDate(p.form337)}: ${lcFirst(alteration!.title)}.`
+        : `${ac.registration} carries STC ${p.stc} (${p.holder}), Form 337 dated ${fmtDate(p.form337)}: ${lcFirst(alteration!.title)}.`,
+    );
     why.push(`The IPC lists ${p.ipcPn}; the ${lcFirst(p.item)} really installed is ${p.neededPn}, listed only in ${p.ica}.`);
-    why.push(`Engineering approves it on the STC, the 337 and the logbook entry of ${fmtDate(alteration!.date)}.`);
+    why.push(`Engineering approves it on ${field ? 'the field-approved 337' : 'the STC, the 337'} and the logbook entry of ${fmtDate(alteration!.date)}.`);
   } else {
     expect = [...s.expect, ...pick.comps.filter((x) => t >= x.comp.from).map((x) => x.e)];
     optional = pick.comps.filter((x) => t < x.comp.from).map((x) => x.e);
@@ -684,9 +690,10 @@ export function scoreIpc(m: IpcModel, a: IpcAttempt): IpcScore {
     const e = m.expect[0];
     if (hit[0] >= 0) {
       const alt = m.alteration!;
-      const rv = reviewRequest(m.ac, { ata: m.ata, pn: e.pn, stc: alt.stc!, form337: alt.form337, entryId: a.cite ?? '' });
+      // a field approval is cited by its 337 (no STC number)
+      const rv = reviewRequest(m.ac, { ata: m.ata, pn: e.pn, stc: alt.stc ?? '', form337: alt.form337, entryId: a.cite ?? '' });
       reason = rv.approved ? 1 : 0;
-      if (rv.approved) notes.push({ ok: true, text: `Engineering approved: STC ${alt.stc}, 337 of ${fmtDate(alt.form337)}` });
+      if (rv.approved) notes.push({ ok: true, text: `Engineering approved: ${alt.stc ? `STC ${alt.stc}, 337` : 'field-approved 337'} of ${fmtDate(alt.form337)}` });
       else notes.push({ ok: false, text: a.cite ? rv.problems[0] : 'No logbook entry cited: engineering holds the part' });
     }
   } else {
@@ -1615,7 +1622,7 @@ export const ipc: PuzzleDef = {
       const citeEntry = cite ? ac.log.find((e) => e.id === cite) : undefined;
       const apr =
         ica && alt
-          ? `<div class="apr"><div><b>ENGINEERING APPROVAL</b><small>STC ${esc(alt.stc!)} · Form 337 ${fmtDate(alt.form337)} · Log: ${citeEntry ? `${fmtDate(citeEntry.date)} ✓` : '—'}</small></div><button data-act="cite">${citeEntry ? 'Change' : 'Cite entry'}</button></div>`
+          ? `<div class="apr"><div><b>ENGINEERING APPROVAL</b><small>${alt.stc ? `STC ${esc(alt.stc)}` : 'Field approval'} · Form 337 ${fmtDate(alt.form337)} · Log: ${citeEntry ? `${fmtDate(citeEntry.date)} ✓` : '—'}</small></div><button data-act="cite">${citeEntry ? 'Change' : 'Cite entry'}</button></div>`
           : '';
       slip.innerHTML = `
         <div class="slh"><span>PARTS REQUEST</span><span>${esc(ac.registration)} · ${esc(m.ata)}</span></div>
@@ -1730,7 +1737,9 @@ export const ipc: PuzzleDef = {
 
     function logEntryHtml(e: LogEntry, citeMode: boolean) {
       const hi = m.teach && e.kind === 'sb' && e.text.includes(sbFig);
-      const book = e.book === 'airframe' ? 'Airframe' : e.book === 'engine' ? 'Engine' : 'Propeller';
+      // a twin keeps a book per engine and per propeller: say whose
+      const kind = e.book === 'airframe' ? 'Airframe' : e.book === 'engine' ? 'Engine' : 'Propeller';
+      const book = e.pos ? `${e.pos} ${kind.toLowerCase()}` : kind;
       return `<div class="icard le${hi ? ' hint' : ''}">
         <div class="lh"><span><b>${fmtDate(e.date)}</b> · ${book}</span><span>TT ${e.tt.toFixed(1)} · ${ac.meter} ${e.tach.toFixed(1)}</span></div>
         <p class="lt">${esc(e.text)}</p>
@@ -1814,7 +1823,7 @@ export const ipc: PuzzleDef = {
             .join('');
         } else {
           body = `<div class="srch"><input type="search" enterkeyhint="search" placeholder="Search: SB, STC, P/N, 32-40…" value="${esc(logQuery)}"><button class="ichip" data-chip="all">All</button><button class="ichip" data-chip="ata">${esc(m.ata)}</button><button class="ichip" data-chip="sb">SBs</button><button class="ichip" data-chip="stc">STCs</button></div>
-            ${sheet.citeMode ? `<div class="icard hint"><p><b>Engineering approval:</b> cite the entry that recorded the installation of STC ${esc(m.alteration?.stc ?? '')}.</p></div>` : ''}
+            ${sheet.citeMode ? `<div class="icard hint"><p><b>Engineering approval:</b> cite the entry that recorded the installation of ${m.alteration?.stc ? `STC ${esc(m.alteration.stc)}` : `the field-approved alteration (Form 337 dated ${fmtDate(m.alteration?.form337 ?? '')})`}.</p></div>` : ''}
             <div class="logs"></div>`;
         }
       } else {
