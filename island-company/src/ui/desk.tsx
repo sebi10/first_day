@@ -205,6 +205,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               <span class="label num">{Math.round(exp.p * 100)}% incident risk next week</span>
             </div>
           </div>
+          {top.squawk && <span class="chip">✎ Written up by {top.squawk}: their call that it needs this</span>}
           {top.pushedBack && <span class="chip ink">Owner pushed back on the cheap fix</span>}
           {hint && (
             <div

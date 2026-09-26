@@ -60,6 +60,8 @@ export interface Order {
   counter?: { cost: number; gain: number };
   /** owner rejected the counter: analyst must approve or defer */
   pushedBack?: boolean;
+  /** written up by the trade (a squawk), not generated: the name of who raised it */
+  squawk?: string;
   approvedWeek?: number;
   autoApproved?: boolean;
   seed: number;
@@ -198,6 +200,8 @@ export interface IslandState {
   turns: Partial<Record<Role, TurnState>>;
   /** covers used this week, by covering role */
   coversUsed: Partial<Record<Role, number>>;
+  /** week of each trade's last write-up (one squawk per trade per week) */
+  squawked?: Partial<Record<Role, number>>;
   weather: Weather;
   history: WeekReport[];
   stats: {
@@ -235,7 +239,7 @@ export interface IslandState {
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */
-export const WEEK_BOUND = ['complete', 'approve', 'defer', 'counter', 'acceptCounter', 'rejectCounter', 'buyList', 'endTurn', 'tag'] as const;
+export const WEEK_BOUND = ['complete', 'approve', 'defer', 'counter', 'acceptCounter', 'rejectCounter', 'buyList', 'endTurn', 'tag', 'squawk'] as const;
 
 export type Action =
   | { t: 'join'; uid: string; name: string; role: Role; reclaim?: boolean; key?: string; /** replace an absent player (explicit, confirmed in the UI) */ takeover?: boolean }
@@ -267,6 +271,7 @@ export type Action =
   | { t: 'allocateBonus'; choice: 'reserve' | 'capex' | 'split' }
   | { t: 'story'; key: string; role: Role }
   | { t: 'tag'; role: Role; assetId: string; on: boolean; week?: number }
+  | { t: 'squawk'; role: Role; assetId: string; kind: string; week?: number }
   | { t: 'cosmetic'; role: Role; id: string }
   | { t: 'practice'; role: Role; puzzle: PuzzleId; tier: number; score: number }
   | { t: 'resolve'; week: number };

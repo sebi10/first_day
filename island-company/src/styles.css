@@ -560,6 +560,18 @@ h3 {
 .asset + .asset {
   border-top: 1px solid rgba(31, 42, 48, 0.07);
 }
+/* the asset name/health is a button: tap for details and a write-up */
+.asset-tap {
+  all: unset;
+  display: block;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.asset-tap:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 2px;
+}
 
 /* bottom area */
 .dock {

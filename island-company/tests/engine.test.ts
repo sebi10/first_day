@@ -371,3 +371,22 @@ describe('skill keeps paying above a pass', () => {
     if (o.gain > 0 && hp < 90) expect(h(hi)).toBeGreaterThan(h(lo));
   });
 });
+
+describe('squawks: the trades write up what their assets need', () => {
+  it('one write-up per trade per week, on its own assets, and it goes to the analyst', () => {
+    let s = started();
+    const plane = s.assets.find((a) => a.kind === 'plane')!;
+    const house = s.assets.find((a) => a.kind === 'house')!;
+    const open = new Set(s.orders.filter((o) => o.assetId === plane.id && o.status !== 'done').map((o) => o.kind));
+    const kind = ['cylinder', 'alternator', 'corrosion', 'prop', 'tires'].find((k) => !open.has(k))!;
+    expect(apply(s, { t: 'squawk', role: 'mech', assetId: house.id, kind }, NOW).error).toMatch(/doesn't apply/);
+    expect(apply(s, { t: 'squawk', role: 'fin', assetId: plane.id, kind }, NOW).error).toMatch(/trades/);
+    const r = apply(s, { t: 'squawk', role: 'mech', assetId: plane.id, kind }, NOW);
+    expect(r.error).toBeUndefined();
+    s = r.s;
+    const o = s.orders[s.orders.length - 1];
+    expect(o.squawk).toBe('Ana');
+    expect(o.status).toBe('pending');
+    expect(apply(s, { t: 'squawk', role: 'mech', assetId: plane.id, kind: 'tires' }, NOW).error).toMatch(/One write-up/);
+  });
+});

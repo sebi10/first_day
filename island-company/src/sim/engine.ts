@@ -443,6 +443,24 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       }
       return { s };
     }
+    case 'squawk': {
+      // the trade writes up what an asset needs; the analyst decides whether it's worth the money
+      if (a.role === 'fin') return fail('Only the trades write up squawks.');
+      if (s.week < 1) return fail('The week has not started yet.');
+      if (s.turns[a.role]?.ended) return fail('Your turn is over for this week.');
+      if (s.squawked?.[a.role] === s.week) return fail('One write-up per week.');
+      const asset = s.assets.find((x) => x.id === a.assetId);
+      if (!asset) return fail('No such asset.');
+      const c = squawkable(a.role, asset).find((x) => x.kind === a.kind);
+      if (!c) return fail("That job doesn't apply to this asset.");
+      if (s.orders.some((o) => open(o) && o.kind === c.kind && o.assetId === asset.id)) return fail('That job is already open.');
+      const who = s.players[a.role]?.name ?? a.role;
+      const o = addOps(s, c.kind, asset);
+      o.squawk = who;
+      s.squawked = { ...(s.squawked ?? {}), [a.role]: s.week };
+      feed(s, a.role, 'info', `${who} wrote up ${o.title} on ${asset.name}${o.status === 'pending' ? ` (${usd(o.cost)}, waiting on the analyst)` : ''}.`, now);
+      return { s };
+    }
     case 'practice': {
       const p = s.players[a.role];
       if (!p) return fail('Join first.');
@@ -460,6 +478,11 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       return { s };
     }
   }
+}
+
+/** Jobs a trade may write up on an asset: real work on something it looks after (not paperwork). */
+export function squawkable(role: Role, asset: Asset) {
+  return CATALOG.filter((c) => c.role === role && c.targets.includes(asset.model) && c.gain > 0);
 }
 
 /** Safety-critical work stays approvable through a cash freeze: an asset under 60, or an inspection sign-off. */
@@ -712,7 +735,7 @@ function generateOpsOrders(s: IslandState, r: Rng) {
 function addOps(s: IslandState, kind: string, asset: Asset) {
   const c = CATALOG_BY_KIND[kind];
   const tier = orderTier(kind, asset, s.tier);
-  newOrder(s, {
+  return newOrder(s, {
     role: c.role,
     kind,
     assetId: asset.id,

@@ -1,9 +1,10 @@
 // Mechanic hangar / electrician cottages: assets, work orders, covering.
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
-import { houseBlocker, planeCapacity, powered } from '../sim/econ';
-import type { Order, Role } from '../sim/types';
-import { Btn, Health, Icon, Sheet, usd } from './kit';
+import { houseBlocker, orderCost, orderTier, planeCapacity, powered } from '../sim/econ';
+import { squawkable } from '../sim/engine';
+import type { Asset, Order, Role } from '../sim/types';
+import { Btn, Health, Icon, Sheet, TierDots, usd } from './kit';
 import { OrderCard, OrderDetail } from './orders';
 import { openOrders } from './select';
 import type { Ctl } from './useIsland';
@@ -11,8 +12,10 @@ import type { Ctl } from './useIsland';
 export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec'; onPlay(o: Order, cover?: boolean): void }) {
   const { s } = ctl;
   const [sel, setSel] = useState<Order | null>(null);
+  const [writeUp, setWriteUp] = useState<Asset | null>(null);
   const orders = openOrders(s, role);
   const turn = s.turns[role];
+  const canWrite = s.week >= 1 && !turn?.ended && s.squawked?.[role] !== s.week;
   const pw = powered(s);
   const capped = role === 'mech' && pw.gridDown && (turn?.done ?? 0) >= 1;
 
@@ -39,7 +42,9 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
               return (
                 <div class="asset" key={p.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name="plane" size={22} />
-                  <Health value={p.health} label={`${p.name} · ${MODELS[p.model].label}`} />
+                  <button class="asset-tap" onClick={() => setWriteUp(p)} aria-label={`${p.name}: details and write-up`}>
+                    <Health value={p.health} label={`${p.name} · ${MODELS[p.model].label}`} />
+                  </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     <b class={`num ${cap === 0 && !grounded ? 'fault' : ''}`}>{grounded ? 'GND' : cap === 0 ? 'AOG' : `${cap} fl`}</b>
                     <span class="label num">{p.sinceInspection ?? 0}/{ECON.planeInspectionFlights} insp</span>
@@ -59,7 +64,9 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
               return (
                 <div class="asset" key={h.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name={h.kind === 'house' ? 'house' : 'bolt'} size={22} />
-                  <Health value={h.health} label={label} />
+                  <button class="asset-tap" onClick={() => setWriteUp(h)} aria-label={`${h.name}: details and write-up`}>
+                    <Health value={h.health} label={label} />
+                  </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     {h.kind === 'house' ? (
                       <>
@@ -78,6 +85,10 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
             })}
       </div>
 
+      <span class="label" style={{ padding: '0 4px' }}>
+        {canWrite ? 'Tap an asset to write up what it needs (1 squawk a week). The analyst decides if it’s worth the money.' : s.squawked?.[role] === s.week ? 'Squawk written up this week.' : ''}
+      </span>
+
       {capped && (
         <div class="card" style={{ borderLeft: '6px solid var(--rust)' }}>
           <b class="fault">Grid down:</b> hangar tools offline, 1 order max this week.
@@ -94,6 +105,10 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
       ))}
 
       <CoverSection ctl={ctl} role={role} onPlay={onPlay} />
+
+      <Sheet open={!!writeUp} onClose={() => setWriteUp(null)} label="Write up">
+        {writeUp && <WriteUp ctl={ctl} role={role} asset={writeUp} can={canWrite} onDone={() => setWriteUp(null)} />}
+      </Sheet>
 
       <Sheet open={!!sel} onClose={() => setSel(null)} label="Order">
         {sel && (
@@ -140,6 +155,51 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
         )}
       </Sheet>
     </>
+  );
+}
+
+/** Squawk: the trade judges what an asset needs and writes it up. Knowing which job fits is the skill. */
+function WriteUp({ ctl, role, asset, can, onDone }: { ctl: Ctl; role: Role; asset: Asset; can: boolean; onDone(): void }) {
+  const { s } = ctl;
+  const a = s.assets.find((x) => x.id === asset.id) ?? asset;
+  const openKinds = new Set(s.orders.filter((o) => o.assetId === a.id && o.status !== 'done' && o.status !== 'cancelled').map((o) => o.kind));
+  const jobs = squawkable(role, a);
+  return (
+    <div class="col" style={{ gap: 10 }}>
+      <h2>{a.name}</h2>
+      <span class="muted">
+        Health {Math.round(a.health)}
+        {a.kind === 'plane' ? ` · ${a.sinceInspection ?? 0}/${ECON.planeInspectionFlights} flights since inspection` : ''}
+        {a.kind === 'house' ? ` · inspection good to week ${a.inspectionUntil}` : ''}
+      </span>
+      <span class="label">{can ? 'Write up one job this week. Paperwork is automatic; this is for work you judge it needs.' : 'You’ve written up this week’s squawk (or your turn is over).'}</span>
+      {jobs.map((c) => {
+        const tier = orderTier(c.kind, a, s.tier);
+        const cost = orderCost(c.kind, tier);
+        const already = openKinds.has(c.kind);
+        return (
+          <div class="card row" key={c.kind} style={{ gap: 10 }}>
+            <span class="col grow" style={{ gap: 2 }}>
+              <b>{c.title}</b>
+              <span class="row wrap label" style={{ gap: 6 }}>
+                <TierDots tier={tier} /> {cost ? usd(cost) : 'no cost'} · +{c.gain}
+                {c.parts ? ` · ${c.parts} kit` : ''}
+              </span>
+            </span>
+            <Btn
+              small
+              kind={already ? 'ghost' : 'soft'}
+              disabled={!can || already}
+              onClick={async () => {
+                if (await ctl.dispatch({ t: 'squawk', role, assetId: a.id, kind: c.kind })) onDone();
+              }}
+            >
+              {already ? 'Open' : 'Write up'}
+            </Btn>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
