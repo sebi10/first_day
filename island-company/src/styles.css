@@ -414,11 +414,20 @@ h3 {
   }
 }
 @keyframes beam {
-  from {
-    transform: rotate(0deg);
+  0% {
+    transform: rotate(110deg);
+    opacity: 1;
   }
-  to {
-    transform: rotate(360deg);
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    transform: rotate(470deg);
+    opacity: 1;
   }
 }
 @keyframes twinkle {

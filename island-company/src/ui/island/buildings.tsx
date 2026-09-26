@@ -1,6 +1,6 @@
 // Buildings, each drawn at its front-centre ground point in the oblique
 // projection: light roof top, mid front, dark east side. Care wears the paint.
-import { P, type V3 } from './geo';
+import { face, P, type V3 } from './geo';
 import { K, mix, shade, tones, weather } from './paint';
 import { box, gable, gableZ, hip, post, seg, shadowOf } from './solid';
 
@@ -45,8 +45,8 @@ export function Ribbon({ x, y }: { x: number; y: number }) {
 export type Fault = { tag?: boolean; damaged?: boolean; lapsed?: boolean };
 type FaultGeo = { w: number; h: number; door: [number, number, number, number]; shutter: [number, number]; patches: [number, number][]; crack: [number, number]; board: [number, number] };
 /** red-tagged: sealed with barrier tape and a tag on the door; damaged: a
- *  shutter hanging off, a crack, planks nailed over the roof; inspection
- *  lapsed: a closed notice staked out front */
+ *  shutter hanging off, a crack, planks nailed over the roof and across the
+ *  door; inspection lapsed: a closed notice staked out front */
 function Faults({ f, g }: { f: Fault; g: FaultGeo }) {
   const [dx0, dy0, dx1, dy1] = g.door;
   const cx = (dx0 + dx1) / 2;
@@ -61,6 +61,9 @@ function Faults({ f, g }: { f: Fault; g: FaultGeo }) {
             <path d="M0 0h4.2v8.4h-4.2z" fill={K.woodDark} stroke="#5c3b20" stroke-width=".6" />
             <path d="M.8 2.2h2.6M.8 4.6h2.6" stroke="#5c3b20" stroke-width=".6" />
           </g>
+          {/* boarded up: two planks nailed across the door */}
+          <path d={`M${dx0 - 2} ${dy0 + (dy1 - dy0) * 0.25}L${dx1 + 2} ${dy0 + (dy1 - dy0) * 0.62}M${dx0 - 2} ${dy0 + (dy1 - dy0) * 0.7}L${dx1 + 2} ${dy0 + (dy1 - dy0) * 0.36}`} stroke="#5c3b20" stroke-width="3.6" stroke-linecap="round" />
+          <path d={`M${dx0 - 2} ${dy0 + (dy1 - dy0) * 0.25}L${dx1 + 2} ${dy0 + (dy1 - dy0) * 0.62}M${dx0 - 2} ${dy0 + (dy1 - dy0) * 0.7}L${dx1 + 2} ${dy0 + (dy1 - dy0) * 0.36}`} stroke="#d8b27a" stroke-width="2.2" stroke-linecap="round" />
         </>
       )}
       {f.tag && (
@@ -190,10 +193,18 @@ export function Lodge({ tint, win, wear, open, fault = {} }: { tint: string; win
       {win === 'glass' && <path d="M-9 -22l6 -12" stroke="#fff" stroke-width="1.4" opacity=".8" />}
       <path d={r.eaves} stroke={roof.dk} stroke-width="2.4" fill="none" stroke-linejoin="round" />
       <Wear wear={wear} spots={[[-18, -10, 5], [16, -14, 5]]} />
-      {/* chimney */}
+      {/* stone chimney rising out of the east slope, just clear of the ridge, with a cap */}
       {(() => {
-        const c = box(12, 20, 0, 50, 22, 30);
-        return <path d={c.front + c.side} fill="#8f8577" transform={`translate(0 0)`} />;
+        const cap = box(10.8, 21.2, 56, 59.5, 20.8, 31.2);
+        return (
+          <g>
+            <path d={face([[12, 42.3, 22], [20, 34.6, 22], [20, 57, 22], [12, 57, 22]])} fill="#a39a8c" />
+            <path d={face([[20, 34.6, 22], [20, 34.6, 30], [20, 57, 30], [20, 57, 22]])} fill="#7d7468" />
+            <path d={cap.front + cap.side} fill="#5f574e" />
+            <path d={cap.top} fill="#8f8577" />
+            <path d={face([[13, 59.5, 23.5], [19, 59.5, 23.5], [19, 59.5, 28.5], [13, 59.5, 28.5]])} fill="#3a342e" />
+          </g>
+        );
       })()}
       {/* deck */}
       <path d={deck.top} fill={weather(K.woodLight, wear)} />
@@ -304,7 +315,7 @@ export function Office({ tint, win, wear, flag, motion }: { tint: string; win: W
 
 // ------------------------------------------------------------ generator ---
 /** running: carrying the island (grid down) — exhaust, a green beacon, door open, lit inside */
-export function GenHouse({ wear, running, motion }: { wear: number; running: boolean; motion: boolean }) {
+export function GenHouse({ wear, running, motion, lamp }: { wear: number; running: boolean; motion: boolean; lamp?: boolean }) {
   const w = 18, d = 22, h = 16;
   const b = box(-w, w, 0, h, 0, d);
   const para = box(-w, w, h, h + 2, 0, d);
@@ -332,6 +343,9 @@ export function GenHouse({ wear, running, motion }: { wear: number; running: boo
         <path d="M-14 0v-12h9v12z" fill="#5d8a72" />
       )}
       <path d="M-18 -1.5h36" stroke="#f2c230" stroke-width="3" stroke-dasharray="3 3" />
+      {/* a lamp over the door that stays on at night while the generator stands by */}
+      <path d="M-13.5 -15.5h8" stroke="#3e4448" stroke-width="1.6" />
+      <circle cx={-9.5} cy={-13.4} r={1.9} fill={lamp ? '#ffe89a' : '#9aa0a4'} />
       {/* fuel tank */}
       <path d={tank.side + tank.front} fill="#e8e3d6" />
       <path d={tank.top} fill="#f7f4ec" />

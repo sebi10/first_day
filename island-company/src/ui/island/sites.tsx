@@ -16,13 +16,16 @@ const DIM: Record<SiteKind, { w: number; d: number; h: number }> = {
 
 const quad = (x0: number, x1: number, z0: number, z1: number, y = 0) => lin([P([x0, y, z0]), P([x1, y, z0]), P([x1, y, z1]), P([x0, y, z1])], true);
 
-function Stakes({ w, d, lines }: { w: number; d: number; lines: boolean }) {
+function Stakes({ w, d, lines, flags }: { w: number; d: number; lines: boolean; flags?: boolean }) {
   const c: V3[] = [[-w - 4, 0, -4], [w + 4, 0, -4], [w + 4, 0, d + 4], [-w - 4, 0, d + 4]];
+  const hgt = flags ? 12 : 8;
   return (
     <g>
-      {lines && <path d={lin([...c.map(([x, , z]) => P([x, 5, z]))], true)} stroke="#fff" stroke-width=".9" fill="none" opacity=".9" />}
-      <path d={c.map(([x, , z]) => post(x, z, 8)).join('')} stroke={K.woodDark} stroke-width="2" />
-      <path d={c.map(([x, , z]) => post(x, z, 2.5, 6)).join('')} stroke="#ff7a1f" stroke-width="2.4" />
+      {lines && <path d={lin([...c.map(([x, , z]) => P([x, 5, z]))], true)} stroke="#c98f2e" stroke-width="1.1" fill="none" />}
+      <path d={c.map(([x, , z]) => post(x, z, hgt)).join('')} stroke={K.woodDark} stroke-width={flags ? 2.4 : 2} />
+      <path d={c.map(([x, , z]) => post(x, z, 2.5, hgt - 2)).join('')} stroke="#ff7a1f" stroke-width={flags ? 3 : 2.4} />
+      {/* a little survey flag on every corner */}
+      {flags && <path d={c.map(([x, , z]) => `M${P([x, hgt, z]).map((n) => Math.round(n * 10) / 10).join(' ')}l6 1.8l-6 1.8z`).join('')} fill="#ff4f2e" />}
     </g>
   );
 }
@@ -69,18 +72,20 @@ function Scaffold({ w, h }: { w: number; h: number }) {
   );
 }
 
+/** a tower crane standing on the site's west side, its jib reaching east over the frame */
 function Crane({ x, h }: { x: number; h: number }) {
   const top = h + 34;
   const [bx, by] = P([x, 0, 22]);
   return (
     <g transform={`translate(${bx} ${by})`}>
+      <path d="M-6 1h12v-3h-12z" fill="#6b7176" />
       <path d={`M-3 0V${-top}M3 0V${-top}`} stroke="#f2b01e" stroke-width="1.8" />
-      <path d={Array.from({ length: Math.floor(top / 7) }, (_, i) => `M-3 ${-i * 7}L3 ${-i * 7 - 7}`).join('')} stroke="#f2b01e" stroke-width="1.1" />
-      <path d={`M-42 ${-top}H14`} stroke="#f2b01e" stroke-width="3" />
-      <path d={`M0 ${-top - 8}L-42 ${-top}M0 ${-top - 8}L14 ${-top}`} stroke="#c98a12" stroke-width="1" />
-      <rect x={9} y={-top - 1} width={7} height={6} fill="#6b7176" />
-      <path d={`M-34 ${-top}V${-top + 22}`} stroke="#3e4448" stroke-width=".8" />
-      <path d={`M-38 ${-top + 22}h8v4h-8z`} fill={K.wood} />
+      <path d={Array.from({ length: Math.floor(top / 7) }, (_, i) => `M3 ${-i * 7}L-3 ${-i * 7 - 7}`).join('')} stroke="#f2b01e" stroke-width="1.1" />
+      <path d={`M42 ${-top}H-14`} stroke="#f2b01e" stroke-width="3" />
+      <path d={`M0 ${-top - 8}L42 ${-top}M0 ${-top - 8}L-14 ${-top}`} stroke="#c98a12" stroke-width="1" />
+      <rect x={-16} y={-top - 1} width={7} height={6} fill="#6b7176" />
+      <path d={`M34 ${-top}V${-top + 22}`} stroke="#3e4448" stroke-width=".8" />
+      <path d={`M30 ${-top + 22}h8v4h-8z`} fill={K.wood} />
     </g>
   );
 }
@@ -102,7 +107,7 @@ function PlotSign({ x, kind }: { x: number; kind: SiteKind }) {
       <path d="M0 0V-10" stroke={K.woodDark} stroke-width="1.8" />
       <path d="M-7 -20h14v10h-14z" fill="#fffaf0" stroke={K.woodDark} stroke-width="1.2" />
       {kind === 'gen' ? (
-        <path d="M1 -19L-3 -14.6H0L-1 -11L3 -15.4H0Z" fill="#e0a21a" />
+        <path d="M-4.4 -12v-4.6h6.4v4.6zM3 -12v-6.4h1.8v6.4z" fill="#6f7a82" />
       ) : (
         <path d="M-3.6 -12v-3.6l3.6 -3l3.6 3v3.6z" fill={K.rust} />
       )}
@@ -115,16 +120,18 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
   const { w, d, h } = DIM[kind];
   const big = kind === 'villa' || kind === 'lodge';
   if (stage < 0) {
-    // a surveyed plot: mown lawn, corner stakes, string lines and a sign
-    const stripes = Array.from({ length: 4 }, (_, i) => {
-      const z = -2 + ((d + 4) * (i + 0.5)) / 4;
-      return lin([P([-w - 2, 0, z]), P([w + 2, 0, z])]);
-    }).join('');
+    // a surveyed plot: rough cleared ground, ochre string lines on flagged
+    // corner stakes, a few survey pegs, a small stack of timber and a sign
+    const pegs = [[-w * 0.4, d * 0.3], [w * 0.35, d * 0.55], [-w * 0.05, d * 0.8]].map(([px, pz]) => post(px, pz, 4)).join('');
     return (
       <g transform={`translate(${x} ${y})`}>
-        <path d={quad(-w - 2, w + 2, -2, d + 2)} fill={mix(K.grass, K.grassLighter, 0.5)} />
-        <path d={stripes} stroke={mix(K.grass, K.grassLighter, 0.85)} stroke-width={((d + 4) / 4) * 0.5 * 0.9} />
-        <Stakes w={w - 2} d={d - 4} lines />
+        <path d={quad(-w - 2, w + 2, -2, d + 2)} fill={mix(K.grass, K.dirtLight, 0.35)} opacity=".85" />
+        <path d={quad(-w * 0.5, w * 0.3, d * 0.2, d * 0.7)} fill={mix(K.grass, K.dirt, 0.45)} opacity=".5" />
+        <path d={pegs} stroke="#f2e6c8" stroke-width="1.8" />
+        <Stakes w={w - 2} d={d - 4} lines flags />
+        <g transform="scale(.7)">
+          <Lumber x={w * 0.2} z={d * 0.9} />
+        </g>
         <PlotSign x={-w - 8} kind={kind} />
       </g>
     );
@@ -144,7 +151,7 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
       <Stakes w={w} d={d} lines={stage === 0} />
       {stage === 2 && <Frame w={w} d={d} h={h} />}
       {stage === 2 && <Scaffold w={w} h={h} />}
-      {stage === 2 && <Crane x={w + 8} h={big ? h : h * 0.7} />}
+      {stage === 2 && <Crane x={-w - 3} h={big ? h : h * 0.7} />}
       <Lumber x={-w - 4} z={-20} />
       {/* sand pile and a barrier along the front */}
       <path d={`M${w - 2} 14q7 -12 14 0z`} fill="#e3c27e" />
@@ -169,11 +176,15 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
 
 /** the floatplane dock: buoy while planned, piles then planks while building */
 export function DockSite({ stage, motion }: { stage: -1 | 0 | 1 | 2; motion: boolean }) {
-  const [ax, ay] = DOCK.root, [bx, by] = DOCK.tip;
-  const piles: Pt[] = Array.from({ length: 5 }, (_, i) => [ax + ((bx - ax) * (i + 0.6)) / 5, ay + ((by - ay) * (i + 0.6)) / 5]);
+  const [ax, ay] = DOCK.root, [, by] = DOCK.tip;
+  const [x0, y0, x1, y1] = DOCK.head;
+  const piles: Pt[] = [
+    [ax - 6, ay - 12], [ax + 6, ay - 12], [ax - 6, by + 4], [ax + 6, by + 4],
+    ...Array.from({ length: 5 }, (_, i) => [x0 + 4 + (i * (x1 - x0 - 8)) / 4, y1 + 1] as Pt),
+  ];
   return (
     <g>
-      <g transform={`translate(${bx + 10} ${by + 4})`}>
+      <g transform={`translate(${x1 + 12} ${y0 + 2})`}>
         <g class={motion ? 'bob' : undefined}>
           <ellipse cx={0} cy={4} rx={8} ry={2.6} fill="#fff" opacity=".5" />
           <path d="M-5 3q5 -16 10 0z" fill="#fff" />
@@ -187,14 +198,14 @@ export function DockSite({ stage, motion }: { stage: -1 | 0 | 1 | 2; motion: boo
           <Lumber x={0} z={0} />
         </g>
       )}
-      {stage >= 1 && (
-        <g>
-          {piles.map(([x, y], i) => (
-            <path key={i} d={`M${x - 6} ${y + 5}v-12M${x + 6} ${y - 3}v-12`} stroke={K.woodDark} stroke-width="3" stroke-linecap="round" />
-          ))}
-        </g>
-      )}
-      {stage === 2 && <path d={`M${ax} ${ay}L${(ax + bx) / 2} ${(ay + by) / 2}`} stroke={K.woodLight} stroke-width="11" stroke-dasharray="3 1.4" />}
+      {stage >= 1 &&
+        piles.map(([x, y], i) => (
+          <g key={i}>
+            <ellipse cx={x + 1} cy={y + 4.4} rx={3.4} ry={1.2} fill="none" stroke="#fff" stroke-width=".9" opacity=".8" />
+            <path d={`M${x} ${y - 4}v8`} stroke={K.woodDark} stroke-width="2.6" stroke-linecap="round" />
+          </g>
+        ))}
+      {stage === 2 && <path d={`M${ax} ${ay}V${y1}M${x0 + 4} ${(y0 + y1) / 2}H${(x0 + x1) / 2}`} stroke={K.woodLight} stroke-width="11" stroke-dasharray="3 1.4" />}
     </g>
   );
 }

@@ -16,13 +16,13 @@ import {
   ApronProps, BeachBar, Bench, Boardwalk, Confetti, Dock, FishingBoats, Fountain, GardenBeds, Grove, Lamp, Lighthouse, Market, NewFlags, Observatory, Statue,
   Bunting, buntingBulbs, YachtAt,
 } from './island/extras';
-import { AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, OFFICE, P, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, W, zoomK, zoomOf, type Pt } from './island/geo';
+import { AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, OFFICE, P, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, viewOf, W, zoomK, zoomOf, type Pt } from './island/geo';
 import { blob } from './island/rocks';
-import { Clouds, Gulls, Guy, LifeDefs, NightGrade, NightSky, Rain, SeaLife, StormGrade, Wind } from './island/life';
+import { Clouds, DawnGrade, GoldenGrade, Gulls, Guy, LifeDefs, NightGrade, NightSky, Rain, SeaLife, StormGrade, Wind } from './island/life';
 import { K } from './island/paint';
 import { DockSite, Site, type SiteKind } from './island/sites';
-import { Bubble, bubbleK, NewBadge, spread, type Icon, type Tone } from './island/status';
-import { COAST_LINE, RIM_D, Terrain, TerrainDefs } from './island/terrain';
+import { Bubble, bubbleK, NewBadge, spread, type Icon, type KeepOut, type Rect, type Tone } from './island/status';
+import { COAST_LINE, Terrain, TerrainDefs } from './island/terrain';
 
 type Phase = 'dawn' | 'day' | 'golden' | 'night';
 export const phaseOf = (d = new Date()): Phase => {
@@ -51,7 +51,7 @@ const POLES: Record<string, { at: Pt; tier: number }> = {
   C: { at: [636, 318], tier: 1 },
   D: { at: [640, 366], tier: 2 },
   E: { at: [644, 418], tier: 4 },
-  F: { at: [630, 240], tier: 5 },
+  F: { at: [648, 236], tier: 5 }, // at the terrace foot, clear of the steps and the lodge
 };
 const SPANS: [string, string][] = [['S', 'A'], ['A', 'C'], ['C', 'D'], ['D', 'E'], ['C', 'F']];
 const FEED: Record<string, string> = { h1: 'A', h2: 'C', h3: 'D', h4: 'D', h5: 'E', h6: 'E', h7: 'F' };
@@ -126,22 +126,31 @@ function useStill(ref: { current: SVGSVGElement | null }) {
   return still;
 }
 
-/** dawn and golden hour are a light tint; night and storms get their own grade */
-const LIGHT: Record<Phase, { fill: string; o: number }> = {
-  dawn: { fill: '#ff9eb4', o: 0.15 },
-  day: { fill: '#ffffff', o: 0 },
-  golden: { fill: '#ff9147', o: 0.15 },
-  night: { fill: '#0a1745', o: 0 },
-};
-
 const siteKind = (model: string): SiteKind | null =>
   model === 'cottage' ? 'house' : model === 'villa' ? 'villa' : model === 'lodge' ? 'lodge' : model === 'gen' ? 'gen' : null;
 
 /** the runway's markings: bubbles are pushed off it */
-const RUNWAY_BOX: [number, number, number, number] = [RUNWAY.a[0] - 6, Math.min(RUNWAY.a[1], RUNWAY.b[1]) - RUNWAY.w / 2 - 4, RUNWAY.b[0] + 6, Math.max(RUNWAY.a[1], RUNWAY.b[1]) + RUNWAY.w / 2 + 4];
+const RUNWAY_BOX: Rect = [RUNWAY.a[0] - 6, Math.min(RUNWAY.a[1], RUNWAY.b[1]) - RUNWAY.w / 2 - 4, RUNWAY.b[0] + 6, Math.max(RUNWAY.a[1], RUNWAY.b[1]) + RUNWAY.w / 2 + 4];
 
 type Item = { y: number; el: JSX.Element };
-type Bub = { x: number; y: number; k: number; dx: number; dy: number; icon: Icon; tone: Tone; small?: boolean; key: string };
+type Bub = { x: number; y: number; k: number; dx: number; dy: number; icon: Icon; tone: Tone; small?: boolean; key: string; owner: string; fixed?: boolean };
+
+/** Screen footprints (front-centre ground point p) that other assets' bubbles keep off. */
+const FOOT = {
+  hangar: [-52, -66, 68, 2],
+  office: [-34, -58, 44, 4],
+  plane: [-38, -22, 38, 22],
+  float: [-30, -16, 30, 16],
+  cottage: [-22, -42, 30, 2],
+  villa: [-30, -50, 36, 4],
+  lodge: [-62, -66, 44, 8],
+  g1: [-18, -26, 26, 2],
+  gen: [-18, -30, 40, 2],
+  fountain: [-20, -24, 20, 6],
+  stall: [-14, -26, 16, 4],
+  statue: [-16, -44, 16, 4],
+} satisfies Record<string, Rect>;
+const footAt = (p: Pt, f: Rect): Rect => [p[0] + f[0], p[1] + f[1], p[0] + f[2], p[1] + f[3]];
 
 export function Island({
   s,
@@ -164,8 +173,9 @@ export function Island({
   const has = (f: Flourish) => dev.flourishes.includes(f);
   const pw = powered(s);
   const night = phase === 'night';
-  const warm = night || phase === 'golden';
   const storm = s.weather === 'storm';
+  // lights come on at dusk, at night and under a storm's dark sky
+  const warm = night || phase === 'golden' || storm;
   const wear = Math.max(0, Math.min(1, (0.7 - dev.care) / 0.25));
   const hangarColor = cosmeticColor('mech', s.players.mech?.cosmetic);
   const houseColor = cosmeticColor('elec', s.players.elec?.cosmetic);
@@ -194,35 +204,45 @@ export function Island({
     ),
     [],
   );
-  const ground = useMemo(() => <Terrain tier={s.tier} weather={s.weather} motion={motion} paved={paved} />, [s.tier, s.weather, motion, paved]);
+  const grove = has('palm-grove');
+  const ground = useMemo(
+    () => <Terrain tier={s.tier} weather={s.weather} motion={motion} paved={paved} night={night} grove={grove} />,
+    [s.tier, s.weather, motion, paved, night, grove],
+  );
   const boats = storm ? 0 : 1 + Math.round(dev.prosperity * 3);
-  const sea = useMemo(() => <SeaLife motion={motion} boats={boats} />, [motion, boats]);
+  const sea = useMemo(() => <SeaLife motion={motion} boats={boats} storm={storm} />, [motion, boats, storm]);
   const sky = useMemo(
     () => (
       <>
         {!storm && <Gulls motion={motion} />}
-        <Clouds storm={storm} motion={motion} />
+        <Clouds storm={storm} motion={motion} night={night} />
       </>
     ),
-    [storm, motion],
+    [storm, motion, night],
   );
   const grade = useMemo(
-    () => (night ? <NightGrade rim={RIM_D} coast={COAST_LINE} /> : storm ? <StormGrade /> : null),
-    [night, storm],
+    () =>
+      night ? <NightGrade coast={COAST_LINE} /> : storm ? <StormGrade /> : phase === 'dawn' ? <DawnGrade /> : phase === 'golden' ? <GoldenGrade /> : null,
+    [night, storm, phase],
   );
-  const stars = useMemo(() => (night ? <NightSky motion={motion} /> : null), [night, motion]);
+  // no moon or stars behind a storm's cloud deck
+  const stars = useMemo(() => (night && !storm ? <NightSky motion={motion} /> : null), [night, storm, motion]);
 
   const items: Item[] = [];
   const flat: JSX.Element[] = [];
   const glows: [number, number, number][] = [];
   const bubbles: Bub[] = [];
   const badges: Pt[] = [];
-  const bub = (key: string, x: number, y: number, icon: Icon, tone: Tone, small?: boolean, dx = 0) => bubbles.push({ key, x, y, k: bubbleK(bscale, small), dx: dx * bscale, dy: 0, icon, tone, small });
+  const keep: KeepOut[] = [{ r: RUNWAY_BOX }];
+  const foot = (owner: string, p: Pt, f: Rect) => keep.push({ owner, r: footAt(p, f) });
+  const bub = (key: string, x: number, y: number, icon: Icon, tone: Tone, o: { small?: boolean; dx?: number; dy?: number; owner?: string; fixed?: boolean } = {}) =>
+    bubbles.push({ key, x, y, k: bubbleK(bscale, o.small), dx: (o.dx ?? 0) * bscale, dy: (o.dy ?? 0) * bscale, icon, tone, small: o.small, owner: o.owner ?? key, fixed: o.fixed });
   const at = (id: string) => POS[id];
 
   // ---- airfield: every plane has its own stand and its own AOG spot
   const aog = planes.filter((p) => p.health < 40);
   items.push({ y: HANGAR[1], el: <At key="hangar" p={HANGAR}><Hangar tint={hangarColor} wear={wear} doorOpen={aog.some((p) => p.id === 'p1')} /></At> });
+  foot('hangar', HANGAR, FOOT.hangar);
   const spots = unclutter(planes.map((p) => ({ id: p.id, x: (p.health < 40 ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[0], y: (p.health < 40 ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[1] })));
   const spotOf = (id: string) => spots.find((q) => q.id === id)!;
   const float = planes.find((p) => p.model === 'float');
@@ -232,12 +252,16 @@ export function Island({
     const g = tagged(p);
     const onWater = p.model === 'float';
     // the floatplane sits on the water, drawn with the dock below the y-sorted things
-    if (!onWater) items.push({ y, el: <Plane key={p.id} model={p.model as PlaneModel} x={x} y={y} rot={PLANE_ROT[p.id] ?? 92} jacks={down} chocks={g} mood={dev.care} /> });
+    if (!onWater) items.push({ y, el: <Plane key={p.id} model={p.model as PlaneModel} x={x} y={y} rot={PLANE_ROT[p.id] ?? 92} jacks={down} chocks={g} covered={storm && !down} mood={dev.care} /> });
+    foot(p.id, [x, y], onWater ? FOOT.float : FOOT.plane);
     if (down) {
-      const mech: Pt = onWater ? [DOCK.root[0] + 8, y + 10] : [x + 22, y + 12];
+      const mech: Pt = onWater ? [DOCK.head[2] - 22, DOCK.head[1] + 9] : [x + 22, y + 12];
       items.push({ y: mech[1], el: <Guy key={`mech${p.id}`} x={mech[0]} y={mech[1]} c={K.orange} /> });
-      if (onWater) items.push({ y: y + 14, el: <path key="kit" d={`M${DOCK.root[0] - 2} ${y + 16}h9v-5h-9zM${DOCK.root[0] - 1} ${y + 11}v-2h7v2`} fill={K.red} stroke="#8a2a22" stroke-width=".8" /> });
-      bub(p.id, x, y - (onWater ? 20 : 26), 'wrench', 'alert');
+      if (onWater) items.push({ y: DOCK.head[3], el: <path key="kit" d={`M${DOCK.head[2] - 40} ${DOCK.head[3] - 2}h9v-5h-9zM${DOCK.head[2] - 39} ${DOCK.head[3] - 7}v-2h7v2`} fill={K.red} stroke="#8a2a22" stroke-width=".8" /> });
+      // the twin is on jacks just out of the hangar mouth: its bubble sits on
+      // the apron beside it, tail to the wing, so it reads "plane", not "hangar"
+      if (p.id === 'p1' && !onWater) bub(p.id, x - 32, y - 2, 'wrench', 'alert', { dx: -36, dy: 12, fixed: true });
+      else bub(p.id, x, y - (onWater ? 20 : 26), 'wrench', 'alert');
     } else if (g) bub(p.id, x, y - 22, 'cone', 'alert');
     else if (p.health < 60) bub(p.id, x, y - 22, 'warn', 'warn');
     if (newIds.has(p.id) && !onWater) {
@@ -251,15 +275,18 @@ export function Island({
   // ---- office and the square
   const officeWin: Win = !pw.on ? 'dark' : warm ? 'lit' : 'glass';
   items.push({ y: OFFICE[1], el: <At key="office" p={OFFICE}><Office tint={officeColor} win={officeWin} wear={wear} flag={officeColor} motion={motion} /></At> });
-  if (pw.on && night) glows.push([OFFICE[0], OFFICE[1] - 12, 26], [OFFICE[0], OFFICE[1] - 28, 26]);
-  if (s.cash < 2000) bub('cash', OFFICE[0] - 20, OFFICE[1] - 52, 'cash', 'alert');
+  foot('office', OFFICE, FOOT.office);
+  if (pw.on && (night || storm)) glows.push([OFFICE[0], OFFICE[1] - 12, 26], [OFFICE[0], OFFICE[1] - 28, 26]);
+  if (s.cash < 2000) bub('cash', OFFICE[0] - 20, OFFICE[1] - 52, 'cash', 'alert', { owner: 'office' });
 
   // ---- grid: substation, poles, wires
   if (grid) {
     items.push({ y: at('g1')[1], el: <At key="g1" p={at('g1')}><Substation wear={wear} down={pw.gridDown} motion={motion} /></At> });
-    // off to the west, so the snapped line and the sparks east of it stay in view
-    if (pw.gridDown) bub('g1', at('g1')[0] - 8, at('g1')[1] - 28, 'wrench', 'alert', false, -26);
-    else if (grid.health < 60) bub('g1', at('g1')[0] - 8, at('g1')[1] - 28, 'warn', 'warn', false, -26);
+    foot('g1', at('g1'), FOOT.g1);
+    // grid down says "power", not "repair": a struck-through bolt. The body
+    // leans east over the river bank, off the square's stalls and fountain.
+    if (pw.gridDown) bub('g1', at('g1')[0] + 4, at('g1')[1] - 26, 'bolt-off', 'alert', { dx: 30 });
+    else if (grid.health < 60) bub('g1', at('g1')[0] + 4, at('g1')[1] - 26, 'warn', 'warn', { dx: 30 });
   }
   const poles = Object.entries(POLES).filter(([, p]) => p.tier <= s.tier);
   for (const [k, p] of poles) items.push({ y: p.at[1], el: <Pole key={`pole${k}`} x={p.at[0]} y={p.at[1]} lean={k === 'Q' && pw.gridDown ? Q_LEAN : 0} /> });
@@ -267,11 +294,15 @@ export function Island({
   // ---- generator
   if (gen) {
     const [x, y] = at('gen');
-    items.push({ y, el: <At key="gen" p={[x, y]}><GenHouse wear={wear} running={carrying} motion={motion} /></At> });
-    // west of the stack, so the exhaust stays in view
-    if (gen.health < 50) bub('gen', x - 10, y - 28, pw.gridDown ? 'wrench' : 'warn', pw.gridDown ? 'alert' : 'warn', false, -24);
-    else if (carrying) bub('gen', x - 10, y - 28, 'bolt', 'warn', true, -24);
+    const standby = !carrying && (night || storm);
+    items.push({ y, el: <At key="gen" p={[x, y]}><GenHouse wear={wear} running={carrying} motion={motion} lamp={standby} /></At> });
+    foot('gen', [x, y], FOOT.gen);
+    // west of the stack, so the exhaust stays in view. Carrying the island is
+    // good news, so it gets the green "running" tone, not the warning yellow.
+    if (gen.health < 50) bub('gen', x - 10, y - 28, pw.gridDown ? 'wrench' : 'warn', pw.gridDown ? 'alert' : 'warn', { dx: -24 });
+    else if (carrying) bub('gen', x - 10, y - 28, 'bolt', 'ok', { small: true, dx: -24 });
     if (carrying && night) glows.push([x - 3, y - 29, 13]);
+    if (standby) glows.push([x - 9.5, y - 13, 11]);
     if (newIds.has('gen')) {
       items.push({ y: y + 1, el: <Ribbon key="rbgen" x={x - 4} y={y - 6} /> });
       items.push({ y: y + 2, el: <NewFlags key="nfgen" x={x + 2} y={y - 26} w={46} /> });
@@ -290,16 +321,18 @@ export function Island({
     const props = { tint: houseColor, win, wear, open, fault };
     const el = h.model === 'villa' ? <Villa {...props} /> : h.model === 'lodge' ? <Lodge {...props} /> : <Cottage {...props} />;
     items.push({ y, el: <g key={h.id} transform={`translate(${x} ${y})${h.model === 'villa' ? ' scale(.92)' : ''}`}>{el}</g> });
-    if (open && night) g.glow.forEach((q) => glows.push([x + q[0], y + q[1], q[2]]));
+    foot(h.id, [x, y], h.model === 'villa' ? FOOT.villa : h.model === 'lodge' ? FOOT.lodge : FOOT.cottage);
+    if (open && (night || storm) && pw.on) g.glow.forEach((q) => glows.push([x + q[0], y + q[1], q[2]]));
     if (newIds.has(h.id)) {
       items.push({ y: y + 1, el: <Ribbon key={`rb${h.id}`} x={x} y={y - 6} /> });
       items.push({ y: y + 2, el: <NewFlags key={`nf${h.id}`} x={x + 4} y={y - g.top + 12} w={g.w * 2 + 10} /> });
       badges.push([x - g.w - 12, y - g.top + 8]);
     }
-    if (h.health < 30) items.push({ y: y + 3, el: <Smoke key={`sm${h.id}`} x={x - g.w * 0.45} y={y - g.top + 12} motion={motion} /> });
     if (why) {
-      const icon: Icon = why === 'red-tagged' ? 'tag' : why === 'no power' ? 'bolt-off' : why === 'inspection lapsed' ? 'clipboard' : h.health < 30 ? 'flame' : 'wrench';
-      bub(h.id, x + 4, y - g.top, icon, 'alert', why === 'no power');
+      // one pictogram per reason a house is closed: closed on purpose (no
+      // entry), no power, inspection lapsed, or falling apart (cracked house)
+      const icon: Icon = why === 'red-tagged' ? 'noentry' : why === 'no power' ? 'bolt-off' : why === 'inspection lapsed' ? 'clipboard' : 'broken';
+      bub(h.id, x + 4, y - g.top, icon, 'alert', { small: why === 'no power' });
     }
   }
 
@@ -333,24 +366,34 @@ export function Island({
     SPOT.benches.forEach(([x, y], i) => items.push({ y, el: <Bench key={`bn${i}`} x={x} y={y} flip={i % 2 === 1} /> }));
     SPOT.lamps.forEach(([x, y], i) => {
       items.push({ y, el: <Lamp key={`lp${i}`} x={x} y={y} /> });
-      if (night && pw.on) glows.push([x, y - 22, 13]);
+      if ((night || storm) && pw.on) glows.push([x, y - 22, 13]);
     });
   }
-  if (has('palm-grove')) items.push({ y: SPOT.grove[SPOT.grove.length - 1][1], el: <Grove key="grove" /> });
+  if (grove) items.push({ y: SPOT.grove[SPOT.grove.length - 1][1], el: <Grove key="grove" /> });
   if (has('beach-bar')) {
-    items.push({ y: SPOT.bar[1], el: <BeachBar key="bar" /> });
-    if (night) glows.push([SPOT.bar[0], SPOT.bar[1] - 10, 22]);
+    items.push({ y: SPOT.bar[1], el: <BeachBar key="bar" closed={storm} /> });
+    if (night && !storm) glows.push([SPOT.bar[0], SPOT.bar[1] - 10, 22]);
   }
-  if (has('fountain')) items.push({ y: SPOT.fountain[1], el: <Fountain key="fountain" motion={motion} /> });
-  if (has('market')) items.push({ y: SPOT.market[0][1], el: <Market key="market" /> });
+  if (has('fountain')) {
+    items.push({ y: SPOT.fountain[1], el: <Fountain key="fountain" motion={motion} /> });
+    keep.push({ r: footAt(SPOT.fountain, FOOT.fountain) });
+  }
+  if (has('market')) {
+    items.push({ y: SPOT.market[0][1], el: <Market key="market" closed={storm} /> });
+    SPOT.market.forEach((m) => keep.push({ r: footAt(m, FOOT.stall) }));
+  }
   if (has('lighthouse')) items.push({ y: SPOT.lighthouse[1], el: <Lighthouse key="lh" /> });
   if (has('observatory')) items.push({ y: SPOT.observatory[1], el: <Observatory key="obs" /> });
-  if (has('statue')) items.push({ y: SPOT.statue[1], el: <Statue key="statue" /> });
+  if (has('statue')) {
+    items.push({ y: SPOT.statue[1], el: <Statue key="statue" /> });
+    keep.push({ r: footAt(SPOT.statue, FOOT.statue) });
+  }
 
   // ---- people: busier with prosperity, guests walking when houses are booked
   const pr = dev.prosperity;
   const shirts = [K.pink, K.blue, K.yellow, '#4caf50', K.purple, K.orange, '#fff'];
-  SQUARE_PEOPLE.slice(0, 1 + Math.round(pr * 5)).forEach(([x, y], i) => items.push({ y, el: <Guy key={`sq${i}`} x={x} y={y} c={shirts[i % shirts.length]} /> }));
+  // everyone heads indoors when a storm hits
+  SQUARE_PEOPLE.slice(0, storm ? 0 : 1 + Math.round(pr * 5)).forEach(([x, y], i) => items.push({ y, el: <Guy key={`sq${i}`} x={x} y={y} c={shirts[i % shirts.length]} /> }));
   const beachN = storm ? 0 : Math.round(pr * 6);
   BEACH_TOWELS.slice(0, beachN).forEach(([x, y], i) => flat.push(<use key={`tw${i}`} href="#i-towel" transform={`translate(${x} ${y})`} style={{ color: shirts[(i + 2) % shirts.length] }} />));
   SWIMMERS.slice(0, storm ? 0 : Math.round(pr * 4)).forEach(([x, y], i) => flat.push(<use key={`sw${i}`} href="#i-swim" transform={`translate(${x} ${y})`} style={{ color: shirts[(i + 4) % shirts.length] }} />));
@@ -381,13 +424,15 @@ export function Island({
     const g = houseGeo(h);
     const [x, y] = at(h.id);
     const side = POLES[k].at[0] < x ? -1 : 1;
-    put(pw.on, poleTop(k), add([x, y], P([side * g.w, g.h + 2, g.d * 0.4])), 0.06);
+    // the lodge takes its service drop low on its east side, not across its front
+    const drop: Pt = h.model === 'lodge' ? add([x, y], P([g.w, 9, 3])) : add([x, y], P([side * g.w, g.h + 2, g.d * 0.4]));
+    put(pw.on, poleTop(k), drop, 0.06);
   }
 
-  // ---- bubbles: above their asset, never on each other, never on the runway
-  spread(bubbles, [RUNWAY_BOX]);
+  // ---- bubbles: above their asset, never on each other, on other assets or
+  // on the runway, and always inside the (zoomed) view
+  spread(bubbles, keep, viewOf(z));
 
-  const lit = LIGHT[phase];
   return (
     <svg
       ref={svgRef}
@@ -405,7 +450,7 @@ export function Island({
         {float && (
           <g>
             <Plane model="float" x={spotOf(float.id).x} y={spotOf(float.id).y} rot={PLANE_ROT.p3} mood={dev.care} size={PLANE_SIZE.p3} service={float.health < 40} />
-            {tagged(float) && <path d={`M${DOCK.root[0] + 4} ${spotOf(float.id).y + 4}q10 8 22 2`} stroke="#e8d8b0" stroke-width="1.6" fill="none" />}
+            {tagged(float) && <path d={`M${DOCK.head[2] - 4} ${DOCK.head[1] + 2}q-6 -8 -${DOCK.head[2] - 4 - spotOf(float.id).x - 6} -14`} stroke="#e8d8b0" stroke-width="1.6" fill="none" />}
             {newIds.has('p3') && <Ribbon x={spotOf(float.id).x} y={spotOf(float.id).y - 8} />}
             {newIds.has('p3') && <NewBadge x={spotOf(float.id).x + 34} y={spotOf(float.id).y - 4} scale={bscale} motion={motion} />}
           </g>
@@ -426,16 +471,22 @@ export function Island({
             <FlyingPlane />
           </g>
         )}
-        {booked > 0 && <Walkers n={Math.min(2, booked)} motion={motion} />}
+        {booked > 0 && !storm && <Walkers n={Math.min(2, booked)} motion={motion} />}
         {!storm && sky}
-        {/* light of the hour */}
-        {lit.o > 0 && <rect x={-60} y={-60} width={W + 120} height={H + 120} fill={lit.fill} opacity={lit.o} pointer-events="none" />}
+        {/* the light of the hour */}
         {grade}
         {storm && sky}
         {stars}
         {/* light sources stay bright over the grade */}
         {pw.gridDown && grid && <Sparks from={bushing} motion={motion} night={night} />}
         {night && carrying && <circle cx={at('gen')[0] - 3} cy={at('gen')[1] - 29} r={9} fill="#6dff8e" opacity=".45" />}
+        {storm && !night && glows.length > 0 && (
+          <g pointer-events="none" opacity=".7">
+            {glows.map(([x, y, r], i) => (
+              <circle key={i} cx={x} cy={y} r={r} fill="url(#i-glow)" />
+            ))}
+          </g>
+        )}
         {night && (
           <g pointer-events="none">
             {glows.map(([x, y, r], i) => (
@@ -476,18 +527,6 @@ function Worn({ wear }: { wear: number }) {
     <g opacity={Math.min(0.85, 0.3 + wear * 0.8)}>
       <path d={DRY.map(([x, y, rx, ry], i) => curve(blob(x, y, rx, ry, i * 7 + 3, 7, 0.3))).join('')} fill="#c2b35e" />
       <path d={DRY.map(([x, y, rx], i) => `M${x - rx * 0.4} ${y + 2}l-2 -6M${x - rx * 0.3} ${y + 2}l2 -7M${x + rx * 0.3} ${y}l1 -6M${x + rx * 0.36} ${y}l-3 -5` + (i % 2 ? '' : `M${x} ${y - 3}l-1 -5`)).join('')} stroke="#8a7a3a" stroke-width="1.3" fill="none" />
-    </g>
-  );
-}
-
-function Smoke({ x, y, motion }: { x: number; y: number; motion: boolean }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <path d="M-5 0a6 6 0 1 0 .1 0M-9 -9a7 7 0 1 0 .1 0M-5 -19a6 6 0 1 0 .1 0" fill="#5d5956" opacity=".8" />
-      <g class={motion ? 'puff' : undefined}>
-        <circle cx={-4} cy={-26} r={7} fill="#7a7672" opacity=".7" />
-        <circle cx={2} cy={-34} r={5} fill="#9a9692" opacity=".55" />
-      </g>
     </g>
   );
 }
@@ -544,7 +583,8 @@ function Beam({ motion }: { motion: boolean }) {
   const [x, y] = SPOT.lighthouse;
   return (
     <g transform={`translate(${x} ${y - 56})`}>
-      <g class={motion ? 'beam' : undefined}>
+      {/* it sweeps the open sea (west and north) and goes dark over the lagoon and the island */}
+      <g class={motion ? 'beam' : undefined} transform={motion ? undefined : 'rotate(205)'}>
         <path d="M0 0L150 -26L150 26Z" fill="url(#i-beam)" />
       </g>
       <circle r={9} fill="url(#i-glow)" />

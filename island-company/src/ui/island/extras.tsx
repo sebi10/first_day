@@ -3,31 +3,52 @@
 import { DOCK, lin, P, SPOT, type Pt } from './geo';
 import { Saplings } from './flora';
 import { Dinghy, Yacht } from './craft';
-import { K, tones } from './paint';
+import { K, mix, tones } from './paint';
 import { box, hip, post } from './solid';
 
 const pt = (x: number, y: number, z: number) => P([x, y, z]).map((n) => Math.round(n * 10) / 10).join(' ');
 
+/** the floatplane jetty: a short plank stem from the beach to a T-head
+ *  landing lying across the water. Thin deck edges, piles and ripples along
+ *  the sunny south and east edges, two bollards, a shadow on the water. */
 export function Dock() {
-  const [ax, ay] = DOCK.root, [bx, by] = DOCK.tip;
-  const n = 9;
-  const posts = Array.from({ length: n }, (_, i) => {
-    const t = (i + 0.5) / n;
-    return [ax + (bx - ax) * t, ay + (by - ay) * t] as Pt;
-  });
+  const [ax, ay] = DOCK.root, [, by] = DOCK.tip;
+  const [x0, y0, x1, y1] = DOCK.head;
+  const hw = 6;
+  const stemPlanks = Array.from({ length: Math.floor((ay - by) / 3.4) }, (_, i) => `M${ax - hw + 0.8} ${ay - 2 - i * 3.4}h${2 * hw - 1.6}`).join('');
+  const headPlanks = Array.from({ length: Math.floor((x1 - x0) / 3.4) }, (_, i) => `M${x0 + 2 + i * 3.4} ${y0 + 0.8}v${y1 - y0 - 1.6}`).join('');
+  const piles: Pt[] = [
+    ...Array.from({ length: 5 }, (_, i) => [x0 + 4 + (i * (x1 - x0 - 8)) / 4, y1 + 2] as Pt),
+    [ax + hw, ay - 12], [ax + hw, by + 12], [x1, y0 + 6],
+  ];
   return (
     <g>
-      <path d={`M${ax + 4} ${ay + 8}L${bx + 8} ${by + 10}`} stroke="rgba(10,60,120,.25)" stroke-width="14" />
-      {posts.map(([x, y], i) => (
-        <path key={i} d={`M${x - 6} ${y + 6}v-8M${x + 7} ${y - 3}v-8`} stroke={K.woodDark} stroke-width="3" stroke-linecap="round" />
+      {/* shadow on the water */}
+      <path d={`M${x0 + 5} ${y0 + 5}H${x1 + 5}V${y1 + 5}H${ax + hw + 5}V${ay}H${ax - hw + 5}V${y1 + 5}H${x0 + 5}Z`} fill="rgba(10,60,120,.24)" />
+      {/* piles standing in the water, a ring of ripple round each */}
+      {piles.map(([x, y], i) => (
+        <g key={i}>
+          <ellipse cx={x + 1} cy={y + 4.4} rx={3.4} ry={1.2} fill="none" stroke="#fff" stroke-width=".9" opacity=".8" />
+          <path d={`M${x} ${y}v4.2`} stroke="#5a3a20" stroke-width="2.4" stroke-linecap="round" />
+        </g>
       ))}
-      <path d={`M${ax} ${ay}L${bx} ${by}`} stroke={K.woodDark} stroke-width="14" stroke-linecap="square" />
-      <path d={`M${ax} ${ay - 2}L${bx} ${by - 2}`} stroke={K.woodLight} stroke-width="12" stroke-dasharray="3.2 1.3" />
-      <path d={`M${bx - 4} ${by - 16}l16 4l-6 14l-16 -4z`} fill={K.woodDark} />
-      <path d={`M${bx - 4} ${by - 18}l16 4l-6 14l-16 -4z`} fill={K.woodLight} />
-      {/* bollards + a coil of rope */}
-      <path d={`M${bx + 8} ${by - 12}v-5M${bx - 3} ${by - 15}v-5`} stroke="#5a4636" stroke-width="3" stroke-linecap="round" />
-      <circle cx={bx + 2} cy={by - 6} r={2.6} fill="none" stroke="#e8d8b0" stroke-width="1.4" />
+      {/* the stem: a thin east edge, then the deck */}
+      <path d={`M${ax + hw} ${y1}V${ay}h1.6V${y1}Z`} fill={K.woodDark} />
+      <path d={`M${ax - hw} ${ay}V${y1}H${ax + hw}V${ay}Z`} fill={K.woodLight} />
+      <path d={stemPlanks} stroke={mix(K.woodLight, K.wood, 0.55)} stroke-width=".8" />
+      {/* the T-head, lying across the water: a thin south and east edge */}
+      <path d={`M${x0} ${y1}H${x1}v1.8H${x0}Z`} fill={K.woodDark} />
+      <path d={`M${x1} ${y0}v${y1 - y0 + 1.8}h1.6V${y0}Z`} fill={mix(K.woodDark, '#000', 0.15)} />
+      <path d={`M${x0} ${y0}H${x1}V${y1}H${x0}Z`} fill={K.woodLight} />
+      <path d={headPlanks} stroke={mix(K.woodLight, K.wood, 0.55)} stroke-width=".8" />
+      {/* two bollards and a coil of rope */}
+      {[[x0 + 4, y0 + 3], [x1 - 4, y0 + 3]].map(([x, y], i) => (
+        <g key={i}>
+          <path d={`M${x} ${y + 1.6}v-3`} stroke="#3e3a36" stroke-width="3.4" stroke-linecap="round" />
+          <circle cx={x} cy={y - 1.6} r={1.5} fill="#6b6560" />
+        </g>
+      ))}
+      <circle cx={x0 + 16} cy={(y0 + y1) / 2} r={2.4} fill="none" stroke="#e8d8b0" stroke-width="1.3" />
       {/* barrels and crates at the root */}
       <g transform={`translate(${ax - 18} ${ay - 2})`}>
         <ellipse cx={4} cy={2} rx={8} ry={2.5} fill={K.shadowSand} />
@@ -124,17 +145,21 @@ export function Lamp({ x, y }: { x: number; y: number }) {
 const GX = SPOT.grove.map((p) => p[0]), GY = SPOT.grove.map((p) => p[1]);
 const G0: [number, number] = [Math.min(...GX) - 14, Math.min(...GY) - 12], G1: [number, number] = [Math.max(...GX) + 14, Math.max(...GY) + 8];
 const FIELD = `M${G0[0] + 4} ${G0[1]}Q${(G0[0] + G1[0]) / 2} ${G0[1] - 6} ${G1[0]} ${G0[1] + 2}Q${G1[0] + 6} ${(G0[1] + G1[1]) / 2} ${G1[0] - 2} ${G1[1]}Q${(G0[0] + G1[0]) / 2} ${G1[1] + 6} ${G0[0]} ${G1[1] - 2}Q${G0[0] - 6} ${(G0[1] + G1[1]) / 2} ${G0[0] + 4} ${G0[1]}Z`;
-export function Grove() {
+/** the tilled plot: part of the ground, so the trees around it stand on top of it */
+export function GroveField() {
   const rows = Array.from({ length: Math.floor((G1[1] - G0[1] - 6) / 10) }, (_, i) => `M${G0[0] + 2} ${G0[1] + 8 + i * 10}h${G1[0] - G0[0] - 4}`).join('');
   return (
     <g>
-      <path d={FIELD} fill="#9a7a4a" opacity=".35" transform="translate(0 3)" />
+      <path d={FIELD} fill="#9a7a4a" transform="translate(0 3)" />
       <path d={FIELD} fill="#c29a62" />
       <path d={rows} stroke="#9e7440" stroke-width="2" fill="none" />
       <path d={FIELD} fill="none" stroke={K.grassDark} stroke-width="3" />
-      <Saplings pts={[...SPOT.grove].sort((a, b) => a[1] - b[1])} />
     </g>
   );
+}
+/** the saplings in their neat grid (y-sorted with everything else) */
+export function Grove() {
+  return <Saplings pts={[...SPOT.grove].sort((a, b) => a[1] - b[1])} />;
 }
 
 export function FishingBoats() {
@@ -157,6 +182,17 @@ function Umbrella({ x, y, c }: { x: number; y: number; c: string }) {
     </g>
   );
 }
+/** a beach umbrella folded up against the weather */
+function Furled({ x, y, c }: { x: number; y: number; c: string }) {
+  return (
+    <g transform={`translate(${x} ${y})`}>
+      <ellipse cx={3} cy={1} rx={5} ry={1.8} fill={K.shadowSand} />
+      <path d="M0 0V-20" stroke="#8a6a4a" stroke-width="1.4" />
+      <path d="M-2.6 -8L0 -22L2.6 -8Z" fill={c} />
+      <path d="M-2 -11h4" stroke="#fff" stroke-width="1" opacity=".7" />
+    </g>
+  );
+}
 function Lounger({ x, y, c }: { x: number; y: number; c: string }) {
   return (
     <g transform={`translate(${x} ${y})`}>
@@ -166,7 +202,7 @@ function Lounger({ x, y, c }: { x: number; y: number; c: string }) {
   );
 }
 
-export function BeachBar() {
+export function BeachBar({ closed }: { closed?: boolean }) {
   const [x, y] = SPOT.bar;
   const w = 16, d = 16, h = 13;
   const r = hip(-w, w, h, 0, d, 13, 6, 8);
@@ -174,11 +210,20 @@ export function BeachBar() {
   const posts = [post(-w, 0, h), post(w, 0, h), post(-w, d, h), post(w, d, h)].join('');
   return (
     <g>
-      <Umbrella x={x - 46} y={y + 12} c="#ff6fa8" />
-      <Umbrella x={x + 50} y={y + 10} c="#3a8ee6" />
-      <Lounger x={x - 66} y={y + 14} c="#ff6fa8" />
-      <Lounger x={x + 30} y={y + 14} c="#3a8ee6" />
-      <Lounger x={x + 70} y={y + 12} c={K.yellow} />
+      {closed ? (
+        <>
+          <Furled x={x - 40} y={y + 12} c="#ff6fa8" />
+          <Furled x={x + 44} y={y + 10} c="#3a8ee6" />
+        </>
+      ) : (
+        <>
+          <Umbrella x={x - 46} y={y + 12} c="#ff6fa8" />
+          <Umbrella x={x + 50} y={y + 10} c="#3a8ee6" />
+          <Lounger x={x - 66} y={y + 14} c="#ff6fa8" />
+          <Lounger x={x + 30} y={y + 14} c="#3a8ee6" />
+          <Lounger x={x + 70} y={y + 12} c={K.yellow} />
+        </>
+      )}
       <g transform={`translate(${x} ${y})`}>
         <path d={`M${pt(-w, 0, 0)}L${pt(w + 12, 0, 0)}L${pt(w + 12, 0, d)}L${pt(-w, 0, d)}Z`} fill={K.shadowSand} />
         <path d={posts} stroke={K.woodDark} stroke-width="2.6" />
@@ -218,7 +263,7 @@ export function Fountain({ motion }: { motion: boolean }) {
   );
 }
 
-function Stall({ x, y, c, goods }: { x: number; y: number; c: string; goods: string }) {
+function Stall({ x, y, c, goods, closed }: { x: number; y: number; c: string; goods: string; closed?: boolean }) {
   const b = box(-11, 11, 0, 7, 0, 10);
   const t = tones(c);
   const canopy = Array.from({ length: 4 }, (_, i) => {
@@ -232,7 +277,16 @@ function Stall({ x, y, c, goods }: { x: number; y: number; c: string; goods: str
       <path d={b.side} fill={K.woodDark} />
       <path d={b.front} fill={K.wood} />
       <path d={b.top} fill={K.woodLight} />
-      <path d={`M${pt(-8, 7, 4)}a2.2 1.4 0 1 0 .1 0M${pt(-2, 7, 5)}a2.2 1.4 0 1 0 .1 0M${pt(4, 7, 4)}a2.2 1.4 0 1 0 .1 0M${pt(9, 7, 5)}a2 1.3 0 1 0 .1 0`} fill={goods} />
+      {closed ? (
+        // packed away under a tied tarp
+        <>
+          <path d={`M${pt(-12, 7, -1)}L${pt(12, 7, -1)}L${pt(12, 7, 11)}L${pt(-12, 7, 11)}Z`} fill="#6d8a8c" />
+          <path d={`M${pt(-12, 7, -1)}L${pt(12, 7, -1)}L${pt(12, 2, -1)}L${pt(-12, 2, -1)}Z`} fill="#56706f" />
+          <path d={`M${pt(-5, 7, -1)}v5M${pt(5, 7, -1)}v5`} stroke="#e8d8b0" stroke-width="1" />
+        </>
+      ) : (
+        <path d={`M${pt(-8, 7, 4)}a2.2 1.4 0 1 0 .1 0M${pt(-2, 7, 5)}a2.2 1.4 0 1 0 .1 0M${pt(4, 7, 4)}a2.2 1.4 0 1 0 .1 0M${pt(9, 7, 5)}a2 1.3 0 1 0 .1 0`} fill={goods} />
+      )}
       {canopy.map((s, i) => (
         <path key={i} d={s.d} fill={s.c} />
       ))}
@@ -240,13 +294,13 @@ function Stall({ x, y, c, goods }: { x: number; y: number; c: string; goods: str
     </g>
   );
 }
-export function Market() {
+export function Market({ closed }: { closed?: boolean }) {
   const [[ax, ay], [bx, by], [cx, cy]] = SPOT.market;
   return (
     <g>
-      <Stall x={ax} y={ay} c="#3a8ee6" goods={K.orange} />
-      <Stall x={bx} y={by} c="#4caf50" goods={K.yellow} />
-      <Stall x={cx} y={cy} c="#a77be0" goods="#ff6fa8" />
+      <Stall x={ax} y={ay} c="#3a8ee6" goods={K.orange} closed={closed} />
+      <Stall x={bx} y={by} c="#4caf50" goods={K.yellow} closed={closed} />
+      <Stall x={cx} y={cy} c="#a77be0" goods="#ff6fa8" closed={closed} />
     </g>
   );
 }

@@ -6,12 +6,14 @@
 // the runway) while every pointer keeps aiming at its asset.
 import { K } from './paint';
 
-export type Icon = 'wrench' | 'cone' | 'tag' | 'clipboard' | 'bolt-off' | 'bolt' | 'flame' | 'cash' | 'warn';
-export type Tone = 'alert' | 'warn';
+export type Icon = 'wrench' | 'cone' | 'noentry' | 'broken' | 'clipboard' | 'bolt-off' | 'bolt' | 'cash' | 'warn';
+/** alert = out of service, warn = needs attention soon, ok = running on backup (information only) */
+export type Tone = 'alert' | 'warn' | 'ok';
 
 const TONE = {
   alert: { body: K.rust, base: K.rustDark, ink: '#ffffff', sub: K.rust },
   warn: { body: '#ffd23f', base: '#c79512', ink: K.ink, sub: '#ffd23f' },
+  ok: { body: '#2f9e5a', base: '#1d6b3b', ink: '#ffffff', sub: '#2f9e5a' },
 };
 
 function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
@@ -32,21 +34,29 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
           <path d="M-9 6.5h18" stroke={ink} stroke-width="3" stroke-linecap="round" />
         </g>
       );
-    case 'tag':
+    case 'noentry':
+      // closed on purpose (red-tagged): a no-entry sign
       return (
-        <g transform="rotate(-24)">
-          <path d="M-10 -6.5h12l7 6.5l-7 6.5h-12z" fill={ink} />
-          <circle cx={3} cy={0} r={2.3} fill={sub} />
-          <path d="M-7 -2.2h6M-7 2.2h6" stroke={sub} stroke-width="1.8" stroke-linecap="round" />
+        <g>
+          <circle r={10.6} fill={ink} />
+          <rect x={-7} y={-2.6} width={14} height={5.2} rx={1.4} fill={sub} />
+        </g>
+      );
+    case 'broken':
+      // closed because it is falling apart: a house split by a crack
+      return (
+        <g>
+          <path d="M-11 -0.5L0 -10.5L11 -0.5H8V10H-8V-0.5Z" fill={ink} stroke={ink} stroke-width="1.2" stroke-linejoin="round" />
+          <path d="M1.5 -9.5L-2.2 -3.2L2.6 0.8L-1.8 5.4L1 10.5" stroke={sub} stroke-width="2.4" fill="none" stroke-linejoin="round" />
         </g>
       );
     case 'clipboard':
+      // inspection lapsed: a checklist struck through
       return (
         <g>
-          <rect x={-7} y={-8} width={14} height={17} rx={2} fill={ink} />
-          <rect x={-3.5} y={-10} width={7} height={4} rx={1.2} fill={ink} stroke={sub} stroke-width="1.2" />
-          <path d="M-4 -2h8M-4 1.5h8" stroke={sub} stroke-width="1.6" />
-          <path d="M1 4.2l4.4 4.4M5.4 4.2l-4.4 4.4" stroke={sub} stroke-width="1.8" stroke-linecap="round" />
+          <rect x={-8.5} y={-9.5} width={17} height={20} rx={2.4} fill={ink} />
+          <rect x={-4} y={-11.6} width={8} height={4.4} rx={1.4} fill={sub} stroke={ink} stroke-width="1.4" />
+          <path d="M-4.4 -1.4L4.4 7.4M4.4 -1.4L-4.4 7.4" stroke={sub} stroke-width="3" stroke-linecap="round" />
         </g>
       );
     case 'bolt-off':
@@ -59,13 +69,6 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
       );
     case 'bolt':
       return <path d="M2.5 -11L-7 1.5H-0.5L-3 11L7 -1.5H0.5Z" fill={ink} />;
-    case 'flame':
-      return (
-        <g>
-          <path d="M0 -11C4 -6 8 -3 7 3C6 8 2 10 0 10C-3 10 -7 8 -7 3C-7 -1 -4 -3 -3 -7C-2 -4 -1 -3 0 -2C1 -5 1 -8 0 -11Z" fill={ink} />
-          <path d="M0 1C2 3 3 5 2 7C1 8.5 -1 8.5 -2 7C-3 5 -1 3 0 1Z" fill={sub} />
-        </g>
-      );
     case 'cash':
       // a coin running low: a coin with a down arrow
       return (
@@ -89,15 +92,29 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
 /** body size in local units (before scale) */
 const BW = 46, BH = 34, TIP = 3;
 export const bubbleK = (scale: number, small?: boolean) => scale * (small ? 0.88 : 1.1);
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/** (x, y) = where the pointer touches the asset (its top); (dx, dy) nudges the body */
+/** (x, y) = where the pointer touches the asset; (dx, dy) moves the body. The
+ *  tail leaves the body on the side that faces the asset, so a bubble that
+ *  had to slide aside keeps an angled tail back to what it is about. */
 export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 0, dy = 0, delay = 0 }: { x: number; y: number; icon: Icon; tone?: Tone; small?: boolean; scale: number; motion: boolean; dx?: number; dy?: number; delay?: number }) {
   const t = TONE[tone];
   const k = bubbleK(scale, small);
   const bx = Math.round((dx / k) * 10) / 10, by = Math.round((dy / k) * 10) / 10;
   const top = by - TIP - 9 - BH, bot = by - TIP - 9;
-  const body = `M${bx - 11} ${top}H${bx + 11}A12 12 0 0 1 ${bx + 23} ${top + 12}V${bot - 12}A12 12 0 0 1 ${bx + 11} ${bot}H${bx - 11}A12 12 0 0 1 ${bx - 23} ${bot - 12}V${top + 12}A12 12 0 0 1 ${bx - 11} ${top}Z`;
-  const ptr = `M${bx - 7} ${bot}L0 ${-TIP}L${bx + 7} ${bot}Z`;
+  const l = bx - BW / 2, r = bx + BW / 2;
+  const body = `M${bx - 11} ${top}H${bx + 11}A12 12 0 0 1 ${r} ${top + 12}V${bot - 12}A12 12 0 0 1 ${bx + 11} ${bot}H${bx - 11}A12 12 0 0 1 ${l} ${bot - 12}V${top + 12}A12 12 0 0 1 ${bx - 11} ${top}Z`;
+  let ptr: string;
+  if (-TIP >= bot + 2 || (0 >= l + 4 && 0 <= r - 4)) {
+    // the asset is below: the tail hangs from the bottom edge
+    const c = clamp(0, bx - 11, bx + 11);
+    ptr = `M${c - 7} ${bot - 1}L0 ${-TIP}L${c + 7} ${bot - 1}Z`;
+  } else {
+    // the asset is beside the body: the tail leaves the facing side
+    const side = 0 < bx ? l + 1 : r - 1;
+    const c = clamp(-TIP, top + 12, bot - 9);
+    ptr = `M${side} ${c - 6}L0 ${-TIP}L${side} ${c + 6}Z`;
+  }
   return (
     <g transform={`translate(${Math.round(x)} ${Math.round(y)})`}>
       <g class="bub-scale" style={{ transform: `scale(${k})` }}>
@@ -116,53 +133,60 @@ export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 
   );
 }
 
-export type Placed = { x: number; y: number; k: number; dx: number; dy: number };
-type Rect = [number, number, number, number];
-/** Relaxation: push overlapping bubble bodies apart, never down onto their
- *  asset, and out of the keep-out rects (the runway markings, the map edge). */
-export function spread<T extends Placed>(bs: T[], keepOut: Rect[] = [], view: Rect = [0, 0, 800, 600]) {
-  const box = (b: T): Rect => {
-    const w = (BW + 8) * b.k, h = (BH + 12) * b.k;
-    const cx = b.x + b.dx, cy = b.y + b.dy - (TIP + 9 + BH / 2) * b.k;
+export type Rect = [number, number, number, number];
+/** a footprint bubbles keep off; `owner` = the asset it belongs to (its own bubble may sit on it) */
+export type KeepOut = { r: Rect; owner?: string };
+/** (dx, dy) is the preferred offset on the way in; `fixed` bubbles stay put and the others avoid them */
+export type Placed = { x: number; y: number; k: number; dx: number; dy: number; owner?: string; fixed?: boolean };
+
+/** body offsets to try, in units of the bubble's scale: up to 60 aside and
+ *  64 up, nearest (sideways counts 1.25x) first */
+const OFFSETS: [number, number, number][] = (() => {
+  const o: [number, number, number][] = [];
+  for (let oy = 0; oy <= 64; oy += 3) for (let ox = -60; ox <= 60; ox += 3) o.push([ox, oy, Math.abs(ox) * 1.25 + oy]);
+  return o.sort((a, b) => a[2] - b[2]);
+})();
+const area = (a: Rect, b: Rect) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+
+/** Place every bubble body: as close to its preferred spot as it can get
+ *  while staying off the other bubbles, off every other asset and the runway
+ *  (keep-outs) and inside the view. A small exhaustive search per bubble
+ *  (a few hundred candidate offsets), two rounds, deterministic. */
+export function spread<T extends Placed>(bs: T[], keepOut: KeepOut[] = [], view: Rect = [0, 0, 800, 600]) {
+  const boxAt = (b: T, dx: number, dy: number): Rect => {
+    const w = (BW + 8) * b.k, h = (BH + 10) * b.k;
+    const cx = b.x + dx, cy = b.y + dy - (TIP + 9 + BH / 2) * b.k;
     return [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
   };
-  for (let pass = 0; pass < 12; pass++) {
-    let moved = false;
-    for (let i = 0; i < bs.length; i++)
-      for (let j = i + 1; j < bs.length; j++) {
-        const a = box(bs[i]), b = box(bs[j]);
-        const ox = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
-        const oy = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
-        if (ox <= 0 || oy <= 0) continue;
-        moved = true;
-        const acx = (a[0] + a[2]) / 2, bcx = (b[0] + b[2]) / 2, acy = (a[1] + a[3]) / 2, bcy = (b[1] + b[3]) / 2;
-        if (ox < oy * 1.3) {
-          const s = (acx <= bcx ? -1 : 1) * (ox / 2 + 0.5);
-          bs[i].dx += s;
-          bs[j].dx -= s;
-        } else {
-          // the higher one goes further up; nobody goes down
-          if (acy <= bcy) bs[i].dy -= oy + 0.5;
-          else bs[j].dy -= oy + 0.5;
+  const pref = bs.map((b) => [b.dx, b.dy] as const);
+  const order = bs.map((_, i) => i).sort((i, j) => Number(!!bs[j].fixed) - Number(!!bs[i].fixed) || bs[i].y - bs[j].y);
+  for (let round = 0; round < 2; round++)
+    for (const i of order) {
+      const b = bs[i];
+      if (b.fixed) continue;
+      const [px, py] = pref[i];
+      const k2 = b.k * b.k;
+      let best = Infinity, bx = b.dx, by = b.dy;
+      // candidates nearest first, so the search stops as soon as moving any
+      // further would cost more than the best spot found so far
+      for (const [ox, oy, d] of OFFSETS) {
+        const move = d * 3 * b.k;
+        if (move >= best) break;
+        const dx = px + ox * b.k, dy = py - oy * b.k;
+        const q = boxAt(b, dx, dy);
+        let cost = move;
+        for (let j = 0; j < keepOut.length && cost < best; j++) {
+          const ko = keepOut[j];
+          if (ko.owner === undefined || ko.owner !== b.owner) cost += area(q, ko.r) / k2;
         }
+        for (let j = 0; j < bs.length && cost < best; j++) if (j !== i) cost += (2.5 * area(q, boxAt(bs[j], bs[j].dx, bs[j].dy))) / k2;
+        const out = Math.max(0, view[0] + 2 - q[0]) + Math.max(0, q[2] - view[2] + 2) + Math.max(0, view[1] + 2 - q[1]);
+        cost += (out * 60) / b.k;
+        if (cost < best) (best = cost), (bx = dx), (by = dy);
       }
-    for (const b of bs) {
-      for (const r of keepOut) {
-        const q = box(b);
-        if (q[2] > r[0] && q[0] < r[2] && q[3] > r[1] && q[1] < r[3]) {
-          b.dy -= q[3] - r[1] + 1;
-          moved = true;
-        }
-      }
-      const q = box(b);
-      if (q[0] < view[0] + 2) b.dx += view[0] + 2 - q[0];
-      if (q[2] > view[2] - 2) b.dx -= q[2] - view[2] + 2;
-      if (q[1] < view[1] + 2) b.dy += view[1] + 2 - q[1];
-      b.dx = Math.max(-44, Math.min(44, b.dx));
-      b.dy = Math.max(-60, Math.min(0, b.dy));
+      b.dx = bx;
+      b.dy = by;
     }
-    if (!moved) break;
-  }
   return bs;
 }
 

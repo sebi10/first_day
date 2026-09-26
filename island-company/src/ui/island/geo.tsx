@@ -140,6 +140,8 @@ export const RIVER: Pt[] = [
   [534, 238], [522, 268], [527, 304], [513, 346], [510, 390], [516, 432], [526, 474], [527, 510], [523, 552],
 ];
 export const RIVER_S = sample(RIVER, false, 6);
+/** where the river reaches the plateau's south lip and spills over it */
+export const MOUTH: Pt = [527, 504];
 
 export const RUNWAY = { a: [112, 441] as Pt, b: [378, 427] as Pt, w: 36 };
 export const RUNWAY_ANGLE = (Math.atan2(RUNWAY.b[1] - RUNWAY.a[1], RUNWAY.b[0] - RUNWAY.a[0]) * 180) / Math.PI;
@@ -169,20 +171,22 @@ export const POS: Record<string, Pt> = {
   h6: [602, 462],
   h7: [656, 190],
   g1: [474, 398],
-  gen: [466, 474],
+  gen: [462, 478],
   hangar: HANGAR,
   office: OFFICE,
 };
 
 /** where each plane is worked on when it is AOG: every plane has its own spot */
 export const AOG_SPOT: Record<string, Pt> = {
-  p1: [142, 340], // on jacks in the hangar mouth
+  p1: [160, 346], // on jacks on the apron, just out of the hangar mouth
   p2: [300, 340], // on jacks on its own stand
   p3: [222, 128], // at its mooring, cowling open, mechanic on the dock
 };
 
-/** the floatplane dock in the lagoon (tier 4): shore end, running north */
-export const DOCK = { root: [190, 190] as Pt, tip: [186, 132] as Pt };
+/** the floatplane jetty in the lagoon (tier 4): a short stem from the beach
+ *  north to a T-head landing that lies across the water (x0..x1, y0..y1);
+ *  the floatplane moors against the head's north edge */
+export const DOCK = { root: [192, 192] as Pt, tip: [192, 160] as Pt, head: [164, 148, 232, 160] as [number, number, number, number] };
 
 /** dirt paths, stone once the island is paved (the paved-paths flourish) */
 export type PathDef = { pts: Pt[]; tier: number; w?: number; steps?: boolean };
@@ -214,20 +218,32 @@ export const BRIDGES: { at: Pt; rot: number; len: number }[] = [
 export type Box = [number, number, number, number];
 /** zoom boxes per role [x0, y0, x1, y1]; the view frames the box at 4:3 */
 export function focusBox(role: Role, tier: number): Box {
-  if (role === 'mech') return tier >= 4 ? [60, 100, 400, 472] : [64, 214, 396, 472];
-  if (role === 'fin') return [320, 168, 520, 384];
-  return tier >= 5 ? [430, 100, 756, 506] : tier >= 4 ? [430, 222, 756, 512] : [430, 222, 744, 500];
+  // tall enough that the bubbles above the top-most asset (the floatplane,
+  // the lodge, the first cottage row) stay inside the view
+  if (role === 'mech') return tier >= 4 ? [60, 44, 400, 472] : [64, 206, 396, 472];
+  if (role === 'fin') return [320, 160, 520, 384];
+  return tier >= 5 ? [430, 60, 756, 506] : tier >= 4 ? [430, 190, 756, 512] : [430, 194, 744, 500];
 }
 /** the zoom factor that frames a box at the map's 4:3 */
 export const zoomK = (b: Box | null) => (b ? Math.min(3.2, W / Math.max(b[2] - b[0], ((b[3] - b[1]) * W) / H)) : 1);
+/** the view's centre for a box, clamped to the map */
+function viewCentre(b: Box, k: number): Pt {
+  const hw = W / 2 / k, hh = H / 2 / k;
+  return [Math.max(hw, Math.min(W - hw, (b[0] + b[2]) / 2)), Math.max(hh, Math.min(H - hh, (b[1] + b[3]) / 2))];
+}
 /** view transform (CSS) that frames a box, clamped to the map */
 export function zoomOf(b: Box | null) {
   if (!b) return 'none';
   const k = zoomK(b);
-  const hw = W / 2 / k, hh = H / 2 / k;
-  const cx = Math.max(hw, Math.min(W - hw, (b[0] + b[2]) / 2));
-  const cy = Math.max(hh, Math.min(H - hh, (b[1] + b[3]) / 2));
+  const [cx, cy] = viewCentre(b, k);
   return `translate(${f1(W / 2 - cx * k)}px, ${f1(H / 2 - cy * k)}px) scale(${Math.round(k * 1000) / 1000})`;
+}
+/** the part of the map that is on screen for a box (the whole map unzoomed) */
+export function viewOf(b: Box | null): Box {
+  if (!b) return [0, 0, W, H];
+  const k = zoomK(b);
+  const [cx, cy] = viewCentre(b, k);
+  return [cx - W / 2 / k, cy - H / 2 / k, cx + W / 2 / k, cy + H / 2 / k];
 }
 
 /** flourish spots (growth.ts), placed clear of every asset and path */

@@ -17,7 +17,7 @@ function parts(m: PlaneModel) {
   return { fus, wing, tail, len, fw, span };
 }
 
-export function Plane({ model, x, y, rot, jacks, service, chocks, flying, mood = 1, size = 1 }: { model: PlaneModel; x: number; y: number; rot: number; jacks?: boolean; service?: boolean; chocks?: boolean; flying?: boolean; mood?: number; size?: number }) {
+export function Plane({ model, x, y, rot, jacks, service, chocks, flying, covered, mood = 1, size = 1 }: { model: PlaneModel; x: number; y: number; rot: number; jacks?: boolean; service?: boolean; chocks?: boolean; flying?: boolean; covered?: boolean; mood?: number; size?: number }) {
   const p = parts(model);
   const liv = LIVERY[model];
   const body = mood < 1 ? '#e9e6de' : '#fbfbf7';
@@ -44,6 +44,9 @@ export function Plane({ model, x, y, rot, jacks, service, chocks, flying, mood =
         <path d={`M${p.len * 0.5} ${-p.fw * 0.7}q${p.fw * 1.3} ${p.fw * 0.7} 0 ${p.fw * 1.4}z`} fill="#2d4d66" />
         {model !== 'twin' && !open && <path d={`M${p.len + 1} -6v12`} stroke="#7d868c" stroke-width="1.8" stroke-linecap="round" opacity=".75" />}
         {open && model !== 'twin' && <path d={`M${p.len * 0.55} ${-p.fw}h${p.len * 0.45}v${p.fw * 2}h${-p.len * 0.45}z`} fill="#56606a" />}
+        {/* tied down for the storm: a canvas cover over the cockpit, ropes from the wingtips */}
+        {covered && <path d={`M${p.len * 0.3} ${-p.fw - 1}h${p.len * 0.5}q3 0 3 ${p.fw + 1}q0 ${p.fw + 1} -3 ${p.fw + 1}h${-p.len * 0.5}z`} fill="#8c9a78" stroke="#5f6b50" stroke-width=".8" />}
+        {covered && <path d={`M3 ${-p.span}l-5 -7M3 ${p.span}l-5 7M${-p.len + 3} -10l-4 -5M${-p.len + 3} 10l-4 5`} stroke="#e8d8b0" stroke-width="1.2" stroke-linecap="round" />}
       </g>
       {jacks && (
         <g fill="#f2c230" stroke="#6d5a1c" stroke-width=".6">
