@@ -8,7 +8,7 @@ import { hashSeed } from '../sim/rng';
 import { toolsFor } from '../sim/progression';
 import { tierDef } from '../sim/econ';
 import { nextTierProgress } from '../sim/progression';
-import { ROLES, type Grade, type IslandState, type Role, type WeekReport } from '../sim/types';
+import { ROLES, type Grade, type Incident, type IslandState, type ReportLine, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
 import { Btn, Icon, Seg, TierDots, usd } from './kit';
 import { CrewBoard } from './crewboard';
@@ -190,8 +190,13 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
     { k: 'On-time flights', g: r.components.flights, v: `${r.flightsFlown}/${r.flightsScheduled}`, sub: `${Math.round((r.flightsFlown / Math.max(1, r.flightsScheduled)) * 100)}%`, w: '30%' },
     { k: 'Safety', g: r.components.safety, v: `${r.incidents.length}`, sub: `incidents${r.nearMisses ? ` · ${r.nearMisses} near-miss` : ''}`, w: '30%' },
   ];
-  const bad = r.lines.filter((l) => l.tone === 'bad');
-  const rest = r.lines.filter((l) => l.tone !== 'bad');
+  // blind sign-offs coming back: failures traced to the job, and what inspections caught first
+  const defects = r.incidents.filter((i) => i.kind === 'defect');
+  const traced = new Map<Incident, ReportLine | undefined>(defects.map((i) => [i, r.lines.find((l) => l.text.startsWith(`${i.title}: traced to `))]));
+  const caught = r.lines.filter((l) => l.tone === 'good' && l.text.endsWith('caught before it failed.'));
+  const shown = new Set<ReportLine>([...traced.values(), ...caught].filter((l): l is ReportLine => !!l));
+  const bad = r.lines.filter((l) => l.tone === 'bad' && !shown.has(l));
+  const rest = r.lines.filter((l) => l.tone !== 'bad' && !shown.has(l));
   return (
     <div class="overlay" role="dialog" aria-label={`Week ${r.week} review`}>
       <div class="overlay-inner" style={{ overflow: 'auto' }}>
@@ -240,6 +245,45 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               <span class="label">The island keeps running. Chase the next streak.</span>
             </div>
           )}
+          {(defects.length > 0 || caught.length > 0) && (
+            <div class="card col" style={{ gap: 12, borderTop: `6px solid ${defects.length ? C.rust : C.palm}` }}>
+              <div class="col" style={{ gap: 2 }}>
+                <h3>Earlier sign-offs</h3>
+                <span class="label">No verdict on the day: this is where signed-off work shows up.</span>
+              </div>
+              {defects.map((i, k) => {
+                const line = traced.get(i);
+                const to = line ? line.text.slice(line.text.indexOf(': traced to ') + ': traced to '.length) : i.from ? `${i.from.title}, signed off by ${i.from.name} in week ${i.from.week}.` : '';
+                return (
+                  <div class="col" key={`d${k}`} style={{ gap: 4 }}>
+                    <span class="row wrap" style={{ gap: 6 }}>
+                      <span class="chip rust">Incident</span>
+                      <span class="label">
+                        {ROLE_LABEL[i.role]} · −{usd(i.cost)} before insurance
+                      </span>
+                    </span>
+                    <b style={{ lineHeight: 1.3 }}>{i.title}</b>
+                    {to && (
+                      <span style={{ lineHeight: 1.35 }}>
+                        <span class="label">Traced to </span>
+                        {to}
+                      </span>
+                    )}
+                    <span class="label">Repair written up for the analyst, then the original job gets redone.</span>
+                  </div>
+                );
+              })}
+              {caught.map((l, k) => (
+                <div class="col" key={`c${k}`} style={{ gap: 4 }}>
+                  <span class="row wrap" style={{ gap: 6 }}>
+                    <span class="chip palm">Caught</span>
+                    {l.role !== 'all' && <span class="label">{ROLE_LABEL[l.role]}</span>}
+                  </span>
+                  <span style={{ lineHeight: 1.35 }}>{l.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div class="card col" style={{ gap: 6 }}>
             <h3>What moved it</h3>
             {[...bad, ...rest].slice(0, 9).map((l, i) => (
@@ -252,6 +296,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               </div>
             ))}
             {r.lines.length === 0 && <span class="muted">A clean, quiet week.</span>}
+            {r.lines.length > 0 && bad.length + rest.length === 0 && <span class="muted">Nothing else of note.</span>}
           </div>
           <div class="card col" style={{ gap: 6 }}>
             <h3>MVP lines</h3>
@@ -274,6 +319,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               Fixed {usd(r.costs.fixed)} · insurance {usd(r.costs.insurance)} · leakage {usd(r.costs.leak)} · incidents {usd(r.costs.incidents)} · refunds{' '}
               {usd(r.costs.refunds)}
               {r.costs.loan ? ` · loan ${usd(r.costs.loan)}` : ''}
+              {r.costs.reports ? ` · open reports ${usd(r.costs.reports)}` : ''}
             </span>
             <span class="label num">Incident roll seed {r.seed} — every outcome is replayable.</span>
           </div>
@@ -367,7 +413,7 @@ function Challenge({ ctl }: { ctl: Ctl }) {
         );
       })}
       <span class="label">
-        <TierDots tier={tier} /> Scores reset each week. Your own jobs count toward personal bests too.
+        <TierDots tier={tier} /> Scores reset each week. Your own jobs count toward personal bests too, except blind sign-offs.
       </span>
       {play && (
         <PuzzleHost

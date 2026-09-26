@@ -624,7 +624,8 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, ...(blind ? { blind: true } : { summary: a.summary }) };
   turn.done += 1;
   if (a.perfect && !covered && player.perfects < 15) player.perfects += 1;
-  player.best = { ...(player.best ?? {}), [o.puzzle]: Math.max(player.best?.[o.puzzle] ?? 0, clamp(a.score, 0, 1)) };
+  // a blind sign-off's score stays hidden: a new personal best would give it away
+  if (!blind) player.best = { ...(player.best ?? {}), [o.puzzle]: Math.max(player.best?.[o.puzzle] ?? 0, clamp(a.score, 0, 1)) };
   gainXp(s, a.role, Math.round(orderXp(o.tier, cr, a.perfect) * (covered ? 0.5 : 1)));
 
   const asset = assetOf(s, o);

@@ -132,6 +132,16 @@ describe('blind sign-off', () => {
     expect(lastReport(s).mvp.mech).not.toMatch(/Prop bolt re-torque \d+%/);
     expect(lastReport(s).mvp.mech).toMatch(/1 signed off/);
   });
+
+  it('a blind sign-off never sets a personal best (a new best would give the score away)', () => {
+    const s = started();
+    const before = s.players.mech!.best?.torque;
+    const o = addOrder(s, { role: 'mech', kind: 'prop', puzzle: 'torque', assetId: 'p1', tier: 2, cost: 280, gain: 12 });
+    const r = complete(s, 'mech', o, 0.97);
+    expect(r.s.players.mech!.best?.torque).toBe(before);
+    const t1 = addOrder(s, { role: 'mech', kind: 'prop', puzzle: 'torque', assetId: 'p1', tier: 1, cost: 280, gain: 12 });
+    expect(complete(s, 'mech', t1, 0.97).s.players.mech!.best?.torque).toBe(0.97);
+  });
 });
 
 describe('hidden defects', () => {

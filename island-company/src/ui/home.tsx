@@ -16,7 +16,7 @@ import { Island } from './island';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
-import { blocks, launchFor, mateStatus, teamNumbers } from './select';
+import { blocks, capNow, launchFor, mateStatus, teamNumbers } from './select';
 import { settings } from './settings';
 import { shareText } from './share';
 import { C, ROLE_TINT } from './theme';
@@ -360,6 +360,8 @@ export function CrewProject({ ctl, onPlay }: { ctl: Ctl; onPlay?(o: Order): void
   if (!p) return null;
   const parts = ROLES.map((r) => ({ r, o: s.orders.find((x) => x.id === p.orders[r]) }));
   const mine = parts.find((x) => x.r === role)?.o;
+  // the same per-turn limits as any other job: grid down (hangar), or a crewmate's unfixed report
+  const held = !!role && ((role === 'mech' && powered(s).gridDown && (s.turns.mech?.done ?? 0) >= 1) || !!capNow(s, role)?.full);
   return (
     <div class="card col" style={{ gap: 10, borderTop: `6px solid ${C.palm}` }}>
       <span class="chip palm" style={{ alignSelf: 'flex-start' }}>
@@ -376,16 +378,23 @@ export function CrewProject({ ctl, onPlay }: { ctl: Ctl; onPlay?(o: Order): void
             <div class="label">{s.players[r]?.name ?? ROLE_LABEL[r]}</div>
           </span>
           {o?.status === 'done' ? (
-            <b style={{ color: C.palm }}>✓ {Math.round((o.result?.score ?? 0) * 100)}%</b>
+            o.result?.blind ? (
+              <b style={{ color: C.inkSoft, fontSize: 14, whiteSpace: 'nowrap' }}>✓ Signed off</b>
+            ) : (
+              <b style={{ color: C.palm }}>✓ {Math.round((o.result?.score ?? 0) * 100)}%</b>
+            )
           ) : (
             <span class="label">to do</span>
           )}
         </div>
       ))}
-      {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && (
+      {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && !held && (
         <Btn block onClick={() => onPlay(mine)}>
           Do your part ▸
         </Btn>
+      )}
+      {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && held && (
+        <span class="label fault">You've hit this turn's job limit: your part waits for next turn.</span>
       )}
       <span class="label">
         Tier {p.tier} opens the moment all three are done. Each of you does your own part: autopilot and lend-a-hand can't. New buildings start at 60–90 health, set by
@@ -452,7 +461,7 @@ function Dock({
   const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   const ready = readyList.length;
   const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week).length : 0;
-  const gridCapped = r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1;
+  const gridCapped = (r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1) || !!capNow(s, r)?.full;
   // the next useful thing, always under the thumb
   const next: { label: string; go(): void } | null = turn?.ended
     ? null

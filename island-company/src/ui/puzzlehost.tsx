@@ -4,12 +4,16 @@
 //  - The clock starts on your first touch, never while you're reading.
 //  - Back (before you touch anything) leaves the job untouched.
 //  - Handing in early asks first; one attempt per job, as always.
+//  - Blind sign-off (a real job at puzzle tier 2+): no verdict. Wrong input
+//    sounds like any other tap, the finished job is sealed (no end-of-puzzle
+//    reveal), and the card says "Signed off". The true score still goes to the
+//    engine; how good it was shows up later.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PUZZLES } from '../puzzles';
 import { markInput, suspendLoops } from '../puzzles/kit';
 import { PASS, type PuzzleContext, type PuzzleId, type PuzzleInstance, type PuzzleResult } from '../puzzles/types';
 import { REWORK_BELOW, workCredit } from '../sim/econ';
-import { fx } from './feedback';
+import { fx, type Fx } from './feedback';
 import { Btn, Icon, TierDots } from './kit';
 import { settings } from './settings';
 import { C } from './theme';
@@ -30,6 +34,10 @@ export type PuzzleLaunch = {
   seat?: string;
   /** an owner's trade job: under 40% it isn't signed off and stays open */
   rework?: boolean;
+  /** blind sign-off: a real job at puzzle tier 2+ gives no verdict (the engine still gets the true score) */
+  blind?: boolean;
+  /** blind: the logbook entry the sealed job shows */
+  signoff?: { by: string; week: number; stamp: string; later: string };
 };
 
 const SEEN = 'ic.seen.';
@@ -57,6 +65,16 @@ export function PuzzleHost({
   const [started, setStarted] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [oops, setOops] = useState(0);
+  const blind = !!launch.blind;
+  /** blind: the job is sealed the moment it's handed in, so its finish animation can't give a verdict away */
+  const [sealed, setSealed] = useState(false);
+  const sealedRef = useRef(false);
+  const seal = () => {
+    if (!blind || sealedRef.current) return;
+    sealedRef.current = true;
+    setSealed(true);
+    fx.done();
+  };
   const pausedRef = useRef(true);
   const startedRef = useRef(false);
   const hiddenAt = useRef<number | null>(null);
@@ -77,20 +95,24 @@ export function PuzzleHost({
   const finish = (r: PuzzleResult) => {
     if (finished.current) return;
     finished.current = true;
+    seal();
     setConfirm(false);
     setRes(r);
     onResult(r);
   };
 
-  // wrong input must feel wrong without sound too: shake + a short caption
-  const hostFx = {
-    ...fx,
-    bad() {
-      fx.bad();
-      setOops(performance.now());
-      setTimeout(() => setOops(0), 450);
-    },
-  };
+  // wrong input must feel wrong without sound too: shake + a short caption.
+  // Blind: every verdict sound is the same neutral tap (the sign-off plays its own).
+  const hostFx: Fx = blind
+    ? { ...fx, bad: fx.tap, fault: fx.tap, good: fx.tap, flourish: fx.tap }
+    : {
+        ...fx,
+        bad() {
+          fx.bad();
+          setOops(performance.now());
+          setTimeout(() => setOops(0), 450);
+        },
+      };
 
   useEffect(() => {
     if (!bodyRef.current) return;
@@ -113,9 +135,12 @@ export function PuzzleHost({
         hold: (r, ms) => {
           if (finished.current || held.current) return;
           held.current = r;
-          setTimeout(() => finish(r), ms);
+          // blind: seal it now and take the same time whatever the result (a perfect run's longer flourish would tell)
+          seal();
+          setTimeout(() => finish(r), blind ? 450 : ms);
         },
-        status: setStatus,
+        // blind: a finished puzzle's closing status line is a verdict too
+        status: (t) => !(blind && (held.current || finished.current)) && setStatus(t),
         paused: () => (pausedRef.current && startedRef.current) || !!howtoRef.current || finished.current,
       },
       { seed: launch.seed, tier: launch.tier, tools: launch.tools, reducedMotion: settings.get().reduceMotion, context: launch.context },
@@ -132,8 +157,8 @@ export function PuzzleHost({
 
   // nothing to animate under the help card or the result card
   useEffect(() => {
-    suspendLoops(!!howto || !!res);
-  }, [howto, res]);
+    suspendLoops(!!howto || !!res || sealed);
+  }, [howto, res, sealed]);
   useEffect(() => {
     markInput();
     const onKey = () => markInput();
@@ -161,7 +186,7 @@ export function PuzzleHost({
           setLeft(l);
         }
         if (l <= 0 && inst.current) {
-          fx.bad();
+          (blind ? fx.tap : fx.bad)();
           settleNow();
         }
       }
@@ -258,7 +283,8 @@ export function PuzzleHost({
           <span class="label num" style={{ minHeight: 17, color: shaking ? C.rust : undefined }}>
             {shaking ? '✕ Not quite. ' : ''}
             {!started && !howto && timed ? 'Clock starts on your first touch. ' : ''}
-            {status}
+            {/* blind: a puzzle's closing status is often its verdict ("5/6 bolts in band") */}
+            {blind && (sealed || res) ? '' : status}
           </span>
         </div>
         <div class={`phost-body ${shaking ? 'shake' : ''}`} ref={bodyRef}>
@@ -283,7 +309,7 @@ export function PuzzleHost({
             <div class="result">
               <div class="card col" style={{ gap: 10 }}>
                 <h3>Hand it in now?</h3>
-                <span class="muted">One attempt per job: your score counts as it stands.</span>
+                <span class="muted">{blind ? 'One attempt per job: it’s signed off as it stands.' : 'One attempt per job: your score counts as it stands.'}</span>
                 <div class="row" style={{ gap: 8 }}>
                   <Btn kind="ghost" block onClick={() => setConfirm(false)}>
                     Keep working
@@ -295,7 +321,27 @@ export function PuzzleHost({
               </div>
             </div>
           )}
-          {res && (
+          {blind && (sealed || res) && <SealedEntry launch={launch} />}
+          {res && blind && (
+            <div class="result">
+              <div class="card col" style={{ gap: 10 }}>
+                <div class="row" style={{ gap: 14 }}>
+                  <div class="signed-mark" aria-hidden="true">
+                    <Icon name="pen" size={30} />
+                  </div>
+                  <div class="col" style={{ gap: 2 }}>
+                    <h2>Signed off</h2>
+                    <span class="muted">No verdict on a real job.</span>
+                  </div>
+                </div>
+                <div class="label">{launch.signoff?.later ?? 'How good it was shows up later: in the asset’s health, an inspection, or an incident.'}</div>
+                <Btn block onClick={onClose}>
+                  Continue
+                </Btn>
+              </div>
+            </div>
+          )}
+          {res && !blind && (
             <div class="result">
               <div class="card col" style={{ gap: 10 }}>
                 <div class="row" style={{ gap: 14 }}>
@@ -318,6 +364,27 @@ export function PuzzleHost({
               </div>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The sealed job: a logbook entry, not a score. */
+function SealedEntry({ launch }: { launch: PuzzleLaunch }) {
+  const so = launch.signoff;
+  return (
+    <div class="sealed" role="status">
+      <div class="logentry">
+        <span class="label">Logbook entry{so ? ` · week ${so.week}` : ''}</span>
+        <b style={{ fontSize: 17, lineHeight: 1.25 }}>{launch.title}</b>
+        {launch.subtitle && <span class="label">{launch.subtitle}</span>}
+        <div class="row spread" style={{ marginTop: 6, alignItems: 'flex-end' }}>
+          <span class="col" style={{ gap: 0 }}>
+            <span class="label">Signed</span>
+            <span class="sig">{so?.by ?? '—'}</span>
+          </span>
+          <span class="rubber">{so?.stamp ?? 'Signed off'}</span>
         </div>
       </div>
     </div>

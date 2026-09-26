@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
 import { budgetCap, listPrice } from '../sim/engine';
-import { charterLoad, expectedDeferralCost, logistic, occupancy, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
+import { charterLoad, expectedDeferralCost, logistic, occupancy, openReports, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
 import type { Insurance, Order } from '../sim/types';
 import { fx } from './feedback';
-import { Btn, Icon, Seg, TierDots, usd } from './kit';
-import { CoverSection } from './ops';
+import { Btn, Icon, Seg, TierDots, toast, usd } from './kit';
+import { CapNotice, CoverSection } from './ops';
 import { OrderCard } from './orders';
-import { openOrders } from './select';
+import { capNow, openOrders } from './select';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
 
@@ -19,6 +19,11 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
   const tasks = openOrders(s, 'fin');
   const proj = projectWeek(s);
   const delta = s.cash - s.openCash;
+  // a crewmate hasn't fixed what the analyst reported: fewer desk tasks per turn
+  const cap = capNow(s, 'fin');
+  // open 'leak' reports cost cash every week until someone fixes them
+  const leaks = openReports(s).filter((o) => o.report!.effect === 'leak');
+  const leakTotal = leaks.reduce((n, o) => n + o.report!.amount, 0);
   return (
     <>
       <div class="card col" style={{ gap: 6, ['--tint' as string]: C.fin }}>
@@ -35,7 +40,13 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
             {Math.round((proj.revenue / proj.budget) * 100)}% of {usd(proj.budget)} budget
           </span>
           <span class="chip num">Fixed −{usd(tierDef(s.tier).fixed)}</span>
+          {leakTotal > 0 && <span class="chip rust num">Open reports −{usd(leakTotal)}/wk</span>}
         </div>
+        {leaks.map((o) => (
+          <span class="label" key={o.id} style={{ color: C.rust }}>
+            <b>{o.title}:</b> <span style={{ whiteSpace: 'nowrap' }}>−{usd(o.report!.amount)}</span> every week until {o.role === 'fin' ? 'you fix it' : `${s.players[o.role]?.name ?? ROLE_LABEL[o.role]} fixes it`}.
+          </span>
+        ))}
         {s.cash < ECON.freezeBelow && <span class="fault">Under $2,000: frozen except safety-critical work (assets under 60, inspections).</span>}
         {s.loan && <span class="label">Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week</span>}
         {s.receivership > 0 && <span class="fault">Receivership · {s.receivership} wk: rates capped, spend over $800 blocked, grade capped at C.</span>}
@@ -49,9 +60,19 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
       <Approvals ctl={ctl} disabled={ended} />
 
       <h2 style={{ marginTop: 4 }}>Desk work</h2>
+      {cap && <CapNotice cap={cap} />}
       {tasks.length === 0 && <div class="card muted">Nothing on the desk.</div>}
       {tasks.map((o) => (
-        <OrderCard key={o.id} s={s} o={o} onOpen={(x) => x.status === 'ready' && !ended && onPlay(x)} />
+        <OrderCard
+          key={o.id}
+          s={s}
+          o={o}
+          onOpen={(x) => {
+            if (x.status !== 'ready' || ended) return;
+            if (cap?.full) return toast(cap.text);
+            onPlay(x);
+          }}
+        />
       ))}
 
       <h2 style={{ marginTop: 4 }}>Pricing</h2>
@@ -182,8 +203,12 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
           aria-label={`Approval card: ${top.title}, ${usd(top.cost)}`}
         >
           <div class="row spread">
-            <span class="chip" style={{ background: `${ROLE_TINT[top.role]}55` }}>
-              {s.players[top.role]?.name ?? ROLE_LABEL[top.role]} · {ROLE_LABEL[top.role]}
+            <span class="row" style={{ gap: 6, minWidth: 0 }}>
+              <span class="chip" style={{ background: `${ROLE_TINT[top.role]}55` }}>
+                {s.players[top.role]?.name ?? ROLE_LABEL[top.role]} · {ROLE_LABEL[top.role]}
+              </span>
+              {/* a known defect is still in service: the card has no room for the story, the owner's detail has it */}
+              {top.repair && <span class="chip ink">Repair · known defect</span>}
             </span>
             <TierDots tier={top.tier} />
           </div>

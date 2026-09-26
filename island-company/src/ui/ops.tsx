@@ -6,7 +6,7 @@ import { squawkable } from '../sim/engine';
 import type { Asset, Order, Role } from '../sim/types';
 import { Btn, Health, Icon, Sheet, TierDots, usd } from './kit';
 import { OrderCard, OrderDetail } from './orders';
-import { openOrders } from './select';
+import { capNow, openOrders } from './select';
 import type { Ctl } from './useIsland';
 
 export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec'; onPlay(o: Order, cover?: boolean): void }) {
@@ -17,7 +17,10 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
   const turn = s.turns[role];
   const canWrite = s.week >= 1 && !turn?.ended && s.squawked?.[role] !== s.week;
   const pw = powered(s);
-  const capped = role === 'mech' && pw.gridDown && (turn?.done ?? 0) >= 1;
+  const gridCapped = role === 'mech' && pw.gridDown && (turn?.done ?? 0) >= 1;
+  // a crewmate hasn't fixed what this seat reported: fewer jobs per turn
+  const cap = capNow(s, role);
+  const capped = gridCapped || !!cap?.full;
 
   const open = (o: Order) => {
     if (o.status === 'ready' && !turn?.ended && !capped) onPlay(o);
@@ -89,11 +92,12 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
         {canWrite ? 'Tap an asset to write up what it needs (1 squawk a week). The analyst decides if it’s worth the money.' : s.squawked?.[role] === s.week ? 'Squawk written up this week.' : ''}
       </span>
 
-      {capped && (
+      {gridCapped && (
         <div class="card" style={{ borderLeft: '6px solid var(--rust)' }}>
           <b class="fault">Grid down:</b> hangar tools offline, 1 order max this week.
         </div>
       )}
+      {cap && <CapNotice cap={cap} />}
 
       <div class="row spread" style={{ marginTop: 4 }}>
         <h2>Work orders</h2>
@@ -145,7 +149,7 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
             )}
             {sel.status === 'ready' && (turn?.ended || capped) && (
               <p class="muted" style={{ margin: 0 }}>
-                {turn?.ended ? 'Your turn is over; this carries to next week.' : 'Hangar tools offline until the grid is back.'}
+                {turn?.ended ? 'Your turn is over; this carries to next week.' : gridCapped ? 'Hangar tools offline until the grid is back.' : cap?.text}
               </p>
             )}
             <Btn kind="soft" block onClick={() => setSel(null)}>
@@ -155,6 +159,21 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
         )}
       </Sheet>
     </>
+  );
+}
+
+/** A crewmate's unfixed report holds this seat to fewer jobs: say so before a puzzle is wasted. */
+export function CapNotice({ cap }: { cap: NonNullable<ReturnType<typeof capNow>> }) {
+  const [head, ...rest] = cap.text.split(': ');
+  return (
+    <div class="card col" style={{ gap: 2, borderLeft: '6px solid var(--rust)' }}>
+      <span>
+        <b class="fault">{head}:</b> {rest.join(': ')}
+      </span>
+      <span class="label num">
+        {cap.full ? 'Used up this turn. Lend a hand still works.' : `${cap.done} of ${cap.limit} used this turn.`}
+      </span>
+    </div>
   );
 }
 

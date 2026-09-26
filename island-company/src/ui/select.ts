@@ -1,7 +1,7 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
-import { ECON, MODELS, ROLE_LABEL } from '../sim/data';
+import { ECON, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { forecastContext, listPrice } from '../sim/engine';
-import { flightsAvailable, flightsPerPlane, houses, housesRentable, isRework, planes, powered } from '../sim/econ';
+import { flightsAvailable, flightsPerPlane, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
 import type { IslandState, Order, Role } from '../sim/types';
@@ -26,7 +26,32 @@ export function blocks(s: IslandState): Block[] {
   if (powered(s).gridDown) out.push({ from: 'elec', to: 'mech', text: 'grid down: hangar tools offline' });
   if (houses(s).length && housesRentable(s) === 0) out.push({ from: 'elec', to: 'fin', text: 'no rentable houses: no revenue' });
   if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
+  // a crewmate's report: the fixer holds the reporter up until it's fixed
+  for (const o of openReports(s)) {
+    const rep = o.report!;
+    if (rep.by === o.role || !s.players[rep.by]) continue;
+    out.push({ from: o.role, to: rep.by, text: `${reportSaid(o)}${rep.effect === 'cap' ? ` (${capWords(rep.by)})` : ` (−\u2060$${rep.amount.toLocaleString('en-US')}/wk)`}` });
+  }
   return out;
+}
+
+/** "the hangar work lights are dead": what the reporter said, for mid-sentence use */
+export function reportSaid(o: Order) {
+  const def = o.report ? REPORT_BY_KEY[o.report.key] : undefined;
+  return def?.said ?? o.title.replace(/ \(again\)$/, '');
+}
+
+/** "2 jobs max" / "1 desk task max" */
+export function capWords(by: Role) {
+  return by === 'fin' ? '1 desk task max' : '2 jobs max';
+}
+
+/** A report cap this seat is under, and whether this turn has used it up (lend-a-hand is never capped). */
+export function capNow(s: IslandState, role: Role) {
+  const cap = reportCap(s, role);
+  if (!cap) return null;
+  const done = s.turns[role]?.done ?? 0;
+  return { ...cap, done, full: done >= cap.limit };
 }
 
 export function teamNumbers(s: IslandState) {
@@ -54,7 +79,10 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   const grace = !assist && p && s.week <= p.graceUntil;
   const asset = s.assets.find((a) => a.id === o.assetId);
   // lending a hand always plays at expert level: real trade knowledge is the gate
-  const tier = assist ? Math.max(3, o.tier) : grace ? 1 : o.tier;
+  const tier = launchTier(s, o, role, assist);
+  // a real job at tier 2+: no verdict now, it shows up later
+  const blind = isBlind(s, o, role, assist);
+  const reporter = o.report ? (s.players[o.report.by]?.name ?? ROLE_LABEL[o.report.by]) : null;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
   const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.kind };
   if (o.kind === 'project' && o.puzzle === 'auction') {
@@ -74,10 +102,25 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
     tools: p && !assist ? toolsFor(role, p.xp) : [],
     title: assist ? `Lending a hand · ${o.title}` : o.title,
     expert: assist,
-    subtitle: asset?.name ?? (grace ? 'new-crew difficulty' : assist ? 'outside your trade' : undefined),
+    subtitle: asset?.name ?? (reporter ? `${reporter}'s report` : grace ? 'new-crew difficulty' : assist ? 'outside your trade' : undefined),
     context,
     reward,
-    rework: !assist && isRework(o, 0),
+    rework: !assist && isRework(o, 0, blind),
+    blind,
+    signoff: blind
+      ? {
+          by: p?.name ?? ROLE_LABEL[role],
+          week: s.week,
+          stamp: role === 'mech' ? 'Return to service' : role === 'elec' ? 'Work complete' : 'Filed',
+          later: asset
+            ? `How good it was shows up later: in ${asset.name}'s health, an inspection, or an incident.`
+            : o.report
+              ? `How good it was shows up later: if the fix doesn't hold, ${reporter} will be back.`
+              : o.kind === 'project'
+                ? 'How good it was shows up later: in what the crew project builds.'
+                : 'How good it was shows up later: in the week’s numbers.',
+        }
+      : undefined,
   };
 }
 
