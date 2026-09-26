@@ -7,7 +7,8 @@ import '@fontsource-variable/manrope';
 import './styles.css';
 import { MODELS, TIERS, ECON } from './sim/data';
 import { apply, createIsland } from './sim/engine';
-import type { IslandState, Role, Weather } from './sim/types';
+import { developmentOf } from './sim/growth';
+import type { IslandState, Order, Role, Weather, WeekReport } from './sim/types';
 import { Island } from './ui/island';
 
 type Phase = 'dawn' | 'day' | 'golden' | 'night';
@@ -24,10 +25,29 @@ function build(tier: number, weather: Weather = 'clear') {
       s.assets.push({ id: a.id, kind, model: a.model, name: a.name, health: 82, touchedWeek: 0, ...(kind === 'house' ? { inspectionUntil: 8 } : {}), ...(kind === 'plane' ? { sinceInspection: 4 } : {}) });
     }
   s.tier = tier;
-  s.week = 3;
   s.weather = weather;
   for (const a of s.assets) a.health = Math.max(a.health, 80);
+  // a plausible history for this tier, so the island shows its usual development
+  played(s, [3, 8, 12, 18, 24][tier - 1]);
+  for (let t = 2; t <= tier; t++) s.stats.tierReachedWeek[t] = [0, 0, 6, 10, 16, 21][t];
   return s;
+}
+
+function played(s: IslandState, weeks: number, o: { bplus?: number; perfect?: number; strength?: number; grade?: 'A' | 'B' } = {}) {
+  s.week = weeks + 1;
+  s.stats.totalWeeks = weeks;
+  s.stats.weeksBPlus = o.bplus ?? Math.floor(weeks * 0.7);
+  s.stats.perfectWeeks = o.perfect ?? (weeks >= 10 ? 2 : 0);
+  const budget = [3900, 5900, 6900, 16000, 22000][s.tier - 1];
+  // inspections were kept up along the way (the 'lapsed' scene breaks one on purpose)
+  for (const a of s.assets) if (a.kind === 'house') a.inspectionUntil = s.week + 6;
+  s.history = Array.from({ length: Math.min(3, weeks) }, (_, i) => ({ week: weeks - 2 + i, tier: s.tier, grade: o.grade ?? 'B', revenue: Math.round(budget * (o.strength ?? 0.85)), budget }) as unknown as WeekReport);
+}
+
+function order(s: IslandState, role: Role, done: boolean): string {
+  const id = `lab-${role}`;
+  s.orders.push({ id, role, kind: 'project', assetId: null, title: 'Crew project part', puzzle: 'torque', tier: 3, cost: 0, parts: 0, gain: 0, createdWeek: s.week, deferrals: 0, lastDeferredWeek: null, status: done ? 'done' : 'ready', seed: 1 } as Order);
+  return id;
 }
 
 const SCN: Scn[] = [
@@ -56,6 +76,39 @@ const SCN: Scn[] = [
   { id: 'zoom-mech', note: 'Tier 2, zoomed to the mechanic zone', tier: 2, phase: 'day', focus: 'mech' },
   { id: 'zoom-elec', note: 'Tier 4, zoomed to the electrician zone', tier: 4, phase: 'day', focus: 'elec' },
   { id: 'zoom-fin', note: 'Tier 3, zoomed to the analyst zone', tier: 3, phase: 'golden', focus: 'fin' },
+  // development between tiers (src/sim/growth.ts)
+  { id: 'dev-fresh', note: 'Week 1: a brand-new tier-1 island, nothing extra yet', tier: 1, phase: 'day', tweak: (s) => played(s, 0) },
+  { id: 'dev-settled', note: 'Tier 1 after 6 good weeks: garden, benches, palm grove', tier: 1, phase: 'day', tweak: (s) => played(s, 6, { bplus: 4 }) },
+  {
+    id: 'project',
+    note: 'Tier 2 building tier 3: crew project 2 of 3 parts done (construction stage 2)',
+    tier: 2,
+    phase: 'day',
+    tweak: (s) => {
+      played(s, 9, { bplus: 7 });
+      s.project = { tier: 3, title: 'Village', orders: { mech: order(s, 'mech', true), elec: order(s, 'elec', true), fin: order(s, 'fin', false) } };
+    },
+  },
+  { id: 'just-built', note: 'Tier 3 arrived this week: ribbons on the new buildings', tier: 3, phase: 'day', tweak: (s) => (s.stats.tierReachedWeek[3] = s.week) },
+  {
+    id: 't4-thriving',
+    note: 'Tier 4 after 20 strong weeks: beach bar, fountain, market, lighthouse, boardwalk, yacht',
+    tier: 4,
+    phase: 'day',
+    tweak: (s) => played(s, 20, { bplus: 16, perfect: 3, strength: 1.1 }),
+  },
+  { id: 'weathered', note: 'Tier 3, every asset around 58 health: weathered paint, still open', tier: 3, phase: 'day', tweak: (s) => s.assets.forEach((a) => (a.health = 58)) },
+  {
+    id: 'beaten',
+    note: 'Beat the game: tier 5 at night, 8 straight A weeks, the crew statue, observatory, bunting',
+    tier: 5,
+    phase: 'night',
+    tweak: (s) => {
+      played(s, 30, { bplus: 26, perfect: 6, strength: 1.1, grade: 'A' });
+      s.stats.aStreak = 8;
+      s.creditsWeek = s.week - 1;
+    },
+  },
 ];
 
 const q = new URLSearchParams(location.search);
@@ -76,6 +129,12 @@ function Lab() {
             </div>
             <div style={{ fontSize: 12, marginTop: 6, color: '#1F2A30' }}>
               <b>{x.id}</b> · {x.note}
+              <div style={{ opacity: 0.7 }}>
+                {(() => {
+                  const d = developmentOf(s);
+                  return `develops: ${d.flourishes.join(', ') || 'nothing yet'}${d.construction ? ` · building T${d.construction.tier} stage ${d.construction.stage}` : ''}${d.justBuilt ? ` · just built T${d.justBuilt}` : ''} · prosperity ${d.prosperity.toFixed(2)} · care ${d.care.toFixed(2)}`;
+                })()}
+              </div>
             </div>
           </div>
         );
