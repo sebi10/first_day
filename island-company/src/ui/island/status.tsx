@@ -6,7 +6,7 @@
 // the runway) while every pointer keeps aiming at its asset.
 import { K } from './paint';
 
-export type Icon = 'wrench' | 'cone' | 'noentry' | 'broken' | 'clipboard' | 'bolt-off' | 'bolt' | 'cash' | 'warn';
+export type Icon = 'wrench' | 'cone' | 'noflight' | 'noentry' | 'broken' | 'clipboard' | 'bolt-off' | 'bolt' | 'cash' | 'warn';
 /** alert = out of service, warn = needs attention soon, ok = running on backup (information only) */
 export type Tone = 'alert' | 'warn' | 'ok';
 
@@ -34,6 +34,15 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
           <path d="M-9 6.5h18" stroke={ink} stroke-width="3" stroke-linecap="round" />
         </g>
       );
+    case 'noflight':
+      // grounded (red-tagged by the mechanic): a plane struck through, "no flights"
+      return (
+        <g>
+          <path d="M-1.4 -11h2.8l1 7.6l8.6 4.4v2.8l-8.6 -2.2l-.6 5.6l3 2.2v2.2l-4.2 -1.2h-.8l-4.2 1.2v-2.2l3 -2.2l-.6 -5.6l-8.6 2.2v-2.8l8.6 -4.4z" fill={ink} />
+          <path d="M-10 -9L10 9" stroke={sub} stroke-width="4.6" stroke-linecap="round" />
+          <path d="M-10 -9L10 9" stroke={ink} stroke-width="2" stroke-linecap="round" />
+        </g>
+      );
     case 'noentry':
       // closed on purpose (red-tagged): a no-entry sign
       return (
@@ -51,12 +60,17 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
         </g>
       );
     case 'clipboard':
-      // inspection lapsed: a checklist struck through
+      // inspection lapsed: a checklist on a clipboard (a ringed clip on top,
+      // ticked lines), stamped with a cross in the corner
       return (
         <g>
-          <rect x={-8.5} y={-9.5} width={17} height={20} rx={2.4} fill={ink} />
-          <rect x={-4} y={-11.6} width={8} height={4.4} rx={1.4} fill={sub} stroke={ink} stroke-width="1.4" />
-          <path d="M-4.4 -1.4L4.4 7.4M4.4 -1.4L-4.4 7.4" stroke={sub} stroke-width="3" stroke-linecap="round" />
+          <rect x={-8} y={-9} width={16} height={20} rx={2} fill={ink} />
+          <path d="M-4.6 -8.6v-2.2h9.2v2.2z" fill={sub} stroke={ink} stroke-width="1.2" stroke-linejoin="round" />
+          <circle cx={0} cy={-11.6} r={2} fill="none" stroke={ink} stroke-width="1.5" />
+          <path d="M-5.6 -3.6l1.3 1.3l2.2 -2.6M-5.6 1.6l1.3 1.3l2.2 -2.6" stroke={sub} stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M0 -3h4.6M0 2.2h4.6" stroke={sub} stroke-width="1.4" stroke-linecap="round" />
+          <circle cx={6} cy={8} r={5.4} fill={sub} stroke={ink} stroke-width="1.4" />
+          <path d="M3.9 5.9l4.2 4.2M8.1 5.9l-4.2 4.2" stroke={ink} stroke-width="1.7" stroke-linecap="round" />
         </g>
       );
     case 'bolt-off':
@@ -91,8 +105,26 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
 
 /** body size in local units (before scale) */
 const BW = 46, BH = 34, TIP = 3;
+/** past this, a tail becomes a short stub and a dotted leader to the asset */
+const TAIL_MAX = 26;
 export const bubbleK = (scale: number, small?: boolean) => scale * (small ? 0.88 : 1.1);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** Where the tail leaves the body (local units, body offset bx, by): from the
+ *  bottom edge when the asset is below, else from the side that faces it. */
+function tailOf(bx: number, by: number) {
+  const top = by - TIP - 9 - BH, bot = by - TIP - 9;
+  const l = bx - BW / 2, r = bx + BW / 2;
+  if (-TIP >= bot + 2 || (0 >= l + 4 && 0 <= r - 4)) {
+    const c = clamp(0, bx - 11, bx + 11);
+    return { below: true, ax: c, ay: bot - 1, len: Math.hypot(c, -TIP - bot) };
+  }
+  const side = 0 < bx ? l + 1 : r - 1;
+  const c = clamp(-TIP, top + 12, bot - 9);
+  return { below: false, ax: side, ay: c, len: Math.hypot(side, -TIP - c) };
+}
+/** how far a tail runs past the cap, in local units */
+const tailExcess = (bx: number, by: number) => Math.max(0, tailOf(bx, by).len - TAIL_MAX);
 
 /** (x, y) = where the pointer touches the asset; (dx, dy) moves the body. The
  *  tail leaves the body on the side that faces the asset, so a bubble that
@@ -104,22 +136,25 @@ export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 
   const top = by - TIP - 9 - BH, bot = by - TIP - 9;
   const l = bx - BW / 2, r = bx + BW / 2;
   const body = `M${bx - 11} ${top}H${bx + 11}A12 12 0 0 1 ${r} ${top + 12}V${bot - 12}A12 12 0 0 1 ${bx + 11} ${bot}H${bx - 11}A12 12 0 0 1 ${l} ${bot - 12}V${top + 12}A12 12 0 0 1 ${bx - 11} ${top}Z`;
-  let ptr: string;
-  if (-TIP >= bot + 2 || (0 >= l + 4 && 0 <= r - 4)) {
-    // the asset is below: the tail hangs from the bottom edge
-    const c = clamp(0, bx - 11, bx + 11);
-    ptr = `M${c - 7} ${bot - 1}L0 ${-TIP}L${c + 7} ${bot - 1}Z`;
-  } else {
-    // the asset is beside the body: the tail leaves the facing side
-    const side = 0 < bx ? l + 1 : r - 1;
-    const c = clamp(-TIP, top + 12, bot - 9);
-    ptr = `M${side} ${c - 6}L0 ${-TIP}L${side} ${c + 6}Z`;
-  }
+  const tl = tailOf(bx, by);
+  // a tail that would run long stops short, and a dotted leader finishes the
+  // way to a dot on the asset (a game bubble, not a diagram callout)
+  const long = tl.len > TAIL_MAX;
+  const f = long ? 12 / tl.len : 1;
+  const tipX = Math.round((tl.ax + (0 - tl.ax) * f) * 10) / 10, tipY = Math.round((tl.ay + (-TIP - tl.ay) * f) * 10) / 10;
+  const ptr = tl.below ? `M${tl.ax - 7} ${tl.ay}L${tipX} ${tipY}L${tl.ax + 7} ${tl.ay}Z` : `M${tl.ax} ${tl.ay - 6}L${tipX} ${tipY}L${tl.ax} ${tl.ay + 6}Z`;
   return (
     <g transform={`translate(${Math.round(x)} ${Math.round(y)})`}>
       <g class="bub-scale" style={{ transform: `scale(${k})` }}>
         <g class={motion ? 'bob' : undefined} style={delay ? { animationDelay: `${-delay}s` } : undefined}>
           <ellipse cx={3} cy={-1} rx={8} ry={2.6} fill="rgba(0,0,0,.22)" />
+          {long && (
+            <>
+              <path d={`M${tipX} ${tipY}L0 ${-TIP}`} stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-dasharray=".1 5" />
+              <path d={`M${tipX} ${tipY}L0 ${-TIP}`} stroke={t.body} stroke-width="2.6" stroke-linecap="round" stroke-dasharray=".1 5" />
+              <circle cx={0} cy={-TIP} r={3} fill={t.body} stroke="#fff" stroke-width="1.6" />
+            </>
+          )}
           <path d={body + ptr} fill={t.base} transform="translate(0 3.5)" />
           <path d={body + ptr} fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round" />
           <path d={body + ptr} fill={t.body} />
@@ -182,6 +217,8 @@ export function spread<T extends Placed>(bs: T[], keepOut: KeepOut[] = [], view:
         for (let j = 0; j < bs.length && cost < best; j++) if (j !== i) cost += (2.5 * area(q, boxAt(bs[j], bs[j].dx, bs[j].dy))) / k2;
         const out = Math.max(0, view[0] + 2 - q[0]) + Math.max(0, q[2] - view[2] + 2) + Math.max(0, view[1] + 2 - q[1]);
         cost += (out * 60) / b.k;
+        // a long tail reads as a diagram callout: keep bubbles near their asset
+        cost += tailExcess(dx / b.k, dy / b.k) * 9;
         if (cost < best) (best = cost), (bx = dx), (by = dy);
       }
       b.dx = bx;

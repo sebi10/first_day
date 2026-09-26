@@ -107,7 +107,11 @@ function PlotSign({ x, kind }: { x: number; kind: SiteKind }) {
       <path d="M0 0V-10" stroke={K.woodDark} stroke-width="1.8" />
       <path d="M-7 -20h14v10h-14z" fill="#fffaf0" stroke={K.woodDark} stroke-width="1.2" />
       {kind === 'gen' ? (
-        <path d="M-4.4 -12v-4.6h6.4v4.6zM3 -12v-6.4h1.8v6.4z" fill="#6f7a82" />
+        // a power shed: a little shed with a lightning bolt on it
+        <>
+          <path d="M-5 -11.6v-4.4l5 -3l5 3v4.4z" fill="#6f7a82" />
+          <path d="M.9 -18.4l-2.6 3.8h2l-1.6 3.4l3.4 -4.4h-2z" fill={K.yellow} stroke="#6d5a1c" stroke-width=".4" />
+        </>
       ) : (
         <path d="M-3.6 -12v-3.6l3.6 -3l3.6 3v3.6z" fill={K.rust} />
       )}
@@ -138,6 +142,8 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
   }
   const slab = box(-w, w, 0, 3, 0, d);
   const k = big ? 1 : 1.2;
+  // the barrier along the front; the generator's plot is by the lip, where the beach steps go down
+  const by = kind === 'gen' ? 11 : 18;
   return (
     <g transform={`translate(${x} ${y}) scale(${k})`}>
       <path d={quad(-w - 6, w + 6, -6, d + 6)} fill={K.dirt} />
@@ -156,9 +162,9 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
       {/* sand pile and a barrier along the front */}
       <path d={`M${w - 2} 14q7 -12 14 0z`} fill="#e3c27e" />
       <path d={`M${w + 1} 10q4 -6 7 -1`} stroke="#f6e2b0" stroke-width="1.4" fill="none" />
-      <path d={`M${-w - 6} 18h${w * 0.9}`} stroke="#ff7a1f" stroke-width="3.4" />
-      <path d={`M${-w - 6} 18h${w * 0.9}`} stroke="#fff" stroke-width="3.4" stroke-dasharray="3 3" />
-      <path d={`M${-w - 5} 21v-4M${-w * 0.15 - 6} 21v-4`} stroke="#555" stroke-width="1.2" />
+      <path d={`M${-w - 6} ${by}h${w * 0.9}`} stroke="#ff7a1f" stroke-width="3.4" />
+      <path d={`M${-w - 6} ${by}h${w * 0.9}`} stroke="#fff" stroke-width="3.4" stroke-dasharray="3 3" />
+      <path d={`M${-w - 5} ${by + 3}v-4M${-w * 0.15 - 6} ${by + 3}v-4`} stroke="#555" stroke-width="1.2" />
       {/* the crew at work */}
       <Worker x={-w * 0.4} y={10} />
       {stage >= 1 && <Worker x={w * 0.6} y={4} />}

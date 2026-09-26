@@ -156,7 +156,7 @@ export const HANGAR: Pt = [142, 292]; // front-centre ground point of the hangar
 export const HANGAR_PAD: Pt[] = [[92, 292], [194, 292], [198, 318], [88, 318]];
 export const OFFICE: Pt = [418, 268];
 export const SQUARE = { c: [420, 330] as Pt, rx: 68, ry: 33 };
-export const WINDSOCK: Pt = [396, 398];
+export const WINDSOCK: Pt = [392, 466]; // south-east of the runway's east end, clear of the plaza
 
 /** front-centre ground point of every asset */
 export const POS: Record<string, Pt> = {
@@ -169,7 +169,7 @@ export const POS: Record<string, Pt> = {
   h4: [690, 378],
   h5: [694, 454],
   h6: [602, 462],
-  h7: [656, 190],
+  h7: [666, 190], // on its own terrace, its retaining wall clear of the peak's boulders
   g1: [474, 398],
   gen: [462, 478],
   hangar: HANGAR,
@@ -196,7 +196,7 @@ export const PATHS: PathDef[] = [
   // square → bridge → cottage lane
   { pts: [[486, 318], [506, 306], [526, 302], [552, 300], [600, 300], [648, 298], [700, 294], [728, 290]], tier: 1 },
   // square → south beach
-  { pts: [[420, 362], [422, 400], [428, 444], [434, 488], [440, 512]], tier: 1 },
+  { pts: [[420, 362], [422, 400], [428, 444], [434, 486], [437, 498]], tier: 1 },
   // cottage spine and the lower lane
   { pts: [[646, 298], [648, 346], [650, 398]], tier: 2 },
   { pts: [[566, 404], [610, 402], [650, 398], [700, 396], [730, 390]], tier: 2 },
@@ -209,6 +209,11 @@ export const PATHS: PathDef[] = [
   // lane → stone steps up to the lodge terrace
   { pts: [[612, 300], [614, 270], [618, 244], [624, 218]], tier: 5, steps: true },
 ];
+
+/** where the south path reaches the lip: steps go down to the beach */
+export const BEACH_STEPS: Pt = [437, 499];
+/** the river's mouth on the sand: from the foot of the little fall to the waterline */
+export const MOUTH_WATER = 539.5;
 
 export const BRIDGES: { at: Pt; rot: number; len: number }[] = [
   { at: [526, 302], rot: -3, len: 36 },
@@ -249,7 +254,7 @@ export function viewOf(b: Box | null): Box {
 /** flourish spots (growth.ts), placed clear of every asset and path */
 export const SPOT = {
   garden: [[366, 290], [472, 290]] as Pt[],
-  grove: [[254, 206], [276, 204], [298, 208], [250, 226], [272, 224], [294, 228], [256, 246], [278, 244], [300, 248]] as Pt[],
+  grove: [[256, 200], [284, 205], [307, 213], [245, 222], [270, 227], [294, 235], [254, 247], [279, 251], [305, 244]] as Pt[],
   boats: [[106, 474], [132, 496]] as Pt[],
   bar: [318, 526] as Pt,
   fountain: [420, 332] as Pt,
@@ -258,9 +263,9 @@ export const SPOT = {
   boardwalk: [[176, 519], [240, 525], [300, 527], [360, 526], [416, 522]] as Pt[],
   yacht: [372, 580] as Pt,
   observatory: [498, 72] as Pt,
-  statue: [446, 366] as Pt,
+  statue: [420, 396] as Pt, // on its own roundel where the south path leaves the square
   benches: [[380, 382], [462, 380], [560, 318], [562, 420]] as Pt[],
-  lamps: [[358, 304], [484, 306], [548, 318], [634, 318], [404, 410], [540, 452], [346, 352]] as Pt[],
+  lamps: [[358, 304], [484, 306], [548, 318], [634, 318], [396, 424], [540, 452], [346, 352]] as Pt[],
 };
 
 // -------------------------------------------------- oblique projection ---

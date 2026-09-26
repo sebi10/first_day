@@ -8,12 +8,26 @@ export type Win = 'glass' | 'lit' | 'shut' | 'dark';
 const winFill = (w: Win) => (w === 'lit' ? K.lit : w === 'dark' ? '#33455a' : w === 'shut' ? K.wood : K.glass);
 const pt = (v: V3) => P(v).map((n) => Math.round(n * 10) / 10).join(' ');
 
+export type WinRect = [number, number, number, number];
+/** window rects per building (local screen units on the front face), shared
+ *  with the island's night layer, which redraws lit windows above the grade */
+export const WINDOWS: Record<'cottage' | 'villa' | 'lodge' | 'office', WinRect[]> = {
+  cottage: [[-16, -12.5, 7.5, 6.5], [8.5, -12.5, 7.5, 6.5]],
+  villa: [[-25, -29, 9, 9], [-4.5, -29, 9, 9], [16, -29, 9, 9], [-25, -12, 10, 10], [15, -12, 10, 10]],
+  lodge: [[-48, -12, 7, 7], [-38, -12, 7, 7]],
+  office: [[-27, -30, 10, 9], [-5, -30, 10, 9], [17, -30, 10, 9], [-26, -12, 10, 9], [16, -12, 10, 9]],
+};
+/** the lodge's big A-frame window */
+export const LODGE_AFRAME = 'M-14 -20L0 -46L14 -20Z';
+export const winPath = (rects: WinRect[], ox = 0, oy = 0, k = 1) =>
+  rects.map(([x, y, ww, hh]) => `M${Math.round((ox + x * k) * 10) / 10} ${Math.round((oy + y * k) * 10) / 10}h${Math.round(ww * k * 10) / 10}v${Math.round(hh * k * 10) / 10}h${-Math.round(ww * k * 10) / 10}z`).join('');
+
 /** windows (screen rects on the front face, which is undistorted) */
-function Windows({ rects, w }: { rects: [number, number, number, number][]; w: Win }) {
-  const d = rects.map(([x, y, ww, hh]) => `M${x} ${y}h${ww}v${hh}h${-ww}z`).join('');
+function Windows({ rects, w }: { rects: WinRect[]; w: Win }) {
+  const d = winPath(rects);
   return (
     <>
-      <path d={d} fill={winFill(w)} stroke={w === 'lit' ? '#fff3c4' : '#ffffff'} stroke-width="1.2" />
+      <path d={d} fill={winFill(w)} stroke={w === 'lit' ? '#e8a040' : '#ffffff'} stroke-width={w === 'lit' ? 0.8 : 1.2} />
       {w === 'glass' && <path d={rects.map(([x, y, ww, hh]) => `M${x + 1} ${y + hh - 1.5}l${Math.min(ww, hh) * 0.6} ${-hh + 3}`).join('')} stroke="#fff" stroke-width="1.3" opacity=".8" />}
       {w === 'shut' && <path d={rects.map(([x, y, ww, hh]) => `M${x + ww / 2} ${y}v${hh}`).join('')} stroke={K.woodDark} stroke-width="1" />}
     </>
@@ -42,16 +56,44 @@ export function Ribbon({ x, y }: { x: number; y: number }) {
 }
 
 /** What is wrong with a house, drawn on the house itself. */
-export type Fault = { tag?: boolean; damaged?: boolean; lapsed?: boolean };
-type FaultGeo = { w: number; h: number; door: [number, number, number, number]; shutter: [number, number]; patches: [number, number][]; crack: [number, number]; board: [number, number] };
+export type Fault = { tag?: boolean; damaged?: boolean; lapsed?: boolean; smoking?: boolean };
+type FaultGeo = { w: number; h: number; door: [number, number, number, number]; shutter: [number, number]; patches: [number, number][]; crack: [number, number]; board: [number, number]; smoke: [number, number] };
+/** where a house's smoke rises from (front-centre local units), for keep-outs */
+export const SMOKE_AT: Record<'cottage' | 'villa' | 'lodge', [number, number]> = { cottage: [12, -31], villa: [14, -45], lodge: [17, -40] };
+
+/** a house in a bad way (under 30): a charred hole in the roof and a grey
+ *  column of smoke. The first wisp is static so it always reads; the rest
+ *  rise on the shared puff loop (static too when motion is off). */
+function Smoke({ at: [x, y], motion }: { at: [number, number]; motion: boolean }) {
+  return (
+    <g>
+      <path d={`M${x - 5} ${y + 1}q1 -3 4 -3.4q3 -.6 5 1.2q1.6 2 -1 3.4q-4 1.4 -8 -1.2z`} fill="#2f2a26" />
+      <path d={`M${x - 3} ${y}q2 -2 4.4 -1.6`} stroke="#ff8a3a" stroke-width="1" fill="none" stroke-linecap="round" />
+      <g transform={`translate(${x} ${y - 3})`}>
+        <circle cx={0.5} cy={-1} r={4.4} fill="#4a4f53" />
+        <circle cx={2.6} cy={-8.4} r={5.6} fill="#686d71" opacity=".95" />
+        <g class={motion ? 'puff' : undefined}>
+          <circle cx={4.4} cy={-15} r={6} fill="#868c90" />
+          <circle cx={7.4} cy={-23.5} r={6.8} fill="#a7acaf" opacity=".9" />
+          <circle cx={10.4} cy={-32} r={7.2} fill="#c9cdd0" opacity=".8" />
+        </g>
+        <g class={motion ? 'puff puff-late' : undefined}>
+          <circle cx={6} cy={-19} r={6} fill="#979da1" opacity=".85" />
+          <circle cx={11.4} cy={-36} r={6.6} fill="#d4d7d9" opacity=".7" />
+        </g>
+      </g>
+    </g>
+  );
+}
 /** red-tagged: sealed with barrier tape and a tag on the door; damaged: a
  *  shutter hanging off, a crack, planks nailed over the roof and across the
  *  door; inspection lapsed: a closed notice staked out front */
-function Faults({ f, g }: { f: Fault; g: FaultGeo }) {
+function Faults({ f, g, motion }: { f: Fault; g: FaultGeo; motion: boolean }) {
   const [dx0, dy0, dx1, dy1] = g.door;
   const cx = (dx0 + dx1) / 2;
   return (
     <>
+      {f.smoking && <Smoke at={g.smoke} motion={motion} />}
       {f.damaged && (
         <>
           <path d={g.patches.map(([x, y]) => `M${x - 5} ${y - 3}l10 -1.5l1 6l-10 1.5z`).join('')} fill="#c9a36a" stroke="#7a5534" stroke-width=".9" />
@@ -91,7 +133,8 @@ function Faults({ f, g }: { f: Fault; g: FaultGeo }) {
 }
 
 // ------------------------------------------------------------- cottage ---
-export function Cottage({ tint, win, wear, open, fault = {} }: { tint: string; win: Win; wear: number; open: boolean; fault?: Fault }) {
+type HouseProps = { tint: string; win: Win; wear: number; open: boolean; fault?: Fault; motion?: boolean };
+export function Cottage({ tint, win, wear, open, fault = {}, motion = false }: HouseProps) {
   const w = 20, d = 26, h = 18, rh = 16, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const r = gable(-w, w, h, 0, d, rh, o);
@@ -108,20 +151,20 @@ export function Cottage({ tint, win, wear, open, fault = {} }: { tint: string; w
       <Wear wear={wear} spots={[[-12, -4, 5], [12, -10, 4]]} />
       <path d="M-4.5 0v-11.5a4.5 4 0 0 1 9 0V0z" fill={open ? K.woodDark : '#6b4a2e'} />
       <circle cx={2.4} cy={-5.5} r={0.9} fill={K.yellow} />
-      <Windows rects={[[-16, -12.5, 7.5, 6.5], [8.5, -12.5, 7.5, 6.5]]} w={win} />
+      <Windows rects={WINDOWS.cottage} w={win} />
       {wear < 0.4 && <path d="M-16.5 -5.2h8.5v2h-8.5zM8 -5.2h8.5v2h-8.5z" fill={K.woodDark} />}
       {wear < 0.4 && <path d="M-15 -6a1.4 1.4 0 1 0 .1 0M-11.5 -6.4a1.4 1.4 0 1 0 .1 0M10 -6a1.4 1.4 0 1 0 .1 0M13.5 -6.4a1.4 1.4 0 1 0 .1 0" fill={K.pink} />}
       <path d={r.front} fill={thatch ? mix(roof.mid, '#f3d57e', 0.35) : roof.mid} />
       <path d={r.courses(thatch ? 4 : 3)} stroke={roof.lo} stroke-width={thatch ? 1.6 : 1.1} opacity=".55" fill="none" />
       <path d={r.ridge} stroke={roof.hi} stroke-width="3" stroke-linecap="round" />
       {wear >= 0.25 && <path d={`M-10 ${-24}l6 -1l1 4l-6 1z`} fill={roof.dk} opacity=".45" />}
-      <Faults f={fault} g={{ w, h, door: [-4.5, -11.5, 4.5, 0], shutter: [-17, -12.5], patches: [[-8, -27], [9, -24]], crack: [11, -17], board: [-27, 6] }} />
+      <Faults f={fault} motion={motion} g={{ w, h, door: [-4.5, -11.5, 4.5, 0], shutter: [-17, -12.5], patches: [[-8, -27], [4, -22]], crack: [11, -17], board: [-27, 6], smoke: SMOKE_AT.cottage }} />
     </g>
   );
 }
 
 // --------------------------------------------------------------- villa ---
-export function Villa({ tint, win, wear, open, fault = {} }: { tint: string; win: Win; wear: number; open: boolean; fault?: Fault }) {
+export function Villa({ tint, win, wear, open, fault = {}, motion = false }: HouseProps) {
   const w = 30, d = 32, h = 32, rh = 13, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const r = hip(-w, w, h, 0, d, rh, o, 14);
@@ -140,7 +183,7 @@ export function Villa({ tint, win, wear, open, fault = {} }: { tint: string; win
       <path d={b.side} fill={weather(K.wallShade, wear)} />
       <path d={b.front} fill={wall} />
       <Wear wear={wear} spots={[[-20, -6, 6], [18, -24, 5], [0, -12, 4]]} />
-      <Windows rects={[[-25, -29, 9, 9], [-4.5, -29, 9, 9], [16, -29, 9, 9], [-25, -12, 10, 10], [15, -12, 10, 10]]} w={win} />
+      <Windows rects={WINDOWS.villa} w={win} />
       <path d="M-6 0v-13h12v13z" fill={open ? '#6fb7d8' : K.wood} stroke="#fff" stroke-width="1.2" />
       <path d={`M-27 -30h2v11h-2zM-16 -30h2v11h-2zM14 -30h2v11h-2zM25 -30h2v11h-2z`} fill={weather(tint, wear)} />
       {/* balcony */}
@@ -152,29 +195,36 @@ export function Villa({ tint, win, wear, open, fault = {} }: { tint: string; win
       <path d={r.front} fill={roof.mid} />
       <path d={r.ridge} stroke={roof.hi} stroke-width="2.4" stroke-linecap="round" />
       <path d={`M${pt([w - 8, h + 6, d * 0.7])}v-10h5v10z`} fill={weather('#e9e2d6', wear)} />
-      <Faults f={fault} g={{ w, h, door: [-6, -13, 6, 0], shutter: [-26, -29], patches: [[-12, -40], [12, -42]], crack: [20, -26], board: [-40, 8] }} />
+      <Faults f={fault} motion={motion} g={{ w, h, door: [-6, -13, 6, 0], shutter: [-26, -29], patches: [[-12, -40], [2, -38]], crack: [20, -26], board: [-40, 8], smoke: SMOKE_AT.villa }} />
     </g>
   );
 }
 
 // --------------------------------------------------------------- lodge ---
-export function Lodge({ tint, win, wear, open, fault = {} }: { tint: string; win: Win; wear: number; open: boolean; fault?: Fault }) {
+export function Lodge({ tint, win, wear, open, fault = {}, motion = false }: HouseProps) {
   const w = 30, d = 40, h = 20, rh = 34, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const base = box(-w, w, 0, 7, 0, d);
   const r = gableZ(-w, w, h, 0, d, rh, o);
-  const wing = box(-w - 30, -w, 0, 16, 6, 34);
-  const wr = gable(-w - 30, -w, 16, 6, 34, 11, 3);
+  const wing = box(-w - 24, -w, 0, 16, 6, 34);
+  const wr = gable(-w - 24, -w, 16, 6, 34, 11, 3);
+  // a dressed-stone retaining wall holds the peak's boulders back from the terrace
+  const wall = box(-w - 36, -w - 29, 0, 13, -8, 46);
+  const courses = [4.4, 8.8].map((y) => `M${pt([-w - 29, y, -8])}L${pt([-w - 29, y, 46])}`).join('') + [4, 16, 28, 40].map((z, i) => `M${pt([-w - 29, i % 2 ? 4.4 : 0, z])}v-4.4`).join('');
   const roof = tones(weather(tint, wear * 0.7));
   const timber = weather('#c98a52', wear);
   const deck = box(-w - 4, w + 4, 0, 4, -14, 0);
   return (
     <g>
-      <path d={shadowOf(-w - 30, w, 0, d, h + rh)} fill={K.shadow} />
+      <path d={shadowOf(-w - 36, w, 0, d, h + rh)} fill={K.shadow} />
+      <path d={wall.top} fill="#d9d0c0" />
+      <path d={wall.side} fill="#b8ad9a" />
+      <path d={wall.front} fill="#9d927f" />
+      <path d={courses} stroke="#8a7f6c" stroke-width=".8" fill="none" />
       {/* west wing */}
       <path d={wr.back} fill={roof.lo} />
       <path d={wing.front} fill={timber} />
-      <Windows rects={[[-54, -12, 8, 7], [-42, -12, 8, 7]]} w={win} />
+      <Windows rects={WINDOWS.lodge} w={win} />
       <path d={wr.front} fill={roof.mid} />
       <path d={wr.ridge} stroke={roof.hi} stroke-width="2" />
       {/* main hall */}
@@ -188,7 +238,7 @@ export function Lodge({ tint, win, wear, open, fault = {} }: { tint: string; win
       <path d={r.west} fill={roof.hi} />
       <path d={r.gable} fill={shade(timber, 0.12)} />
       {/* big A-frame window */}
-      <path d="M-14 -20L0 -46L14 -20Z" fill={winFill(win)} stroke="#fff4dc" stroke-width="1.6" />
+      <path d={LODGE_AFRAME} fill={winFill(win)} stroke="#fff4dc" stroke-width="1.6" />
       <path d="M0 -46V-20M-7 -33H7" stroke="#fff4dc" stroke-width="1.2" />
       {win === 'glass' && <path d="M-9 -22l6 -12" stroke="#fff" stroke-width="1.4" opacity=".8" />}
       <path d={r.eaves} stroke={roof.dk} stroke-width="2.4" fill="none" stroke-linejoin="round" />
@@ -211,7 +261,7 @@ export function Lodge({ tint, win, wear, open, fault = {} }: { tint: string; win
       <path d={deck.front} fill={K.woodDark} />
       <path d={Array.from({ length: 13 }, (_, i) => post(-w - 3 + i * 5.5, -14, 7, 4)).join('') + seg([-w - 4, 11, -14], [w + 4, 11, -14])} stroke={K.woodDark} stroke-width="1.4" />
       <path d="M-5 -4v-14h10v14z" fill={open ? '#6fb7d8' : K.woodDark} stroke="#fff4dc" stroke-width="1.2" />
-      <Faults f={fault} g={{ w: 22, h: 22, door: [-5, -18, 5, -4], shutter: [-55, -12], patches: [[-18, -34], [16, -38]], crack: [18, -14], board: [-72, 8] }} />
+      <Faults f={fault} motion={motion} g={{ w: 22, h: 22, door: [-5, -18, 5, -4], shutter: [-49, -12], patches: [[-18, -34], [8, -30]], crack: [18, -14], board: [-60, 12], smoke: SMOKE_AT.lodge }} />
     </g>
   );
 }
@@ -275,7 +325,7 @@ export function Office({ tint, win, wear, flag, motion }: { tint: string; win: W
       <path d="M-32 -34h64v3h-64z" fill="#fff" opacity=".7" />
       <path d="M-32 -17.5h64" stroke="#fff" stroke-width="1.6" />
       <Wear wear={wear} spots={[[-22, -6, 5], [20, -26, 5]]} />
-      <Windows rects={[[-27, -30, 10, 9], [-5, -30, 10, 9], [17, -30, 10, 9], [-26, -12, 10, 9], [16, -12, 10, 9]]} w={win} />
+      <Windows rects={WINDOWS.office} w={win} />
       <path d="M-7 0V-13H7V0Z" fill={win === 'lit' ? K.lit : '#7fc3dc'} stroke="#fff" stroke-width="1.4" />
       <path d="M0 0V-13" stroke="#fff" stroke-width="1" />
       {stripes.map((s, i) => (
@@ -321,7 +371,7 @@ export function GenHouse({ wear, running, motion, lamp }: { wear: number; runnin
   const para = box(-w, w, h, h + 2, 0, d);
   const tank = box(w + 4, w + 20, 0, 8, 4, 18);
   const [sx, sy] = P([w + 12, 8, 11]); // the stack stands on the tank end, clear of the grid next door
-  const [lx, ly] = P([-8, h + 2, 8]);
+  const [lx, ly] = P([8, h + 2, 8]); // east of the wire's roof insulator
   return (
     <g>
       <path d={shadowOf(-w, w + 20, 0, d, h + 4)} fill={K.shadow} />
@@ -353,20 +403,28 @@ export function GenHouse({ wear, running, motion, lamp }: { wear: number; runnin
       {/* exhaust stack */}
       <path d={`M${sx} ${sy}v-20`} stroke="#5a6064" stroke-width="3.6" stroke-linecap="round" />
       <path d={`M${sx - 2.6} ${sy - 20}h5.2`} stroke="#3e4448" stroke-width="2" />
-      {/* roof beacon: green and glowing while it carries the island */}
-      <path d={`M${lx} ${ly}v-4`} stroke="#5a6064" stroke-width="2" />
-      <circle cx={lx} cy={ly - 6} r={3.2} fill={running ? '#6dff8e' : '#7d8a80'} stroke="#3e4448" stroke-width="1" />
-      {running && <circle cx={lx} cy={ly - 6} r={8} fill="#6dff8e" opacity=".3" />}
+      {/* the overhead line leaves from an insulator on the roof's west end */}
+      <path d={`M${pt([-8, h + 2, 12])}v-6`} stroke="#5a6064" stroke-width="1.6" />
+      <circle cx={P([-8, h + 2, 12])[0]} cy={P([-8, h + 2, 12])[1] - 6.6} r={1.4} fill="#dfe7ea" />
+      {/* roof beacon: a domed lamp, green and glowing while it carries the island */}
+      <path d={`M${lx} ${ly}v-3`} stroke="#5a6064" stroke-width="2" />
+      <path d={`M${lx - 3.4} ${ly - 3}a3.4 3.6 0 0 1 6.8 0z`} fill={running ? '#6dff8e' : '#8f9a90'} />
+      <path d={`M${lx - 4} ${ly - 3}h8`} stroke="#3e4448" stroke-width="1.4" />
+      {running && <circle cx={lx} cy={ly - 5} r={8} fill="#6dff8e" opacity=".3" />}
       {running && (
-        <g transform={`translate(${sx} ${sy - 22})`}>
-          <g class={motion ? 'puff' : undefined}>
-            <circle r={4.6} fill="#6f7478" />
-            <circle cx={3} cy={-7} r={6} fill="#9aa0a4" />
-            <circle cx={8} cy={-15} r={5} fill="#c4c8cb" opacity=".85" />
+        // exhaust leans west, away from the lower bridge; the first wisp is
+        // static so the running engine always reads, the rest rise on a loop
+        <g transform={`translate(${Math.round(sx)} ${Math.round(sy - 22)})`}>
+          <circle cx={-1} cy={0} r={4.2} fill="#6a7074" opacity=".95" />
+          <circle cx={-6} cy={-6} r={4.8} fill="#8f959a" opacity=".85" />
+          <g class={motion ? 'puff-w' : undefined}>
+            <circle cx={-5} cy={-6} r={4.8} fill="#6f7478" />
+            <circle cx={-11} cy={-13} r={5.6} fill="#9aa0a4" />
+            <circle cx={-17} cy={-20} r={5} fill="#c4c8cb" opacity=".85" />
           </g>
-          <g class={motion ? 'puff puff-late' : undefined}>
-            <circle cx={-4} cy={-18} r={5.5} fill="#b4b9bc" opacity=".8" />
-            <circle cx={2} cy={-26} r={6.5} fill="#d6d9db" opacity=".7" />
+          <g class={motion ? 'puff-w puff-late' : undefined}>
+            <circle cx={-9} cy={-10} r={4.6} fill="#80868a" opacity=".85" />
+            <circle cx={-21} cy={-27} r={6} fill="#d6d9db" opacity=".7" />
           </g>
         </g>
       )}

@@ -45,10 +45,6 @@ export function LifeDefs() {
         <stop offset=".45" stop-color="#1a2230" stop-opacity="0" />
         <stop offset="1" stop-color="#1a2230" stop-opacity=".62" />
       </radialGradient>
-      <radialGradient id="i-moonpath" cx=".5" cy=".35" r=".6">
-        <stop offset="0" stop-color="#fff4c2" stop-opacity=".45" />
-        <stop offset="1" stop-color="#fff4c2" stop-opacity="0" />
-      </radialGradient>
       <linearGradient id="i-dawn" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="#ff6f9c" stop-opacity=".46" />
         <stop offset=".32" stop-color="#ffa98a" stop-opacity=".2" />
@@ -70,6 +66,15 @@ export function LifeDefs() {
         <stop offset=".45" stop-color="#ffc45c" stop-opacity=".16" />
         <stop offset="1" stop-color="#ffc45c" stop-opacity="0" />
       </radialGradient>
+      <radialGradient id="i-apron">
+        <stop offset="0" stop-color="#fff4d8" stop-opacity=".3" />
+        <stop offset=".55" stop-color="#fff0cc" stop-opacity=".2" />
+        <stop offset="1" stop-color="#fff0cc" stop-opacity="0" />
+      </radialGradient>
+      <linearGradient id="i-flood" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0" stop-color="#fff2c4" stop-opacity=".62" />
+        <stop offset="1" stop-color="#fff2c4" stop-opacity="0" />
+      </linearGradient>
       <linearGradient id="i-stormtop" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="#2e3542" stop-opacity=".7" />
         <stop offset="1" stop-color="#2e3542" stop-opacity="0" />
@@ -111,7 +116,7 @@ export function SeaLife({ motion, boats, storm }: { motion: boolean; boats: numb
       </g>}
       {/* sailboats; more of them when business is good */}
       {[
-        [238, 566, '#ffffff', K.blue], [626, 30, '#ffd23f', '#e8453c'], [30, 110, '#ffffff', '#4caf50'], [118, 578, '#ff9fc4', K.blue],
+        [262, 591, '#ffffff', K.blue], [626, 30, '#ffd23f', '#e8453c'], [30, 110, '#ffffff', '#4caf50'], [118, 578, '#ff9fc4', K.blue],
       ]
         .slice(0, boats)
         .map(([x, y, sail, stripe], i) => (
@@ -132,9 +137,10 @@ const CLOUD_HI = 'M-10 -8a10 10 0 0 1 14 -10M20 -16a9 9 0 0 1 14 -4';
 /** fair-weather clouds frame two corners; a storm brings a heavy deck along the top and sides */
 const FAIR: [number, number, number][] = [[-6, 6, 1.25], [64, -14, 0.9], [-26, 62, 0.8], [752, 582, 1.3], [690, 606, 0.9], [808, 530, 0.8]];
 const STORM: [number, number, number][] = [
-  [-20, 22, 1.7], [112, -16, 1.45], [252, -34, 1.3], [400, -40, 1.3], [546, -34, 1.35], [684, -14, 1.55], [822, 34, 1.7],
-  [180, -2, 1.1], [330, -12, 1.05], [470, -8, 1.1], [612, -2, 1.05],
-  [-42, 178, 1.25], [842, 206, 1.25], [-34, 578, 1.6], [120, 630, 1.25], [676, 628, 1.35], [822, 556, 1.6],
+  // pushed out past the island's corners, so the deck frames the view without biting into the coast
+  [-36, 8, 1.7], [112, -22, 1.45], [252, -38, 1.3], [400, -42, 1.3], [546, -38, 1.35], [684, -20, 1.55], [840, 20, 1.7],
+  [180, -8, 1.1], [330, -16, 1.05], [470, -12, 1.1], [612, -8, 1.05],
+  [-56, 178, 1.25], [856, 206, 1.25], [-54, 596, 1.6], [120, 642, 1.25], [676, 642, 1.35], [852, 584, 1.6],
 ];
 export function Clouds({ storm, motion, night }: { storm: boolean; motion: boolean; night?: boolean }) {
   const list = storm ? STORM : FAIR;
@@ -145,13 +151,16 @@ export function Clouds({ storm, motion, night }: { storm: boolean; motion: boole
     <g>
       {/* a storm brings a low deck across the whole top of the view, and lightning in it */}
       {storm && <rect x={-60} y={-60} width={W + 120} height={200} fill="url(#i-stormtop)" />}
-      {storm && (
-        <g transform="translate(178 38)">
-          <g class={motion ? 'flicker' : undefined}>
-            <path d="M0 0l-9 20h8l-12 26l22 -32h-8l9 -14z" fill="#fff8c8" stroke="#ffd84a" stroke-width="1.6" stroke-linejoin="round" />
+      {storm &&
+        // forked lightning out of the deck: over the north-west sea and the north-east point
+        [[178, 30, 1], [690, 18, 1.35]].map(([x, y, k], i) => (
+          <g key={i} transform={`translate(${x} ${y}) scale(${k})`}>
+            <g class={motion ? 'flicker' : undefined} style={motion && i ? { animationDelay: '-.7s' } : undefined}>
+              <path d="M0 0l-9 20h8l-12 26l22 -32h-8l9 -14z" fill="#fff8c8" stroke="#ffd84a" stroke-width="1.6" stroke-linejoin="round" />
+              <path d="M-5 24l-8 8l3 1l-6 9" stroke="#fff8c8" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+            </g>
           </g>
-        </g>
-      )}
+        ))}
     <g class={motion ? 'cloud' : undefined}>
       {/* merged per tone: a whole cloud deck costs four nodes a cloud at most */}
       {list.map(([x, y, s], i) => (
@@ -196,9 +205,8 @@ export function NightSky({ motion }: { motion: boolean }) {
       <g class={motion ? 'twinkle' : undefined}>
         <path d="M200 30l1.5 4l4 1.5l-4 1.5l-1.5 4l-1.5 -4l-4 -1.5l4 -1.5zM790 250l1.2 3l3 1.2l-3 1.2l-1.2 3l-1.2 -3l-3 -1.2l3 -1.2zM40 420l1.2 3l3 1.2l-3 1.2l-1.2 3l-1.2 -3l-3 -1.2l3 -1.2z" fill="#fffbe6" />
       </g>
-      {/* moon, and a soft sheen of it on the sea with a few loose glints */}
-      <ellipse cx={mx - 24} cy={my + 64} rx={34} ry={22} fill="url(#i-moonpath)" opacity=".6" />
-      <path d={`M${mx - 36} ${my + 50}q4 -2 8 0M${mx - 8} ${my + 58}q5 -2.5 10 0M${mx - 30} ${my + 74}q3 -1.5 6 0M${mx - 52} ${my + 66}q4 -2 8 0`} stroke="#fff4c2" stroke-width="1.5" fill="none" stroke-linecap="round" opacity=".5" />
+      {/* moon, and its path on the sea: a column of crisp glints, no haze */}
+      <path d={`M${mx - 6} ${my + 36}h9M${mx - 12} ${my + 46}h14M${mx - 4} ${my + 55}h8M${mx - 16} ${my + 63}h12M${mx - 8} ${my + 72}h10M${mx - 20} ${my + 82}h8`} stroke="#fff4c2" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".55" />
       <circle cx={mx} cy={my} r={24} fill="#fff6c9" opacity=".16" />
       <path d={`M${mx - 6} ${my - 13}A14 14 0 1 0 ${mx + 12} ${my + 7}A11 11 0 1 1 ${mx - 6} ${my - 13}Z`} fill="#fff4c2" />
     </g>
@@ -211,9 +219,9 @@ export function NightSky({ motion }: { motion: boolean }) {
 export function NightGrade({ coast }: { coast: string }) {
   return (
     <g pointer-events="none">
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#5a6cb0" style={{ mixBlendMode: 'multiply' }} />
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#6879c0" style={{ mixBlendMode: "multiply" }} />
       {/* moonlight lifts the land's mid-tones, so it separates from the sea */}
-      <path d={coast} fill="#7f95d6" opacity=".22" style={{ mixBlendMode: 'screen' }} />
+      <path d={coast} fill="#7f95d6" opacity=".1" style={{ mixBlendMode: "screen" }} />
       <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-nightvig)" />
     </g>
   );
@@ -245,23 +253,37 @@ function Mist() {
   );
 }
 
-/** Golden hour: a strong amber multiply grade (keeps the darks, so nothing
- *  goes hazy), deepening to rose in the east, the sun low in the west. */
-export function GoldenGrade() {
+/** the whole view minus the island: the sea, the shallows and the surf */
+const seaOnly = (coast: string) => `M-60 -60H${W + 60}V${H + 60}H-60Z${coast}`;
+/** sun glitter on the water under the low western sun */
+const GLITTER = [
+  [8, 486, 9], [26, 498, 6], [4, 512, 12], [30, 520, 8], [14, 534, 10], [44, 544, 7], [6, 556, 13], [34, 566, 9], [18, 580, 11], [52, 588, 8], [70, 574, 6],
+  [12, 440, 6], [28, 456, 5], [6, 470, 8], [20, 410, 5], [80, 592, 7],
+].map(([x, y, l]) => `M${x} ${y}h${l}`).join('');
+
+/** Golden hour: an amber multiply over the land only (keeps the darks, so
+ *  nothing goes hazy), deepening to rose in the east; the sea takes a light
+ *  peach wash instead, keeping its blue, with the low sun glittering on it
+ *  in the west. */
+export function GoldenGrade({ coast }: { coast: string }) {
   return (
     <g pointer-events="none">
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-golden)" style={{ mixBlendMode: 'multiply' }} />
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-golden)" style={{ mixBlendMode: 'multiply' }} clip-path="url(#i-land)" />
+      <path d={seaOnly(coast)} fill="#ffc890" fill-rule="evenodd" opacity=".16" />
       <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-goldsun)" />
+      <path d={GLITTER} stroke="#ffe59a" stroke-width="1.8" stroke-linecap="round" opacity=".85" />
     </g>
   );
 }
 
 /** Storm: a darker, cooler grade that falls off toward the edges so the
- *  island in the middle stays readable. */
-export function StormGrade() {
+ *  island in the middle stays readable; the sea and shallows go a colder,
+ *  greyer blue on top of it (plain alpha), the land keeps its grade. */
+export function StormGrade({ coast }: { coast: string }) {
   return (
     <g pointer-events="none">
       <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#b4bfd2" style={{ mixBlendMode: 'multiply' }} />
+      <path d={seaOnly(coast)} fill="#5f6f86" fill-rule="evenodd" opacity=".42" />
       <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-stormvig)" />
     </g>
   );
