@@ -34,15 +34,27 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
   - From tier 3 that scaffolding is gone. A tradesperson solves it from knowledge, and an outsider mostly guesses.
   - Each puzzle model has a test asserting that no answer-revealing hint survives at tier 3+.
 - **Lend a hand replaces the spec's cover rule** (the spec allowed covering after 2 missed turns, at double cost).
-  - Anyone may try another trade's ready job once a week (mentors twice), at normal cost, without their own trade's tools.
-  - Under 40% is a botch: the asset takes −6 and the job stays open for its owner.
+  - Anyone may try another trade's job once a week, but only a job that has already waited a week, and never a crew-project part.
+  - It always plays at expert difficulty (tier ≥3): no tools, no rule text in the help card.
+  - Under 60% is a botch: the asset takes −6 and the job stays open for its owner.
   - Nobody is ever fully gridlocked, and specialisation still matters.
+- **Skill keeps paying above a pass.** Work credit = 0.45 + 0.6 × score: a bare pass (60%) restores 81% of the job's gain, a clean job 105%, plus up to +15% from perfect runs. An owner under 40% gets **rework**: the job stays open with a fresh fault (new seed, so no replaying a memorised answer). Inspection sign-offs are pass/fail at 60%.
+- **Crew projects build each new tier.** Qualifying for the next tier opens one job per trade (e.g. tier 2: first cargo load sheet, put cottages 3–4 on the panel, pay the builders by three-way match). The tier arrives the moment all three are done; new buildings start at 60 + 30 × the average score. Autopilot and lend-a-hand can't do a project part.
+- **Safety calls and votes.** The mechanic can ground a plane and the electrician can red-tag a house or the generator for the week (no revenue, but no incident rolls). Story cards are a 2-of-3 crew vote.
 - **Integral but not gridlocked:**
   - Parallel turns.
   - Auto-approve budgets for small jobs.
   - Autopilot at 50% for missed days.
   - A 12-hour minimum week.
   - Lend a hand.
+
+## Critique round (Sep 26): five review agents, one per area
+
+- **Functional:** week-bound moves carry their week (an offline move can't land in the next week); the review never opens over a running puzzle; joining a held seat fails with "ask for the seat code" instead of silently replacing a friend; the $2,000 freeze exempts safety-critical work (asset under 60, inspections) and receivership comes with one bridge loan (deficit + 2 weeks' fixed + $3k, repaid at 15% over 10 weeks); jobs waiting on parts don't block new hand-work, and a boat brings one kit ($350) when nothing flew; a solved puzzle's result is locked in before its finish animation; "nothing can fail until week 3" is now literally true; an unallocated A bonus goes to reserve.
+- **Balance / systems:** see the table below; plus crew projects, safety calls, votes, the load sheet gating charters, weather-capped grading and the credit curve above.
+- **UX:** the clock starts on your first touch, Back before touching costs nothing, help stays until you tap it, wrong input shakes and says so; meter and panel labels no longer overlap.
+- **Performance:** island motion pauses when idle, covered or off-screen (main thread 28% → 0.3% busy at 4× CPU); puzzle canvases idle at 30 → 10 fps and stop under cards; cold start reopens the last island (≈140 ms, offline too); online moves show instantly.
+- **Not done yet:** a per-turn work cap with trade-raised squawks (more choices for mechanic/electrician); lazy-loading puzzles (≈86 kB gzipped off the first load); fully on-demand canvas redraws; moving the top-heavy puzzles' targets into the thumb zone.
 
 ## Additions (beyond MVP scope)
 
@@ -55,15 +67,17 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
 
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
-Retuned after the balance and systems critiques (Sep 26).
+Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26, latest).
 
 | Team | Tier at wk 26 | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 |
 | --- | --- | --- | --- | --- | --- |
-| All good | 5 | 4 / 7 / 15 / 20 | 100% | $6,468 | 0 |
-| All average (3 jobs/turn, 10% missed turns) | 5 | 5 / 9 / 15 / 20 | 95% | $6,335 | 0 |
-| **Three friends** (skill drops with tier, absences in streaks) | 5 | 5 / 9 / 15 / 20 | 89% | $3,089 | 0 |
-| Naive analyst (approves everything, never prices) | 3 | 4 / 13 / — / — | 100% | $5,973 | 0 |
-| Any role absent / any solo player | 1 | — | 34–100% | down to −$135k | up to 447 of 780 |
+| All good | 5 | 5 / 8 / 16 / 21 | 100% | $6,456 | 0 |
+| All average (3 jobs/turn, 10% missed turns) | 5 | 7 / 10 / 16 / 21 | 91% | $6,126 | 0 |
+| **Three friends** (skill drops with tier, absences in streaks) | 5 | 7 / 11 / 16 / 22 | 90% | $5,882 | 0 |
+| Naive analyst (approves everything, never prices) | 3 | 5 / 13 / — / — | 100% | $5,962 | 0 |
+| Any role absent / any solo player | 1 | — | 37–100% | down to −$133k | up to 409 of 780 |
+
+Knife-edge found on the way: with the new credit curve, "inspection renewed only at credit ≥ 1" silently stopped renewals and the average team collapsed at tier 4 (−$83k). Sign-off is now pass/fail at 60%, and the collapse is gone. Lesson: the economy has thin margins at tier 4 ($7k/week fixed), so any change to repair throughput needs a sim run.
 
 What changed and why:
 
@@ -94,8 +108,8 @@ What changed and why:
 Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
 
 - **No role can win alone.** Pass: every solo team stays at tier 1.
-- **No week ends with cash < 0 under sensible play.** Pass: minimum $3,089, including the three-friends team.
-- **Every unlock is reachable within 26 weeks.** Pass: tier 5 by week 20.
+- **No week ends with cash < 0 under sensible play.** Pass: minimum $5,882, including the three-friends team.
+- **Every unlock is reachable within 26 weeks.** Pass: tier 5 by week 21–22.
 
 **Goodhart warning.** The board grade weights revenue at 40%, so an analyst can inflate it by pricing up. The rate cap (2× base) limits that, occupancy falls off a logistic curve, and empty houses cost the electrician's "houses booked" MVP line. If players start gaming the grade, lower the revenue weight in `resolveWeek`, or grade revenue *per rentable house* instead.
 

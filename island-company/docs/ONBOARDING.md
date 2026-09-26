@@ -30,24 +30,25 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 ## 3. A week (one real day, 5–10 min each)
 
 1. Open the app. Read the 2–3 "since you left" lines.
-2. Do 2–4 jobs. Each job is a 60–120 s puzzle, and there's only one attempt: a pass is full credit, a perfect run adds a small permanent bonus.
+2. Do 2–4 jobs. Each job is a 60–120 s puzzle; the clock starts on your first touch. The better the work, the more the asset recovers: a bare pass (60%) restores 81% of the job, a clean one 105%, and perfect runs add a small permanent bonus. Under 40% the job fails its own check and comes back as **rework** with a fresh fault.
 3. Make your calls:
    - **Analyst:** swipe cards (→ approve, ← defer, ↑ cheaper fix), then set prices on the demand curve.
-   - **Mechanic / electrician:** accept or push back on a cheaper fix.
+   - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident).
 4. Tap **End turn**.
 
 The week resolves at **20:00 island time**, or as soon as all three have ended their turn. Everyone gets the board review. Miss a day and your role runs on autopilot at 50%: nothing is lost, but that week doesn't count toward unlocks.
 
 ## 4. Lend a hand
 
-Once a week you can try another trade's ready job (*Lend a hand* on your panel). Your own tools stay home. Under 40% botches it: the asset takes −6 and the job stays open for its owner. Only do it if you actually know how.
+Once a week you can try another trade's job that has already waited a week (*Lend a hand* on your panel). It's always expert difficulty: no tools, no rule text. Under 60% botches it: the asset takes −6 and the job stays open for its owner. Only do it if you actually know how.
 
 ## 5. Getting better together
 
 - **Board → Weekly challenge:** the same puzzle and seed for all three this week. Try each other's trades and compare. No XP; bragging only.
-- **Streaks:** every third B+ week in a row brings a story card, and any of you can make the call.
-- **Grade A** pays a bonus, and the analyst chooses what to do with it: reserve, capex, or +150 XP each.
-- **Unlocks:** tier 2 comes after 4 full-crew B+ weeks; the island shows faint outlines of what's coming.
+- **Streaks:** every third B+ week in a row brings a story card. Two of three votes decide it.
+- **Grade A** pays a bonus, and the analyst chooses what to do with it: reserve, capex, or +150 XP each (unspent, it goes to reserve).
+- **Crew projects:** qualifying for the next tier (tier 2: 4 full-crew B+ weeks) opens one job per trade. The tier arrives when all three are done, and your average score sets how healthy the new buildings start. Nobody can do your part for you.
+- **Cash trouble:** under $2,000 only safety-critical work gets approved. Two weeks below zero puts the island in receivership, with one bridge loan to climb out.
 
 ## 6. What to test and report
 

@@ -64,6 +64,7 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 - Each player takes one 5–10 minute turn: 2–4 hands-on puzzles plus 1–2 decisions, then **End turn**.
 - The week resolves at 20:00 in the creator's time zone, or as soon as all three have ended their turn. Whichever phone notices first resolves it, inside a Firestore transaction, so it happens exactly once. There's no server code to run.
 - A missed turn runs on autopilot at 50%. Autopilot weeks never lose progress, but they don't count toward unlocks, because nobody wins alone.
+- Each new tier is a **crew project**: one real job per trade, and the tier opens when all three are done. See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full crew briefing.
 - Resolution is deterministic: the three turns plus a seeded incident roll. The seed is shown on the board review, so any week can be replayed.
 
 ## Puzzles (15, five per role, all modelled on the real job)
@@ -76,7 +77,7 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 | Weight and balance (CG envelope) | Multimeter diagnosis (open neutral, MWBC) | Bank reconciliation (timing items, transpositions) |
 | Safety wire (tightening direction, twists/inch) | Conduit bending (offsets, saddles, 360° rule) | Three-way match (PO / receipt / invoice) |
 
-Difficulty comes from the order's tier (1–5), which climbs as the island grows. It never depends on your level. Levels unlock **tools** that change how a puzzle plays (for example the click-type wrench, borescope, clamp meter, and driver tree), never stats that skip it.
+Difficulty comes from the order's tier (1–5), which climbs as the island grows. It never depends on your level. Levels unlock **tools** that change how a puzzle plays (for example the click-type wrench, non-aqueous developer, clamp meter and driver tree): convenience or raw readings to interpret, never the answer. From tier 3 the teaching aids are gone, so real trade knowledge is what separates the three of you.
 
 ## Development
 
