@@ -189,6 +189,10 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'wb', role: 'mech', title: 'Charter load sheet', puzzle: 'balance', tier: 1, cost: 0, parts: 0, gain: 0, targets: ['twin', 'float'], weight: () => 100 },
   { kind: 'wire', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
   { kind: 'oil', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
+  // power brakes and an accumulator: the twin's brake-and-gear system and the amphibian floats' gear system
+  { kind: 'hydraulics', role: 'mech', title: 'Service the brake hydraulics', puzzle: 'hydraulics', tier: 2, cost: 260, parts: 0, gain: 13, targets: ['twin', 'float'], weight: below(94, 4) },
+  // the singles only (the puzzle's airframes): a piston single through order tier 3, a turbine single from tier 4
+  { kind: 'gpustart', role: 'mech', title: 'Ground power start: weak battery', puzzle: 'gpu', tier: 2, cost: 120, parts: 0, gain: 8, targets: ['cargo', 'float'], weight: below(96, 4) },
   // Electrician — houses
   { kind: 'trip', role: 'elec', title: 'Trace dead outlets', puzzle: 'trace', tier: 1, cost: 120, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(95, 4) },
   { kind: 'gfci', role: 'elec', title: 'GFCI in wet rooms', puzzle: 'wireup', tier: 1, cost: 210, parts: 0, gain: 10, targets: ['cottage', 'villa', 'lodge'], weight: below(92, 3) },
@@ -226,12 +230,15 @@ export type Tool = { id: string; level: number; name: string; puzzle: PuzzleId; 
 export const TOOLS: Record<Role, Tool[]> = {
   mech: [
     { id: 'clickWrench', level: 3, name: 'Click-type wrench', puzzle: 'torque', effect: 'Clicks when a bolt enters the band' },
-    { id: 'borescope', level: 6, name: 'Non-aqueous developer', puzzle: 'crack', effect: 'Indications bleed out faster and linger' },
+    { id: 'borescope', level: 6, name: 'Non-aqueous developer', puzzle: 'crack', effect: 'Swabbed cracks bleed back sooner and brighter' },
     { id: 'partsTray', level: 9, name: 'Numbered parts tray', puzzle: 'teardown', effect: 'Removed parts keep their order number' },
     { id: 'gaugeDamper', level: 12, name: 'Gauge damper', puzzle: 'torque', effect: 'Halves torque needle lag' },
-    { id: 'uvPlus', level: 15, name: 'UV floodlamp', puzzle: 'crack', effect: 'Wider lamp beam' },
+    { id: 'uvPlus', level: 15, name: 'UV floodlamp', puzzle: 'crack', effect: 'Stronger UV: every indication glows brighter' },
     { id: 'cgComputer', level: 18, name: 'Station moment card', puzzle: 'balance', effect: 'Moment per station shown while you drag' },
     { id: 'wirePliers', level: 21, name: 'Safety-wire pliers', puzzle: 'safetywire', effect: 'Live twists-per-inch readout' },
+    { id: 'sightLight', level: 24, name: 'Sight-glass loupe', puzzle: 'hydraulics', effect: 'Magnified view of the level at the FULL mark' },
+    { id: 'gpuMeter', level: 27, name: 'Digital cart meter', puzzle: 'gpu', effect: 'Cart volts and amps read out in digits' },
+    { id: 'chargingKit', level: 30, name: 'Nitrogen charging kit', puzzle: 'hydraulics', effect: 'Fine metering valve: the precharge rises slower' },
   ],
   elec: [
     { id: 'clampMeter', level: 12, name: 'Clamp meter', puzzle: 'panel', effect: 'Live amps per phase while dragging' },
