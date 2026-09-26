@@ -625,7 +625,7 @@ function block(ctx: CanvasRenderingContext2D, b: Box, lk: Look, depth = 0.22) {
   return { fx, fy, fw, fh, d };
 }
 
-function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, b: Box, lk: Look, mat: Mat) {
+function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, b: Box, lk: Look, mat: Mat, flat = false) {
   const cx = b.x + b.w / 2;
   const cy = b.y + b.h / 2;
   const R = b.x + b.w;
@@ -688,6 +688,14 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: ArtShape, b: Box, lk: L
       break;
     }
     case 'plate': {
+      if (flat) {
+        // a flat rectangular plate seen edge-on, with its connector cut-out
+        const f = block(ctx, { x: b.x - b.w * 0.4, y: b.y, w: b.w * 1.8, h: b.h }, lk, 0.45);
+        ctx.beginPath();
+        ctx.rect(f.fx + f.fw * 0.25, f.fy + f.fh * 0.3, f.fw * 0.5, f.fh * 0.4);
+        paint(ctx, lk.hole, lk);
+        break;
+      }
       const d = drum(ctx, b.x, R, cy, ry, lk, 0.38);
       for (const f of [-0.72, 0.72]) {
         ell(ctx, d.x0, cy + f * ry, d.rx * 0.18, ry * 0.07);
@@ -942,15 +950,15 @@ const CSS = `
 .ipcz .sq{display:flex;gap:7px;align-items:flex-start;font-size:13px;font-weight:700;line-height:1.28}
 .ipcz .sq b{flex:none;font-size:9.5px;letter-spacing:.8px;background:${C.rust};color:${C.white};border-radius:6px;padding:2px 5px;margin-top:1px}
 .ipcz .coach{font-size:11.5px;color:${C.seaDeep};font-weight:700;line-height:1.3;padding-left:2px}
-.ipcz .fh{display:flex;align-items:center;gap:5px;padding:3px 6px 3px 10px;background:${C.white};border-bottom:1px solid rgba(31,42,48,.1);min-height:40px}
+.ipcz .fh{display:flex;align-items:center;gap:5px;padding:3px 6px 3px 10px;background:${C.white};border-bottom:1px solid rgba(31,42,48,.1);min-height:50px}
 .ipcz .fht{flex:1;min-width:0;font-size:11px;font-weight:800;letter-spacing:.3px;color:${C.inkSoft};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ipcz .fht b{color:${C.ink}}
-.ipcz .effpill{flex:none;height:34px;border-radius:17px;padding:0 10px;font-size:12px;font-weight:800;background:${C.sand};box-shadow:inset 0 0 0 1px rgba(31,42,48,.14)}
-.ipcz .zbtn{flex:none;width:38px;height:34px;border-radius:17px;background:${C.paper};box-shadow:inset 0 0 0 1px rgba(31,42,48,.14);font-size:19px;font-weight:800;line-height:34px}
+.ipcz .effpill{flex:none;height:44px;border-radius:22px;padding:0 10px;font-size:12px;font-weight:800;background:${C.sand};box-shadow:inset 0 0 0 1px rgba(31,42,48,.14)}
+.ipcz .zbtn{flex:none;width:44px;height:44px;border-radius:22px;background:${C.paper};box-shadow:inset 0 0 0 1px rgba(31,42,48,.14);font-size:19px;font-weight:800;line-height:44px}
 .ipcz .effpill.set{background:${C.seaDeep};color:${C.white}}
 .ipcz .fig{position:relative;flex:0 0 33%;min-height:150px;transition:flex-basis .22s ease;background:${C.white};border-bottom:1px solid rgba(31,42,48,.16)}
 .ipcz.lf .fig{flex-basis:24%}
-.ipcz.rm .fig{transition:none}
+.ipcz.rm .fig,.ipcz.rm .isheet,.ipcz.rm .vd,.ipcz.rm .vc,.ipcz.rm .shade{transition:none}
 .ipcz .plate{position:absolute;inset:10px 14px;border-radius:10px;background:linear-gradient(135deg,#dfe4e6,#aab4b8 55%,#cfd6d8);box-shadow:0 6px 18px rgba(31,42,48,.35),inset 0 0 0 1px rgba(255,255,255,.6);display:none;flex-direction:column;justify-content:center;padding:14px 22px;font-family:${MONO};color:#26343b;text-shadow:0 1px 0 rgba(255,255,255,.55)}
 .ipcz .plate.on{display:flex}
 .ipcz .plate .pt{font-family:${FONT};font-weight:900;font-size:13px;letter-spacing:1.4px;text-align:center;margin-bottom:8px}
@@ -987,7 +995,7 @@ const CSS = `
 .ipcz .rnote{padding:0 10px 7px 50px;font-size:11px;color:${C.inkSoft};font-weight:600;line-height:1.35}
 .ipcz .rnote b{color:${C.ink};font-weight:800}
 .ipcz .rnote:empty{display:none}
-.ipcz .lk{color:${C.seaDeep};font-weight:800;text-decoration:underline;text-underline-offset:2px;padding:6px 2px;margin:-6px 0}
+.ipcz .lk{color:${C.seaDeep};font-weight:800;text-decoration:underline;text-underline-offset:2px;padding:13px 3px;margin:-13px -1px;display:inline-block;line-height:1.35}
 .ipcz .r.grp{background:rgba(46,124,147,.07);box-shadow:inset 3px 0 0 ${C.sea}}
 .ipcz .r.sel{background:rgba(46,124,147,.14);box-shadow:inset 4px 0 0 ${C.seaDeep}}
 .ipcz .r.dim .rg,.ipcz .r.dim .rnote{opacity:.38}
@@ -1013,7 +1021,7 @@ const CSS = `
 .ipcz .qs{display:flex;align-items:center}
 .ipcz .qs button{width:38px;height:44px;border-radius:10px;font-size:20px;font-weight:800;background:${C.paper}}
 .ipcz .qs span{min-width:26px;text-align:center;font-size:17px;font-weight:900;font-variant-numeric:tabular-nums}
-.ipcz .lx{width:34px;height:44px;font-size:16px;color:${C.inkSoft}}
+.ipcz .lx{width:44px;height:44px;font-size:16px;color:${C.inkSoft}}
 .ipcz .iorder{align-self:stretch;min-height:48px;border-radius:14px;background:${C.seaDeep};color:${C.white};font-size:16px;font-weight:900;letter-spacing:.3px;box-shadow:0 2px 0 rgba(0,0,0,.18)}
 .ipcz .iorder[disabled]{background:${C.sandDeep};color:rgba(31,42,48,.45);box-shadow:none}
 .ipcz .apr{grid-column:1/-1;display:flex;align-items:center;gap:8px;background:${C.white};border-radius:12px;padding:4px 4px 4px 10px;box-shadow:inset 0 0 0 2px ${C.mech}}
@@ -1030,7 +1038,7 @@ const CSS = `
 .ipcz .shtitle small{display:block;font-size:11px;color:${C.inkSoft};font-weight:700}
 .ipcz .shx{flex:none;width:44px;height:44px;border-radius:22px;background:${C.sand};font-size:18px;font-weight:900}
 .ipcz .itabs{display:flex;gap:6px;padding:0 10px 8px}
-.ipcz .tab{flex:1;min-height:40px;border-radius:12px;background:${C.white};font-weight:800;font-size:13px;box-shadow:inset 0 0 0 1px rgba(31,42,48,.12)}
+.ipcz .tab{flex:1;min-height:44px;border-radius:12px;background:${C.white};font-weight:800;font-size:13px;box-shadow:inset 0 0 0 1px rgba(31,42,48,.12)}
 .ipcz .tab.on{background:${C.ink};color:${C.paper}}
 .ipcz .shb{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding:0 10px 18px}
 .ipcz .icard{background:${C.white};border-radius:12px;padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 0 rgba(31,42,48,.08)}
@@ -1043,7 +1051,7 @@ const CSS = `
 .ipcz .hl{background:rgba(46,124,147,.14);border-radius:4px;padding:0 3px;font-weight:800}
 .ipcz .srch{display:flex;gap:6px;margin-bottom:8px;position:sticky;top:0;background:${C.paper};padding:2px 0 6px;z-index:1;flex-wrap:wrap}
 .ipcz .srch input{flex:1 1 100%;min-width:0;height:44px;border-radius:12px;border:1px solid rgba(31,42,48,.2);padding:0 12px;font:inherit;font-size:16px;background:${C.white};color:${C.ink};user-select:text;-webkit-user-select:text}
-.ipcz .ichip{flex:1;min-height:36px;border-radius:18px;background:${C.white};font-weight:800;font-size:12px;box-shadow:inset 0 0 0 1px rgba(31,42,48,.14);padding:0 8px}
+.ipcz .ichip{flex:1;min-height:44px;border-radius:22px;background:${C.white};font-weight:800;font-size:12px;box-shadow:inset 0 0 0 1px rgba(31,42,48,.14);padding:0 8px}
 .ipcz .ichip.on{background:${C.seaDeep};color:${C.white}}
 .ipcz .le{font-size:12px}
 .ipcz .le .lh{display:flex;justify-content:space-between;gap:6px;font-size:11px;font-weight:800;color:${C.inkSoft};margin-bottom:3px}
@@ -1398,15 +1406,31 @@ export const ipc: PuzzleDef = {
       </div>`;
     }
 
+    // the first page of the current books: what was carried forward from the archived ones
+    const oldSbs = ac.sbs.filter((x) => x.date < ac.logStart);
+    const oldAlts = ac.alterations.filter((x) => x.date < ac.logStart);
+    const carried = [
+      `Logbook opened ${fmtDate(ac.logStart)}. Carried forward from the previous airframe log:`,
+      ...oldSbs.map((x) => `${x.id} (${x.title}) complied with ${fmtDate(x.date)} at ${x.tt.toFixed(1)} TT.`),
+      ...oldAlts.map((x) => `${x.stc ? `STC ${x.stc}` : 'Field approval'} (${x.title}), Form 337 dated ${fmtDate(x.form337)}.`),
+    ];
+    const carriedHtml = () => `<div class="icard le${m.teach && !m.premarked && oldSbs.some((x) => x.id === sbFig) ? ' hint' : ''}"><div class="lh"><span><b>${fmtDate(ac.logStart)}</b> · Airframe · first page</span><span>carried forward</span></div>${carried.map((x, i) => `<p class="lt"${i ? '' : ' style="font-weight:800"'}>${esc(x)}</p>`).join('')}</div>`;
+
     function renderLog() {
       const body = sheetEl.querySelector('.logs') as HTMLElement | null;
       if (!body) return;
-      let es = logQuery.trim() ? searchLog(ac, logQuery) : ac.log;
+      const q = logQuery.trim().toLowerCase();
+      let es = q ? searchLog(ac, logQuery) : ac.log;
       if (logChip === 'ata') es = es.filter((e) => e.ata?.startsWith(m.ata));
       if (logChip === 'sb') es = es.filter((e) => e.kind === 'sb');
       if (logChip === 'stc') es = es.filter((e) => e.kind === 'stc');
       const shown = [...es].reverse();
-      body.innerHTML = shown.length ? shown.map((e) => logEntryHtml(e, !!sheet?.citeMode)).join('') : `<div class="icard"><p>No entries match.</p></div>`;
+      const cf = carried.join(' ').toLowerCase();
+      const showCarried =
+        (oldSbs.length || oldAlts.length) &&
+        (!q || q.split(/\s+/).every((w) => cf.includes(w))) &&
+        (logChip === 'all' || (logChip === 'sb' && oldSbs.length) || (logChip === 'stc' && oldAlts.length) || (logChip === 'ata' && oldSbs.some((x) => x.ata.startsWith(m.ata))));
+      body.innerHTML = shown.length || showCarried ? shown.map((e) => logEntryHtml(e, !!sheet?.citeMode)).join('') + (showCarried ? carriedHtml() : '') : `<div class="icard"><p>No entries match.</p></div>`;
       sheetEl.querySelectorAll<HTMLButtonElement>('.ichip').forEach((b) => b.classList.toggle('on', b.dataset.chip === logChip));
     }
 
@@ -1430,13 +1454,14 @@ export const ipc: PuzzleDef = {
         title = `${esc(ac.registration)} records<small>${esc(ac.designation)} S/N ${esc(ac.serial)} · TT ${ac.tt.toFixed(1)} · as of ${fmtDate(ac.asOf)}</small>`;
         tabs = `<div class="itabs"><button class="tab${tab === 'sb' ? ' on' : ''}" data-tab="sb">SB / AD</button><button class="tab${tab === 'alt' ? ' on' : ''}" data-tab="alt">337s</button><button class="tab${tab === 'log' ? ' on' : ''}" data-tab="log">Logbooks</button></div>`;
         if (tab === 'sb') {
+          const adTable = `<div class="icard"><h4>Airworthiness directives</h4><table class="tbl">${ac.ads.map((a) => `<tr><td>${esc(a.id)}</td><td>${esc(a.subject)}<br><span class="mt">${esc(a.note)}${a.nextDue ? ` · next due ${a.nextDue.toFixed(1)} TT` : ''}</span></td></tr>`).join('')}</table></div>`;
           if (!m.compliance)
-            body = `<div class="icard"><h4>SB compliance record</h4><p>Not kept current on this airplane. Search the logbooks for “Complied with”.</p></div>`;
+            body = `<div class="icard hint"><h4>SB compliance record</h4><p>Not kept current on this airplane. Search the logbooks: every SB done was logged “Complied with …”.</p></div>${adTable}`;
           else
             body = `
               <div class="icard"><h4>Service bulletins complied with</h4><table class="tbl">${ac.sbs.map((s) => `<tr class="${hintSb(s.id) ? 'hint' : ''}"><td>${esc(s.id)}</td><td>${esc(s.title)}<br><span class="mt">${fmtDate(s.date)} · TT ${s.tt.toFixed(1)}</span></td></tr>`).join('')}</table></div>
               <div class="icard"><h4>Service bulletins open</h4><table class="tbl">${ac.sbsOpen.map((s) => `<tr class="${hintSb(s.id) ? 'hint' : ''}"><td>${esc(s.id)}</td><td>${esc(s.title)}</td></tr>`).join('') || '<tr><td>—</td><td>none</td></tr>'}</table></div>
-              <div class="icard"><h4>Airworthiness directives</h4><table class="tbl">${ac.ads.map((a) => `<tr><td>${esc(a.id)}</td><td>${esc(a.subject)}<br><span class="mt">${esc(a.note)}${a.nextDue ? ` · next due ${a.nextDue.toFixed(1)} TT` : ''}</span></td></tr>`).join('')}</table></div>`;
+              ${adTable}`;
         } else if (tab === 'alt') {
           body = [...ac.alterations]
             .reverse()
@@ -1490,7 +1515,7 @@ export const ipc: PuzzleDef = {
         const alt = m.alteration!;
         const main = alt.parts![1] ?? alt.parts![0];
         host.fx.thunk();
-        lines.length = 0;
+        for (let i = lines.length - 1; i >= 0; i--) if (lines[i].src === 'ipc') lines.splice(i, 1);
         refreshSlip();
         showCard(`
           <div class="istamp" style="color:${C.mech}">DOESN’T FIT</div>
@@ -1799,7 +1824,7 @@ export const ipc: PuzzleDef = {
         const r = rowByItem.get(a.item);
         const mat = matOf(r?.nomen ?? '', a.shape);
         const state = selItem === a.item ? 'sel' : 'n';
-        drawShape(ctx, a.shape, b, lookFor(mat, state, lw), mat);
+        drawShape(ctx, a.shape, b, lookFor(mat, state, lw), mat, /BACKPLATE/.test(r?.nomen ?? ''));
       }
       // teaching: circle the damaged part
       const pulse = rm ? 0.5 : 0.5 + 0.5 * Math.sin(t * 4);
@@ -1867,12 +1892,7 @@ export const ipc: PuzzleDef = {
     }
 
     // ---- DOM events (one delegated handler)
-    let plateHold = 0;
-    const onDown = (e: PointerEvent) => {
-      markInput();
-      const el = (e.target as HTMLElement).closest('[data-act="plate"]');
-      if (el) plateHold = performance.now();
-    };
+    const onDown = () => markInput();
     const onClick = (e: MouseEvent) => {
       markInput();
       const t = e.target as HTMLElement;
@@ -2015,13 +2035,6 @@ export const ipc: PuzzleDef = {
       }
       if (t === shade) closeSheet();
     };
-    const onUp = () => {
-      // press-and-hold peeks the plate; a quick tap toggles it (click handler)
-      if (plateHold && performance.now() - plateHold > 380 && plate.classList.contains('on')) {
-        setTimeout(() => plate.classList.remove('on'), 0);
-      }
-      plateHold = 0;
-    };
     const onPlate = () => {
       plate.classList.remove('on');
       job.querySelector('[data-act="plate"]')?.classList.remove('on');
@@ -2033,7 +2046,6 @@ export const ipc: PuzzleDef = {
     figEl.addEventListener('pointerdown', onFigDown);
     root.addEventListener('pointerdown', onDown, { capture: true });
     root.addEventListener('click', onClick);
-    root.addEventListener('pointerup', onUp);
     plate.addEventListener('click', onPlate);
 
     // automation hook (lab / playtests): where a callout sits on screen
@@ -2067,7 +2079,6 @@ export const ipc: PuzzleDef = {
         list.removeEventListener('pointerdown', onListDown);
         figEl.removeEventListener('pointerdown', onFigDown);
         root.removeEventListener('click', onClick);
-        root.removeEventListener('pointerup', onUp);
         st.destroy();
         root.remove();
       },
