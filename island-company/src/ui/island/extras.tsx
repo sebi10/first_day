@@ -1,7 +1,7 @@
 // What the island gains between tiers (src/sim/growth.ts flourishes), plus
 // the finished dock. Every piece has a reserved spot in geo.tsx SPOT.
 import { DOCK, lin, P, SPOT, type Pt } from './geo';
-import { Palm } from './flora';
+import { Saplings } from './flora';
 import { Dinghy, Yacht } from './craft';
 import { K, tones } from './paint';
 import { box, hip, post } from './solid';
@@ -36,6 +36,44 @@ export function Dock() {
         <path d="M-4 -3h8M-4 -6h8" stroke="#6b4a2e" stroke-width=".9" />
         <path d="M6 0h9v-8h-9z" fill={K.woodLight} stroke={K.woodDark} stroke-width="1" />
         <path d="M6 -8l3 -2.5h9l-3 2.5zM15 0l3 -2.5v-8l-3 2.5z" fill={K.wood} />
+      </g>
+    </g>
+  );
+}
+
+/** life on the apron: a fuel bowser, a baggage train and a stack of drums */
+export function ApronProps() {
+  const cab = box(10, 18, 0, 8, 0, 8);
+  const bed = box(-12, 10, 0, 3, 0, 8);
+  const tank = box(-11, 8, 3, 10, 1, 7);
+  const cart = box(-6, 6, 0, 5, 0, 7);
+  return (
+    <g>
+      <g transform="translate(262 306)">
+        <ellipse cx={4} cy={2} rx={17} ry={4} fill={K.shadow} />
+        <path d={bed.front + bed.side} fill="#4a5258" />
+        <path d={tank.side} fill="#c9ced1" />
+        <path d={tank.front} fill="#eef1f2" />
+        <path d={tank.top} fill="#ffffff" />
+        <path d="M-9 -6h15" stroke={K.red} stroke-width="1.6" />
+        <path d={cab.side} fill="#a8322a" />
+        <path d={cab.front} fill="#e8453c" />
+        <path d={cab.top} fill="#ff6b5e" />
+        <path d="M12 -6.5h4.4v3h-4.4z" fill="#bfe6f5" />
+        <path d="M-7 0.6a2 2 0 1 0 .1 0M5 0.6a2 2 0 1 0 .1 0M14 0.6a2 2 0 1 0 .1 0" fill="#2f3438" />
+      </g>
+      {[[318, 372, '#3a8ee6'], [334, 368, '#f2c230']].map(([x, y, c], i) => (
+        <g key={i} transform={`translate(${x} ${y})`}>
+          <path d={cart.front + cart.side} fill="#56606a" />
+          <path d={cart.top} fill={c as string} />
+          <path d="M-4 0.6a1.6 1.6 0 1 0 .1 0M4 0.6a1.6 1.6 0 1 0 .1 0" fill="#2f3438" />
+        </g>
+      ))}
+      <g transform="translate(96 372)">
+        <ellipse cx={8} cy={2} rx={13} ry={3} fill={K.shadow} />
+        <path d="M-4 0v-8a4 1.6 0 0 1 8 0v8a4 1.6 0 0 1 -8 0zM5 1v-8a4 1.6 0 0 1 8 0v8a4 1.6 0 0 1 -8 0z" fill="#2e7c93" />
+        <path d="M0 -8m-4 0a4 1.6 0 1 0 8 0a4 1.6 0 1 0 -8 0M9 -7m-4 0a4 1.6 0 1 0 8 0a4 1.6 0 1 0 -8 0" fill="#5aa7bd" />
+        <path d="M-4 -3h8M5 -2h8" stroke="#1f5c6e" stroke-width=".9" />
       </g>
     </g>
   );
@@ -83,18 +121,18 @@ export function Lamp({ x, y }: { x: number; y: number }) {
 }
 
 /** a newly planted palm grove: tilled rows, saplings in a neat grid */
-export function Grove({ motion }: { motion: boolean }) {
+const GX = SPOT.grove.map((p) => p[0]), GY = SPOT.grove.map((p) => p[1]);
+const G0: [number, number] = [Math.min(...GX) - 14, Math.min(...GY) - 12], G1: [number, number] = [Math.max(...GX) + 14, Math.max(...GY) + 8];
+const FIELD = `M${G0[0] + 4} ${G0[1]}Q${(G0[0] + G1[0]) / 2} ${G0[1] - 6} ${G1[0]} ${G0[1] + 2}Q${G1[0] + 6} ${(G0[1] + G1[1]) / 2} ${G1[0] - 2} ${G1[1]}Q${(G0[0] + G1[0]) / 2} ${G1[1] + 6} ${G0[0]} ${G1[1] - 2}Q${G0[0] - 6} ${(G0[1] + G1[1]) / 2} ${G0[0] + 4} ${G0[1]}Z`;
+export function Grove() {
+  const rows = Array.from({ length: Math.floor((G1[1] - G0[1] - 6) / 10) }, (_, i) => `M${G0[0] + 2} ${G0[1] + 8 + i * 10}h${G1[0] - G0[0] - 4}`).join('');
   return (
     <g>
-      <path d="M182 306Q222 294 268 300Q276 336 262 372Q220 384 176 380Q166 342 182 306Z" fill="#9a7a4a" opacity=".35" transform="translate(0 3)" />
-      <path d="M182 306Q222 294 268 300Q276 336 262 372Q220 384 176 380Q166 342 182 306Z" fill="#c29a62" />
-      <path d="M182 314Q224 304 266 308M178 326Q222 316 268 320M177 338Q222 328 268 332M176 350Q222 340 267 344M176 362Q220 352 265 356M178 373Q220 364 262 367" stroke="#9e7440" stroke-width="2" fill="none" />
-      <path d="M182 306Q222 294 268 300Q276 336 262 372Q220 384 176 380Q166 342 182 306Z" fill="none" stroke={K.grassDark} stroke-width="3" />
-      {[...SPOT.grove]
-        .sort((a, b) => a[1] - b[1])
-        .map(([x, y], i) => (
-          <Palm key={i} x={x} y={y} s={0.95} lean={i % 2 ? 1 : -1} young motion={motion} />
-        ))}
+      <path d={FIELD} fill="#9a7a4a" opacity=".35" transform="translate(0 3)" />
+      <path d={FIELD} fill="#c29a62" />
+      <path d={rows} stroke="#9e7440" stroke-width="2" fill="none" />
+      <path d={FIELD} fill="none" stroke={K.grassDark} stroke-width="3" />
+      <Saplings pts={[...SPOT.grove].sort((a, b) => a[1] - b[1])} />
     </g>
   );
 }
@@ -136,11 +174,11 @@ export function BeachBar() {
   const posts = [post(-w, 0, h), post(w, 0, h), post(-w, d, h), post(w, d, h)].join('');
   return (
     <g>
-      <Umbrella x={x - 44} y={y + 16} c="#ff6fa8" />
-      <Umbrella x={x + 48} y={y + 12} c="#3a8ee6" />
-      <Lounger x={x - 58} y={y + 22} c="#ff6fa8" />
-      <Lounger x={x + 36} y={y + 20} c="#3a8ee6" />
-      <Lounger x={x + 58} y={y + 22} c={K.yellow} />
+      <Umbrella x={x - 46} y={y + 12} c="#ff6fa8" />
+      <Umbrella x={x + 50} y={y + 10} c="#3a8ee6" />
+      <Lounger x={x - 66} y={y + 14} c="#ff6fa8" />
+      <Lounger x={x + 30} y={y + 14} c="#3a8ee6" />
+      <Lounger x={x + 70} y={y + 12} c={K.yellow} />
       <g transform={`translate(${x} ${y})`}>
         <path d={`M${pt(-w, 0, 0)}L${pt(w + 12, 0, 0)}L${pt(w + 12, 0, d)}L${pt(-w, 0, d)}Z`} fill={K.shadowSand} />
         <path d={posts} stroke={K.woodDark} stroke-width="2.6" />
@@ -286,8 +324,8 @@ export function Statue() {
 
 /** strings of little flags across the square (with bulbs that glow at night) */
 export const BUNTING: [Pt, Pt][] = [
-  [[300, 284], [420, 284]],
-  [[304, 310], [424, 318]],
+  [[352, 300], [488, 302]],
+  [[358, 326], [484, 328]],
 ];
 const quadAt = (a: Pt, b: Pt, t: number, sag: number): Pt => {
   const m: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2 + sag * 2];
@@ -320,7 +358,7 @@ export function Bunting({ motion }: { motion: boolean }) {
 /** confetti over the square after an A week */
 export function Confetti({ motion }: { motion: boolean }) {
   const cols = ['#ff6fa8', '#ffd23f', '#3a8ee6', '#4caf50', '#a77be0', '#ff8c42'];
-  const pts = Array.from({ length: 36 }, (_, i) => [290 + ((i * 53) % 150), 250 + ((i * 37) % 130), ((i * 47) % 7) - 3] as const);
+  const pts = Array.from({ length: 36 }, (_, i) => [350 + ((i * 53) % 150), 240 + ((i * 37) % 130), ((i * 47) % 7) - 3] as const);
   return (
     <g class={motion ? 'confetti' : undefined}>
       {cols.map((c, ci) => (

@@ -17,14 +17,15 @@ function parts(m: PlaneModel) {
   return { fus, wing, tail, len, fw, span };
 }
 
-export function Plane({ model, x, y, rot, jacks, chocks, flying, mood = 1 }: { model: PlaneModel; x: number; y: number; rot: number; jacks?: boolean; chocks?: boolean; flying?: boolean; mood?: number }) {
+export function Plane({ model, x, y, rot, jacks, service, chocks, flying, mood = 1, size = 1 }: { model: PlaneModel; x: number; y: number; rot: number; jacks?: boolean; service?: boolean; chocks?: boolean; flying?: boolean; mood?: number; size?: number }) {
   const p = parts(model);
   const liv = LIVERY[model];
   const body = mood < 1 ? '#e9e6de' : '#fbfbf7';
   const sil = p.wing + p.fus + p.tail;
   const lift = jacks ? 5 : 0;
+  const open = jacks || service;
   return (
-    <g transform={`translate(${x} ${y}) scale(1.38)`}>
+    <g transform={`translate(${x} ${y}) scale(${Math.round(138 * size) / 100})`}>
       {!flying && <path d={sil} fill="rgba(20,40,40,.3)" transform={`translate(6 ${5 + lift}) scale(1 .72) rotate(${rot})`} />}
       <g transform={`translate(0 ${-lift}) scale(1 .72) rotate(${rot})`}>
         {model === 'float' && <path d={`M-18 -12.5h30q6 0 8 2.5q-2 2.5 -8 2.5h-30zM-18 7.5h30q6 0 8 2.5q-2 2.5 -8 2.5h-30z`} fill="#c9d0d4" stroke="#8e999f" stroke-width=".8" />}
@@ -32,8 +33,8 @@ export function Plane({ model, x, y, rot, jacks, chocks, flying, mood = 1 }: { m
         <path d={`M${model === 'twin' ? 5 : 6} ${-p.span}h2v6h-2zM${model === 'twin' ? 5 : 6} ${p.span - 6}h2v6h-2z`} fill={liv} />
         {model === 'twin' && (
           <>
-            <path d="M-2 -14h13q3 0 3 2.5q0 2.5 -3 2.5h-13zM-2 9.5h13q3 0 3 2.5q0 2.5 -3 2.5h-13z" fill={jacks ? '#56606a' : '#e2e4e0'} stroke="#b8bbb4" stroke-width=".6" />
-            {!jacks && <path d="M15 -17v10M15 7v10" stroke="#7d868c" stroke-width="1.6" stroke-linecap="round" opacity=".7" />}
+            <path d="M-2 -14h13q3 0 3 2.5q0 2.5 -3 2.5h-13zM-2 9.5h13q3 0 3 2.5q0 2.5 -3 2.5h-13z" fill={open ? '#56606a' : '#e2e4e0'} stroke="#b8bbb4" stroke-width=".6" />
+            {!open && <path d="M15 -17v10M15 7v10" stroke="#7d868c" stroke-width="1.6" stroke-linecap="round" opacity=".7" />}
           </>
         )}
         <path d={p.fus} fill={body} stroke="#7d878c" stroke-width=".9" />
@@ -41,8 +42,8 @@ export function Plane({ model, x, y, rot, jacks, chocks, flying, mood = 1 }: { m
         <path d={p.tail} fill={body} stroke="#7d878c" stroke-width=".9" />
         <path d={`M${-p.len} 0h8`} stroke={liv} stroke-width="3.2" stroke-linecap="round" />
         <path d={`M${p.len * 0.5} ${-p.fw * 0.7}q${p.fw * 1.3} ${p.fw * 0.7} 0 ${p.fw * 1.4}z`} fill="#2d4d66" />
-        {model !== 'twin' && !jacks && <path d={`M${p.len + 1} -6v12`} stroke="#7d868c" stroke-width="1.8" stroke-linecap="round" opacity=".75" />}
-        {jacks && model !== 'twin' && <path d={`M${p.len * 0.55} ${-p.fw}h${p.len * 0.45}v${p.fw * 2}h${-p.len * 0.45}z`} fill="#56606a" />}
+        {model !== 'twin' && !open && <path d={`M${p.len + 1} -6v12`} stroke="#7d868c" stroke-width="1.8" stroke-linecap="round" opacity=".75" />}
+        {open && model !== 'twin' && <path d={`M${p.len * 0.55} ${-p.fw}h${p.len * 0.45}v${p.fw * 2}h${-p.len * 0.45}z`} fill="#56606a" />}
       </g>
       {jacks && (
         <g fill="#f2c230" stroke="#6d5a1c" stroke-width=".6">

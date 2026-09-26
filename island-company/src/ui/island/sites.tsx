@@ -94,17 +94,38 @@ function Worker({ x, y }: { x: number; y: number }) {
   );
 }
 
+/** a little board on a post: what will be built here */
+function PlotSign({ x, kind }: { x: number; kind: SiteKind }) {
+  return (
+    <g transform={`translate(${x} 6)`}>
+      <ellipse cx={3} cy={1} rx={6} ry={1.8} fill={K.shadow} />
+      <path d="M0 0V-10" stroke={K.woodDark} stroke-width="1.8" />
+      <path d="M-7 -20h14v10h-14z" fill="#fffaf0" stroke={K.woodDark} stroke-width="1.2" />
+      {kind === 'gen' ? (
+        <path d="M1 -19L-3 -14.6H0L-1 -11L3 -15.4H0Z" fill="#e0a21a" />
+      ) : (
+        <path d="M-3.6 -12v-3.6l3.6 -3l3.6 3v3.6z" fill={K.rust} />
+      )}
+    </g>
+  );
+}
+
 /** one site at a screen point. stage -1 = planned only (subtle) */
 export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKind; stage: -1 | 0 | 1 | 2 }) {
   const { w, d, h } = DIM[kind];
   const big = kind === 'villa' || kind === 'lodge';
   if (stage < 0) {
-    const [cx, cy] = P([0, 0, d / 2]);
+    // a surveyed plot: mown lawn, corner stakes, string lines and a sign
+    const stripes = Array.from({ length: 4 }, (_, i) => {
+      const z = -2 + ((d + 4) * (i + 0.5)) / 4;
+      return lin([P([-w - 2, 0, z]), P([w + 2, 0, z])]);
+    }).join('');
     return (
       <g transform={`translate(${x} ${y})`}>
-        <ellipse cx={cx} cy={cy} rx={w + 5} ry={d * 0.28 + 5} fill={mix(K.grass, K.dirt, 0.55)} />
-        <ellipse cx={cx - 2} cy={cy - 1} rx={w * 0.7} ry={d * 0.17 + 2} fill={mix(K.grass, K.dirtLight, 0.7)} />
-        <Stakes w={w - 4} d={d - 6} lines={false} />
+        <path d={quad(-w - 2, w + 2, -2, d + 2)} fill={mix(K.grass, K.grassLighter, 0.5)} />
+        <path d={stripes} stroke={mix(K.grass, K.grassLighter, 0.85)} stroke-width={((d + 4) / 4) * 0.5 * 0.9} />
+        <Stakes w={w - 2} d={d - 4} lines />
+        <PlotSign x={-w - 8} kind={kind} />
       </g>
     );
   }

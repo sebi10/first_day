@@ -37,6 +37,18 @@ export function LifeDefs() {
         <stop offset="0" stop-color="#fff3b0" stop-opacity=".75" />
         <stop offset="1" stop-color="#fff3b0" stop-opacity="0" />
       </linearGradient>
+      <radialGradient id="i-nightvig" cx=".5" cy=".5" r=".72">
+        <stop offset=".55" stop-color="#040a24" stop-opacity="0" />
+        <stop offset="1" stop-color="#040a24" stop-opacity=".55" />
+      </radialGradient>
+      <radialGradient id="i-stormvig" cx=".5" cy=".55" r=".75">
+        <stop offset=".35" stop-color="#1a2230" stop-opacity="0" />
+        <stop offset="1" stop-color="#1a2230" stop-opacity=".7" />
+      </radialGradient>
+      <linearGradient id="i-moonpath" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#fff4c2" stop-opacity=".9" />
+        <stop offset="1" stop-color="#fff4c2" stop-opacity="0" />
+      </linearGradient>
     </>
   );
 }
@@ -92,28 +104,32 @@ export function SeaLife({ motion, boats }: { motion: boolean; boats: number }) {
 const PUFFS: [number, number, number][] = [[0, 0, 22], [26, -8, 19], [48, 2, 17], [24, 12, 17], [-20, 8, 15], [4, 16, 14]];
 const CLOUD = PUFFS.map(([x, y, r]) => `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`).join('');
 const CLOUD_HI = 'M-10 -8a10 10 0 0 1 14 -10M20 -16a9 9 0 0 1 14 -4';
+/** fair-weather clouds frame two corners; a storm brings a heavy deck along the top and sides */
+const FAIR: [number, number, number][] = [[-6, 6, 1.25], [64, -14, 0.9], [-26, 62, 0.8], [752, 582, 1.3], [690, 606, 0.9], [808, 530, 0.8]];
+const STORM: [number, number, number][] = [
+  [-20, 22, 1.7], [112, -16, 1.45], [252, -34, 1.3], [400, -40, 1.3], [546, -34, 1.35], [684, -14, 1.55], [822, 34, 1.7],
+  [-42, 178, 1.25], [842, 206, 1.25], [-34, 578, 1.6], [120, 630, 1.25], [676, 628, 1.35], [822, 556, 1.6],
+];
 export function Clouds({ storm, motion }: { storm: boolean; motion: boolean }) {
-  const top = storm ? '#8d97a4' : '#ffffff';
-  const under = storm ? '#687382' : '#cfe4f6';
-  const cl = (x: number, y: number, s: number, key: string) => (
-    <g key={key} transform={`translate(${x} ${y}) scale(${s})`}>
-      <path d={CLOUD} fill="rgba(10,60,130,.18)" transform="translate(14 20)" />
-      <path d={CLOUD} fill={under} transform="translate(2 6)" />
-      <path d={CLOUD} fill={top} />
-      <path d={CLOUD_HI} stroke="#fff" stroke-width="4" fill="none" opacity={storm ? 0.2 : 0.95} stroke-linecap="round" />
-    </g>
-  );
+  const list = storm ? STORM : FAIR;
+  const top = storm ? '#7b8595' : '#ffffff';
+  const under = storm ? '#434b58' : '#cfe4f6';
+  const tr = (x: number, y: number, s: number, dx = 0, dy = 0) => `translate(${x + dx} ${y + dy}) scale(${s})`;
   return (
     <g class={motion ? 'cloud' : undefined}>
-      {cl(-6, 6, 1.25, 'a')}
-      {cl(64, -14, 0.9, 'b')}
-      {cl(-26, 62, 0.8, 'c')}
-      {cl(752, 582, 1.3, 'd')}
-      {cl(690, 606, 0.9, 'e')}
-      {cl(808, 530, 0.8, 'f')}
-      {storm && cl(360, -6, 1.2, 'g')}
-      {storm && cl(470, -14, 1, 'h')}
-      {storm && cl(250, -10, 0.9, 'i')}
+      {/* merged per tone: a whole cloud deck costs four nodes a cloud at most */}
+      {list.map(([x, y, s], i) => (
+        <path key={`s${i}`} d={CLOUD} fill={storm ? 'rgba(10,20,40,.3)' : 'rgba(10,60,130,.18)'} transform={tr(x, y, s, 14, 20)} />
+      ))}
+      {list.map(([x, y, s], i) => (
+        <path key={`u${i}`} d={CLOUD} fill={under} transform={tr(x, y, s, 2, 6)} />
+      ))}
+      {list.map(([x, y, s], i) => (
+        <path key={`t${i}`} d={CLOUD} fill={top} transform={tr(x, y, s)} />
+      ))}
+      {list.map(([x, y, s], i) => (
+        <path key={`h${i}`} d={CLOUD_HI} stroke={storm ? '#c3cad4' : '#fff'} stroke-width="4" fill="none" opacity={storm ? 0.7 : 0.95} stroke-linecap="round" transform={tr(x, y, s)} />
+      ))}
     </g>
   );
 }
@@ -131,20 +147,48 @@ export function Gulls({ motion }: { motion: boolean }) {
 // ----------------------------------------------------------------- sky ---
 const STARS: [number, number, number][] = [
   [30, 60, 1.4], [90, 30, 1], [160, 50, 1.2], [260, 20, 1.6], [420, 24, 1], [520, 16, 1.3], [690, 40, 1], [780, 90, 1.4], [790, 200, 1],
-  [20, 180, 1], [16, 300, 1.3], [24, 480, 1], [120, 560, 1.2], [300, 580, 1], [520, 560, 1.4], [600, 588, 1], [786, 450, 1.2], [770, 520, 1],
-  [640, 20, 1.6], [360, 44, 1],
+  [20, 180, 1], [16, 300, 1.3], [24, 480, 1], [120, 570, 1.2], [300, 580, 1], [520, 568, 1.4], [600, 588, 1], [786, 450, 1.2], [770, 540, 1],
+  [640, 20, 1.6], [360, 44, 1], [200, 90, 1], [720, 70, 1.1],
 ];
+const MOON: [number, number] = [762, 40];
 export function NightSky({ motion }: { motion: boolean }) {
+  const [mx, my] = MOON;
   return (
     <g pointer-events="none">
       <path d={STARS.map(([x, y, r]) => `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`).join('')} fill="#fff8d8" />
       <g class={motion ? 'twinkle' : undefined}>
-        <path d="M200 30l1.5 4l4 1.5l-4 1.5l-1.5 4l-1.5 -4l-4 -1.5l4 -1.5zM740 150l1.2 3l3 1.2l-3 1.2l-1.2 3l-1.2 -3l-3 -1.2l3 -1.2zM60 420l1.2 3l3 1.2l-3 1.2l-1.2 3l-1.2 -3l-3 -1.2l3 -1.2z" fill="#fffbe6" />
+        <path d="M200 30l1.5 4l4 1.5l-4 1.5l-1.5 4l-1.5 -4l-4 -1.5l4 -1.5zM790 250l1.2 3l3 1.2l-3 1.2l-1.2 3l-1.2 -3l-3 -1.2l3 -1.2zM40 420l1.2 3l3 1.2l-3 1.2l-1.2 3l-1.2 -3l-3 -1.2l3 -1.2z" fill="#fffbe6" />
       </g>
-      <g transform="translate(756 44)">
-        <circle r={20} fill="#fff6c9" opacity=".18" />
-        <path d="M-6 -13A14 14 0 1 0 12 7A11 11 0 1 1 -6 -13Z" fill="#fff4c2" />
-      </g>
+      {/* moon, and its path of light on the water */}
+      <path d={`M${mx - 3} ${my + 26}h10M${mx - 8} ${my + 36}h18M${mx - 2} ${my + 46}h9M${mx - 12} ${my + 56}h22M${mx - 5} ${my + 68}h14M${mx - 14} ${my + 80}h20M${mx - 6} ${my + 94}h12`} stroke="url(#i-moonpath)" stroke-width="2.6" stroke-linecap="round" />
+      <circle cx={mx} cy={my} r={24} fill="#fff6c9" opacity=".16" />
+      <path d={`M${mx - 6} ${my - 13}A14 14 0 1 0 ${mx + 12} ${my + 7}A11 11 0 1 1 ${mx - 6} ${my - 13}Z`} fill="#fff4c2" />
+    </g>
+  );
+}
+
+/** Night: a cool multiply grade (keeps dark darks and every edge; no grey
+ *  wash), a moonlit rim on the high ground and the surf, a soft vignette. */
+export function NightGrade({ rim, coast }: { rim: string; coast: string }) {
+  return (
+    <g pointer-events="none">
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#5a6cb0" style={{ mixBlendMode: 'multiply' }} />
+      {/* moonlight lifts the land's mid-tones, so it separates from the sea */}
+      <path d={coast} fill="#7f95d6" opacity=".22" style={{ mixBlendMode: 'screen' }} />
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-nightvig)" />
+      <path d={coast} fill="none" stroke="#cfe0ff" stroke-width="2.2" stroke-dasharray="26 7 12 6" opacity=".45" />
+      <path d={rim} fill="none" stroke="#b9ccff" stroke-width="2" opacity=".38" clip-path="url(#i-lip)" />
+    </g>
+  );
+}
+
+/** Storm: a darker, cooler grade that falls off toward the edges so the
+ *  island in the middle stays readable. */
+export function StormGrade() {
+  return (
+    <g pointer-events="none">
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#a9b3c4" style={{ mixBlendMode: 'multiply' }} />
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-stormvig)" />
     </g>
   );
 }
@@ -167,25 +211,26 @@ export function Wind({ motion }: { motion: boolean }) {
   );
 }
 
+/** three sheets of rain: fine far drizzle, long streaks, short heavy drops */
 export function Rain({ motion }: { motion: boolean }) {
-  const drops = (seed: number) =>
-    Array.from({ length: 34 }, (_, i) => {
-      const x = (i * 97 + seed * 41) % W;
+  const drops = (n: number, seed: number, len: number, slant: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const x = (i * 97 + seed * 41) % (W + 60);
       const y = ((i * 53 + seed * 29) % 150) - 150;
-      return [0, 150, 300, 450, 600].map((o) => `M${x} ${y + o}l-5 16`).join('');
+      return [0, 150, 300, 450, 600].map((o) => `M${x} ${y + o}l${-slant} ${len}`).join('');
     }).join('');
+  const sheets = [
+    { d: drops(40, 3, 10, 3), c: '#c9d6e2', w: 1, o: 0.4, dur: '1.3s' },
+    { d: drops(30, 1, 22, 7), c: '#e4eef6', w: 1.4, o: 0.6, dur: '.8s' },
+    { d: drops(16, 2, 12, 5), c: '#ffffff', w: 2.2, o: 0.7, dur: '.6s' },
+  ];
   return (
-    <g pointer-events="none">
-      <rect width={W} height={H} fill="#1d2a3a" opacity=".3" />
-      {motion ? (
-        <g stroke="#dbe8f2" stroke-width="1.4" opacity=".55" stroke-linecap="round">
-          <path d={drops(1)} class="rain" />
-          <path d={drops(2)} class="rain" style={{ animationDuration: '1.1s', animationDelay: '-.4s' }} />
-        </g>
-      ) : (
-        <path d={drops(1)} stroke="#dbe8f2" stroke-width="1.4" opacity=".45" />
-      )}
+    <g pointer-events="none" stroke-linecap="round">
+      {sheets.map((r, i) => (
+        <path key={i} d={r.d} stroke={r.c} stroke-width={r.w} opacity={r.o} class={motion ? 'rain' : undefined} style={motion ? { animationDuration: r.dur, animationDelay: `${-i * 0.3}s` } : undefined} />
+      ))}
       {motion && <rect width={W} height={H} fill="#fff" class="flash" opacity="0" />}
+      {motion && <path d="M706 34l-16 32h13l-20 40l34 -48h-13l15 -24z" fill="#fffbe0" stroke="#ffe27a" stroke-width="1.5" stroke-linejoin="round" class="bolt" opacity="0" />}
     </g>
   );
 }

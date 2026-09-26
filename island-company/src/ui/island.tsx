@@ -1,27 +1,28 @@
 // The island is the progress bar and the status board: a cartoon map that
 // grows tier by tier (and week by week, src/sim/growth.ts), with notification
-// bubbles sitting on whatever needs a hand. Layers, bottom to top: memoized
-// terrain, sea life, flat props, y-sorted buildings/planes/people, wires,
-// sky, light, bubbles; rain and wind streaks sit outside the zoom.
+// bubbles above whatever needs a hand, and every fault drawn on the asset
+// itself. Layers, bottom to top: memoized terrain, sea life, flat props,
+// y-sorted buildings/planes/people, wires, sky, the light of the hour,
+// bubbles; rain and wind streaks sit outside the zoom.
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
 import { houseBlocker, houseRentable, planeCapacity, powered } from '../sim/econ';
-import { developmentOf, type Flourish } from '../sim/growth';
+import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
-import { Cottage, GenHouse, Hangar, Lodge, Office, Pole, POLE_H, Ribbon, Substation, Villa, type Win } from './island/buildings';
+import { Cottage, GenHouse, Hangar, Lodge, Office, Pole, POLE_H, Ribbon, Substation, Villa, type Fault, type Win } from './island/buildings';
 import { FlyingPlane, Plane, type PlaneModel } from './island/craft';
 import {
-  BeachBar, Bench, Boardwalk, Confetti, Dock, FishingBoats, Fountain, GardenBeds, Grove, Lamp, Lighthouse, Market, NewFlags, Observatory, Statue,
+  ApronProps, BeachBar, Bench, Boardwalk, Confetti, Dock, FishingBoats, Fountain, GardenBeds, Grove, Lamp, Lighthouse, Market, NewFlags, Observatory, Statue,
   Bunting, buntingBulbs, YachtAt,
 } from './island/extras';
-import { curve, FOCUS, H, HANGAR, OFFICE, P, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, W, zoomOf, type Pt } from './island/geo';
+import { AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, OFFICE, P, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, W, zoomK, zoomOf, type Pt } from './island/geo';
 import { blob } from './island/rocks';
-import { Clouds, Gulls, Guy, LifeDefs, NightSky, Rain, SeaLife, Wind } from './island/life';
+import { Clouds, Gulls, Guy, LifeDefs, NightGrade, NightSky, Rain, SeaLife, StormGrade, Wind } from './island/life';
 import { K } from './island/paint';
 import { DockSite, Site, type SiteKind } from './island/sites';
-import { Bubble, NewBadge, type Icon, type Tone } from './island/status';
-import { Terrain, TerrainDefs } from './island/terrain';
+import { Bubble, bubbleK, NewBadge, spread, type Icon, type Tone } from './island/status';
+import { COAST_LINE, RIM_D, Terrain, TerrainDefs } from './island/terrain';
 
 type Phase = 'dawn' | 'day' | 'golden' | 'night';
 export const phaseOf = (d = new Date()): Phase => {
@@ -34,32 +35,52 @@ const add = (a: Pt, b: Pt): Pt => [a[0] + b[0], a[1] + b[1]];
 
 // house geometry, for bubbles, wires and window glows
 const HOUSE = {
-  cottage: { top: 38, bub: 34, w: 20, h: 18, d: 26, glow: [[-12, -9], [12, -9]] },
-  villa: { top: 58, bub: 50, w: 30, h: 32, d: 32, glow: [[-20, -24], [0, -24], [20, -24], [-20, -8], [20, -8]] },
-  lodge: { top: 66, bub: 40, w: 30, h: 20, d: 40, glow: [[0, -30], [-48, -8]] },
+  cottage: { top: 42, w: 20, h: 18, d: 26, glow: [[0, -9, 22]] },
+  villa: { top: 54, w: 28, h: 30, d: 30, glow: [[-10, -22, 22], [10, -9, 22]] },
+  lodge: { top: 66, w: 30, h: 20, d: 40, glow: [[0, -30, 20], [-48, -8, 16]] },
 } as const;
 const houseGeo = (a: Asset) => HOUSE[(a.model as keyof typeof HOUSE) in HOUSE ? (a.model as keyof typeof HOUSE) : 'cottage'];
 
-// power poles and the spans between them (tier each first appears)
+// Power: the substation feeds its own pole Q on the west bank; the line
+// crosses the river to the junction S, then runs up the east bank and along
+// the cottage spine. The generator (tier 3) feeds S directly.
 const POLES: Record<string, { at: Pt; tier: number }> = {
-  S: { at: [552, 268], tier: 1 },
-  A: { at: [598, 306], tier: 1 },
-  C: { at: [676, 290], tier: 1 },
-  D: { at: [612, 356], tier: 2 },
-  E: { at: [704, 296], tier: 4 },
-  F: { at: [630, 272], tier: 5 },
+  Q: { at: [488, 372], tier: 1 },
+  S: { at: [548, 406], tier: 1 },
+  A: { at: [554, 320], tier: 1 },
+  C: { at: [636, 318], tier: 1 },
+  D: { at: [640, 366], tier: 2 },
+  E: { at: [644, 418], tier: 4 },
+  F: { at: [630, 240], tier: 5 },
 };
-const SPANS: [string, string][] = [['S', 'A'], ['A', 'C'], ['A', 'D'], ['C', 'E'], ['S', 'F']];
+const SPANS: [string, string][] = [['S', 'A'], ['A', 'C'], ['C', 'D'], ['D', 'E'], ['C', 'F']];
 const FEED: Record<string, string> = { h1: 'A', h2: 'C', h3: 'D', h4: 'D', h5: 'E', h6: 'E', h7: 'F' };
-const poleTop = (k: string): Pt => [POLES[k].at[0], POLES[k].at[1] - POLE_H + 3];
+const Q_LEAN = 24;
+const poleTop = (k: string, lean = 0): Pt => {
+  const [x, y] = POLES[k].at, r = (lean * Math.PI) / 180, l = POLE_H - 3;
+  return [Math.round((x + Math.sin(r) * l) * 10) / 10, Math.round((y - Math.cos(r) * l) * 10) / 10];
+};
 const sag = (a: Pt, b: Pt, k = 0.12) => {
   const m: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2 + Math.hypot(b[0] - a[0], b[1] - a[1]) * k];
   return `M${a[0]} ${a[1]}Q${m[0].toFixed(1)} ${m[1].toFixed(1)} ${b[0]} ${b[1]}`;
 };
 
-// where AOG planes are worked on: on jacks on the hangar pad
-const AOG_SPOTS: Pt[] = [[112, 304], [276, 234]];
-const PLANE_ROT: Record<string, number> = { p1: 100, p2: 96, p3: 20 };
+const PLANE_ROT: Record<string, number> = { p1: 94, p2: 91, p3: -84 };
+const PLANE_SIZE: Record<string, number> = { p3: 0.8 };
+/** Keep plane footprints apart (wingspan ~76, depth ~50): a safety net over the fixed spots. */
+function unclutter(ps: { id: string; x: number; y: number }[]) {
+  for (let pass = 0; pass < 4; pass++)
+    for (let i = 0; i < ps.length; i++)
+      for (let j = i + 1; j < ps.length; j++) {
+        const a = ps[i], b = ps[j];
+        const ox = 80 - Math.abs(a.x - b.x), oy = 52 - Math.abs(a.y - b.y);
+        if (ox <= 0 || oy <= 0) continue;
+        const s = (a.x <= b.x ? -1 : 1) * (ox / 2);
+        a.x += s;
+        b.x -= s;
+      }
+  return ps;
+}
 
 // Ambient motion is decoration, so it must cost nothing when nobody is looking:
 // it stops after 20 s without input, off-screen, in a background tab, and under
@@ -105,18 +126,22 @@ function useStill(ref: { current: SVGSVGElement | null }) {
   return still;
 }
 
+/** dawn and golden hour are a light tint; night and storms get their own grade */
 const LIGHT: Record<Phase, { fill: string; o: number }> = {
   dawn: { fill: '#ff9eb4', o: 0.15 },
   day: { fill: '#ffffff', o: 0 },
   golden: { fill: '#ff9147', o: 0.15 },
-  night: { fill: '#0a1745', o: 0.56 },
+  night: { fill: '#0a1745', o: 0 },
 };
 
 const siteKind = (model: string): SiteKind | null =>
   model === 'cottage' ? 'house' : model === 'villa' ? 'villa' : model === 'lodge' ? 'lodge' : model === 'gen' ? 'gen' : null;
 
+/** the runway's markings: bubbles are pushed off it */
+const RUNWAY_BOX: [number, number, number, number] = [RUNWAY.a[0] - 6, Math.min(RUNWAY.a[1], RUNWAY.b[1]) - RUNWAY.w / 2 - 4, RUNWAY.b[0] + 6, Math.max(RUNWAY.a[1], RUNWAY.b[1]) + RUNWAY.w / 2 + 4];
+
 type Item = { y: number; el: JSX.Element };
-type Bub = { x: number; y: number; icon: Icon; tone: Tone; small?: boolean; key: string };
+type Bub = { x: number; y: number; k: number; dx: number; dy: number; icon: Icon; tone: Tone; small?: boolean; key: string };
 
 export function Island({
   s,
@@ -140,6 +165,7 @@ export function Island({
   const pw = powered(s);
   const night = phase === 'night';
   const warm = night || phase === 'golden';
+  const storm = s.weather === 'storm';
   const wear = Math.max(0, Math.min(1, (0.7 - dev.care) / 0.25));
   const hangarColor = cosmeticColor('mech', s.players.mech?.cosmetic);
   const houseColor = cosmeticColor('elec', s.players.elec?.cosmetic);
@@ -152,99 +178,132 @@ export function Island({
   const flying = planes.some((p) => !tagged(p) && planeCapacity(p, s.tier, s.weather) > 0 && !p.model.includes('cargo'));
   const rentable = houses.filter((h) => houseRentable(s, h));
   const booked = rentable.length;
-  const z = focus ? FOCUS[focus] : null;
-  const bscale = z ? 1.3 / z.k : 1;
+  const z = focus ? focusBox(focus, s.tier) : null;
+  const bscale = z ? 1.3 / zoomK(z) : 1;
   const newIds = new Set(dev.justBuilt ? TIERS[dev.justBuilt - 1].adds.map((a) => a.id) : []);
+  const paved = has('paved-paths');
+  const carrying = pw.gridDown && pw.genOK;
 
-  const ground = useMemo(() => <Terrain tier={s.tier} weather={s.weather} motion={motion} />, [s.tier, s.weather, motion]);
-  const storm = s.weather === 'storm';
+  // static layers, rendered once per combination that changes them
+  const defs = useMemo(
+    () => (
+      <defs>
+        <TerrainDefs />
+        <LifeDefs />
+      </defs>
+    ),
+    [],
+  );
+  const ground = useMemo(() => <Terrain tier={s.tier} weather={s.weather} motion={motion} paved={paved} />, [s.tier, s.weather, motion, paved]);
   const boats = storm ? 0 : 1 + Math.round(dev.prosperity * 3);
   const sea = useMemo(() => <SeaLife motion={motion} boats={boats} />, [motion, boats]);
+  const sky = useMemo(
+    () => (
+      <>
+        {!storm && <Gulls motion={motion} />}
+        <Clouds storm={storm} motion={motion} />
+      </>
+    ),
+    [storm, motion],
+  );
+  const grade = useMemo(
+    () => (night ? <NightGrade rim={RIM_D} coast={COAST_LINE} /> : storm ? <StormGrade /> : null),
+    [night, storm],
+  );
+  const stars = useMemo(() => (night ? <NightSky motion={motion} /> : null), [night, motion]);
 
   const items: Item[] = [];
   const flat: JSX.Element[] = [];
-  const glows: Pt[] = [];
+  const glows: [number, number, number][] = [];
   const bubbles: Bub[] = [];
   const badges: Pt[] = [];
+  const bub = (key: string, x: number, y: number, icon: Icon, tone: Tone, small?: boolean, dx = 0) => bubbles.push({ key, x, y, k: bubbleK(bscale, small), dx: dx * bscale, dy: 0, icon, tone, small });
   const at = (id: string) => POS[id];
 
-  // ---- airfield
+  // ---- airfield: every plane has its own stand and its own AOG spot
   const aog = planes.filter((p) => p.health < 40);
-  items.push({ y: HANGAR[1], el: <At key="hangar" p={HANGAR}><Hangar tint={hangarColor} wear={wear} doorOpen={aog.length > 0} /></At> });
-  aog.forEach((p, i) => {
-    const [x, y] = i === 0 ? AOG_SPOTS[0] : p.model === 'float' ? AOG_SPOTS[1] : POS[p.id];
-    items.push({ y, el: <Plane key={p.id} model={p.model as PlaneModel} x={x} y={y} rot={92} jacks chocks={tagged(p)} /> });
-    items.push({ y: y + 1, el: <Guy key={`mech${i}`} x={x + 22} y={y + 12} c={K.orange} /> });
-    bubbles.push({ x: x - 4, y: y - 22, icon: 'wrench', tone: 'alert', key: p.id });
-  });
-  for (const p of planes.filter((q) => q.health >= 40)) {
-    const [x, y] = at(p.id) ?? POS.p1;
+  items.push({ y: HANGAR[1], el: <At key="hangar" p={HANGAR}><Hangar tint={hangarColor} wear={wear} doorOpen={aog.some((p) => p.id === 'p1')} /></At> });
+  const spots = unclutter(planes.map((p) => ({ id: p.id, x: (p.health < 40 ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[0], y: (p.health < 40 ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[1] })));
+  const spotOf = (id: string) => spots.find((q) => q.id === id)!;
+  const float = planes.find((p) => p.model === 'float');
+  for (const p of planes) {
+    const { x, y } = spotOf(p.id);
+    const down = p.health < 40;
     const g = tagged(p);
-    // the floatplane is drawn on the water under the dock (see below); only its bubbles go here
-    if (p.model !== 'float') items.push({ y, el: <Plane key={p.id} model={p.model as PlaneModel} x={x} y={y} rot={PLANE_ROT[p.id] ?? 96} chocks={g} mood={dev.care} /> });
-    if (newIds.has(p.id) && p.model !== 'float') {
+    const onWater = p.model === 'float';
+    // the floatplane sits on the water, drawn with the dock below the y-sorted things
+    if (!onWater) items.push({ y, el: <Plane key={p.id} model={p.model as PlaneModel} x={x} y={y} rot={PLANE_ROT[p.id] ?? 92} jacks={down} chocks={g} mood={dev.care} /> });
+    if (down) {
+      const mech: Pt = onWater ? [DOCK.root[0] + 8, y + 10] : [x + 22, y + 12];
+      items.push({ y: mech[1], el: <Guy key={`mech${p.id}`} x={mech[0]} y={mech[1]} c={K.orange} /> });
+      if (onWater) items.push({ y: y + 14, el: <path key="kit" d={`M${DOCK.root[0] - 2} ${y + 16}h9v-5h-9zM${DOCK.root[0] - 1} ${y + 11}v-2h7v2`} fill={K.red} stroke="#8a2a22" stroke-width=".8" /> });
+      bub(p.id, x, y - (onWater ? 20 : 26), 'wrench', 'alert');
+    } else if (g) bub(p.id, x, y - 22, 'cone', 'alert');
+    else if (p.health < 60) bub(p.id, x, y - 22, 'warn', 'warn');
+    if (newIds.has(p.id) && !onWater) {
       items.push({ y: y + 1, el: <Ribbon key={`rb${p.id}`} x={x} y={y - 6} /> });
-      badges.push([x - 18, y - 16]);
+      badges.push([x - 30, y - 12]);
     }
-    if (g) bubbles.push({ x: x + 16, y: y - 22, icon: 'cone', tone: 'alert', key: p.id });
-    else if (p.health < 60) bubbles.push({ x: x + 16, y: y - 22, icon: 'warn', tone: 'warn', key: p.id });
   }
+  flat.push(<ApronProps key="apron" />);
   if (s.tier >= 5) flat.push(<RunwayLights key="rwl" night={night} />);
 
   // ---- office and the square
   const officeWin: Win = !pw.on ? 'dark' : warm ? 'lit' : 'glass';
   items.push({ y: OFFICE[1], el: <At key="office" p={OFFICE}><Office tint={officeColor} win={officeWin} wear={wear} flag={officeColor} motion={motion} /></At> });
-  if (pw.on && night) glows.push([OFFICE[0], OFFICE[1] - 14], [OFFICE[0], OFFICE[1] - 30]);
-  if (s.cash < 2000) bubbles.push({ x: OFFICE[0] - 16, y: OFFICE[1] - 56, icon: 'cash', tone: 'alert', key: 'cash' });
+  if (pw.on && night) glows.push([OFFICE[0], OFFICE[1] - 12, 26], [OFFICE[0], OFFICE[1] - 28, 26]);
+  if (s.cash < 2000) bub('cash', OFFICE[0] - 20, OFFICE[1] - 52, 'cash', 'alert');
 
   // ---- grid: substation, poles, wires
   if (grid) {
-    items.push({ y: at('g1')[1], el: <At key="g1" p={at('g1')}><Substation wear={wear} /></At> });
-    if (pw.gridDown) bubbles.push({ x: at('g1')[0] - 2, y: at('g1')[1] - 30, icon: 'wrench', tone: 'alert', key: 'g1' });
-    else if (grid.health < 60) bubbles.push({ x: at('g1')[0] - 2, y: at('g1')[1] - 30, icon: 'warn', tone: 'warn', key: 'g1' });
+    items.push({ y: at('g1')[1], el: <At key="g1" p={at('g1')}><Substation wear={wear} down={pw.gridDown} motion={motion} /></At> });
+    // off to the west, so the snapped line and the sparks east of it stay in view
+    if (pw.gridDown) bub('g1', at('g1')[0] - 8, at('g1')[1] - 28, 'wrench', 'alert', false, -26);
+    else if (grid.health < 60) bub('g1', at('g1')[0] - 8, at('g1')[1] - 28, 'warn', 'warn', false, -26);
   }
   const poles = Object.entries(POLES).filter(([, p]) => p.tier <= s.tier);
-  for (const [k, p] of poles) items.push({ y: p.at[1], el: <Pole key={`pole${k}`} x={p.at[0]} y={p.at[1]} /> });
+  for (const [k, p] of poles) items.push({ y: p.at[1], el: <Pole key={`pole${k}`} x={p.at[0]} y={p.at[1]} lean={k === 'Q' && pw.gridDown ? Q_LEAN : 0} /> });
 
   // ---- generator
   if (gen) {
     const [x, y] = at('gen');
-    const carrying = pw.gridDown && pw.genOK;
     items.push({ y, el: <At key="gen" p={[x, y]}><GenHouse wear={wear} running={carrying} motion={motion} /></At> });
-    if (gen.health < 50) bubbles.push({ x, y: y - 40, icon: pw.gridDown ? 'wrench' : 'warn', tone: pw.gridDown ? 'alert' : 'warn', key: 'gen' });
-    else if (carrying) bubbles.push({ x: x + 10, y: y - 40, icon: 'bolt', tone: 'warn', small: true, key: 'gen' });
+    // west of the stack, so the exhaust stays in view
+    if (gen.health < 50) bub('gen', x - 10, y - 28, pw.gridDown ? 'wrench' : 'warn', pw.gridDown ? 'alert' : 'warn', false, -24);
+    else if (carrying) bub('gen', x - 10, y - 28, 'bolt', 'warn', true, -24);
+    if (carrying && night) glows.push([x - 3, y - 29, 13]);
     if (newIds.has('gen')) {
       items.push({ y: y + 1, el: <Ribbon key="rbgen" x={x - 4} y={y - 6} /> });
       items.push({ y: y + 2, el: <NewFlags key="nfgen" x={x + 2} y={y - 26} w={46} /> });
-      badges.push([x - 16, y - 34]);
+      badges.push([x - 30, y - 30]);
     }
   }
 
-  // ---- houses
+  // ---- houses: open, or showing what is wrong on the building itself
   for (const h of houses) {
     const [x, y] = at(h.id) ?? [0, 0];
     const g = houseGeo(h);
     const open = houseRentable(s, h);
-    const win: Win = open ? (warm ? 'lit' : 'glass') : !pw.on ? 'dark' : 'shut';
-    const props = { tint: houseColor, win, wear, open };
+    const why = houseBlocker(s, h);
+    const fault: Fault = { tag: why === 'red-tagged', damaged: h.health < 40, lapsed: (h.inspectionUntil ?? 0) < s.week };
+    const win: Win = !pw.on ? 'dark' : open ? (warm ? 'lit' : 'glass') : 'shut';
+    const props = { tint: houseColor, win, wear, open, fault };
     const el = h.model === 'villa' ? <Villa {...props} /> : h.model === 'lodge' ? <Lodge {...props} /> : <Cottage {...props} />;
-    items.push({ y, el: <g key={h.id} transform={`translate(${x} ${y})`}>{el}</g> });
-    if (open && night) g.glow.forEach((q) => glows.push([x + q[0], y + q[1]]));
+    items.push({ y, el: <g key={h.id} transform={`translate(${x} ${y})${h.model === 'villa' ? ' scale(.92)' : ''}`}>{el}</g> });
+    if (open && night) g.glow.forEach((q) => glows.push([x + q[0], y + q[1], q[2]]));
     if (newIds.has(h.id)) {
       items.push({ y: y + 1, el: <Ribbon key={`rb${h.id}`} x={x} y={y - 6} /> });
-      items.push({ y: y + 2, el: <NewFlags key={`nf${h.id}`} x={x + 4} y={y - g.top + 8} w={g.w * 2 + 10} /> });
-      badges.push([x - g.w, y - g.top + 4]);
+      items.push({ y: y + 2, el: <NewFlags key={`nf${h.id}`} x={x + 4} y={y - g.top + 12} w={g.w * 2 + 10} /> });
+      badges.push([x - g.w - 12, y - g.top + 8]);
     }
-    if (h.health < 30) items.push({ y: y + 3, el: <Smoke key={`sm${h.id}`} x={x - g.w * 0.55} y={y - g.top + 8} motion={motion} /> });
-    const why = houseBlocker(s, h);
+    if (h.health < 30) items.push({ y: y + 3, el: <Smoke key={`sm${h.id}`} x={x - g.w * 0.45} y={y - g.top + 12} motion={motion} /> });
     if (why) {
       const icon: Icon = why === 'red-tagged' ? 'tag' : why === 'no power' ? 'bolt-off' : why === 'inspection lapsed' ? 'clipboard' : h.health < 30 ? 'flame' : 'wrench';
-      bubbles.push({ x: x + g.w * 0.45, y: y - g.bub, icon, tone: 'alert', small: why === 'no power', key: h.id });
-      if (why === 'red-tagged') items.push({ y: y + 1, el: <path key={`tape${h.id}`} d={`M${x - 6} ${y - 12}l12 10M${x + 6} ${y - 12}l-12 10`} stroke={K.rust} stroke-width="2.4" /> });
+      bub(h.id, x + 4, y - g.top, icon, 'alert', why === 'no power');
     }
   }
 
-  // ---- build sites: the next tier under construction, later ones planned
+  // ---- build sites: the next tier under construction, later ones surveyed
   const cons = dev.construction && dev.construction.stage < 3 ? dev.construction : null;
   for (const t of TIERS.filter((t) => t.n > s.tier)) {
     const stage = cons && cons.tier === t.n ? (cons.stage as 0 | 1 | 2) : -1;
@@ -261,16 +320,6 @@ export function Island({
     }
   }
   if (s.tier >= 4) flat.push(<Dock key="dockbuilt" />);
-  const float = planes.find((p) => p.model === 'float');
-  if (float && float.health >= 40) {
-    // moored floatplane sits on the water, below the dock's things
-    const [x, y] = POS.p3;
-    flat.push(
-      <g key="floatwater">
-        <ellipse cx={x + 2} cy={y + 6} rx={30} ry={6} fill="#fff" opacity=".25" />
-      </g>,
-    );
-  }
 
   // ---- a poorly kept island: dry, patchy lawns (paint fades on the buildings too)
   if (wear > 0.3) flat.push(<Worn key="worn" wear={wear} />);
@@ -284,13 +333,13 @@ export function Island({
     SPOT.benches.forEach(([x, y], i) => items.push({ y, el: <Bench key={`bn${i}`} x={x} y={y} flip={i % 2 === 1} /> }));
     SPOT.lamps.forEach(([x, y], i) => {
       items.push({ y, el: <Lamp key={`lp${i}`} x={x} y={y} /> });
-      if (night && pw.on) glows.push([x, y - 22]);
+      if (night && pw.on) glows.push([x, y - 22, 13]);
     });
   }
-  if (has('palm-grove')) items.push({ y: 340, el: <Grove key="grove" motion={motion} /> });
+  if (has('palm-grove')) items.push({ y: SPOT.grove[SPOT.grove.length - 1][1], el: <Grove key="grove" /> });
   if (has('beach-bar')) {
     items.push({ y: SPOT.bar[1], el: <BeachBar key="bar" /> });
-    if (night) glows.push([SPOT.bar[0], SPOT.bar[1] - 10]);
+    if (night) glows.push([SPOT.bar[0], SPOT.bar[1] - 10, 22]);
   }
   if (has('fountain')) items.push({ y: SPOT.fountain[1], el: <Fountain key="fountain" motion={motion} /> });
   if (has('market')) items.push({ y: SPOT.market[0][1], el: <Market key="market" /> });
@@ -309,23 +358,34 @@ export function Island({
   items.sort((a, b) => a.y - b.y);
 
   // ---- wires (drawn over roofs, as overhead lines are)
-  const wires: string[] = [];
-  const dead: string[] = [];
+  const live: string[] = []; // carrying power
+  const idle: string[] = []; // energised-looking but unused (the generator on standby)
+  const dead: string[] = []; // no power: dark and drooping
+  const droop = (a: Pt, b: Pt, k: number) => sag(a, b, k * 1.9);
+  const put = (on: boolean, a: Pt, b: Pt, k = 0.12) => (on ? live.push(sag(a, b, k)) : dead.push(droop(a, b, k)));
+  const bushing = add(at('g1'), [1, -24]);
+  if (grid && !pw.gridDown) {
+    live.push(sag(bushing, poleTop('Q'), 0.05), sag(poleTop('Q'), poleTop('S'), 0.08));
+  } else if (grid) dead.push(droop(poleTop('Q', Q_LEAN), poleTop('S'), 0.08));
+  if (gen && POLES.S) {
+    const from = add(at('gen'), [-9, -30]);
+    (carrying ? live : pw.gridDown ? dead : idle).push(sag(from, poleTop('S'), 0.06));
+  }
   for (const [a, b] of SPANS) {
     if (POLES[a].tier > s.tier || POLES[b].tier > s.tier) continue;
-    if (pw.gridDown && a === 'S' && b === 'A') continue; // the broken span, drawn separately
-    (pw.on ? wires : dead).push(sag(poleTop(a), poleTop(b)));
+    put(pw.on, poleTop(a), poleTop(b));
   }
-  if (grid) (pw.gridDown ? dead : wires).push(sag(add(at('g1'), [-2, -21]), poleTop('S'), 0.05));
   for (const h of houses) {
     const k = FEED[h.id];
     if (!k || POLES[k].tier > s.tier) continue;
     const g = houseGeo(h);
     const [x, y] = at(h.id);
     const side = POLES[k].at[0] < x ? -1 : 1;
-    const end = add([x, y], P([side * g.w, g.h + 2, g.d * 0.4]));
-    (pw.on ? wires : dead).push(sag(poleTop(k), end, 0.06));
+    put(pw.on, poleTop(k), add([x, y], P([side * g.w, g.h + 2, g.d * 0.4])), 0.06);
   }
+
+  // ---- bubbles: above their asset, never on each other, never on the runway
+  spread(bubbles, [RUNWAY_BOX]);
 
   const lit = LIGHT[phase];
   return (
@@ -334,51 +394,52 @@ export function Island({
       class={`island-svg${still ? ' still' : ''}${s.weather !== 'clear' ? ' windy' : ''}`}
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label={describe(s, pw, rentable.length, dev.flourishes)}
+      aria-label={describe(s, pw, rentable.length, dev)}
       onClick={onTap}
     >
-      <defs>
-        <TerrainDefs />
-        <LifeDefs />
-      </defs>
+      {defs}
       <g class="island-zoom" style={{ transform: zoomOf(z) }}>
         {ground}
         {sea}
         {flat}
-        {float && float.health >= 40 && (
+        {float && (
           <g>
-            <Plane model="float" x={POS.p3[0]} y={POS.p3[1]} rot={PLANE_ROT.p3} mood={dev.care} />
-            {tagged(float) && <path d={`M${POS.p3[0] - 30} ${POS.p3[1] - 18}q10 8 22 6`} stroke="#e8d8b0" stroke-width="1.6" fill="none" />}
-            {newIds.has('p3') && <Ribbon x={POS.p3[0]} y={POS.p3[1] - 8} />}
-            {newIds.has('p3') && <NewBadge x={POS.p3[0] - 22} y={POS.p3[1] - 14} scale={bscale} motion={motion} />}
+            <Plane model="float" x={spotOf(float.id).x} y={spotOf(float.id).y} rot={PLANE_ROT.p3} mood={dev.care} size={PLANE_SIZE.p3} service={float.health < 40} />
+            {tagged(float) && <path d={`M${DOCK.root[0] + 4} ${spotOf(float.id).y + 4}q10 8 22 2`} stroke="#e8d8b0" stroke-width="1.6" fill="none" />}
+            {newIds.has('p3') && <Ribbon x={spotOf(float.id).x} y={spotOf(float.id).y - 8} />}
+            {newIds.has('p3') && <NewBadge x={spotOf(float.id).x + 34} y={spotOf(float.id).y - 4} scale={bscale} motion={motion} />}
           </g>
         )}
         {items.map((it) => it.el)}
         {/* overhead lines */}
         <g fill="none" stroke-linecap="round">
-          {dead.length > 0 && <path d={dead.join('')} stroke="#4b535a" stroke-width="1.1" opacity=".75" />}
-          {wires.length > 0 && <path d={wires.join('')} stroke="#2f3438" stroke-width="1.2" opacity=".85" />}
-          {wires.length > 0 && <path d={wires.join('')} stroke={K.yellow} stroke-width=".7" class={motion && grid && grid.health < 60 ? 'flicker' : undefined} opacity=".9" />}
-          {pw.gridDown && grid && <BrokenSpan motion={motion} />}
+          {dead.length > 0 && <path d={dead.join('')} stroke="#3a4046" stroke-width="1.3" opacity=".85" />}
+          {idle.length > 0 && <path d={idle.join('')} stroke="#2f3438" stroke-width="1.2" opacity=".7" />}
+          {live.length > 0 && <path d={live.join('')} stroke="#2f3438" stroke-width="1.4" opacity=".9" />}
+          {live.length > 0 && <path d={live.join('')} stroke={carrying ? '#fff27a' : K.yellow} stroke-width={carrying ? 1.1 : 0.7} class={motion && grid && grid.health < 60 && !pw.gridDown ? 'flicker' : undefined} opacity=".95" />}
+          {pw.gridDown && grid && <BrokenFeed from={bushing} />}
         </g>
         {dev.celebration && <Confetti motion={motion} />}
         {has('bunting') && <Bunting motion={motion} />}
-        {!storm && <Gulls motion={motion} />}
         {flying && (
           <g class={motion ? 'flyby' : undefined} transform={motion ? undefined : 'translate(470 28) rotate(-24)'}>
             <FlyingPlane />
           </g>
         )}
         {booked > 0 && <Walkers n={Math.min(2, booked)} motion={motion} />}
-        <Clouds storm={storm} motion={motion} />
+        {!storm && sky}
         {/* light of the hour */}
-        {lit.o > 0 && <rect x={-40} y={-40} width={W + 80} height={H + 80} fill={lit.fill} opacity={lit.o} pointer-events="none" />}
-        {storm && <rect x={-40} y={-40} width={W + 80} height={H + 80} fill="#1d2a3a" opacity=".22" pointer-events="none" />}
-        {night && <NightSky motion={motion} />}
+        {lit.o > 0 && <rect x={-60} y={-60} width={W + 120} height={H + 120} fill={lit.fill} opacity={lit.o} pointer-events="none" />}
+        {grade}
+        {storm && sky}
+        {stars}
+        {/* light sources stay bright over the grade */}
+        {pw.gridDown && grid && <Sparks from={bushing} motion={motion} night={night} />}
+        {night && carrying && <circle cx={at('gen')[0] - 3} cy={at('gen')[1] - 29} r={9} fill="#6dff8e" opacity=".45" />}
         {night && (
           <g pointer-events="none">
-            {glows.map(([x, y], i) => (
-              <circle key={i} cx={x} cy={y} r={13} fill="url(#i-glow)" />
+            {glows.map(([x, y, r], i) => (
+              <circle key={i} cx={x} cy={y} r={r} fill="url(#i-glow)" />
             ))}
             {has('lighthouse') && <Beam motion={motion} />}
             {has('observatory') && <circle cx={SPOT.observatory[0]} cy={SPOT.observatory[1] - 10} r={16} fill="url(#i-glow)" />}
@@ -392,9 +453,9 @@ export function Island({
         ))}
         {/* notification bubbles, above everything so they read at night */}
         {bubbles
-          .sort((a, b) => a.y - b.y)
-          .map((b) => (
-            <Bubble key={b.key} x={b.x} y={b.y} icon={b.icon} tone={b.tone} small={b.small} scale={bscale} motion={motion} />
+          .sort((a, b) => a.y + a.dy - (b.y + b.dy))
+          .map((b, i) => (
+            <Bubble key={b.key} x={b.x} y={b.y} dx={b.dx} dy={b.dy} icon={b.icon} tone={b.tone} small={b.small} scale={bscale} motion={motion} delay={(i * 0.37) % 1.6} />
           ))}
       </g>
       {storm && <Rain motion={motion} />}
@@ -405,11 +466,11 @@ export function Island({
 
 // ---------------------------------------------------------------- bits ---
 const At = ({ p, children }: { p: Pt; children: JSX.Element }) => <g transform={`translate(${p[0]} ${p[1]})`}>{children}</g>;
-const SQUARE_PEOPLE: Pt[] = [[338, 352], [386, 344], [352, 380], [392, 368], [322, 372], [408, 352], [370, 390]];
-const BEACH_TOWELS: Pt[] = [[196, 498], [318, 500], [562, 480], [604, 476], [150, 486], [640, 464]];
-const SWIMMERS: Pt[] = [[214, 530], [344, 524], [584, 506], [640, 494]];
+const SQUARE_PEOPLE: Pt[] = [[396, 318], [444, 314], [402, 346], [446, 350], [378, 336], [466, 334], [424, 356]];
+const BEACH_TOWELS: Pt[] = [[212, 536], [410, 536], [566, 524], [612, 516], [160, 522], [654, 508]];
+const SWIMMERS: Pt[] = [[250, 560], [410, 558], [580, 552], [650, 540]];
 
-const DRY: [number, number, number, number][] = [[196, 300, 26, 9], [470, 296, 18, 7], [640, 424, 24, 8], [296, 418, 26, 8], [168, 196, 30, 8], [700, 350, 16, 8], [580, 250, 18, 6], [110, 360, 16, 8]];
+const DRY: [number, number, number, number][] = [[330, 262, 26, 9], [470, 250, 18, 7], [210, 398, 22, 7], [150, 206, 30, 8], [722, 330, 14, 8], [560, 252, 18, 6]];
 function Worn({ wear }: { wear: number }) {
   return (
     <g opacity={Math.min(0.85, 0.3 + wear * 0.8)}>
@@ -431,17 +492,33 @@ function Smoke({ x, y, motion }: { x: number; y: number; motion: boolean }) {
   );
 }
 
-function BrokenSpan({ motion }: { motion: boolean }) {
-  const [ax, ay] = poleTop('S');
-  const [bx, by] = poleTop('A');
+/** grid down: the feed from the substation has snapped; both ends dangle... */
+const sparkEnds = (from: Pt): Pt[] => {
+  const [bx, by] = poleTop('Q', Q_LEAN);
+  return [[from[0] + 10, from[1] + 26], [bx - 2, by + 34]];
+};
+function BrokenFeed({ from }: { from: Pt }) {
+  const [ax, ay] = from;
+  const [bx, by] = poleTop('Q', Q_LEAN);
+  const [end, end2] = sparkEnds(from);
+  return <path d={`M${ax} ${ay}Q${ax + 6} ${ay + 14} ${end[0]} ${end[1]}M${bx} ${by}Q${bx - 4} ${by + 20} ${end2[0]} ${end2[1]}`} stroke="#3a4046" stroke-width="1.4" />;
+}
+/** ...and spark, with the substation's alarm light */
+function Sparks({ from, motion, night }: { from: Pt; motion: boolean; night: boolean }) {
+  const [ax, ay] = POS.g1;
   return (
-    <g>
-      <path d={`M${ax} ${ay}Q${ax + 10} ${ay + 20} ${ax + 14} ${ay + 34}M${bx} ${by}Q${bx - 8} ${by + 18} ${bx - 16} ${by + 30}`} stroke="#4b535a" stroke-width="1.2" />
-      <g transform={`translate(${ax + 14} ${ay + 34})`}>
-        <g class={motion ? 'flicker' : undefined}>
-          <path d="M0 0l-4 -5M0 0l5 -4M0 0l1 6M0 0l-5 3" stroke={K.yellow} stroke-width="1.6" />
+    <g pointer-events="none">
+      {night && <circle cx={ax + 11} cy={ay - 17} r={9} fill="#ff3b30" opacity=".4" />}
+      {sparkEnds(from).map(([x, y], i) => (
+        <g key={i} transform={`translate(${x} ${y})`}>
+          <circle r={11} fill="#fff3a0" opacity=".4" />
+          <g class={motion ? 'spark' : undefined}>
+            <path d="M0 0l-8 -9M0 0l9 -7M0 0l2 10M0 0l-9 4M0 0l6 7M0 0l1 -11" stroke="#fffbe0" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M0 0l-8 -9M0 0l9 -7M0 0l2 10M0 0l-9 4" stroke="#ffc400" stroke-width="1.1" stroke-linecap="round" />
+            <circle r={2.6} fill="#fff" />
+          </g>
         </g>
-      </g>
+      ))}
     </g>
   );
 }
@@ -479,8 +556,8 @@ function Walkers({ n, motion }: { n: number; motion: boolean }) {
   if (!motion)
     return (
       <g>
-        <Guy x={520} y={346} c={K.pink} />
-        {n > 1 && <Guy x={420} y={352} c={K.blue} />}
+        <Guy x={566} y={306} c={K.pink} />
+        {n > 1 && <Guy x={346} y={326} c={K.blue} />}
       </g>
     );
   return (
@@ -497,12 +574,32 @@ function Walkers({ n, motion }: { n: number; motion: boolean }) {
   );
 }
 
-function describe(s: IslandState, pw: ReturnType<typeof powered>, open: number, fl: Flourish[]) {
+const FLOURISH_WORDS: Record<Flourish, string> = {
+  garden: 'flower beds',
+  benches: 'benches and lamps',
+  'palm-grove': 'a young palm grove',
+  'fishing-boats': 'fishing boats',
+  'beach-bar': 'a beach bar',
+  'paved-paths': 'paved paths',
+  fountain: 'a fountain',
+  market: 'market stalls',
+  lighthouse: 'a lighthouse',
+  boardwalk: 'a boardwalk',
+  yacht: 'a visiting yacht',
+  observatory: 'an observatory',
+  bunting: 'festive bunting',
+  statue: 'the crew statue',
+};
+
+function describe(s: IslandState, pw: ReturnType<typeof powered>, open: number, dev: Development) {
   const tierName = TIERS[s.tier - 1]?.name ?? '';
   const planes = s.assets.filter((a) => a.kind === 'plane');
   const houses = s.assets.filter((a) => a.kind === 'house');
   const pl = planes.map((p) => `${p.name} ${p.health < 40 ? 'AOG' : s.tags?.[p.id] ? 'grounded' : p.health < 60 ? 'needs attention' : 'flying'}`);
   const closed = houses.filter((h) => !houseRentable(s, h)).map((h) => `${h.name} closed (${houseBlocker(s, h)})`);
+  const c = dev.construction;
+  const building = c && c.stage < 3 ? `construction under way for tier ${c.tier} ${TIERS[c.tier - 1]?.name ?? ''}: ${c.stage} of 3 parts done` : '';
+  const fl = dev.flourishes.map((f) => FLOURISH_WORDS[f]);
   const parts = [
     `${s.name}, tier ${s.tier} ${tierName}`,
     `${planes.length} plane${planes.length === 1 ? '' : 's'}: ${pl.join(', ')}`,
@@ -510,7 +607,9 @@ function describe(s: IslandState, pw: ReturnType<typeof powered>, open: number, 
     !pw.on ? 'no power on the island' : pw.gridDown ? 'grid down, generator carrying the load' : 'grid up',
     s.cash < 2000 ? 'cash alarm' : '',
     s.weather !== 'clear' ? s.weather : '',
-    fl.length ? `developed: ${fl.join(', ')}` : '',
+    building,
+    dev.justBuilt ? `tier ${dev.justBuilt} just arrived` : '',
+    fl.length ? `the island has developed ${fl.length > 1 ? fl.slice(0, -1).join(', ') + ' and ' + fl[fl.length - 1] : fl[0]}` : 'nothing extra developed yet',
   ];
   return parts.filter(Boolean).join('. ') + '.';
 }

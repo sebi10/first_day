@@ -89,139 +89,162 @@ export function along(line: Pt[], t: number): Pt {
 
 // ---------------------------------------------------------------- layout ---
 // 800 x 600 map, light from the upper left, shadows fall down-right.
-// Mountain at the back (north-east), airfield on the north-west plain, the
-// town square in the middle, cottages east of the river, a sheltered bay in
-// the south for the floatplane, beaches for the leisure flourishes.
+// The coastline is design B's island (scaled to leave a sea margin): a long
+// finger and a sheltered lagoon in the north-west (floatplane dock), the
+// airfield plain on the west with the hangar and a big apron, the mountain at
+// the back with the waterfall, the river down the middle to the south beach,
+// the town square in the middle, cottages east of the river, the lodge on the
+// north-east shoulder and the villas on the south-east headland.
 
 export const COAST: Pt[] = [
-  [26, 352], [44, 318], [60, 284], [56, 240], [56, 196], [74, 150], [114, 120], [176, 102], [246, 90], [316, 80],
-  [392, 70], [468, 56], [556, 46], [640, 56], [704, 86], [738, 130], [734, 176], [760, 210], [786, 262], [784, 318],
-  [762, 362], [730, 394], [708, 434], [666, 472], [606, 492], [548, 494], [508, 480], [482, 458], [452, 450], [420, 458],
-  [398, 478], [366, 502], [300, 516], [230, 520], [162, 510], [108, 488], [76, 456], [62, 418], [44, 388],
+  [72, 212], [73, 170], [85, 129], [106, 100], [126, 104], [138, 130], [150, 160], [184, 182], [230, 180], [260, 154],
+  [274, 122], [294, 98], [330, 88], [357, 70], [415, 49], [488, 37], [564, 43], [626, 64], [678, 92], [721, 119],
+  [750, 161], [746, 208], [725, 245], [738, 290], [756, 340], [750, 391], [775, 431], [766, 484], [726, 511], [666, 516],
+  [611, 527], [554, 535], [497, 543], [440, 539], [383, 541], [326, 547], [269, 543], [212, 535], [155, 524], [110, 501],
+  [75, 465], [60, 419], [64, 374], [45, 334], [53, 286], [62, 250],
+];
+/** beach width per coast point: a thin rim in the lagoon, broad on the south beach */
+const BEACH = [
+  23, 21, 19, 17, 15, 15, 15, 17, 17, 15, 15, 17, 19, 19, 17, 17, 17, 17, 19, 21, 23, 23, 19, 23, 25, 25, 27, 29, 32, 34,
+  36, 36, 36, 38, 40, 42, 42, 40, 38, 32, 27, 25, 21, 23, 23, 23,
 ];
 
+/** inset a clockwise (on screen) outline by a per-point distance */
+export function inset(p: Pt[], d: (i: number) => number): Pt[] {
+  const n = p.length;
+  return p.map((q, i) => {
+    const a = p[(i - 1 + n) % n], b = p[(i + 1) % n];
+    const tx = b[0] - a[0], ty = b[1] - a[1];
+    const l = Math.hypot(tx, ty) || 1;
+    return [Math.round(q[0] + (-ty / l) * d(i)), Math.round(q[1] + (tx / l) * d(i))] as Pt;
+  });
+}
+
 /** grass plateau: inside the beach rim, a low cliff lip shows on its south faces */
-export const PLATEAU: Pt[] = [
-  [50, 350], [66, 318], [80, 284], [76, 240], [78, 198], [96, 164], [130, 138], [186, 122], [250, 110], [318, 100],
-  [392, 90], [468, 78], [556, 70], [636, 80], [690, 106], [712, 138], [708, 178], [732, 214], [758, 262], [756, 312],
-  [736, 346], [706, 374], [684, 414], [646, 444], [598, 460], [552, 462], [520, 450], [496, 430], [454, 420], [416, 424],
-  [388, 440], [356, 452], [298, 458], [232, 458], [172, 452], [130, 438], [102, 414], [86, 390], [66, 376],
-];
+export const PLATEAU: Pt[] = inset(COAST, (i) => BEACH[i] ?? 24);
 
 export const COAST_S = sample(COAST);
 export const PLATEAU_S = sample(PLATEAU);
 export const LIP = 12;
 
-/** the lodge terrace, a raised rock shelf on the mountain's south-east shoulder */
+/** the lodge terrace: a raised grass shelf on the mountain's north-east shoulder */
 export const TERRACE: Pt[] = [
-  [590, 176], [636, 160], [690, 164], [712, 190], [700, 222], [660, 234], [612, 230], [588, 206],
+  [578, 150], [612, 128], [664, 118], [712, 124], [738, 152], [734, 188], [712, 208], [664, 214], [614, 212], [584, 196],
 ];
 export const TERRACE_H = 16;
 
-/** river: waterfall pool at the mountain foot, down through town into the bay */
+/** river: waterfall pool at the mountain foot, down the middle to the south beach */
+export const FALLS: Pt = [536, 142]; // top of the waterfall
+export const POOL: Pt = [534, 238];
 export const RIVER: Pt[] = [
-  [520, 212], [512, 244], [494, 276], [484, 312], [480, 350], [474, 388], [468, 418], [466, 446], [466, 470],
+  [534, 238], [522, 268], [527, 304], [513, 346], [510, 390], [516, 432], [526, 474], [527, 510], [523, 552],
 ];
 export const RIVER_S = sample(RIVER, false, 6);
-export const FALLS: Pt = [522, 150]; // top of the waterfall
 
-export const RUNWAY = { a: [108, 196] as Pt, b: [398, 152] as Pt, w: 36 };
+export const RUNWAY = { a: [112, 441] as Pt, b: [378, 427] as Pt, w: 36 };
 export const RUNWAY_ANGLE = (Math.atan2(RUNWAY.b[1] - RUNWAY.a[1], RUNWAY.b[0] - RUNWAY.a[0]) * 180) / Math.PI;
 export const RUNWAY_LEN = Math.hypot(RUNWAY.b[0] - RUNWAY.a[0], RUNWAY.b[1] - RUNWAY.a[1]);
 export const RUNWAY_C: Pt = [(RUNWAY.a[0] + RUNWAY.b[0]) / 2, (RUNWAY.a[1] + RUNWAY.b[1]) / 2];
+/** the big apron in front of the hangar, and the taxiway down to the runway */
 export const APRON: Pt[] = [
-  [174, 214], [352, 188], [360, 242], [196, 268], [176, 266],
+  [86, 296], [336, 292], [342, 372], [94, 380],
 ];
-export const HANGAR: Pt = [122, 282]; // front-centre ground point of the hangar
-export const HANGAR_PAD: Pt[] = [[66, 282], [178, 282], [184, 316], [60, 316]];
-export const OFFICE: Pt = [360, 322];
-export const SQUARE = { c: [360, 356] as Pt, rx: 64, ry: 34 };
+export const TAXIWAY: Pt[] = [[254, 374], [292, 372], [296, 420], [252, 422]];
+export const HANGAR: Pt = [142, 292]; // front-centre ground point of the hangar
+export const HANGAR_PAD: Pt[] = [[92, 292], [194, 292], [198, 318], [88, 318]];
+export const OFFICE: Pt = [418, 268];
+export const SQUARE = { c: [420, 330] as Pt, rx: 68, ry: 33 };
+export const WINDSOCK: Pt = [396, 398];
 
 /** front-centre ground point of every asset */
 export const POS: Record<string, Pt> = {
-  p1: [238, 238],
-  p2: [310, 222],
-  p3: [474, 508],
-  h1: [556, 318],
-  h2: [634, 300],
-  h3: [572, 392],
-  h4: [650, 376],
-  h5: [712, 250],
-  h6: [716, 334],
-  h7: [650, 212],
-  g1: [526, 276],
-  gen: [524, 420],
+  p1: [210, 342],
+  p2: [300, 340],
+  p3: [222, 128],
+  h1: [592, 284],
+  h2: [680, 276],
+  h3: [600, 384],
+  h4: [690, 378],
+  h5: [694, 454],
+  h6: [602, 462],
+  h7: [656, 190],
+  g1: [474, 398],
+  gen: [466, 474],
   hangar: HANGAR,
   office: OFFICE,
-  aog: [120, 300],
 };
 
-/** where the floatplane dock goes (tier 4) */
-export const DOCK = { root: [392, 466] as Pt, tip: [446, 500] as Pt };
+/** where each plane is worked on when it is AOG: every plane has its own spot */
+export const AOG_SPOT: Record<string, Pt> = {
+  p1: [142, 340], // on jacks in the hangar mouth
+  p2: [300, 340], // on jacks on its own stand
+  p3: [222, 128], // at its mooring, cowling open, mechanic on the dock
+};
 
-/** dirt paths, stone once the island is paved (tier 3) */
+/** the floatplane dock in the lagoon (tier 4): shore end, running north */
+export const DOCK = { root: [190, 190] as Pt, tip: [186, 132] as Pt };
+
+/** dirt paths, stone once the island is paved (the paved-paths flourish) */
 export type PathDef = { pts: Pt[]; tier: number; w?: number; steps?: boolean };
 export const PATHS: PathDef[] = [
   // apron → square
-  { pts: [[300, 256], [318, 280], [340, 300], [350, 326]], tier: 1 },
-  // hangar pad → apron edge (service road)
-  { pts: [[180, 300], [216, 290], [250, 272]], tier: 1, w: 9 },
+  { pts: [[338, 332], [352, 330]], tier: 1, w: 14 },
   // square → bridge → cottage lane
-  { pts: [[410, 348], [446, 350], [480, 350], [512, 344], [548, 334], [596, 318], [640, 310], [680, 300]], tier: 1 },
-  // lane → t2 cottages
-  { pts: [[548, 334], [566, 360], [590, 384]], tier: 2 },
-  { pts: [[640, 310], [650, 340], [662, 370]], tier: 2 },
-  // lane → villas on the headland
-  { pts: [[680, 300], [702, 282], [712, 262]], tier: 4 },
-  { pts: [[680, 300], [700, 318], [712, 334]], tier: 4 },
-  // lane → steps up to the lodge terrace
-  { pts: [[596, 318], [606, 284], [626, 252], [640, 226]], tier: 5, steps: true },
-  // square → dock on the bay
-  { pts: [[356, 388], [366, 414], [382, 440], [394, 462]], tier: 4 },
-  // square → west lawn → beach
-  { pts: [[304, 372], [270, 400], [238, 428], [216, 452]], tier: 1 },
-  // cottages → generator
-  { pts: [[512, 344], [514, 376], [518, 402]], tier: 3 },
-  // hangar pad → lighthouse
-  { pts: [[66, 306], [52, 328]], tier: 4, w: 8 },
+  { pts: [[486, 318], [506, 306], [526, 302], [552, 300], [600, 300], [648, 298], [700, 294], [728, 290]], tier: 1 },
+  // square → south beach
+  { pts: [[420, 362], [422, 400], [428, 444], [434, 488], [440, 512]], tier: 1 },
+  // cottage spine and the lower lane
+  { pts: [[646, 298], [648, 346], [650, 398]], tier: 2 },
+  { pts: [[566, 404], [610, 402], [650, 398], [700, 396], [730, 390]], tier: 2 },
+  // south path → substation → lower bridge → villa headland
+  { pts: [[424, 424], [470, 426], [500, 430], [518, 434], [548, 436], [580, 434], [646, 424], [688, 416]], tier: 1 },
+  // apron → floatplane dock
+  { pts: [[236, 292], [224, 250], [206, 216], [192, 196]], tier: 4, w: 10 },
+  // dock → lighthouse on the finger
+  { pts: [[190, 198], [160, 196], [128, 178], [114, 158]], tier: 4, w: 8 },
+  // lane → stone steps up to the lodge terrace
+  { pts: [[612, 300], [614, 270], [618, 244], [624, 218]], tier: 5, steps: true },
 ];
 
 export const BRIDGES: { at: Pt; rot: number; len: number }[] = [
-  { at: [480, 350], rot: 0, len: 34 },
-  { at: [468, 432], rot: 90, len: 26 },
+  { at: [526, 302], rot: -3, len: 36 },
+  { at: [518, 434], rot: 3, len: 36 },
 ];
 
-export const FOCUS: Record<Role, { x: number; y: number; k: number }> = {
-  mech: { x: 232, y: 222, k: 2.2 },
-  elec: { x: 606, y: 292, k: 1.8 },
-  fin: { x: 360, y: 330, k: 3.1 },
-};
-
-/** view transform (CSS) that frames a focus zone, clamped to the map */
-export function zoomOf(z: { x: number; y: number; k: number } | null) {
-  if (!z) return 'none';
-  const hw = W / 2 / z.k, hh = H / 2 / z.k;
-  const cx = Math.max(hw, Math.min(W - hw, z.x));
-  const cy = Math.max(hh, Math.min(H - hh, z.y));
-  return `translate(${f1(W / 2 - cx * z.k)}px, ${f1(H / 2 - cy * z.k)}px) scale(${z.k})`;
+export type Box = [number, number, number, number];
+/** zoom boxes per role [x0, y0, x1, y1]; the view frames the box at 4:3 */
+export function focusBox(role: Role, tier: number): Box {
+  if (role === 'mech') return tier >= 4 ? [60, 100, 400, 472] : [64, 214, 396, 472];
+  if (role === 'fin') return [320, 168, 520, 384];
+  return tier >= 5 ? [430, 100, 756, 506] : tier >= 4 ? [430, 222, 756, 512] : [430, 222, 744, 500];
+}
+/** the zoom factor that frames a box at the map's 4:3 */
+export const zoomK = (b: Box | null) => (b ? Math.min(3.2, W / Math.max(b[2] - b[0], ((b[3] - b[1]) * W) / H)) : 1);
+/** view transform (CSS) that frames a box, clamped to the map */
+export function zoomOf(b: Box | null) {
+  if (!b) return 'none';
+  const k = zoomK(b);
+  const hw = W / 2 / k, hh = H / 2 / k;
+  const cx = Math.max(hw, Math.min(W - hw, (b[0] + b[2]) / 2));
+  const cy = Math.max(hh, Math.min(H - hh, (b[1] + b[3]) / 2));
+  return `translate(${f1(W / 2 - cx * k)}px, ${f1(H / 2 - cy * k)}px) scale(${Math.round(k * 1000) / 1000})`;
 }
 
 /** flourish spots (growth.ts), placed clear of every asset and path */
 export const SPOT = {
-  garden: [[322, 330], [398, 330]] as Pt[],
-  grove: [[200, 322], [226, 318], [252, 314], [192, 344], [218, 340], [244, 336], [184, 366], [210, 362], [236, 358]] as Pt[],
-  boats: [[108, 452], [132, 470]] as Pt[],
-  bar: [262, 480] as Pt,
-  fountain: [360, 360] as Pt,
-  market: [[312, 360], [406, 362], [330, 384]] as Pt[],
-  lighthouse: [44, 338] as Pt,
-  boardwalk: [[150, 500], [220, 505], [300, 500], [352, 488]] as Pt[],
-  yacht: [362, 548] as Pt,
-  observatory: [566, 58] as Pt,
-  statue: [392, 386] as Pt,
-  benches: [[430, 338], [334, 404], [586, 330], [272, 392]] as Pt[],
-  pond: [150, 384] as Pt,
-  lamps: [[424, 358], [500, 340], [556, 322], [620, 314], [374, 424], [290, 386], [330, 292]] as Pt[],
+  garden: [[366, 290], [472, 290]] as Pt[],
+  grove: [[254, 206], [276, 204], [298, 208], [250, 226], [272, 224], [294, 228], [256, 246], [278, 244], [300, 248]] as Pt[],
+  boats: [[106, 474], [132, 496]] as Pt[],
+  bar: [318, 526] as Pt,
+  fountain: [420, 332] as Pt,
+  market: [[382, 312], [458, 312], [396, 358]] as Pt[],
+  lighthouse: [112, 146] as Pt,
+  boardwalk: [[176, 519], [240, 525], [300, 527], [360, 526], [416, 522]] as Pt[],
+  yacht: [372, 580] as Pt,
+  observatory: [498, 72] as Pt,
+  statue: [446, 366] as Pt,
+  benches: [[380, 382], [462, 380], [560, 318], [562, 420]] as Pt[],
+  lamps: [[358, 304], [484, 306], [548, 318], [634, 318], [404, 410], [540, 452], [346, 352]] as Pt[],
 };
 
 // -------------------------------------------------- oblique projection ---

@@ -342,6 +342,21 @@ h3 {
     opacity: 0.3;
   }
 }
+@keyframes spark {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.55;
+  }
+  60% {
+    opacity: 0.95;
+  }
+  75% {
+    opacity: 0.6;
+  }
+}
 @keyframes puff {
   0% {
     transform: translateY(4px) scale(0.7);
@@ -448,47 +463,47 @@ h3 {
 @keyframes walk-a {
   0%,
   6% {
-    transform: translate(414px, 354px);
+    transform: translate(478px, 312px);
   }
-  20% {
-    transform: translate(480px, 354px);
+  18% {
+    transform: translate(506px, 304px);
   }
-  36% {
-    transform: translate(546px, 338px);
+  30% {
+    transform: translate(552px, 298px);
   }
   44%,
   56% {
-    transform: translate(590px, 324px);
+    transform: translate(598px, 298px);
   }
-  64% {
-    transform: translate(546px, 338px);
+  70% {
+    transform: translate(552px, 298px);
   }
-  80% {
-    transform: translate(480px, 354px);
+  82% {
+    transform: translate(506px, 304px);
   }
   94%,
   100% {
-    transform: translate(414px, 354px);
+    transform: translate(478px, 312px);
   }
 }
 @keyframes walk-b {
   0%,
   8% {
-    transform: translate(302px, 262px);
+    transform: translate(418px, 366px);
   }
-  22% {
-    transform: translate(320px, 286px);
+  30% {
+    transform: translate(422px, 402px);
   }
-  36%,
+  48%,
   60% {
-    transform: translate(348px, 328px);
+    transform: translate(430px, 452px);
   }
-  74% {
-    transform: translate(320px, 286px);
+  78% {
+    transform: translate(422px, 402px);
   }
-  90%,
+  92%,
   100% {
-    transform: translate(302px, 262px);
+    transform: translate(418px, 366px);
   }
 }
 @keyframes streak {
@@ -524,6 +539,22 @@ h3 {
   }
   94% {
     opacity: 0.18;
+  }
+}
+@keyframes bolt {
+  0%,
+  90%,
+  92.5%,
+  93.5%,
+  96%,
+  100% {
+    opacity: 0;
+  }
+  91% {
+    opacity: 1;
+  }
+  94.5% {
+    opacity: 0.8;
   }
 }
 @keyframes gust {
@@ -602,6 +633,12 @@ h3 {
 .puff {
   animation: puff 2.4s ease-out infinite;
 }
+.spark {
+  animation: spark 0.9s steps(1) infinite;
+}
+.puff-late {
+  animation-delay: -1.2s;
+}
 .spout {
   animation: spout 5s ease-out infinite;
 }
@@ -649,6 +686,9 @@ h3 {
 }
 .flash {
   animation: flash 9s linear infinite;
+}
+.bolt {
+  animation: bolt 9s linear infinite;
 }
 .flutter,
 .confetti {

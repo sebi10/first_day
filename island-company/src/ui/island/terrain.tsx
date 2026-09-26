@@ -1,59 +1,64 @@
 // The ground itself: sea, shallows and foam, beach, the grass plateau with its
-// lip, the rocky mountain with a waterfall, the river and its bridges, paths,
-// the airfield surface and seeded scatter. All static for a given tier, phase
-// and weather, so it is memoized by the caller.
+// lip, the rocky mountain with a waterfall, the lodge terrace, the river and
+// its bridges, paths, the square, the airfield surface and seeded scatter.
+// All static for a given tier, weather and paving, so it is memoized by the
+// caller.
 import type { Weather } from '../../sim/types';
 import {
-  APRON, BRIDGES, COAST, COAST_S, DOCK, FALLS, H, HANGAR_PAD, LIP, PATHS, PLATEAU, PLATEAU_S, POS, RIVER, RIVER_S, RUNWAY, RUNWAY_ANGLE,
-  RUNWAY_C, RUNWAY_LEN, SPOT, SQUARE, W, curve, edgeDist, inPoly, lin, lineDist, scatter, type Pt, type Zone,
+  APRON, BRIDGES, COAST, COAST_S, DOCK, FALLS, H, HANGAR_PAD, LIP, PATHS, PLATEAU, PLATEAU_S, POOL, POS, RIVER, RIVER_S, RUNWAY, RUNWAY_ANGLE,
+  RUNWAY_C, RUNWAY_LEN, SPOT, SQUARE, TAXIWAY, TERRACE, TERRACE_H, W, WINDSOCK, curve, edgeDist, inPoly, inset, lin, lineDist, scatter, type Pt, type Zone,
 } from './geo';
 import { FloraDefs, Palm, Use } from './flora';
 import { K, mix } from './paint';
-import { blob, Boulder, ridge, Rock, ROCK } from './rocks';
+import { blob, Boulder, ridge, Rock, RockRow, ROCK } from './rocks';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const COAST_D = curve(COAST);
 const PLATEAU_D = curve(PLATEAU);
+const TERRACE_D = curve(TERRACE);
+/** the high ground's top edges, for the moonlit rim at night */
+export const COAST_LINE = COAST_D;
 
 // ------------------------------------------------------------ mountain ---
+// Stacked ledges from the foot shelf up to the summit, west of centre at the
+// back of the island; the waterfall drops down their fronts to the pool.
 const L0: Pt[] = [
-  [440, 138], [462, 112], [500, 98], [560, 92], [622, 96], [676, 110], [708, 132], [722, 166], [718, 200], [704, 226], [668, 238],
-  [626, 236], [598, 220], [586, 198], [556, 196], [534, 199], [512, 200], [490, 196], [466, 184], [446, 164],
+  [292, 178], [302, 142], [328, 116], [370, 98], [420, 84], [480, 76], [540, 78], [590, 88], [622, 106], [634, 132], [626, 160],
+  [604, 180], [580, 194], [556, 204], [520, 210], [484, 212], [446, 212], [408, 210], [370, 206], [334, 200], [306, 192],
 ];
 const L1: Pt[] = [
-  [476, 120], [510, 96], [560, 84], [616, 86], [664, 100], [690, 124], [686, 150], [662, 166], [622, 172], [580, 168], [546, 164], [520, 160],
-  [496, 150], [480, 138],
+  [340, 150], [362, 122], [400, 104], [450, 94], [510, 92], [560, 98], [596, 114], [606, 138], [592, 158], [560, 170], [520, 174], [480, 174],
+  [440, 172], [400, 168], [364, 162],
 ];
-const L2: Pt[] = [[520, 92], [552, 72], [596, 70], [636, 82], [652, 104], [636, 126], [600, 134], [562, 132], [534, 120]];
-const SUMMIT: Pt[] = [[548, 62], [570, 46], [600, 46], [622, 58], [618, 78], [594, 86], [566, 84], [550, 76]];
-export const MOUNTAIN_FOOT: Pt[] = L0.map(([x, y]) => [x, y + 26]);
-export const LEDGE_TOP = L0;
+const L2: Pt[] = [[380, 126], [400, 102], [444, 88], [500, 84], [548, 92], [580, 108], [584, 130], [560, 144], [514, 150], [466, 152], [420, 148], [392, 140]];
+const L3: Pt[] = [[412, 104], [432, 80], [470, 68], [512, 70], [542, 84], [548, 102], [530, 116], [490, 122], [450, 120], [424, 114]];
+const SUMMIT: Pt[] = [[444, 78], [456, 58], [482, 50], [508, 56], [516, 70], [502, 82], [476, 86], [454, 84]];
 
 // ------------------------------------------------- exclusion for scatter ---
-const FOOT = [...L0.slice(0, 7), ...L0.slice(7).map(([x, y]) => [x, y + 30] as Pt)];
+const FOOT = L0.map(([x, y]) => [x, y + (y > 150 ? 28 : 0)] as Pt);
 export const ZONES: Zone[] = [
-  { line: [RUNWAY.a, RUNWAY.b], r: RUNWAY.w / 2 + 10 },
+  { line: [RUNWAY.a, RUNWAY.b], r: RUNWAY.w / 2 + 12 },
   { poly: APRON, pad: 10 },
-  { poly: HANGAR_PAD, pad: 8 },
-  { poly: [[62, 226], [182, 226], [182, 290], [62, 290]], pad: 6 },
-  { poly: FOOT, pad: 6 },
-  { poly: [[440, 138], [470, 100], [520, 70], [548, 44], [600, 34], [640, 56], [690, 96], [722, 166], [718, 226], [668, 262], [626, 262], [590, 226], [556, 222], [512, 228], [466, 212], [446, 190]], pad: 4 },
-  { c: SQUARE.c, r: 78 },
-  { c: [360, 300], r: 50 },
-  { line: RIVER_S, r: 18 },
+  { poly: TAXIWAY, pad: 8 },
+  { poly: [[80, 214], [212, 214], [212, 300], [80, 300]], pad: 6 }, // hangar
+  { poly: FOOT, pad: 8 },
+  { poly: TERRACE.map(([x, y]) => [x, y + (y > 180 ? TERRACE_H : 0)] as Pt), pad: 6 },
+  { c: SQUARE.c, r: 80 },
+  { poly: [[376, 200], [466, 200], [466, 300], [376, 300]], pad: 4 }, // office + forecourt
+  { line: RIVER_S, r: 20 },
+  { c: POOL, r: 30 },
   ...PATHS.map((p) => ({ line: p.pts, r: (p.w ?? 12) / 2 + 7 })),
-  ...Object.entries(POS).map(([id, c]) => ({ c: [c[0] + 4, c[1] - 14] as Pt, r: id === 'h5' || id === 'h6' ? 46 : id === 'h7' ? 50 : id === 'gen' ? 46 : id.startsWith('h') ? 38 : 30 })),
-  { poly: [[176, 300], [268, 290], [272, 318], [264, 380], [170, 386]], pad: 6 },
+  ...Object.entries(POS).map(([id, c]) => ({ c: [c[0] + 4, c[1] - 16] as Pt, r: id === 'h5' || id === 'h6' ? 52 : id === 'h7' ? 58 : id === 'gen' ? 42 : id.startsWith('h') ? 38 : id.startsWith('p') ? 44 : 30 })),
   ...SPOT.garden.map((c) => ({ c, r: 18 })),
   ...SPOT.benches.map((c) => ({ c, r: 10 })),
   ...SPOT.lamps.map((c) => ({ c, r: 8 })),
   ...SPOT.boats.map((c) => ({ c, r: 22 })),
-  ...SPOT.boardwalk.map((c) => ({ c, r: 20 })),
-  { c: SPOT.bar, r: 44 },
-  { c: SPOT.lighthouse, r: 26 },
-  { line: [DOCK.root, DOCK.tip], r: 16 },
-  { c: [392, 150], r: 22 }, // windsock
-  { c: SPOT.pond, r: 36 },
+  ...SPOT.boardwalk.map((c) => ({ c, r: 18 })),
+  { poly: [[240, 192], [312, 192], [312, 254], [240, 254]], pad: 4 }, // grove
+  { c: SPOT.bar, r: 58 },
+  { c: SPOT.lighthouse, r: 24 },
+  { line: [DOCK.root, DOCK.tip], r: 14 },
+  { c: WINDSOCK, r: 16 },
 ];
 
 const onGrass = (p: Pt) => inPoly(p, PLATEAU_S) && edgeDist(p, PLATEAU_S) > 10;
@@ -82,8 +87,12 @@ export function TerrainDefs() {
       <clipPath id="i-land">
         <path d={COAST_D} />
       </clipPath>
+      {/* the plateau's south-facing lip: where the moon catches the edge at night */}
+      <clipPath id="i-lip">
+        <path d={PLATEAU_D} transform={`translate(0 ${LIP})`} />
+      </clipPath>
       <clipPath id="i-fallclip">
-        <path d={`M${FALLS[0] - 8} ${FALLS[1] + 6}L${FALLS[0] + 8} ${FALLS[1] + 6}L${FALLS[0] + 9} 226L${FALLS[0] - 9} 226Z`} />
+        <path d={`M${FALLS[0] - 8} ${FALLS[1] + 6}L${FALLS[0] + 8} ${FALLS[1] + 6}L${FALLS[0] + 9} ${POOL[1] - 4}L${FALLS[0] - 9} ${POOL[1] - 4}Z`} />
       </clipPath>
       <FloraDefs />
     </>
@@ -91,23 +100,31 @@ export function TerrainDefs() {
 }
 
 // ----------------------------------------------------------------- sea ---
+const CAPS: Pt[] = [
+  [24, 70], [150, 30], [300, 22], [660, 24], [770, 80], [786, 250], [780, 380], [792, 540], [650, 580], [480, 590], [230, 584], [30, 520], [16, 400], [22, 250],
+  [100, 50], [560, 12], [700, 560], [120, 570], [18, 150], [790, 180],
+];
 function Sea({ motion, weather }: { motion: boolean; weather: Weather }) {
   const rough = weather !== 'clear';
+  const storm = weather === 'storm';
+  const caps = storm ? CAPS : CAPS.slice(0, 12);
   return (
     <g>
-      <rect width={W} height={H} fill="url(#i-sea)" />
-      <rect width={W} height={H} fill="url(#i-ripple)" />
-      {/* whitecaps when it blows */}
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-sea)" />
+      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-ripple)" />
+      {/* whitecaps when it blows: crests with a trail of foam */}
       {rough && (
-        <g stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" opacity={weather === 'storm' ? 0.75 : 0.55} class={motion ? 'bob' : undefined}>
-          <path d="M20 90q10 -7 20 0M120 40q10 -7 20 0M700 180q10 -7 20 0M770 420q10 -7 20 0M30 470q10 -7 20 0M250 570q10 -7 20 0M560 560q10 -7 20 0M650 30q10 -7 20 0M16 250q8 -6 16 0M790 110q6 -5 12 0" />
+        <g class={motion ? 'bob' : undefined}>
+          <path d={caps.map(([x, y], i) => `M${x - 12} ${y}q6 -7 12 -2q6 -6 12 1` + (i % 2 ? '' : `M${x - 22} ${y + 8}q8 -4 16 0`)).join('')} stroke="#fff" stroke-width={storm ? 3 : 2.4} fill="none" stroke-linecap="round" opacity={storm ? 0.85 : 0.65} />
+          <path d={caps.map(([x, y]) => `M${x - 5} ${y - 1}a5 2 0 1 0 10 0a5 2 0 1 0 -10 0`).join('')} fill="#fff" opacity={storm ? 0.5 : 0.35} />
         </g>
       )}
     </g>
   );
 }
 
-function Shallows({ motion }: { motion: boolean }) {
+function Shallows({ motion, weather }: { motion: boolean; weather: Weather }) {
+  const rough = weather !== 'clear';
   return (
     <g stroke-linejoin="round" fill="none">
       <path d={COAST_D} stroke={K.halo} stroke-width="104" opacity=".55" />
@@ -116,6 +133,8 @@ function Shallows({ motion }: { motion: boolean }) {
       <path d={COAST_D} stroke="url(#i-caustic)" stroke-width="68" />
       <path d={COAST_D} stroke={K.shallow2} stroke-width="42" />
       <path d={COAST_D} stroke={K.shallow3} stroke-width="20" />
+      {/* a second surf line offshore; broken and brighter when it blows */}
+      <path d={curve(inset(COAST, () => -30))} stroke="#fff" stroke-width={rough ? 3 : 2} stroke-dasharray={rough ? '30 10 14 12' : '22 26 8 30'} stroke-linecap="round" opacity={rough ? 0.8 : 0.45} />
     </g>
   );
 }
@@ -125,7 +144,6 @@ function Beach() {
     <g>
       <path d={COAST_D} fill={K.sand} />
       <path d={COAST_D} fill="none" stroke={K.sandWet} stroke-width="16" clip-path="url(#i-land)" />
-      <path d={COAST_D} fill="none" stroke={K.sandLight} stroke-width="30" clip-path="url(#i-land)" opacity=".0" />
       <path d={COAST_D} fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="26 7 12 6" stroke-linecap="round" opacity=".95" />
     </g>
   );
@@ -134,9 +152,9 @@ function Beach() {
 // ------------------------------------------------------------- plateau ---
 const PATCHES: [number, number, number, number, number][] = [
   // cx, cy, rx, ry, seed
-  [150, 170, 34, 12, 1], [250, 136, 44, 12, 2], [420, 118, 30, 12, 3], [232, 320, 40, 18, 4], [120, 368, 30, 14, 5], [300, 426, 42, 14, 6],
-  [430, 262, 36, 16, 7], [560, 250, 26, 10, 8], [700, 272, 22, 12, 9], [612, 420, 34, 14, 10], [690, 400, 20, 10, 11], [420, 408, 20, 10, 12],
-  [160, 420, 26, 10, 13], [96, 250, 16, 22, 14],
+  [120, 240, 20, 12, 1], [180, 206, 30, 10, 2], [330, 260, 30, 12, 3], [110, 410, 18, 12, 4], [250, 480, 40, 10, 5], [380, 470, 26, 14, 6],
+  [470, 250, 22, 10, 7], [560, 250, 20, 10, 8], [700, 330, 20, 14, 9], [620, 350, 26, 10, 10], [560, 490, 24, 8, 11], [700, 240, 16, 8, 12],
+  [360, 420, 18, 10, 13], [150, 460, 26, 8, 14],
 ];
 
 function Plateau() {
@@ -149,21 +167,15 @@ function Plateau() {
       <path d={PLATEAU_D} fill={K.grassDarker} transform="translate(0 4)" />
       <path d={PLATEAU_D} fill={K.grass} />
       <path d={PLATEAU_D} fill="none" stroke={K.grassLight} stroke-width="3" opacity=".7" transform="translate(-1 -1.5)" clip-path="url(#i-land)" />
-      <g fill={K.grassLight}>
-        {PATCHES.map(([x, y, rx, ry, s]) => (
-          <path key={s} d={curve(blob(x, y, rx, ry, s * 11, 7, 0.25))} />
-        ))}
-      </g>
-      <g fill={K.grassLighter} opacity=".8">
-        {PATCHES.filter((_, i) => i % 2 === 0).map(([x, y, rx, ry, s]) => (
-          <path key={s} d={curve(blob(x - rx * 0.2, y - ry * 0.2, rx * 0.45, ry * 0.45, s * 13, 6, 0.2))} />
-        ))}
-      </g>
-      <g fill={K.grassDark} opacity=".55">
-        {[[330, 150, 30, 8], [520, 300, 22, 8], [180, 392, 24, 8], [660, 440, 24, 7], [740, 300, 12, 16], [110, 300, 14, 20], [440, 440, 18, 5]].map(([x, y, rx, ry], i) => (
-          <path key={i} d={curve(blob(x, y, rx, ry, i * 17 + 5, 7, 0.2))} />
-        ))}
-      </g>
+      <path d={PATCHES.map(([x, y, rx, ry, s]) => curve(blob(x, y, rx, ry, s * 11, 7, 0.25))).join('')} fill={K.grassLight} />
+      <path d={PATCHES.filter((_, i) => i % 2 === 0).map(([x, y, rx, ry, s]) => curve(blob(x - rx * 0.2, y - ry * 0.2, rx * 0.45, ry * 0.45, s * 13, 6, 0.2))).join('')} fill={K.grassLighter} opacity=".8" />
+      <path
+        d={[[330, 140, 20, 8], [420, 460, 22, 8], [180, 400, 20, 7], [640, 440, 24, 7], [736, 380, 10, 14], [80, 300, 10, 16], [600, 230, 18, 6]]
+          .map(([x, y, rx, ry], i) => curve(blob(x, y, rx, ry, i * 17 + 5, 7, 0.2)))
+          .join('')}
+        fill={K.grassDark}
+        opacity=".55"
+      />
     </g>
   );
 }
@@ -181,10 +193,18 @@ function frontEdge(p: Pt[], from: number, to: number, skip: (q: Pt) => boolean =
   }
   return runs.filter((r) => r.length > 1);
 }
-const noFalls = (q: Pt) => Math.abs(q[0] - FALLS[0]) < 16;
-const R0 = frontEdge(L0, 9, 19, (q) => noFalls(q) || (q[0] > 600 && q[0] < 632)).flatMap((e, i) => ridge(e, 26, 40 + i, 26));
-const R1 = frontEdge(L1, 6, 13, noFalls).flatMap((e, i) => ridge(e, 28, 50 + i, 24));
-const R2 = frontEdge(L2, 4, 8).flatMap((e, i) => ridge(e, 26, 60 + i, 22, 0.9));
+const noFalls = (q: Pt) => Math.abs(q[0] - FALLS[0]) < 18;
+const R0 = frontEdge(L0, 9, 20, noFalls).flatMap((e, i) => ridge(e, 26, 40 + i, 26));
+const R1 = frontEdge(L1, 7, 14, noFalls).flatMap((e, i) => ridge(e, 28, 50 + i, 24));
+const R3 = frontEdge(L3, 5, 9).flatMap((e, i) => ridge(e, 24, 65 + i, 20, 0.85));
+const R2 = frontEdge(L2, 6, 11, noFalls).flatMap((e, i) => ridge(e, 26, 60 + i, 22, 0.9));
+export const RIM_D = PLATEAU_D;
+/** loose boulders on the shoulders, one row of nodes */
+const LOOSE = [
+  [322, 150, 12, 3], [350, 118, 10, 4], [602, 108, 12, 5], [616, 146, 9, 6], [556, 74, 8, 7], [398, 96, 7, 8], [300, 186, 9, 10], [590, 150, 9, 12],
+  [424, 92, 7, 13],
+].map(([x, y, r, s]) => ({ top: blob(x, y - r * 0.5, r, r * 0.55, s * 31, 6, 0.22), h: r * 0.7 }));
+const RT = frontEdge(TERRACE, 5, 9, (q) => q[0] > 600 && q[0] < 640).flatMap((e, i) => ridge(e, TERRACE_H, 70 + i, 22, 0.8));
 
 function Mountain() {
   return (
@@ -192,76 +212,77 @@ function Mountain() {
       {/* ground shadow down-right */}
       <path d={curve(FOOT)} fill={K.shadow} transform="translate(12 6)" />
       <Rock top={L0} h={26} topFill={K.grass} smooth />
-      {R0.map((b) => (
-        <Rock key={b.key} top={b.top} h={b.h} cracks={false} />
-      ))}
+      <RockRow rocks={R0} />
       <Rock top={L1} h={28} smooth />
-      <path d={curve(blob(520, 128, 26, 10, 81, 7, 0.2))} fill={K.grassDark} opacity=".9" />
-      <path d={curve(blob(660, 132, 20, 12, 82, 7, 0.2))} fill={K.grassDark} opacity=".9" />
-      {R1.map((b) => (
-        <Rock key={b.key} top={b.top} h={b.h} cracks={false} />
-      ))}
+      <path d={curve(blob(380, 140, 22, 9, 81, 7, 0.2)) + curve(blob(584, 126, 16, 10, 82, 7, 0.2))} fill={K.grassDark} opacity=".9" />
+      <RockRow rocks={R1} />
       <Rock top={L2} h={26} smooth />
-      <path d={curve(blob(598, 102, 34, 16, 71, 7, 0.2))} fill={K.grassDark} />
-      <path d={curve(blob(590, 98, 20, 9, 73, 7, 0.2))} fill={K.grass} />
-      {R2.map((b) => (
-        <Rock key={b.key} top={b.top} h={b.h} cracks={false} />
-      ))}
-      <Rock top={SUMMIT} h={22} topFill={K.grass} smooth />
-      <path d={curve(blob(580, 60, 18, 7, 74, 6, 0.2))} fill={K.grassLighter} opacity=".8" />
+      <path d={curve(blob(410, 126, 22, 10, 71, 7, 0.2)) + curve(blob(560, 116, 20, 10, 72, 7, 0.2))} fill={K.grassDark} />
+      <path d={curve(blob(406, 123, 13, 6, 73, 7, 0.2)) + curve(blob(556, 113, 11, 5, 75, 7, 0.2))} fill={K.grass} />
+      <RockRow rocks={R2} />
+      <Rock top={L3} h={24} smooth />
+      <path d={curve(blob(438, 100, 14, 7, 76, 7, 0.2)) + curve(blob(530, 96, 12, 6, 77, 7, 0.2))} fill={K.grassDark} opacity=".9" />
+      <RockRow rocks={R3} />
+      <Rock top={SUMMIT} h={20} topFill={K.grass} smooth />
+      <path d={curve(blob(474, 64, 16, 6, 74, 6, 0.2))} fill={K.grassLighter} opacity=".8" />
       {/* loose boulders on the shoulders */}
-      {[
-        [470, 136, 12, 3], [494, 112, 10, 4], [664, 122, 12, 5], [684, 146, 9, 6], [612, 90, 8, 7], [540, 94, 7, 8],
-        [702, 194, 9, 10], [566, 148, 9, 12],
-      ].map(([x, y, r, s]) => (
-        <Boulder key={s} x={x} y={y} r={r} seed={s * 31} />
-      ))}
+      <RockRow rocks={LOOSE} />
+    </g>
+  );
+}
+
+/** the lodge shoulder: a raised grass shelf with a rock face, trees at the back */
+function Terrace() {
+  return (
+    <g>
+      <path d={TERRACE_D} fill={K.shadow} transform={`translate(10 ${TERRACE_H + 4})`} />
+      <Rock top={TERRACE} h={TERRACE_H} topFill={K.grass} smooth hi={false} />
+      <RockRow rocks={RT} />
+      <path d={TERRACE_D} fill="none" stroke={K.grassLight} stroke-width="3" opacity=".7" transform="translate(-1 -1.5)" />
+      <path d={curve(blob(690, 150, 30, 10, 91, 7, 0.2))} fill={K.grassLight} />
     </g>
   );
 }
 
 function Falls({ motion }: { motion: boolean }) {
   const [x, y] = FALLS;
+  const by = POOL[1] - 4;
   return (
     <g>
-      <path d={`M${x - 8} ${y + 6}L${x + 8} ${y + 6}L${x + 9} 226L${x - 9} 226Z`} fill="url(#i-fall)" />
+      <path d={`M${x - 8} ${y + 6}L${x + 8} ${y + 6}L${x + 9} ${by}L${x - 9} ${by}Z`} fill="url(#i-fall)" />
       <g clip-path="url(#i-fallclip)">
         <g class={motion ? 'fall' : undefined}>
-          <path
-            d={Array.from({ length: 7 }, (_, i) => `M${x - 5 + (i % 3) * 5} ${y - 30 + i * 18}l0 12`).join('')}
-            stroke="#fff"
-            stroke-width="2.6"
-            stroke-linecap="round"
-          />
+          <path d={Array.from({ length: 8 }, (_, i) => `M${x - 5 + (i % 3) * 5} ${y - 30 + i * 18}l0 12`).join('')} stroke="#fff" stroke-width="2.6" stroke-linecap="round" />
         </g>
       </g>
       <path d={`M${x - 8} ${y + 6}L${x + 8} ${y + 6}`} stroke="#fff" stroke-width="3" stroke-linecap="round" />
       {/* plunge pool */}
-      <ellipse cx={x - 2} cy={228} rx={22} ry={9} fill={K.river} />
-      <ellipse cx={x - 2} cy={227} rx={16} ry={5.5} fill={K.riverLight} opacity=".7" />
-      <path d={`M${x - 14} 226q4 -6 8 0q4 -6 8 0q4 -6 8 0`} stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" />
+      <ellipse cx={POOL[0]} cy={POOL[1]} rx={24} ry={10} fill={K.river} />
+      <ellipse cx={POOL[0]} cy={POOL[1] - 1} rx={17} ry={6} fill={K.riverLight} opacity=".7" />
+      <path d={`M${POOL[0] - 14} ${POOL[1] - 2}q4 -6 8 0q4 -6 8 0q4 -6 8 0`} stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" />
       {/* rope bridge across the gorge */}
-      <path d={`M${x - 26} 188Q${x} 197 ${x + 26} 190`} stroke={K.woodDark} stroke-width="5" fill="none" />
-      <path d={`M${x - 26} 188Q${x} 197 ${x + 26} 190`} stroke={K.woodLight} stroke-width="4" stroke-dasharray="3 1.6" fill="none" />
-      <path d={`M${x - 26} 181Q${x} 189 ${x + 26} 183`} stroke="#6d4a2c" stroke-width="1.1" fill="none" />
+      <path d={`M${x - 26} 200Q${x} 209 ${x + 26} 202`} stroke={K.woodDark} stroke-width="5" fill="none" />
+      <path d={`M${x - 26} 200Q${x} 209 ${x + 26} 202`} stroke={K.woodLight} stroke-width="4" stroke-dasharray="3 1.6" fill="none" />
+      <path d={`M${x - 26} 193Q${x} 201 ${x + 26} 195`} stroke="#6d4a2c" stroke-width="1.1" fill="none" />
     </g>
   );
 }
 
 function River() {
   const d = curve(RIVER, false);
+  const [mx, my] = RIVER[RIVER.length - 2];
   return (
     <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path d={d} stroke={K.grassDarker} stroke-width="26" />
-      <path d={d} stroke={K.earth} stroke-width="21" opacity=".5" />
-      <path d={d} stroke={K.river} stroke-width="17" />
+      <path d={d} stroke={K.grassDarker} stroke-width="28" />
+      <path d={d} stroke={K.earth} stroke-width="23" opacity=".5" />
+      <path d={d} stroke={K.river} stroke-width="18" />
       <path d={d} stroke={K.riverLight} stroke-width="5" stroke-dasharray="14 18" opacity=".85" transform="translate(-2 0)" />
       {/* where it spills over the lip and fans across the sand */}
-      <path d="M452 452Q466 446 480 452L486 470Q466 476 446 470Z" fill={K.river} stroke="none" />
-      <path d="M458 438q8 5 16 0" stroke="#fff" stroke-width="3" />
+      <path d={`M${mx - 13} ${my - 2}Q${mx} ${my - 8} ${mx + 13} ${my - 2}L${mx + 22} ${my + 34}Q${mx} ${my + 42} ${mx - 22} ${my + 34}Z`} fill={K.river} stroke="none" />
+      <path d={`M${mx - 8} ${my + 1}q8 5 16 0M${mx - 14} ${my + 30}q6 -4 12 0q6 -4 12 0`} stroke="#fff" stroke-width="2.6" />
       {/* reeds */}
       {[
-        [500, 262], [462, 330], [496, 398], [454, 404],
+        [506, 280], [540, 332], [494, 372], [532, 404], [542, 486],
       ].map(([x, y], i) => (
         <Use key={i} id="i-reed" x={x} y={y} />
       ))}
@@ -277,59 +298,88 @@ function Bridge({ at, rot, len }: { at: Pt; rot: number; len: number }) {
       <rect x={-len / 2} y={-9} width={len} height={18} rx={2} fill={K.woodDark} />
       <path d={Array.from({ length: n }, (_, i) => `M${r1(-len / 2 + 2.5 + i * 5)} -8.5v15`).join('')} stroke={K.woodLight} stroke-width="3.6" />
       <path d={`M${-len / 2} -9h${len}M${-len / 2} 9h${len}`} stroke={K.woodDark} stroke-width="2.4" />
-      {[-len / 2, len / 2 - 2.5].map((x) => (
-        <g key={x}>
-          <rect x={x} y={-13} width={3} height={6} fill={K.woodDark} />
-          <rect x={x} y={5} width={3} height={6} fill={K.woodDark} />
+      <path d={`M${-len / 2} -11v-4M${len / 2 - 1} -11v-4M${-len / 2} 7v-4M${len / 2 - 1} 7v-4`} stroke={K.woodDark} stroke-width="3" />
+    </g>
+  );
+}
+
+// --------------------------------------------------------------- paths ---
+function Paths({ tier, paved }: { tier: number; paved: boolean }) {
+  const list = PATHS.filter((p) => p.tier <= tier && !p.steps);
+  return (
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d={list.map((p) => curve(p.pts, false)).join('')} stroke={paved ? K.stoneDark : K.dirtEdge} stroke-width={16} />
+      {list.map((p, i) => (
+        <path key={`m${i}`} d={curve(p.pts, false)} stroke={paved ? K.stone : K.dirt} stroke-width={p.w ?? 12} />
+      ))}
+      {paved ? (
+        <path d={list.map((p) => curve(p.pts, false)).join('')} stroke={K.stoneDark} stroke-width={8} stroke-dasharray="1.2 5" opacity=".7" />
+      ) : (
+        <path d={list.map((p) => curve(p.pts, false)).join('')} stroke={K.dirtLight} stroke-width={4.4} />
+      )}
+    </g>
+  );
+}
+
+/** The town square in front of the office: a planned plaza from day one
+ *  (edging, raked sand, planters), laid in patterned stone once paved. */
+const ell = (x: number, y: number, rx: number, ry: number) => `M${r1(x - rx)} ${y}a${rx} ${ry} 0 1 0 ${r1(2 * rx)} 0a${rx} ${ry} 0 1 0 ${r1(-2 * rx)} 0`;
+export const PLANTERS: Pt[] = [[364, 352], [476, 352]];
+function Square({ paved }: { paved: boolean }) {
+  const { c: [x, y], rx, ry } = SQUARE;
+  const spokes = Array.from({ length: 16 }, (_, i) => {
+    const a = (i / 16) * Math.PI * 2;
+    const c = Math.cos(a), s = Math.sin(a);
+    return `M${r1(x + c * rx * 0.34)} ${r1(y + s * ry * 0.34)}L${r1(x + c * rx * 0.8)} ${r1(y + s * ry * 0.8)}`;
+  }).join('');
+  const star = Array.from({ length: 8 }, (_, i) => {
+    const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const rr = i % 2 ? 7 : 17;
+    return `${i ? 'L' : 'M'}${r1(x + Math.cos(a) * rr)} ${r1(y + Math.sin(a) * rr * 0.5)}`;
+  }).join('') + 'Z';
+  return (
+    <g>
+      <path d={ell(x, y + 3, rx + 4, ry + 4)} fill={paved ? K.stoneDark : K.dirtEdge} />
+      <path d={ell(x, y, rx + 1, ry + 1)} fill={paved ? K.stoneLight : '#f0d7a4'} />
+      <path d={ell(x, y + 1, rx - 5, ry - 4)} fill={paved ? K.stone : '#e8c68a'} />
+      {paved ? (
+        <>
+          <path d={ell(x, y + 1, rx - 5, ry - 4)} fill="none" stroke={K.stoneLight} stroke-width="5" stroke-dasharray="5 2" />
+          <path d={spokes + ell(x, y, rx * 0.58, ry * 0.58)} fill="none" stroke={K.stoneDark} stroke-width="1.2" opacity=".75" />
+          <path d={ell(x, y, rx * 0.34, ry * 0.34)} fill={K.stoneLight} stroke={K.stoneDark} stroke-width="1.2" />
+          <path d={star} fill="#c98a52" />
+        </>
+      ) : (
+        <>
+          <path d={ell(x, y + 1, rx - 5, ry - 4)} fill="none" stroke={K.stoneLight} stroke-width="3" stroke-dasharray="6 3" />
+          <path d={ell(x, y, rx * 0.62, ry * 0.62) + ell(x, y, rx * 0.34, ry * 0.34)} fill="none" stroke="#d6ae70" stroke-width="1.6" stroke-dasharray="4 5" />
+          <path d={star} fill="#d6ae70" />
+        </>
+      )}
+      {/* planters at the south corners */}
+      {PLANTERS.map(([px, py], i) => (
+        <g key={i} transform={`translate(${px} ${py})`}>
+          <ellipse cx={4} cy={2} rx={13} ry={4} fill={K.shadow} />
+          <path d="M-10 0v-7h20v7z" fill={K.woodDark} />
+          <path d="M-10 -7l3 -3h20l-3 3z" fill={K.woodLight} />
+          <path d="M10 0v-7l3 -3v7z" fill="#6d4a2c" />
+          <path d="M-6 -11a5 5 0 1 0 .1 0M2 -13a6 6 0 1 0 .1 0M8 -10a4 4 0 1 0 .1 0" fill={K.treeDark} />
+          <path d="M-5 -13a3 3 0 1 0 .1 0M3 -15a3.4 3.4 0 1 0 .1 0" fill={K.tree} />
+          <path d="M-7 -12a1.4 1.4 0 1 0 .1 0M1 -16a1.4 1.4 0 1 0 .1 0M7 -12a1.3 1.3 0 1 0 .1 0M-1 -10a1.3 1.3 0 1 0 .1 0" fill={i ? K.pink : K.yellow} />
         </g>
       ))}
     </g>
   );
 }
 
-// --------------------------------------------------------------- paths ---
-function Paths({ tier }: { tier: number }) {
-  const paved = tier >= 3;
-  const list = PATHS.filter((p) => p.tier <= tier || p.steps);
-  return (
-    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-      {list.map((p, i) => (
-        <path key={`e${i}`} d={curve(p.pts, false)} stroke={paved ? K.stoneDark : K.dirtEdge} stroke-width={(p.w ?? 12) + 4} />
-      ))}
-      {list.map((p, i) => (
-        <path key={`m${i}`} d={curve(p.pts, false)} stroke={paved ? K.stone : K.dirt} stroke-width={p.w ?? 12} />
-      ))}
-      {list.map((p, i) =>
-        paved ? (
-          <path key={`c${i}`} d={curve(p.pts, false)} stroke={K.stoneDark} stroke-width={(p.w ?? 12) - 3} stroke-dasharray="1.2 5" opacity=".7" />
-        ) : (
-          <path key={`c${i}`} d={curve(p.pts, false)} stroke={K.dirtLight} stroke-width={(p.w ?? 12) * 0.4} />
-        ),
-      )}
-    </g>
-  );
-}
-
-/** the town square in front of the office: packed sand, then cobbles (tier 3) */
-function Square({ tier }: { tier: number }) {
-  const { c: [x, y], rx, ry } = SQUARE;
-  const paved = tier >= 3;
-  return (
-    <g>
-      <ellipse cx={x} cy={y + 3} rx={rx + 3} ry={ry + 3} fill={paved ? K.stoneDark : K.dirtEdge} />
-      <ellipse cx={x} cy={y} rx={rx} ry={ry} fill={paved ? K.stone : '#e8cb90'} />
-      <ellipse cx={x} cy={y} rx={rx - 8} ry={ry - 6} fill="none" stroke={paved ? K.stoneDark : '#d8b474'} stroke-width={paved ? 5 : 2} stroke-dasharray={paved ? '1.2 5' : undefined} opacity=".7" />
-      <ellipse cx={x} cy={y + 2} rx={rx * 0.42} ry={ry * 0.42} fill="none" stroke={paved ? K.stoneLight : '#f3dcaa'} stroke-width="3" />
-    </g>
-  );
-}
-
-/** stone steps up the ledge face to the lodge terrace */
+/** stone steps up the terrace face to the lodge */
 function Steps() {
   return (
     <g>
-      {Array.from({ length: 6 }, (_, i) => {
-        const x = 608 + i * 2.2, y = 262 - i * 5;
+      <path d="M612 300Q614 270 618 244" stroke={K.stoneDark} stroke-width="14" fill="none" stroke-linecap="round" />
+      <path d="M612 300Q614 270 618 244" stroke={K.stone} stroke-width="10" fill="none" stroke-linecap="round" />
+      {Array.from({ length: 7 }, (_, i) => {
+        const x = 618 + i * 1.2, y = 240 - i * 4.4;
         return (
           <g key={i}>
             <rect x={x - 9} y={y - 2} width={18} height={5} rx={1.5} fill={K.stoneDark} />
@@ -345,20 +395,19 @@ function Steps() {
 function Airfield({ weather, motion }: { weather: Weather; motion: boolean }) {
   const L = RUNWAY_LEN, w = RUNWAY.w;
   const bars = (x: number) => Array.from({ length: 6 }, (_, i) => `M${x} ${r1(-w / 2 + 4 + i * 5.4)}h14`).join('');
+  const stands = [POS.p1, POS.p2].map(([x, y]) => `M${x} ${y + 22}V${y - 26}M${x - 13} ${y + 24}h26`).join('');
   return (
     <g>
-      {/* hangar pad and apron */}
-      <path d={lin(HANGAR_PAD, true)} fill={K.concreteDark} transform="translate(0 3)" />
-      <path d={lin(HANGAR_PAD, true)} fill={K.concrete} />
-      <path d={lin(APRON, true)} fill={K.concreteDark} transform="translate(0 3)" />
-      <path d={lin(APRON, true)} fill={K.concrete} />
-      <path d={lin(APRON.map(([x, y]) => [x + (360 - x) * 0.04, y + (228 - y) * 0.06]), true)} fill="none" stroke="#fff" stroke-width="1" opacity=".35" />
-      {/* taxiway */}
-      <path d="M248 214L262 176L292 172L282 212Z" fill={K.concrete} />
-      <path d="M270 210L277 176" stroke="#f2c230" stroke-width="1.6" />
-      {/* parking stands */}
-      <g stroke="#f2c230" stroke-width="1.6" fill="none" opacity=".9">
-        <path d="M238 250l0 -32M226 252l24 -4M310 236l-2 -34M298 238l24 -4" />
+      {/* apron, hangar pad and taxiway */}
+      <path d={lin(APRON, true) + lin(TAXIWAY, true)} fill={K.concreteDark} transform="translate(0 3)" />
+      <path d={lin(APRON, true) + lin(TAXIWAY, true)} fill={K.concrete} />
+      <path d={lin(HANGAR_PAD, true)} fill="#c3c7c6" />
+      <path d={lin(APRON.map(([x, y]) => [x + (214 - x) * 0.03, y + (336 - y) * 0.08]), true)} fill="none" stroke="#fff" stroke-width="1" opacity=".4" />
+      <path d="M100 330h84M100 350h84" stroke="#9aa0a2" stroke-width="1" opacity=".5" />
+      {/* parking stands and the taxi line */}
+      <g stroke="#f2c230" stroke-width="1.8" fill="none" opacity=".95">
+        <path d={stands} />
+        <path d="M258 366Q274 380 274 396L274 420" stroke-dasharray="6 4" />
       </g>
       {/* runway */}
       <g transform={`translate(${r1(RUNWAY_C[0])} ${r1(RUNWAY_C[1])}) rotate(${r1(RUNWAY_ANGLE)})`}>
@@ -374,7 +423,7 @@ function Airfield({ weather, motion }: { weather: Weather; motion: boolean }) {
         <path d={`M${-L / 2 + 50} -3h40M${-L / 2 + 54} 4h36M${L / 2 - 90} -4h36`} stroke="#3c4248" stroke-width="2" opacity=".5" />
       </g>
       {/* windsock at the east end */}
-      <g transform="translate(392 150)">
+      <g transform={`translate(${WINDSOCK[0]} ${WINDSOCK[1]})`}>
         <ellipse cx={5} cy={1} rx={6} ry={2} fill={K.shadow} />
         <rect x={-1} y={-28} width={2.2} height={28} fill="#e8e3da" />
         <g transform="translate(0 -26)">
@@ -396,39 +445,26 @@ function Airfield({ weather, motion }: { weather: Weather; motion: boolean }) {
 
 // ------------------------------------------------------------- scatter ---
 const TREE_SPOTS: Pt[] = [
-  // south lawns and river banks
-  [262, 452], [284, 436], [318, 440], [338, 432], [300, 458], [196, 440], [110, 424], [214, 404], [250, 418],
-  [566, 446], [612, 446], [640, 432], [676, 404], [744, 318], [424, 396], [436, 420],
-  [604, 262], [588, 282], [700, 236], [470, 250], [452, 270], [416, 250], [132, 300], [100, 330],
-  // forest round the mountain foot and on the back plain
-  [430, 172], [428, 204], [446, 222], [410, 138], [424, 110], [700, 244], [724, 238], [720, 150], [700, 108], [652, 84], [470, 90],
-  [150, 150], [196, 132], [96, 216], [86, 256], [712, 404], [690, 432], [96, 350], [118, 392], [280, 440], [150, 436],
+  // round the mountain foot and the office
+  [296, 222], [318, 240], [342, 250], [308, 268], [364, 238], [476, 236], [494, 256], [470, 262], [560, 236], [578, 252], [552, 262],
+  // north-west plain, the finger and the lagoon shore
+  [96, 200], [92, 236], [118, 200], [150, 206], [100, 170], [292, 150], [306, 128],
+  // east edge, behind the cottages, the terrace
+  [724, 226], [712, 242], [736, 320], [724, 346], [740, 372], [598, 236], [700, 136], [724, 160], [630, 140],
+  // south lawns
+  [362, 400], [372, 446], [388, 472], [352, 482], [476, 510], [498, 494], [560, 494], [548, 470], [596, 500], [740, 470], [720, 490],
+  [196, 474], [266, 474], [308, 476], [150, 470],
 ];
 const PALMS: [number, number, number, number][] = [
   // x, y, scale, lean
-  [70, 312, 1.05, 1], [108, 440, 1, 1], [170, 464, 0.95, -1], [322, 468, 1.05, 1], [372, 452, 0.9, -1], [520, 470, 1, 1], [586, 474, 1.1, -1],
-  [660, 460, 0.95, 1], [728, 372, 1, -1], [762, 290, 1, 1], [744, 196, 0.95, -1], [96, 170, 1, 1], [164, 118, 0.9, -1], [300, 104, 1, 1],
-  [420, 300, 0.85, -1], [300, 330, 0.8, 1], [520, 398, 0.85, 1], [680, 350, 0.8, -1], [446, 90, 0.9, 1],
+  [86, 210, 1, 1], [122, 186, 0.9, -1], [284, 172, 0.95, 1], [70, 300, 1.05, 1], [62, 350, 0.95, 1], [74, 400, 1, -1],
+  [92, 452, 1, 1], [200, 516, 0.95, -1], [276, 524, 1.05, 1], [458, 522, 0.9, -1], [490, 520, 1, 1], [566, 514, 1.05, -1], [620, 506, 0.95, 1],
+  [730, 296, 1, -1], [744, 360, 0.95, -1], [752, 416, 1, -1], [742, 466, 0.95, 1], [736, 200, 0.95, -1], [700, 112, 0.9, 1], [312, 108, 1, 1],
+  [390, 390, 0.85, -1], [560, 400, 0.8, 1],
 ];
 
-function Pond() {
-  const [x, y] = SPOT.pond;
-  return (
-    <g>
-      <ellipse cx={x + 2} cy={y + 2} rx={30} ry={13} fill={K.grassDarker} />
-      <ellipse cx={x} cy={y} rx={28} ry={12} fill={K.earth} />
-      <ellipse cx={x} cy={y + 1.5} rx={25} ry={10} fill={K.river} />
-      <ellipse cx={x - 6} cy={y - 1} rx={12} ry={4} fill={K.riverLight} opacity=".7" />
-      <path d={`M${x + 8} ${y + 3}a3.4 2 0 1 0 .1 0M${x - 12} ${y + 5}a3 1.8 0 1 0 .1 0M${x + 16} ${y - 2}a2.6 1.6 0 1 0 .1 0`} fill="#4caf50" />
-      <path d={`M${x + 8} ${y + 1}a1.3 1 0 1 0 .1 0`} fill={K.pink} />
-      <Use id="i-reed" x={x - 24} y={y + 2} />
-      <Use id="i-reed" x={x + 25} y={y + 4} />
-    </g>
-  );
-}
-
 /** rocks standing in the shallows, with a ring of foam */
-const SEA_ROCKS: [number, number, number][] = [[16, 262, 9], [790, 238, 8], [740, 452, 10], [150, 540, 8], [558, 528, 7], [96, 90, 8], [760, 106, 7]];
+const SEA_ROCKS: [number, number, number][] = [[18, 250, 9], [790, 300, 8], [790, 500, 10], [100, 560, 8], [600, 560, 7], [40, 80, 8], [770, 110, 7]];
 function SeaRocks() {
   return (
     <g>
@@ -443,7 +479,7 @@ function SeaRocks() {
 }
 
 function Lookout() {
-  const x = 604, y = 60;
+  const x = 462, y = 74;
   return (
     <g transform={`translate(${x} ${y})`}>
       <ellipse cx={6} cy={1} rx={10} ry={3} fill={K.shadow} />
@@ -459,18 +495,25 @@ function Lookout() {
   );
 }
 
-function Scatter({ motion, wind }: { motion: boolean; wind: boolean }) {
+/** tier each future asset arrives: its lot keeps a few trees until it is staked out */
+const LOT_TREES: { tier: number; pts: Pt[] }[] = [
+  { tier: 4, pts: [[590, 440], [616, 452], [690, 434], [668, 452], [712, 444]] },
+  { tier: 5, pts: [[630, 180], [676, 176], [700, 190]] },
+];
+
+function Scatter({ motion, wind, storm, tier }: { motion: boolean; wind: boolean; storm: boolean; tier: number }) {
   const zones = ZONES;
   const tufts = scatter(11, 90, onGrass, zones, 14);
   const flowers = scatter(12, 48, onGrass, zones, 17);
   const bushes = scatter(13, 30, onGrass, zones, 22);
   const beach = scatter(14, 34, onBeach, zones, 20);
   const trees = TREE_SPOTS.filter((p) => clearOf(p, zones));
+  const lots = LOT_TREES.filter((l) => tier < l.tier - 2).flatMap((l) => l.pts);
   const cols = [K.pink, K.yellow, '#ffffff', K.orange, K.purple];
   const items: { y: number; el: preact.JSX.Element }[] = [];
-  trees.forEach(([x, y], i) => items.push({ y, el: <Use key={`t${i}`} id={i % 4 === 3 ? 'i-pine' : 'i-tree'} x={x} y={y} s={0.9 + (i % 3) * 0.12} flip={i % 2 === 1} /> }));
+  [...trees, ...lots].forEach(([x, y], i) => items.push({ y, el: <Use key={`t${i}`} id={i % 4 === 3 ? 'i-pine' : 'i-tree'} x={x} y={y} s={0.9 + (i % 3) * 0.12} flip={i % 2 === 1} /> }));
   bushes.forEach(([x, y], i) => items.push({ y, el: <Use key={`b${i}`} id="i-bush" x={x} y={y} s={0.8 + (i % 3) * 0.15} flip={i % 2 === 0} /> }));
-  PALMS.filter(([x, y]) => clearOf([x, y], zones)).forEach(([x, y, s, l], i) => items.push({ y, el: <Palm key={`p${i}`} x={x} y={y} s={s} lean={l} motion={motion} wind={wind} /> }));
+  PALMS.filter(([x, y]) => clearOf([x, y], zones)).forEach(([x, y, s, l], i) => items.push({ y, el: <Palm key={`p${i}`} x={x} y={y} s={s} lean={l} motion={motion} wind={wind} storm={storm} /> }));
   items.sort((a, b) => a.y - b.y);
   return (
     <g>
@@ -485,14 +528,13 @@ function Scatter({ motion, wind }: { motion: boolean; wind: boolean }) {
       <path d={beach.filter((_, i) => i % 4 === 1).map(([x, y]) => `M${r1(x)} ${r1(y - 5)}l1.4 3.4l3.6 .2l-2.8 2.4l1 3.6l-3.2 -2l-3.2 2l1 -3.6l-2.8 -2.4l3.6 -.2z`).join('')} fill="#ff8a5c" />
       <path d={beach.filter((_, i) => i % 4 === 2).map(([x, y]) => `M${r1(x - 3)} ${r1(y)}q3 -6 6 0z`).join('')} fill="#fff0e6" stroke="#f0b8a0" stroke-width=".6" />
       {[
-        [470, 236], [440, 240], [540, 236], [700, 262],
+        [470, 250], [300, 250], [590, 262], [720, 260],
       ].map(([x, y], i) => (
         <Use key={i} id="i-mush" x={x} y={y} />
       ))}
-      <Pond />
       {/* shore boulders */}
       {[
-        [40, 372, 9, 1], [58, 396, 6, 2], [760, 222, 8, 3], [774, 312, 9, 4], [742, 372, 7, 5], [118, 118, 7, 6], [680, 470, 7, 7], [228, 96, 6, 8],
+        [58, 330, 9, 1], [70, 372, 6, 2], [748, 236, 8, 3], [756, 330, 9, 4], [760, 440, 7, 5], [96, 118, 7, 6], [680, 512, 7, 7], [268, 132, 6, 8],
       ].map(([x, y, r, s]) => (
         <Boulder key={s} x={x} y={y} r={r} seed={s * 97} pal={{ ...ROCK, top: mix(K.rockTop, K.sand, 0.15) }} />
       ))}
@@ -505,28 +547,29 @@ const clearOf = (p: Pt, zones: Zone[]) =>
   zones.every((z) => ('c' in z ? Math.hypot(p[0] - z.c[0], p[1] - z.c[1]) >= z.r * 0.8 : 'line' in z ? lineDist(p, z.line) >= z.r : !inPoly(p, z.poly)));
 
 // -------------------------------------------------------------- export ---
-export function Terrain({ tier, weather, motion }: { tier: number; weather: Weather; motion: boolean }) {
+export function Terrain({ tier, weather, motion, paved }: { tier: number; weather: Weather; motion: boolean; paved: boolean }) {
   return (
     <g>
       <Sea motion={motion} weather={weather} />
-      <Shallows motion={motion} />
+      <Shallows motion={motion} weather={weather} />
       <SeaRocks />
       <Beach />
       <Plateau />
+      <Terrace />
       <River />
       <Mountain />
       <Falls motion={motion} />
       <Lookout />
-      <Use id="i-tree" x={566} y={70} s={0.7} />
-      <Use id="i-bush" x={624} y={78} s={0.8} />
-      <Steps />
-      <Paths tier={tier} />
-      <Square tier={tier} />
+      <Use id="i-tree" x={560} y={120} s={0.8} />
+      <Use id="i-bush" x={506} y={62} s={0.8} />
+      {tier >= 5 && <Steps />}
+      <Paths tier={tier} paved={paved} />
+      <Square paved={paved} />
       {BRIDGES.map((b, i) => (
         <Bridge key={i} {...b} />
       ))}
       <Airfield weather={weather} motion={motion} />
-      <Scatter motion={motion} wind={weather !== 'clear'} />
+      <Scatter motion={motion} wind={weather !== 'clear'} storm={weather === 'storm'} tier={tier} />
     </g>
   );
 }

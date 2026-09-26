@@ -6,7 +6,7 @@ import { K } from './paint';
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /** a broad drooping leaf from the crown at angle a (deg), length L */
-function leaf(a: number, L: number, droop: number) {
+function leaf(a: number, L: number, droop: number, ox = 0, oy = 0) {
   const c = Math.cos((a * Math.PI) / 180), s = Math.sin((a * Math.PI) / 180);
   // local leaf: along +x, bulging up then drooping at the tip
   const pts: [number, number][] = [
@@ -15,7 +15,7 @@ function leaf(a: number, L: number, droop: number) {
     [L, L * droop],
     [L * 0.5, L * 0.06],
   ];
-  const tr = ([x, y]: [number, number]) => `${r1(x * c - y * s)} ${r1(x * s + y * c + Math.abs(x * c) * 0.1)}`;
+  const tr = ([x, y]: [number, number]) => `${r1(ox + x * c - y * s)} ${r1(oy + x * s + y * c + Math.abs(x * c) * 0.1)}`;
   return `M${tr(pts[0])}Q${tr(pts[1])} ${tr(pts[2])}Q${tr(pts[3])} ${tr(pts[0])}Z`;
 }
 
@@ -34,7 +34,7 @@ function crown(size: number, flip: boolean) {
 }
 
 /** Palm with a curved trunk; (x, y) is where the trunk meets the ground. */
-export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind }: { x: number; y: number; s?: number; lean?: number; motion: boolean; young?: boolean; pal?: { leaf: string; dark: string }; wind?: boolean }) {
+export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind, storm }: { x: number; y: number; s?: number; lean?: number; motion: boolean; young?: boolean; pal?: { leaf: string; dark: string }; wind?: boolean; storm?: boolean }) {
   const h = (young ? 20 : 40) * s;
   const lx = 9 * lean * s;
   const w = (young ? 2.2 : 3.6) * s;
@@ -42,11 +42,11 @@ export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind }: { x: n
   const trunk = `M${r1(-w)} 0Q${r1(lx * 0.1 - w)} ${r1(-h * 0.6)} ${r1(lx - w * 0.5)} ${r1(-h)}L${r1(lx + w * 0.5)} ${r1(-h)}Q${r1(lx * 0.1 + w * 1.1)} ${r1(-h * 0.55)} ${r1(w)} 0Z`;
   const mid = `M0 -2Q${r1(lx * 0.1)} ${r1(-h * 0.6)} ${r1(lx)} ${r1(-h + 2)}`;
   return (
-    <g transform={`translate(${r1(x)} ${r1(y)})`}>
+    <g transform={`translate(${r1(x)} ${r1(y)})${wind ? ` skewX(${storm ? -16 : -8})` : ''}`}>
       <ellipse cx={r1(lx + 12 * s)} cy={1.5} rx={r1(18 * s)} ry={r1(5 * s)} fill={K.shadow} />
       <path d={trunk} fill={K.trunk} />
       <path d={mid} stroke={K.trunkDark} stroke-width={r1(w * 1.3)} stroke-dasharray="2 3.2" fill="none" opacity=".55" />
-      <g transform={`translate(${r1(lx)} ${r1(-h)})${wind ? ' rotate(14) skewX(-8)' : ''}`}>
+      <g transform={`translate(${r1(lx)} ${r1(-h)})${wind ? (storm ? ' rotate(22) skewX(-12)' : ' rotate(14) skewX(-8)') : ''}`}>
         <g class={motion ? 'sway' : undefined} style={motion ? { animationDelay: `${r1(-((x * 7 + y) % 50) / 10)}s` } : undefined}>
           <path d={cr.back} fill={pal?.dark ?? K.leafDark} />
           <path d={cr.front} fill={pal?.leaf ?? K.leaf} />
@@ -55,6 +55,26 @@ export function Palm({ x, y, s = 1, lean = 1, motion, young, pal, wind }: { x: n
         </g>
       </g>
     </g>
+  );
+}
+
+/** A bed of young palms in four nodes (they are too small to sway). */
+export function Saplings({ pts }: { pts: [number, number][] }) {
+  const shadow: string[] = [], trunk: string[] = [], back: string[] = [], front: string[] = [];
+  pts.forEach(([x, y], i) => {
+    const flip = i % 2 === 1, lx = flip ? -5 : 5, h = 19, cx = x + lx, cy = y - h;
+    shadow.push(`M${r1(x + 2)} ${r1(y + 1)}a9 2.8 0 1 0 18 0a9 2.8 0 1 0 -18 0`);
+    trunk.push(`M${r1(x - 2)} ${y}Q${r1(x + lx * 0.1 - 2)} ${r1(y - h * 0.6)} ${r1(cx - 1)} ${r1(cy)}L${r1(cx + 1.2)} ${r1(cy)}Q${r1(x + lx * 0.1 + 2.4)} ${r1(y - h * 0.55)} ${r1(x + 2)} ${y}Z`);
+    [200, 250, 300, 345].forEach((a) => back.push(leaf(flip ? 180 - a : a, 10.5, 0.28, cx, cy)));
+    [160, 115, 25, 65].forEach((a) => front.push(leaf(flip ? 180 - a : a, 11, 0.34, cx, cy)));
+  });
+  return (
+    <>
+      <path d={shadow.join('')} fill={K.shadow} />
+      <path d={trunk.join('')} fill={K.trunk} />
+      <path d={back.join('')} fill={K.leafDark} />
+      <path d={front.join('')} fill={K.leaf} />
+    </>
   );
 }
 

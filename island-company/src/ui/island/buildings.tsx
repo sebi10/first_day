@@ -41,8 +41,54 @@ export function Ribbon({ x, y }: { x: number; y: number }) {
   );
 }
 
+/** What is wrong with a house, drawn on the house itself. */
+export type Fault = { tag?: boolean; damaged?: boolean; lapsed?: boolean };
+type FaultGeo = { w: number; h: number; door: [number, number, number, number]; shutter: [number, number]; patches: [number, number][]; crack: [number, number]; board: [number, number] };
+/** red-tagged: sealed with barrier tape and a tag on the door; damaged: a
+ *  shutter hanging off, a crack, planks nailed over the roof; inspection
+ *  lapsed: a closed notice staked out front */
+function Faults({ f, g }: { f: Fault; g: FaultGeo }) {
+  const [dx0, dy0, dx1, dy1] = g.door;
+  const cx = (dx0 + dx1) / 2;
+  return (
+    <>
+      {f.damaged && (
+        <>
+          <path d={g.patches.map(([x, y]) => `M${x - 5} ${y - 3}l10 -1.5l1 6l-10 1.5z`).join('')} fill="#c9a36a" stroke="#7a5534" stroke-width=".9" />
+          <path d={g.patches.map(([x, y]) => `M${x - 3.4} ${y - 2.6}l.2 5M${x + 3.4} ${y - 3.6}l.2 5`).join('')} stroke="#7a5534" stroke-width=".8" />
+          <path d={`M${g.crack[0]} ${g.crack[1]}l2 3.5l-2.4 2.6l2.2 4`} stroke="#7d6e5c" stroke-width="1.1" fill="none" />
+          <g transform={`translate(${g.shutter[0]} ${g.shutter[1]}) rotate(28)`}>
+            <path d="M0 0h4.2v8.4h-4.2z" fill={K.woodDark} stroke="#5c3b20" stroke-width=".6" />
+            <path d="M.8 2.2h2.6M.8 4.6h2.6" stroke="#5c3b20" stroke-width=".6" />
+          </g>
+        </>
+      )}
+      {f.tag && (
+        <>
+          <path d={`M${-g.w + 1} ${-g.h + 3}L${g.w - 1} -2M${-g.w + 1} -2L${g.w - 1} ${-g.h + 3}`} stroke={K.red} stroke-width="3.2" stroke-linecap="round" />
+          <path d={`M${-g.w + 1} ${-g.h + 3}L${g.w - 1} -2M${-g.w + 1} -2L${g.w - 1} ${-g.h + 3}`} stroke="#fff" stroke-width="3.2" stroke-dasharray="2.6 3.2" />
+          <g transform={`translate(${cx + 1} ${dy0 + (dy1 - dy0) * 0.45}) rotate(-8)`}>
+            <path d="M-3.6 0h7.2l1.6 2v8.4h-10.4v-8.4z" fill={K.red} stroke="#fff" stroke-width="1" />
+            <circle cx={0} cy={2.2} r={0.9} fill="#fff" />
+            <path d="M-2.2 5h4.4M-2.2 7.2h4.4" stroke="#fff" stroke-width=".9" />
+          </g>
+        </>
+      )}
+      {f.lapsed && (
+        <g transform={`translate(${g.board[0]} ${g.board[1]})`}>
+          <ellipse cx={3} cy={1} rx={7} ry={2} fill={K.shadow} />
+          <path d="M0 0V-13" stroke={K.woodDark} stroke-width="2" />
+          <path d="M-8 -24h16v11h-16z" fill="#fff" stroke={K.red} stroke-width="1.8" />
+          <path d="M-8 -18.5h16" stroke={K.red} stroke-width="3.4" />
+          <path d="M-5 -21.5h10M-5 -15.4h7" stroke="#8a8f93" stroke-width=".9" />
+        </g>
+      )}
+    </>
+  );
+}
+
 // ------------------------------------------------------------- cottage ---
-export function Cottage({ tint, win, wear, open }: { tint: string; win: Win; wear: number; open: boolean }) {
+export function Cottage({ tint, win, wear, open, fault = {} }: { tint: string; win: Win; wear: number; open: boolean; fault?: Fault }) {
   const w = 20, d = 26, h = 18, rh = 16, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const r = gable(-w, w, h, 0, d, rh, o);
@@ -66,12 +112,13 @@ export function Cottage({ tint, win, wear, open }: { tint: string; win: Win; wea
       <path d={r.courses(thatch ? 4 : 3)} stroke={roof.lo} stroke-width={thatch ? 1.6 : 1.1} opacity=".55" fill="none" />
       <path d={r.ridge} stroke={roof.hi} stroke-width="3" stroke-linecap="round" />
       {wear >= 0.25 && <path d={`M-10 ${-24}l6 -1l1 4l-6 1z`} fill={roof.dk} opacity=".45" />}
+      <Faults f={fault} g={{ w, h, door: [-4.5, -11.5, 4.5, 0], shutter: [-17, -12.5], patches: [[-8, -27], [9, -24]], crack: [11, -17], board: [-27, 6] }} />
     </g>
   );
 }
 
 // --------------------------------------------------------------- villa ---
-export function Villa({ tint, win, wear, open }: { tint: string; win: Win; wear: number; open: boolean }) {
+export function Villa({ tint, win, wear, open, fault = {} }: { tint: string; win: Win; wear: number; open: boolean; fault?: Fault }) {
   const w = 30, d = 32, h = 32, rh = 13, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const r = hip(-w, w, h, 0, d, rh, o, 14);
@@ -102,12 +149,13 @@ export function Villa({ tint, win, wear, open }: { tint: string; win: Win; wear:
       <path d={r.front} fill={roof.mid} />
       <path d={r.ridge} stroke={roof.hi} stroke-width="2.4" stroke-linecap="round" />
       <path d={`M${pt([w - 8, h + 6, d * 0.7])}v-10h5v10z`} fill={weather('#e9e2d6', wear)} />
+      <Faults f={fault} g={{ w, h, door: [-6, -13, 6, 0], shutter: [-26, -29], patches: [[-12, -40], [12, -42]], crack: [20, -26], board: [-40, 8] }} />
     </g>
   );
 }
 
 // --------------------------------------------------------------- lodge ---
-export function Lodge({ tint, win, wear, open }: { tint: string; win: Win; wear: number; open: boolean }) {
+export function Lodge({ tint, win, wear, open, fault = {} }: { tint: string; win: Win; wear: number; open: boolean; fault?: Fault }) {
   const w = 30, d = 40, h = 20, rh = 34, o = 5;
   const b = box(-w, w, 0, h, 0, d);
   const base = box(-w, w, 0, 7, 0, d);
@@ -152,6 +200,7 @@ export function Lodge({ tint, win, wear, open }: { tint: string; win: Win; wear:
       <path d={deck.front} fill={K.woodDark} />
       <path d={Array.from({ length: 13 }, (_, i) => post(-w - 3 + i * 5.5, -14, 7, 4)).join('') + seg([-w - 4, 11, -14], [w + 4, 11, -14])} stroke={K.woodDark} stroke-width="1.4" />
       <path d="M-5 -4v-14h10v14z" fill={open ? '#6fb7d8' : K.woodDark} stroke="#fff4dc" stroke-width="1.2" />
+      <Faults f={fault} g={{ w: 22, h: 22, door: [-5, -18, 5, -4], shutter: [-55, -12], patches: [[-18, -34], [16, -38]], crack: [18, -14], board: [-72, 8] }} />
     </g>
   );
 }
@@ -254,12 +303,14 @@ export function Office({ tint, win, wear, flag, motion }: { tint: string; win: W
 }
 
 // ------------------------------------------------------------ generator ---
+/** running: carrying the island (grid down) — exhaust, a green beacon, door open, lit inside */
 export function GenHouse({ wear, running, motion }: { wear: number; running: boolean; motion: boolean }) {
   const w = 18, d = 22, h = 16;
   const b = box(-w, w, 0, h, 0, d);
   const para = box(-w, w, h, h + 2, 0, d);
   const tank = box(w + 4, w + 20, 0, 8, 4, 18);
-  const [sx, sy] = P([10, h, 14]);
+  const [sx, sy] = P([w + 12, 8, 11]); // the stack stands on the tank end, clear of the grid next door
+  const [lx, ly] = P([-8, h + 2, 8]);
   return (
     <g>
       <path d={shadowOf(-w, w + 20, 0, d, h + 4)} fill={K.shadow} />
@@ -270,22 +321,38 @@ export function GenHouse({ wear, running, motion }: { wear: number; running: boo
       <path d={`M${pt([-w + 3, h + 2, 4])}L${pt([w - 3, h + 2, 4])}L${pt([w - 3, h + 2, d - 4])}L${pt([-w + 3, h + 2, d - 4])}Z`} fill="#7b8378" />
       <Wear wear={wear} spots={[[-10, -6, 4], [10, -10, 4]]} />
       {/* louvres + door + hazard stripe */}
-      <path d="M4 -12h11M4 -9.5h11M4 -7h11M4 -4.5h11" stroke="#6d7470" stroke-width="1.4" />
-      <path d="M-14 0v-12h9v12z" fill="#5d8a72" />
+      <path d="M4 -12h11M4 -9.5h11M4 -7h11M4 -4.5h11" stroke={running ? '#ffcf5a' : '#6d7470'} stroke-width="1.4" />
+      {running ? (
+        <>
+          <path d="M-14 0v-12h9v12z" fill="#ffd966" />
+          <path d="M-14 0v-12l-5 2v11z" fill="#5d8a72" />
+          <path d="M-12 0v-4h5v4z" fill="#8a6a3a" />
+        </>
+      ) : (
+        <path d="M-14 0v-12h9v12z" fill="#5d8a72" />
+      )}
       <path d="M-18 -1.5h36" stroke="#f2c230" stroke-width="3" stroke-dasharray="3 3" />
       {/* fuel tank */}
       <path d={tank.side + tank.front} fill="#e8e3d6" />
       <path d={tank.top} fill="#f7f4ec" />
       <path d={`M${pt([w + 6, 0, 4])}v-4M${pt([w + 18, 0, 4])}v-4`} stroke="#6d7470" stroke-width="1.6" />
       {/* exhaust stack */}
-      <path d={`M${sx} ${sy}v-16`} stroke="#5a6064" stroke-width="3.6" stroke-linecap="round" />
-      <path d={`M${sx - 2.6} ${sy - 16}h5.2`} stroke="#3e4448" stroke-width="2" />
+      <path d={`M${sx} ${sy}v-20`} stroke="#5a6064" stroke-width="3.6" stroke-linecap="round" />
+      <path d={`M${sx - 2.6} ${sy - 20}h5.2`} stroke="#3e4448" stroke-width="2" />
+      {/* roof beacon: green and glowing while it carries the island */}
+      <path d={`M${lx} ${ly}v-4`} stroke="#5a6064" stroke-width="2" />
+      <circle cx={lx} cy={ly - 6} r={3.2} fill={running ? '#6dff8e' : '#7d8a80'} stroke="#3e4448" stroke-width="1" />
+      {running && <circle cx={lx} cy={ly - 6} r={8} fill="#6dff8e" opacity=".3" />}
       {running && (
-        <g transform={`translate(${sx} ${sy - 20})`}>
+        <g transform={`translate(${sx} ${sy - 22})`}>
           <g class={motion ? 'puff' : undefined}>
-            <circle r={4} fill="#d9dde0" />
-            <circle cx={3} cy={-6} r={5} fill="#e9ecee" />
-            <circle cx={7} cy={-13} r={4} fill="#f2f4f5" opacity=".8" />
+            <circle r={4.6} fill="#6f7478" />
+            <circle cx={3} cy={-7} r={6} fill="#9aa0a4" />
+            <circle cx={8} cy={-15} r={5} fill="#c4c8cb" opacity=".85" />
+          </g>
+          <g class={motion ? 'puff puff-late' : undefined}>
+            <circle cx={-4} cy={-18} r={5.5} fill="#b4b9bc" opacity=".8" />
+            <circle cx={2} cy={-26} r={6.5} fill="#d6d9db" opacity=".7" />
           </g>
         </g>
       )}
@@ -294,7 +361,8 @@ export function GenHouse({ wear, running, motion }: { wear: number; running: boo
 }
 
 // ------------------------------------------------------ substation (g1) ---
-export function Substation({ wear }: { wear: number }) {
+/** down: burnt transformer, black bushings, a red alarm light and smoke */
+export function Substation({ wear, down, motion }: { wear: number; down?: boolean; motion?: boolean }) {
   const pad = box(-18, 18, 0, 2, -2, 22);
   const tr = box(-10, 4, 2, 16, 6, 16);
   const cab = box(7, 15, 2, 14, 3, 10);
@@ -303,6 +371,7 @@ export function Substation({ wear }: { wear: number }) {
   ] as const;
   const fpost = fence.map(([x, z]) => post(x, z, 10)).join('');
   const frail = seg([-18, 10, -2], [18, 10, -2]) + seg([18, 10, -2], [18, 10, 22]) + seg([18, 10, 22], [-18, 10, 22]) + seg([-18, 10, 22], [-18, 10, -2]);
+  const [bx, by] = P([-3, 16, 11]);
   return (
     <g>
       <path d={shadowOf(-18, 18, -2, 22, 16)} fill={K.shadow} />
@@ -310,29 +379,51 @@ export function Substation({ wear }: { wear: number }) {
       <path d={pad.front + pad.side} fill={K.concreteDark} />
       {/* back fence first */}
       <path d={seg([18, 10, 22], [-18, 10, 22]) + seg([-18, 10, 22], [-18, 10, -2]) + seg([18, 10, -2], [18, 10, 22])} stroke="#9aa5ab" stroke-width="1" />
-      <path d={tr.side} fill={weather('#6f8a80', wear)} />
-      <path d={tr.front} fill={weather('#8fa99e', wear)} />
-      <path d={tr.top} fill={weather('#b5c9c0', wear)} />
+      <path d={tr.side} fill={weather(down ? '#56625c' : '#6f8a80', wear)} />
+      <path d={tr.front} fill={weather(down ? '#6f7d76' : '#8fa99e', wear)} />
+      <path d={tr.top} fill={weather(down ? '#8a948f' : '#b5c9c0', wear)} />
       <path d="M-8 -5v-8M-5 -5v-8M-2 -5v-8M1 -5v-8" stroke="#5f776d" stroke-width="1.3" />
-      <path d={`M${pt([-7, 16, 11])}v-5M${pt([-3, 16, 11])}v-5M${pt([1, 16, 11])}v-5`} stroke="#c9d3d6" stroke-width="2.2" stroke-linecap="round" />
+      {down && <path d="M-9 -4q2 -7 6 -9q4 2 5 8q-5 3 -11 1z" fill="#2f3336" opacity=".85" />}
+      <path d={`M${pt([-7, 16, 11])}v-5M${pt([-3, 16, 11])}v-5M${pt([1, 16, 11])}v-5`} stroke={down ? '#2f3336' : '#c9d3d6'} stroke-width="2.2" stroke-linecap="round" />
       <path d={cab.side} fill="#8a9298" />
       <path d={cab.front} fill="#b7c0c5" />
       <path d="M9.5 -9.5l2 -2.5h-1.8l1.8 -2.6" stroke={K.yellow} stroke-width="1.4" fill="none" />
       <path d={fpost + seg([-18, 10, -2], [18, 10, -2])} stroke="#9aa5ab" stroke-width="1.2" />
       <path d={frail} stroke="#c4ccd0" stroke-width=".6" opacity=".7" />
+      {/* danger plate on the fence */}
+      <path d="M-11 -9.5l3.4 -6l3.4 6z" fill={K.yellow} stroke="#3e4448" stroke-width=".8" stroke-linejoin="round" />
+      {down && (
+        <>
+          <circle cx={11} cy={-17} r={2.6} fill="#ff3b30" stroke="#7a1a14" stroke-width=".8" />
+          <circle cx={11} cy={-17} r={6.5} fill="#ff3b30" opacity=".3" />
+          <g transform={`translate(${bx} ${by - 6})`}>
+            <g class={motion ? 'puff' : undefined}>
+              <circle r={4.4} fill="#4f5457" opacity=".85" />
+              <circle cx={-3} cy={-8} r={5.6} fill="#6c7073" opacity=".7" />
+              <circle cx={1} cy={-16} r={5} fill="#8e9295" opacity=".55" />
+            </g>
+          </g>
+        </>
+      )}
     </g>
   );
 }
 
-/** a timber power pole at a screen point; returns the top for wiring */
+/** a timber power pole at a screen point; `lean` (deg) when it has been knocked over */
 export const POLE_H = 34;
-export function Pole({ x, y }: { x: number; y: number }) {
+export function Pole({ x, y, lean = 0 }: { x: number; y: number; lean?: number }) {
   return (
-    <g transform={`translate(${x} ${y})`}>
+    <g transform={`translate(${x} ${y})${lean ? ` rotate(${lean})` : ''}`}>
       <ellipse cx={4} cy={1} rx={5} ry={1.8} fill={K.shadow} />
       <path d={`M0 0V${-POLE_H}`} stroke="#7a5534" stroke-width="2.6" />
-      <path d={`M-7 ${-POLE_H + 4}H7`} stroke="#7a5534" stroke-width="2" />
-      <path d={`M-6 ${-POLE_H + 3}v-2M0 ${-POLE_H + 3}v-2M6 ${-POLE_H + 3}v-2`} stroke="#dfe7ea" stroke-width="1.8" stroke-linecap="round" />
+      {lean ? (
+        <path d={`M-7 ${-POLE_H + 8}L2 ${-POLE_H + 4}M3 ${-POLE_H + 5}l6 5`} stroke="#7a5534" stroke-width="2" />
+      ) : (
+        <>
+          <path d={`M-7 ${-POLE_H + 4}H7`} stroke="#7a5534" stroke-width="2" />
+          <path d={`M-6 ${-POLE_H + 3}v-2M0 ${-POLE_H + 3}v-2M6 ${-POLE_H + 3}v-2`} stroke="#dfe7ea" stroke-width="1.8" stroke-linecap="round" />
+        </>
+      )}
     </g>
   );
 }

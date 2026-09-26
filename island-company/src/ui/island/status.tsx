@@ -1,7 +1,9 @@
-// Mobile-game notification bubbles that sit on the asset: a chunky rounded
-// bubble with a pointer and one bold icon. Rust = out of service (the only
-// alert hue), sunflower = warning. Positioned by an outer <g transform>,
-// counter-scaled against the zoom by a middle <g>, bobbed by an inner <g>.
+// Mobile-game notification bubbles that sit above the asset they refer to: a
+// chunky rounded bubble with a pointer down to the asset and one bold
+// pictogram. Rust = out of service (the only alert hue), sunflower = warning.
+// Positioned by an outer <g transform>, counter-scaled against the zoom by a
+// middle <g>, bobbed by an inner <g>. spread() pushes bodies apart (and off
+// the runway) while every pointer keeps aiming at its asset.
 import { K } from './paint';
 
 export type Icon = 'wrench' | 'cone' | 'tag' | 'clipboard' | 'bolt-off' | 'bolt' | 'flame' | 'cash' | 'warn';
@@ -65,10 +67,14 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
         </g>
       );
     case 'cash':
+      // a coin running low: a coin with a down arrow
       return (
-        <text x={0} y={6.5} text-anchor="middle" font-size="19" font-weight="900" fill={ink} font-family="system-ui, sans-serif" letter-spacing="-1">
-          $!
-        </text>
+        <g>
+          <circle cx={-3} cy={0} r={8.6} fill={ink} />
+          <path d="M-0.2 -3.6q-1 -1.8 -3 -1.8q-2.6 0 -2.6 2q0 1.8 2.8 2.2q2.8 .4 2.8 2.4q0 2.2 -3 2.2q-2 0 -3 -1.8M-3 -7.4v14.8" stroke={sub} stroke-width="1.9" fill="none" stroke-linecap="round" />
+          <path d="M9 -9v11" stroke={ink} stroke-width="3" stroke-linecap="round" />
+          <path d="M4.6 1.2L9 7.2L13.4 1.2Z" fill={ink} stroke={ink} stroke-width="1.4" stroke-linejoin="round" />
+        </g>
       );
     default:
       return (
@@ -80,27 +86,84 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
   }
 }
 
-export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion }: { x: number; y: number; icon: Icon; tone?: Tone; small?: boolean; scale: number; motion: boolean }) {
+/** body size in local units (before scale) */
+const BW = 46, BH = 34, TIP = 3;
+export const bubbleK = (scale: number, small?: boolean) => scale * (small ? 0.88 : 1.1);
+
+/** (x, y) = where the pointer touches the asset (its top); (dx, dy) nudges the body */
+export function Bubble({ x, y, icon, tone = 'alert', small, scale, motion, dx = 0, dy = 0, delay = 0 }: { x: number; y: number; icon: Icon; tone?: Tone; small?: boolean; scale: number; motion: boolean; dx?: number; dy?: number; delay?: number }) {
   const t = TONE[tone];
-  const k = scale * (small ? 0.88 : 1.1);
-  const body = 'M-20 -46H20A12 12 0 0 1 32 -34V-24A12 12 0 0 1 20 -12H7L0 -3L-7 -12H-20A12 12 0 0 1 -32 -24V-34A12 12 0 0 1 -20 -46Z';
-  const narrow = icon !== 'cash';
-  const d = narrow ? 'M-11 -46H11A12 12 0 0 1 23 -34V-24A12 12 0 0 1 11 -12H7L0 -3L-7 -12H-11A12 12 0 0 1 -23 -24V-34A12 12 0 0 1 -11 -46Z' : body;
+  const k = bubbleK(scale, small);
+  const bx = Math.round((dx / k) * 10) / 10, by = Math.round((dy / k) * 10) / 10;
+  const top = by - TIP - 9 - BH, bot = by - TIP - 9;
+  const body = `M${bx - 11} ${top}H${bx + 11}A12 12 0 0 1 ${bx + 23} ${top + 12}V${bot - 12}A12 12 0 0 1 ${bx + 11} ${bot}H${bx - 11}A12 12 0 0 1 ${bx - 23} ${bot - 12}V${top + 12}A12 12 0 0 1 ${bx - 11} ${top}Z`;
+  const ptr = `M${bx - 7} ${bot}L0 ${-TIP}L${bx + 7} ${bot}Z`;
   return (
     <g transform={`translate(${Math.round(x)} ${Math.round(y)})`}>
       <g class="bub-scale" style={{ transform: `scale(${k})` }}>
-        <g class={motion ? 'bob' : undefined}>
-          <ellipse cx={3} cy={-1} rx={9} ry={3} fill="rgba(0,0,0,.22)" />
-          <path d={d} fill={t.base} transform="translate(0 3.5)" />
-          <path d={d} fill={t.body} stroke="#fff" stroke-width="3" stroke-linejoin="round" />
-          <path d={narrow ? 'M-12 -41H12' : 'M-21 -41H21'} stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity=".35" />
-          <g transform="translate(0 -29)">
+        <g class={motion ? 'bob' : undefined} style={delay ? { animationDelay: `${-delay}s` } : undefined}>
+          <ellipse cx={3} cy={-1} rx={8} ry={2.6} fill="rgba(0,0,0,.22)" />
+          <path d={body + ptr} fill={t.base} transform="translate(0 3.5)" />
+          <path d={body + ptr} fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round" />
+          <path d={body + ptr} fill={t.body} />
+          <path d={`M${bx - 12} ${top + 5}H${bx + 12}`} stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity=".35" />
+          <g transform={`translate(${bx} ${(top + bot) / 2})`}>
             <Glyph icon={icon} ink={t.ink} sub={t.sub} />
           </g>
         </g>
       </g>
     </g>
   );
+}
+
+export type Placed = { x: number; y: number; k: number; dx: number; dy: number };
+type Rect = [number, number, number, number];
+/** Relaxation: push overlapping bubble bodies apart, never down onto their
+ *  asset, and out of the keep-out rects (the runway markings, the map edge). */
+export function spread<T extends Placed>(bs: T[], keepOut: Rect[] = [], view: Rect = [0, 0, 800, 600]) {
+  const box = (b: T): Rect => {
+    const w = (BW + 8) * b.k, h = (BH + 12) * b.k;
+    const cx = b.x + b.dx, cy = b.y + b.dy - (TIP + 9 + BH / 2) * b.k;
+    return [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
+  };
+  for (let pass = 0; pass < 12; pass++) {
+    let moved = false;
+    for (let i = 0; i < bs.length; i++)
+      for (let j = i + 1; j < bs.length; j++) {
+        const a = box(bs[i]), b = box(bs[j]);
+        const ox = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+        const oy = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+        if (ox <= 0 || oy <= 0) continue;
+        moved = true;
+        const acx = (a[0] + a[2]) / 2, bcx = (b[0] + b[2]) / 2, acy = (a[1] + a[3]) / 2, bcy = (b[1] + b[3]) / 2;
+        if (ox < oy * 1.3) {
+          const s = (acx <= bcx ? -1 : 1) * (ox / 2 + 0.5);
+          bs[i].dx += s;
+          bs[j].dx -= s;
+        } else {
+          // the higher one goes further up; nobody goes down
+          if (acy <= bcy) bs[i].dy -= oy + 0.5;
+          else bs[j].dy -= oy + 0.5;
+        }
+      }
+    for (const b of bs) {
+      for (const r of keepOut) {
+        const q = box(b);
+        if (q[2] > r[0] && q[0] < r[2] && q[3] > r[1] && q[1] < r[3]) {
+          b.dy -= q[3] - r[1] + 1;
+          moved = true;
+        }
+      }
+      const q = box(b);
+      if (q[0] < view[0] + 2) b.dx += view[0] + 2 - q[0];
+      if (q[2] > view[2] - 2) b.dx -= q[2] - view[2] + 2;
+      if (q[1] < view[1] + 2) b.dy += view[1] + 2 - q[1];
+      b.dx = Math.max(-44, Math.min(44, b.dx));
+      b.dy = Math.max(-60, Math.min(0, b.dy));
+    }
+    if (!moved) break;
+  }
+  return bs;
 }
 
 /** a gold "new!" starburst for what arrived this week */
