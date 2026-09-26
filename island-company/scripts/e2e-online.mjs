@@ -39,7 +39,9 @@ async function device(name, opts) {
       await page.waitForTimeout(400);
       if (await page.locator('.howto').count()) await page.locator('.howto').click();
       await page.waitForTimeout(250);
-      await d.click('Stop and score');
+      await page.locator('.phost-body .pz').click({ position: { x: 12, y: 12 } });
+      await d.click('Hand in', { exact: true });
+      await d.click('Hand in now');
       await d.click('Continue', { wait: 400 });
     },
     week0: async (role) => {

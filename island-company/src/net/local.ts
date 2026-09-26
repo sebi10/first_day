@@ -47,14 +47,15 @@ export const localStore: IslandStore = {
   async uid() {
     return 'local-device';
   },
-  async create({ name, role, playerName, passAndPlay }) {
+  async create({ name, role, playerName, passAndPlay, names }) {
     const id = newIslandId();
     const now = Date.now();
     let s = createIsland({ id, name, now, tz: safeTz(), creator: { uid: passAndPlay ? PP_UID[role] : 'local-device', name: playerName, role } });
     if (passAndPlay) {
       for (const r of ROLES) {
         if (r === role) continue;
-        s = apply(s, { t: 'join', uid: PP_UID[r], name: r === 'mech' ? 'Mechanic' : r === 'elec' ? 'Electrician' : 'Analyst', role: r }, now).s;
+        const fallback = r === 'mech' ? 'Mechanic' : r === 'elec' ? 'Electrician' : 'Analyst';
+        s = apply(s, { t: 'join', uid: PP_UID[r], name: names?.[r]?.trim() || fallback, role: r }, now).s;
       }
     }
     write(s);

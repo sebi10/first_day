@@ -12,7 +12,7 @@ export interface IslandStore {
   mode: Mode;
   /** stable id for this device/player */
   uid(): Promise<string>;
-  create(o: { name: string; role: Role; playerName: string; passAndPlay?: boolean }): Promise<string>;
+  create(o: { name: string; role: Role; playerName: string; passAndPlay?: boolean; names?: Partial<Record<Role, string>> }): Promise<string>;
   load(id: string): Promise<IslandState | null>;
   subscribe(id: string, cb: (s: IslandState | null) => void): () => void;
   dispatch(id: string, a: Action): Promise<{ error?: string }>;

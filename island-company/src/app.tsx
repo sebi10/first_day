@@ -34,7 +34,9 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       const scrim = document.querySelector<HTMLElement>('.scrim');
-      if (scrim) scrim.click();
+      if (scrim) return scrim.click();
+      // overlays (puzzle, review) mark their close/back button
+      document.querySelector<HTMLElement>('.overlay [data-esc]')?.click();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

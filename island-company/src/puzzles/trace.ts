@@ -398,7 +398,7 @@ export const trace: PuzzleDef = {
         ctx.fill();
         label(ctx, t, 12 + i * (bw + 12) + bw / 2, by + 26, { size: 15, weight: 800, color: mode === k ? C.white : C.ink });
       });
-      if (m.showStates && !finished) label(ctx, 'Live = green dot. The open sits between the last live and the first dead device.', a.w / 2, a.y + a.ph + 12, { size: 10, color: C.inkSoft });
+      if (m.showStates && !finished) label(ctx, 'Green = live. The open is after the last live device.', a.w / 2, a.y + a.ph + 12, { size: 11, color: C.inkSoft, weight: 700 });
     }
 
     function makeResult(): PuzzleResult {

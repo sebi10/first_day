@@ -4,7 +4,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
-import { tierDef } from '../sim/econ';
+import { powered, tierDef, urgency } from '../sim/econ';
 import { ROLES, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
@@ -74,15 +74,14 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
       {tab === 'board' && <Board ctl={ctl} onReview={setReview} />}
       {tab === 'me' && <Me ctl={ctl} onLeave={() => (location.hash = '#/')} />}
 
-      <Dock ctl={ctl} tab={tab} setTab={setTab} single={tab !== 'island'} />
+      <Dock ctl={ctl} tab={tab} setTab={setTab} single={tab !== 'island'} onPlay={onPlay} onSeat={() => setHandoff(role)} />
 
       {play && (
         <PuzzleHost
-          launch={play.launch}
+          launch={{ ...play.launch, seat: role }}
           onResult={onResult(play.order, play.cover)}
-          onClose={() => {
-            setPlay(null);
-          }}
+          onClose={() => setPlay(null)}
+          onCancel={() => setPlay(null)}
         />
       )}
       {review && (
@@ -103,7 +102,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
             <button
               key={r}
               class="card row"
-              style={{ border: 0, textAlign: 'left', outline: r === role ? '3px solid var(--sea)' : 'none' }}
+              style={{ border: 0, textAlign: 'left', boxShadow: r === role ? 'inset 0 0 0 3px var(--sea)' : undefined }}
               onClick={() => switchSeat(r)}
             >
               <span class="avatar" style={{ ['--tint' as string]: ROLE_TINT[r] }}>
@@ -199,7 +198,7 @@ function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: bool
               <button
                 class="mate"
                 key={x}
-                style={{ border: 0, textAlign: 'left', outline: x === r ? `2px solid ${ROLE_TINT[x]}` : 'none' }}
+                style={{ border: 0, textAlign: 'left', boxShadow: x === r ? `inset 0 0 0 2px ${ROLE_TINT[x]}` : undefined }}
                 onClick={() => ref.passAndPlay && onSeat()}
                 aria-label={`${p?.name ?? 'Open seat'}, ${ROLE_LABEL[x]}, ${st}`}
               >
@@ -249,7 +248,7 @@ function Home({ ctl, onPlay, onSeat }: { ctl: Ctl; onPlay(o: Order, cover?: bool
               <span class="label">Since you left</span>
               <button
                 class="btn soft small"
-                style={{ minHeight: 32, padding: '0 12px', fontSize: 13 }}
+                style={{ minHeight: 44, padding: '0 14px', fontSize: 13 }}
                 onClick={() => {
                   fx.tap();
                   sessions.patch(ref.id, { lastSeenFeed: s.feed[s.feed.length - 1]?.id ?? 0 });
@@ -359,12 +358,40 @@ function Lobby({ ctl, onPass }: { ctl: Ctl; onPass(): void }) {
   );
 }
 
-function Dock({ ctl, tab, setTab, single }: { ctl: Ctl; tab: Tab; setTab(t: Tab): void; single: boolean }) {
+function Dock({
+  ctl,
+  tab,
+  setTab,
+  single,
+  onPlay,
+  onSeat,
+}: {
+  ctl: Ctl;
+  tab: Tab;
+  setTab(t: Tab): void;
+  single: boolean;
+  onPlay(o: Order): void;
+  onSeat(): void;
+}) {
   const { s, role } = ctl;
   const r = role!;
   const [confirm, setConfirm] = useState(false);
   const turn = s.turns[r];
-  const ready = s.orders.filter((o) => o.role === r && o.status === 'ready').length;
+  const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
+  const ready = readyList.length;
+  const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week).length : 0;
+  const gridCapped = r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1;
+  // the next useful thing, always under the thumb
+  const next: { label: string; go(): void } | null = turn?.ended
+    ? null
+    : approvals > 0
+      ? {
+          label: `Review ${approvals} approval${approvals > 1 ? 's' : ''} ▸`,
+          go: () => document.getElementById('approvals')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        }
+      : ready > 0 && !gridCapped
+        ? { label: `Next: ${readyList[0].title} ▸`, go: () => onPlay(readyList[0]) }
+        : null;
   const waiting = ROLES.filter((x) => !s.turns[x]?.ended && x !== r).map((x) => s.players[x]?.name ?? ROLE_LABEL[x]);
   const reviewBadge = s.story && !s.story.chosen ? 1 : 0;
   const end = async () => {
@@ -383,9 +410,24 @@ function Dock({ ctl, tab, setTab, single }: { ctl: Ctl; tab: Tab; setTab(t: Tab)
           {tab === 'island' && s.week >= 1 && (
             <div class="primary">
               {turn?.ended ? (
-                <Btn block kind="soft" disabled>
-                  <Icon name="check" size={18} /> Turn ended{waiting.length ? ` · waiting on ${waiting.join(', ')}` : ''}
-                </Btn>
+                ctl.ref.passAndPlay && waiting.length ? (
+                  <Btn block onClick={onSeat}>
+                    <Icon name="swap" size={18} /> Pass to {waiting[0]} ▸
+                  </Btn>
+                ) : (
+                  <Btn block kind="soft" disabled>
+                    <Icon name="check" size={18} /> Turn ended{waiting.length ? ` · waiting on ${waiting.join(', ')}` : ''}
+                  </Btn>
+                )
+              ) : next ? (
+                <div class="row" style={{ gap: 8 }}>
+                  <Btn block onClick={next.go} style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{next.label}</span>
+                  </Btn>
+                  <Btn kind="ink" onClick={() => (ready > 0 ? setConfirm(true) : void end())} style={{ flex: 'none', padding: '0 16px' }}>
+                    End turn
+                  </Btn>
+                </div>
               ) : (
                 <Btn block kind="ink" onClick={() => (ready > 0 ? setConfirm(true) : void end())}>
                   End turn{ready ? ` · ${ready} job${ready > 1 ? 's' : ''} left` : ''}

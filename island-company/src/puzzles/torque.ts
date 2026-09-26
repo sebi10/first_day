@@ -124,6 +124,7 @@ export const torque: PuzzleDef = {
         dr: Math.min(w * 0.3, h * 0.13),
       };
     };
+    const finishY = (g: ReturnType<typeof geo>) => (g.fy + g.flangeR + (g.gy - g.gr)) / 2;
     const boltPos = (i: number) => {
       const g = geo();
       const a = -Math.PI / 2 + (i / m.bolts) * Math.PI * 2;
@@ -188,13 +189,16 @@ export const torque: PuzzleDef = {
             return;
           }
         }
-        // finish button
-        if (allTouched() && pt.y > g.h - 64 && Math.abs(pt.x - g.w / 2) < 90 && !dragging) {
+        // the dial always wins: re-gripping it must never hand the job in
+        const onDial = Math.hypot(pt.x - g.dx, pt.y - g.dy) < g.dr * 1.6;
+        // finish button sits between the flange and the gauge, away from the dial
+        const fy = finishY(g);
+        if (!onDial && allTouched() && Math.abs(pt.y - fy) < 26 && Math.abs(pt.x - g.w / 2) < 80 && !dragging) {
           lockActive();
           finish();
           return;
         }
-        if (Math.hypot(pt.x - g.dx, pt.y - g.dy) < g.dr * 1.6) {
+        if (onDial) {
           if (active < 0) {
             host.fx.bad();
             hint.bolt = m.sequence[Math.min(step, m.bolts - 1)];
@@ -295,7 +299,10 @@ export const torque: PuzzleDef = {
         ctx.strokeStyle = isHint ? C.sea : C.ink;
         ctx.stroke();
         const seqIdx = m.sequence.indexOf(i);
-        if (seqIdx < m.labelled || t > 0) label(ctx, String(seqIdx + 1), 0, 1, { size: 13, weight: 800, color: C.ink });
+        // colour plus a glyph: never colour alone
+        const glyph = sc === 1 ? '✓' : sc >= 0 && t > m.target ? '!' : '';
+        if (glyph) label(ctx, glyph, 0, 1, { size: 15, weight: 900, color: C.white });
+        else if (seqIdx < m.labelled || t > 0) label(ctx, String(seqIdx + 1), 0, 1, { size: 13, weight: 800, color: C.ink });
         ctx.restore();
       }
 
@@ -367,7 +374,7 @@ export const torque: PuzzleDef = {
         ctx.fillStyle = C.sea;
         const bw = 150;
         const bx = g.w / 2 - bw / 2;
-        const by = g.h - 56;
+        const by = finishY(g) - 22;
         ctx.beginPath();
         ctx.roundRect?.(bx, by, bw, 44, 22);
         ctx.fill();

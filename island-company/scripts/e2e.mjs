@@ -33,7 +33,10 @@ const finishPuzzle = async () => {
   // dismiss first-encounter overlay if present
   if (await page.locator('.howto').count()) await page.locator('.howto').click();
   await page.waitForTimeout(300);
-  await click('Stop and score');
+  // first touch starts the clock (before it, X is a free Back)
+  await page.locator('.phost-body .pz').click({ position: { x: 12, y: 12 } });
+  await click('Hand in', { exact: true });
+  await click('Hand in now');
   await click('Continue', { wait: 300 });
 };
 

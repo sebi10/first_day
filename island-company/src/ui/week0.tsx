@@ -16,9 +16,9 @@ import type { Ctl } from './useIsland';
 const FIRST: Record<Role, PuzzleId> = { mech: 'torque', elec: 'trace', fin: 'variance' };
 const SECOND: Record<Role, PuzzleId> = { mech: 'crack', elec: 'panel', fin: 'auction' };
 const JOB: Record<Role, string> = {
-  mech: 'Keep both planes flying. Guests and parts arrive by air.',
+  mech: 'Keep the planes flying. Guests and parts arrive by air.',
   elec: 'Keep the cottages powered and inspected. No power, no guests.',
-  fin: 'Keep the cash from running out. You approve every big repair.',
+  fin: 'Keep the cash flowing. Big repairs need your approval.',
 };
 const NUMBER: Record<Role, string> = {
   mech: 'Flights available this week',
@@ -31,7 +31,10 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState<PuzzleId | null>(null);
   const [approved, setApproved] = useState(false);
+  const [deferred, setDeferred] = useState(false);
   const name = s.players[role]?.name ?? ROLE_LABEL[role];
+  const analyst = s.players.fin && s.players.fin.name !== ROLE_LABEL.fin ? s.players.fin.name : 'the analyst';
+  const mechanic = s.players.mech && s.players.mech.name !== ROLE_LABEL.mech ? s.players.mech.name : 'The mechanic';
 
   useEffect(() => {
     if (step !== 2 || role === 'fin') return;
@@ -45,12 +48,13 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
   if (playing)
     return (
       <PuzzleHost
-        launch={{ puzzle: playing, seed: hashSeed(s.seed, 'week0', role, playing), tier: 0, tools: [], title: 'Week 0 · practice' }}
+        launch={{ puzzle: playing, seed: hashSeed(s.seed, 'week0', role, playing), tier: 0, tools: [], title: 'Week 0 · practice', seat: role }}
         onResult={() => {}}
         onClose={() => {
           setPlaying(null);
           setStep((x) => x + 1);
         }}
+        onCancel={() => setPlaying(null)}
       />
     );
 
@@ -96,13 +100,13 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
             <div class="card col" style={{ gap: 12 }}>
               <h2>Nobody wins alone</h2>
               <p class="muted" style={{ margin: 0 }}>
-                The next job costs money, so it goes to the analyst as a card. For now, the previous owner is standing in.
+                This job costs money, so it goes to {analyst} as a card.
               </p>
               <div class="card" style={{ background: 'var(--sand)', borderTop: `6px solid ${ROLE_TINT[role]}` }}>
                 <b>{role === 'mech' ? 'Replace alternator' : 'Panel upgrade'}</b>
                 <div class="label num">{usd(role === 'mech' ? 820 : 2100)} · needs approval</div>
                 <div class="row" style={{ marginTop: 8, color: approved ? C.palm : C.inkSoft, fontWeight: 800 }}>
-                  <Icon name={approved ? 'check' : 'clock'} size={18} /> {approved ? 'Approved by the previous owner' : 'Sent to the analyst…'}
+                  <Icon name={approved ? 'check' : 'clock'} size={18} /> {approved ? `Approved (week 0: signed so nobody waits)` : `Sent to ${analyst}…`}
                 </div>
               </div>
               <Btn block disabled={!approved} onClick={() => setPlaying(SECOND[role])}>
@@ -114,7 +118,7 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
             <div class="card col" style={{ gap: 12 }}>
               <h2>Nobody wins alone</h2>
               <p class="muted" style={{ margin: 0 }}>
-                The mechanic needs money for a repair. Approve spends cash now; defer saves it but risks an incident next week.
+                {mechanic} needs money for a repair. Approve now, or defer and risk it.
               </p>
               <div class="card" style={{ background: 'var(--sand)', borderTop: `6px solid ${C.mech}` }}>
                 <b>Tire and brake · Twin N-12</b>
@@ -122,7 +126,15 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
               </div>
               {!approved ? (
                 <div class="row" style={{ gap: 8 }}>
-                  <Btn kind="ghost" block onClick={() => fx.bad()}>
+                  <Btn
+                    kind="ghost"
+                    block
+                    onClick={() => {
+                      fx.good();
+                      setDeferred(true);
+                      setApproved(true);
+                    }}
+                  >
                     Defer
                   </Btn>
                   <Btn
@@ -137,7 +149,9 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
                 </div>
               ) : (
                 <>
-                  <span style={{ color: C.palm, fontWeight: 800 }}>✓ The mechanic can do it now. On your desk, swipe right to approve.</span>
+                  <span style={{ color: C.palm, fontWeight: 800 }}>
+                    {deferred ? '✓ Saved $320 this week; a 10% incident risk rides on it. Both calls can be right.' : `✓ ${mechanic} can do it now. On your desk, swipe right.`}
+                  </span>
                   <Btn block onClick={() => setPlaying(SECOND[role])}>
                     Next: buy a part
                   </Btn>

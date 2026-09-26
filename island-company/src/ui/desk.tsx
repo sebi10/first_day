@@ -42,7 +42,9 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
 
       {s.pendingBonus && <Bonus ctl={ctl} />}
 
-      <h2 style={{ marginTop: 4 }}>Approvals</h2>
+      <h2 style={{ marginTop: 4, scrollMarginTop: 12 }} id="approvals">
+        Approvals
+      </h2>
       <Approvals ctl={ctl} disabled={ended} />
 
       <h2 style={{ marginTop: 4 }}>Desk work</h2>

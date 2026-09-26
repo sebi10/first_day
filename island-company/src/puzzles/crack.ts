@@ -91,7 +91,7 @@ export function generateCrack(seed: number, tier: number, tools: string[] = [], 
     cracks,
     battery,
     lampR: clamp(0.2 - tier * 0.015, 0.12, 0.2) * (tools.includes('uvPlus') ? 1.4 : 1),
-    linger: (tier <= 2 ? 1.1 : 0.6) * (tools.includes('borescope') ? 2 : 1),
+    linger: (tier <= 2 ? 1.6 : 1.2) * (tools.includes('borescope') ? 1.6 : 1),
     decoyDim: tier <= 2 ? 0.45 : 1,
     allowedSweeps: cracks + decoys + 3,
     teach: tier <= 2,
@@ -127,6 +127,9 @@ export function scoreCrack(m: CrackModel, tags: P[], sweeps: number, tol = 0.035
   const score = clamp(found.size / m.cracks - 0.2 * falseTags - 0.03 * extra, 0, 1);
   return { score, found: found.size, falseTags, extra };
 }
+
+/** the lamp shines this far above the finger, so your thumb never hides the glow */
+const LAMP_LIFT = 64;
 
 export const crack: PuzzleDef = {
   id: 'crack',
@@ -189,7 +192,7 @@ export const crack: PuzzleDef = {
         const a = area();
         if (pt.y > a.h - 70) return signOff();
         down = { x: pt.x, y: pt.y, t: performance.now(), moved: false };
-        if (battery > 0) lamp = toN(pt.x, pt.y);
+        if (battery > 0) lamp = toN(pt.x, pt.y - LAMP_LIFT);
       },
       move(pt) {
         if (!down || finished) return;
@@ -198,7 +201,7 @@ export const crack: PuzzleDef = {
           sweeps++;
           status();
         }
-        if (battery > 0) lamp = toN(pt.x, pt.y);
+        if (battery > 0) lamp = toN(pt.x, pt.y - LAMP_LIFT);
       },
       up(pt) {
         if (!down || finished) return;
@@ -299,12 +302,16 @@ export const crack: PuzzleDef = {
         const s = toS(lamp);
         const R = m.lampR * Math.min(a.pw, a.ph);
         const lg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, R);
-        lg.addColorStop(0, 'rgba(143,184,222,.28)');
-        lg.addColorStop(1, 'rgba(143,184,222,0)');
+        lg.addColorStop(0, 'rgba(143,184,222,.42)');
+        lg.addColorStop(1, 'rgba(143,184,222,.06)');
         ctx.fillStyle = lg;
         ctx.beginPath();
         ctx.arc(s.x, s.y, R, 0, Math.PI * 2);
         ctx.fill();
+        // the lamp's rim, so you can see where it points above your finger
+        ctx.strokeStyle = 'rgba(143,184,222,.7)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
       // indications (fluorescent yellow-green)
       m.indications.forEach((ind, i) => {
@@ -377,7 +384,7 @@ export const crack: PuzzleDef = {
         ctx.fill();
         label(ctx, 'UV', a.w - bw - 26, 21, { size: 10, weight: 800, color: C.paper, align: 'right' });
       }
-      if (m.teach && !finished) label(ctx, 'Cracks start at holes, run jagged and bleed. Scratches are straight.', a.w / 2, a.y + a.ph + 12, { size: 11, color: C.fin });
+      if (m.teach && !finished) label(ctx, 'Cracks: at holes, jagged, they bleed.', a.w / 2, a.h - 76, { size: 12, color: C.fin, weight: 700 });
       // sign-off button
       roundRect(ctx, a.w / 2 - 110, a.h - 62, 220, 50, 25);
       ctx.fillStyle = finished ? 'rgba(255,255,255,.15)' : C.sea;

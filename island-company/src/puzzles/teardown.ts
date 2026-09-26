@@ -57,7 +57,7 @@ const ASSEMBLIES: Record<string, Assembly> = {
     note: 'Master off and breaker pulled, first.',
     parts: [
       { id: 'master', name: 'Avionics master OFF', above: [], box: [0.05, 0.04, 0.42, 0.12], minTier: 0, shade: '#3b464b' },
-      { id: 'cb', name: 'Com circuit breaker (pull)', above: ['master'], box: [0.53, 0.04, 0.42, 0.12], minTier: 1, shade: '#56646b' },
+      { id: 'cb', name: 'Com breaker (pull)', above: ['master'], box: [0.53, 0.04, 0.42, 0.12], minTier: 1, shade: '#56646b' },
       { id: 'lock', name: 'Radio lock screw', above: ['cb'], box: [0.05, 0.24, 0.42, 0.12], minTier: 0, shade: '#9aa5a9' },
       { id: 'radio', name: 'Com radio', above: ['lock'], box: [0.12, 0.44, 0.76, 0.2], minTier: 0, shade: '#34444c' },
       { id: 'coax', name: 'Antenna coax (tray)', above: ['radio'], box: [0.53, 0.24, 0.42, 0.12], minTier: 4, shade: '#56646b' },

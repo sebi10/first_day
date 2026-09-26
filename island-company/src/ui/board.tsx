@@ -154,7 +154,7 @@ function StoryCard({ ctl }: { ctl: Ctl }) {
           <button
             key={o.key}
             class="card"
-            style={{ border: 0, textAlign: 'left', background: 'var(--sand)', outline: mine ? `3px solid ${C.sea}` : 'none' }}
+            style={{ border: 0, textAlign: 'left', background: 'var(--sand)', boxShadow: mine ? `inset 0 0 0 3px ${C.sea}` : undefined }}
             onClick={() => {
               if (!role) return;
               fx.snap();
@@ -196,7 +196,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
             <span class="label">
               {s.name} · week {r.week} · {r.weather}
             </span>
-            <button class="btn soft small" onClick={onClose} aria-label="Close" style={{ padding: '0 12px' }}>
+            <button class="btn soft small" onClick={onClose} aria-label="Close" data-esc style={{ padding: '0 12px' }}>
               <Icon name="x" />
             </button>
           </div>
@@ -311,7 +311,7 @@ function Challenge({ ctl }: { ctl: Ctl }) {
             <button
               key={t}
               class={`chip ${t === tier ? 'ink' : ''}`}
-              style={{ border: 0, minWidth: 36, minHeight: 32, justifyContent: 'center' }}
+              style={{ border: 0, minWidth: 44, minHeight: 44, justifyContent: 'center' }}
               onClick={() => setTier(t)}
               aria-pressed={t === tier}
             >
@@ -349,6 +349,8 @@ function Challenge({ ctl }: { ctl: Ctl }) {
                     tier,
                     tools: d.role === role ? toolsFor(role, me.xp) : [],
                     title: `Challenge · ${d.title}`,
+                    seat: role,
+                    expert: d.role !== role,
                     subtitle: `week ${s.week}`,
                   },
                 })
@@ -367,6 +369,7 @@ function Challenge({ ctl }: { ctl: Ctl }) {
           launch={play.launch}
           onResult={(r) => void ctl.dispatch({ t: 'practice', role, puzzle: play.id, tier, score: r.score })}
           onClose={() => setPlay(null)}
+          onCancel={() => setPlay(null)}
         />
       )}
     </div>

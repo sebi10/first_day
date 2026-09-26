@@ -129,6 +129,7 @@ function NewIsland({ open, onClose, playerName }: { open: boolean; onClose(): vo
   const [role, setRole] = useState<Role | null>(null);
   const [mode, setMode] = useState<'online' | 'pp'>(onlineAvailable() ? 'online' : 'pp');
   const [busy, setBusy] = useState(false);
+  const [others, setOthers] = useState<Partial<Record<Role, string>>>({});
   return (
     <Sheet open={open} onClose={onClose} label="New island">
       <div class="col" style={{ gap: 14 }}>
@@ -147,8 +148,18 @@ function NewIsland({ open, onClose, playerName }: { open: boolean; onClose(): vo
           ]}
         />
         {mode === 'online' && !onlineAvailable() && <span class="fault">Online play needs the free Firebase setup first (start screen → Online setup).</span>}
-        <span class="label">{mode === 'pp' ? 'Who starts?' : 'Your seat (fixed for this island)'}</span>
+        <span class="label">{mode === 'pp' ? 'Your seat' : 'Your seat (fixed for this island)'}</span>
         <RolePick value={role} onChange={setRole} />
+        {mode === 'pp' && role && (
+          <div class="row" style={{ gap: 8 }}>
+            {ROLES.filter((r) => r !== role).map((r) => (
+              <div class="field grow" key={r}>
+                <span class="label">{ROLE_LABEL[r]}'s name</span>
+                <input type="text" maxLength={20} value={others[r] ?? ''} placeholder={ROLE_LABEL[r]} onInput={(e) => setOthers({ ...others, [r]: (e.target as HTMLInputElement).value })} />
+              </div>
+            ))}
+          </div>
+        )}
         <Btn
           block
           disabled={!role || !island.trim() || busy || (mode === 'online' && !onlineAvailable())}
@@ -157,7 +168,7 @@ function NewIsland({ open, onClose, playerName }: { open: boolean; onClose(): vo
             setBusy(true);
             try {
               const m: Mode = mode === 'online' ? 'firebase' : 'local';
-              const id = await storeFor(m).create({ name: island.trim(), role, playerName, passAndPlay: mode === 'pp' });
+              const id = await storeFor(m).create({ name: island.trim(), role, playerName, passAndPlay: mode === 'pp', names: others });
               sessions.upsert({ id, name: island.trim(), mode: m, role, passAndPlay: mode === 'pp' });
               fx.flourish();
               location.hash = `#/i/${id}`;
@@ -278,7 +289,7 @@ function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: bo
                   <button
                     key={r}
                     class="card row"
-                    style={{ border: 0, textAlign: 'left', outline: role === r ? '3px solid var(--sea)' : 'none', ['--tint' as string]: ROLE_TINT[r] }}
+                    style={{ border: 0, textAlign: 'left', boxShadow: role === r ? 'inset 0 0 0 3px var(--sea)' : undefined, ['--tint' as string]: ROLE_TINT[r] }}
                     onClick={() => {
                       fx.tap();
                       setRole(r);

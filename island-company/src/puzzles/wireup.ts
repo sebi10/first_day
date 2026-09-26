@@ -43,7 +43,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
       { id: 'b2', label: 'HOT', color: 'brass', x: 0.72, y: 0.62 },
       { id: 's1', label: 'NEU', color: 'silver', x: 0.28, y: 0.36 },
       { id: 's2', label: 'NEU', color: 'silver', x: 0.28, y: 0.62 },
-      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.84, multi: true },
+      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.9, multi: true },
     ];
     cables = [{ id: 'A', label: device === 'passthrough' ? 'from panel' : 'from panel', x: 0.35 }];
     wires = [
@@ -65,7 +65,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
       { id: 'com', label: 'COM', color: 'dark', x: 0.28, y: 0.62, stamp: 'COMMON' },
       { id: 't1', label: 'T1', color: 'brass', x: 0.72, y: 0.36 },
       { id: 't2', label: 'T2', color: 'brass', x: 0.72, y: 0.62 },
-      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.84, multi: true },
+      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.9, multi: true },
     ];
     cables = [{ id: 'A', label: '12/3 from other switch', x: 0.5 }];
     wires = [
@@ -81,7 +81,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
       { id: 'ln', label: 'LINE NEU', color: 'silver', x: 0.28, y: 0.66, stamp: 'LINE' },
       { id: 'dh', label: 'LOAD HOT', color: 'brass', x: 0.72, y: 0.34, stamp: 'LOAD' },
       { id: 'dn', label: 'LOAD NEU', color: 'silver', x: 0.28, y: 0.34, stamp: 'LOAD' },
-      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.86, multi: true },
+      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.9, multi: true },
     ];
     // real devices: LINE at the bottom; LOAD under the yellow tape at the top
     const swap = r.chance(0.5);
@@ -108,7 +108,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
       { id: 't1', label: 'T1', color: 'brass', x: 0.72, y: 0.36 },
       { id: 't2', label: 'T2', color: 'brass', x: 0.72, y: 0.62 },
       { id: 'nut', label: 'wire nut', color: 'nut', x: 0.5, y: 0.2, multi: true },
-      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.86, multi: true },
+      { id: 'g', label: 'GND', color: 'green', x: 0.5, y: 0.9, multi: true },
     ];
     cables = [
       { id: 'S', label: '12/2 from panel', x: 0.3 },
@@ -272,9 +272,11 @@ export const wireup: PuzzleDef = {
           }
         }
         if (!best || bd > 46) return;
-        const s = strip.get(gsx.wire) ?? 0;
+        const wire = m.wires.find((x) => x.id === gsx.wire)!;
+        const s = wire.color === 'bare' ? m.stripTarget : (strip.get(gsx.wire) ?? 0);
         if (s < 0.25) {
           host.fx.bad(); // insulation still on: no contact
+          host.status('Strip the insulation first: swipe the tip left.');
           return;
         }
         if (!best.multi && landed.some((l) => l.term === best!.id)) {
@@ -380,7 +382,18 @@ export const wireup: PuzzleDef = {
           ctx.stroke();
         }
         const txt = m.labels ? t.label : m.stamps ? t.stamp : undefined;
-        if (txt) label(ctx, txt, tp.x + (t.x < 0.5 ? -16 : 16), tp.y + (t.color === 'nut' ? 18 : 0), { size: 9, weight: 900, color: C.paper, align: t.x < 0.5 ? 'right' : 'left' });
+        if (txt) label(ctx, txt, tp.x + (t.x < 0.5 ? -16 : 16), tp.y + (t.color === 'nut' ? 18 : 0), { size: 10, weight: 900, color: C.paper, align: t.x < 0.5 ? 'right' : 'left' });
+        // teaching tiers: a faint clockwise guide arc around each screw
+        if (m.labels && t.color !== 'nut' && !landed.some((l) => l.term === t.id)) {
+          ctx.strokeStyle = 'rgba(251,245,233,.55)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 3]);
+          ctx.beginPath();
+          ctx.arc(tp.x, tp.y, 17, -2.2, 1.2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          label(ctx, '↻', tp.x, tp.y - 22, { size: 11, weight: 900, color: C.paper });
+        }
       }
       // landed wires
       for (const l of landed) {
@@ -390,12 +403,12 @@ export const wireup: PuzzleDef = {
         const tp = termPos(t);
         const cx = g.box.x + c.x * g.box.w;
         drawWire(w, cx, g.box.y + 6, tp.x, tp.y, 0);
-        // the hook
-        if (t.color !== 'nut') {
+        // the hook, drawn the way it was landed (straight = no hook at all)
+        if (t.color !== 'nut' && l.cw !== null) {
           ctx.strokeStyle = WIRE_FILL.bare;
           ctx.lineWidth = 3;
           ctx.beginPath();
-          const cwDir = l.cw !== false;
+          const cwDir = l.cw;
           ctx.arc(tp.x, tp.y, 13, cwDir ? -2.4 : 0.8, cwDir ? 0.8 : -2.4, !cwDir);
           ctx.stroke();
         }
@@ -420,6 +433,8 @@ export const wireup: PuzzleDef = {
         drawWire(w, r.x + 70, r.y + r.h / 2, r.x + r.w - 14, r.y + r.h / 2, s);
         label(ctx, w.cable, r.x + 14, r.y + r.h / 2 - 8, { size: 10, weight: 900, color: C.inkSoft, align: 'left' });
         label(ctx, w.label.split(' ')[0], r.x + 14, r.y + r.h / 2 + 8, { size: 11, weight: 800, align: 'left' });
+        const extra = w.label.includes('(') ? w.label.slice(w.label.indexOf('(')) : w.label.includes(',') ? w.label.slice(w.label.indexOf(',') + 2) : '';
+        if (extra) label(ctx, extra, r.x + 74, r.y + r.h / 2 - 11, { size: 10, weight: 700, align: 'left', color: C.inkSoft });
         const z = stripZone(r);
         ctx.strokeStyle = 'rgba(31,42,48,.15)';
         ctx.lineWidth = 1;
