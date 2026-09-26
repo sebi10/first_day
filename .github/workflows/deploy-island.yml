@@ -30,7 +30,8 @@ jobs:
           cache-dependency-path: island-company/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - id: build
+        run: npm run build
       - name: No deploy key yet
         if: env.HAS_KEY != 'true'
         run: echo "::notice::Add the FIREBASE_SERVICE_ACCOUNT repo secret to enable deploys. Build and tests passed."
@@ -38,6 +39,13 @@ jobs:
         if: env.HAS_KEY == 'true'
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-      - name: Deploy hosting + Firestore rules
+      # Separate steps: the site goes live even if the rules step is refused,
+      # and each failure names the permission it lacks.
+      # Service-account roles needed: Firebase Hosting Admin, Firebase Rules Admin,
+      # Service Usage Consumer (or Firebase Admin + Service Usage Consumer).
+      - name: Deploy the website (Firebase Hosting)
         if: env.HAS_KEY == 'true'
-        run: npx --yes firebase-tools@15 deploy --only hosting,firestore:rules --project islandgame-efc37 --non-interactive
+        run: npx --yes firebase-tools@15 deploy --only hosting --project islandgame-efc37 --non-interactive
+      - name: Deploy Firestore security rules
+        if: env.HAS_KEY == 'true' && !cancelled() && steps.build.outcome == 'success'
+        run: npx --yes firebase-tools@15 deploy --only firestore:rules --project islandgame-efc37 --non-interactive
