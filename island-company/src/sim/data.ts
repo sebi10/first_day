@@ -44,8 +44,8 @@ export const ECON = {
 
 export const INSURANCE: Record<Insurance, { label: string; premium: number; cover: number }> = {
   none: { label: 'None', premium: 0, cover: 0 },
-  standard: { label: 'Standard', premium: 220, cover: 0.5 },
-  premium: { label: 'Premium', premium: 480, cover: 0.8 },
+  standard: { label: 'Standard', premium: 150, cover: 0.5 },
+  premium: { label: 'Premium', premium: 320, cover: 0.8 },
 };
 
 export type AssetModel = {
@@ -122,12 +122,12 @@ export const TIERS: TierDef[] = [
     storms: true,
     nightFlights: false,
     ferry: 2,
-    unlock: 'Cash ≥ $25,000 and 0 incidents over 4 weeks',
+    unlock: 'Cash ≥ $18,000 and 0 incidents over 4 weeks',
   },
   {
     n: 4,
     name: 'Harbor',
-    fixed: 5500,
+    fixed: 7000,
     budget: 16000,
     adds: [
       { id: 'p3', model: 'float', name: 'Float F-3' },
@@ -137,18 +137,18 @@ export const TIERS: TierDef[] = [
     storms: true,
     nightFlights: false,
     ferry: 2,
-    unlock: '12 weeks total, tier 3, 2 perfect weeks',
+    unlock: '15 weeks total, tier 3, 2 perfect weeks',
   },
   {
     n: 5,
     name: 'Resort',
-    fixed: 7500,
+    fixed: 9500,
     budget: 22000,
     adds: [{ id: 'h7', model: 'lodge', name: 'The Lodge' }],
     storms: true,
     nightFlights: true,
     ferry: 2,
-    unlock: '24 weeks total, cash ≥ $100,000',
+    unlock: '20 weeks total, cash ≥ $60,000',
   },
 ];
 
@@ -232,10 +232,10 @@ export const TOOLS: Record<Role, Tool[]> = {
     { id: 'wirePliers', level: 21, name: 'Safety-wire pliers', puzzle: 'safetywire', effect: 'Live twists-per-inch readout' },
   ],
   elec: [
-    { id: 'clampMeter', level: 3, name: 'Clamp meter', puzzle: 'panel', effect: 'Live amps per phase while dragging' },
+    { id: 'clampMeter', level: 12, name: 'Clamp meter', puzzle: 'panel', effect: 'Live amps per phase while dragging' },
     { id: 'toneTracer', level: 6, name: 'Tone tracer', puzzle: 'trace', effect: 'Steady tone while you follow a cable' },
     { id: 'labelMaker', level: 9, name: 'Headlamp', puzzle: 'wireup', effect: 'Read the markings stamped on the device' },
-    { id: 'fishTape', level: 12, name: 'Circuit tracer receiver', puzzle: 'trace', effect: 'Junction-box branches readable' },
+    { id: 'fishTape', level: 3, name: 'Circuit tracer receiver', puzzle: 'trace', effect: 'Junction-box branches readable' },
     { id: 'torqueScrewdriver', level: 15, name: 'Stripper with gauge', puzzle: 'wireup', effect: 'Live strip-length readout' },
     { id: 'nonContact', level: 18, name: 'Non-contact tester', puzzle: 'meter', effect: 'Glows near live conductors' },
     { id: 'bender', level: 21, name: 'Bender with printed table', puzzle: 'conduit', effect: 'Multiplier and shrink table on the shoe' },

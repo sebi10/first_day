@@ -167,7 +167,8 @@ export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPl
   if (!me || s.week < 1 || s.turns[role]?.ended) return null;
   const allowance = 1;
   const used = s.coversUsed[role] ?? 0;
-  const orders = s.orders.filter((o) => o.role !== role && o.status === 'ready');
+  // only jobs that have already waited a week: it relieves gridlock, it doesn't steal work
+  const orders = s.orders.filter((o) => o.role !== role && o.status === 'ready' && o.deferrals >= 1);
   if (!orders.length) return null;
   return (
     <div class="card col" style={{ gap: 8 }}>
@@ -178,7 +179,7 @@ export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPl
         </span>
       </div>
       <span class="label">
-        Try another trade's job at expert level, no hints. Your tools stay home, and anything under 60% botches it: the asset takes −6 and the job stays open for its owner.
+        A job that's waited a week? Try it at expert level, no hints. Your tools stay home, and under 60% botches it: the asset takes −6 and the job stays open.
       </span>
       {used < allowance &&
         orders

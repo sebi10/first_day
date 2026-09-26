@@ -2,7 +2,7 @@
 // live demand curve, set repair budgets, buy parts, run the money hunts.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
-import { listPrice } from '../sim/engine';
+import { budgetCap, listPrice } from '../sim/engine';
 import { charterLoad, expectedDeferralCost, logistic, occupancy, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
 import type { Insurance, Order } from '../sim/types';
 import { fx } from './feedback';
@@ -430,7 +430,7 @@ function BudgetRow({ ctl, role, disabled }: { ctl: Ctl; role: 'mech' | 'elec'; d
       <input
         type="range"
         min={0}
-        max={s.receivership > 0 ? 300 : 3000}
+        max={s.receivership > 0 ? 300 : budgetCap(s)}
         step={50}
         value={v}
         disabled={disabled}
@@ -438,7 +438,7 @@ function BudgetRow({ ctl, role, disabled }: { ctl: Ctl; role: 'mech' | 'elec'; d
         onInput={(e) => setV(Number((e.target as HTMLInputElement).value))}
         onChange={(e) => ctl.dispatch({ t: 'setBudget', role, amount: Number((e.target as HTMLInputElement).value) })}
       />
-      <span class="label num">Used this week {usd(s.autoSpent[role])}. Applies when the next week opens.</span>
+      <span class="label num">Used {usd(s.autoSpent[role])}. Petty cash for routine, parts-free jobs; bigger work comes to you as cards.</span>
     </div>
   );
 }

@@ -6,7 +6,17 @@ import { charterLoad, expectedDeferralCost, logistic, occupancy, urgency } from 
 import { hashSeed, rng, type Rng } from './rng';
 import { ROLES, type Action, type IslandState, type Role } from './types';
 
-export type Bot = { skill: number; absent?: boolean; naive?: boolean; perTurn?: number; miss?: number };
+export type Bot = {
+  skill: number;
+  absent?: boolean;
+  naive?: boolean;
+  perTurn?: number;
+  miss?: number;
+  /** skill lost per island tier as jobs get harder */
+  tierDrop?: number;
+  /** absences come in streaks (holidays, busy weeks), not independent rolls */
+  streak?: boolean;
+};
 export type Team = Record<Role, Bot>;
 
 const good: Bot = { skill: 0.88 };
@@ -14,6 +24,12 @@ export const TEAMS: Record<string, Team> = {
   'all good': { mech: good, elec: good, fin: good },
   'all average': { mech: { skill: 0.72, perTurn: 3, miss: 0.1 }, elec: { skill: 0.72, perTurn: 3, miss: 0.1 }, fin: { skill: 0.72, miss: 0.1 } },
   'naive analyst': { mech: good, elec: good, fin: { skill: 0.8, naive: true } },
+  // closest to three real friends: harder jobs cost skill, absences come in runs
+  'three friends': {
+    mech: { skill: 0.82, tierDrop: 0.05, perTurn: 3, miss: 0.08, streak: true },
+    elec: { skill: 0.82, tierDrop: 0.05, perTurn: 3, miss: 0.08, streak: true },
+    fin: { skill: 0.82, tierDrop: 0.04, miss: 0.08, streak: true },
+  },
   'mech absent': { mech: { skill: 0, absent: true }, elec: good, fin: good },
   'elec absent': { mech: good, elec: { skill: 0, absent: true }, fin: good },
   'fin absent': { mech: good, elec: good, fin: { skill: 0, absent: true } },
@@ -60,8 +76,9 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
   if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role }, now);
   for (const o of s.orders.filter((x) => x.role === role && x.status === 'countered')) s = step(s, { t: 'acceptCounter', orderId: o.id }, now);
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
+  const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
   for (const o of ready.slice(0, bot.perTurn ?? 4)) {
-    const sc = score(r, bot.skill);
+    const sc = score(r, skill);
     s = step(s, { t: 'complete', role, orderId: o.id, score: sc, perfect: sc >= 0.95 }, now);
   }
   return s;
@@ -83,11 +100,14 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     const exp = expectedDeferralCost(s, o).cost;
     const critical = (asset && asset.health < 70) || o.kind === 'inspect100' || o.kind === 'codeprep' || o.deferrals >= 2;
     const worth = exp >= o.cost * 0.6 || critical;
-    if (worth && s.cash - o.cost >= reserve) s = step(s, { t: 'approve', orderId: o.id }, now);
+    // like a person would: cheap safety-critical work gets approved even when cash is tight
+    const cheapCritical = critical && o.cost <= 600 && s.cash - o.cost >= ECON.freezeBelow;
+    if ((worth && s.cash - o.cost >= reserve) || cheapCritical) s = step(s, { t: 'approve', orderId: o.id }, now);
     else if (o.lastDeferredWeek !== s.week) s = step(s, { t: 'defer', orderId: o.id, reason: s.cash - o.cost < reserve ? 'cash' : 'priority' }, now);
   }
+  const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
   for (const o of s.orders.filter((x) => x.role === 'fin' && x.status === 'ready')) {
-    const sc = score(r, bot.skill);
+    const sc = score(r, skill);
     if (o.kind === 'auction') {
       const fair = (ECON.partMarket.low + ECON.partMarket.high) / 2;
       const win = sc > 0.5;
@@ -120,6 +140,7 @@ export function simulate(team: Team, weeks: number, seed: number) {
   s = step(s, { t: 'join', uid: 'u-fin', name: 'F', role: 'fin' }, now);
   for (const role of ROLES) s = step(s, { t: 'week0Done', role }, now);
   const r = rng(hashSeed('bots', seed));
+  const awayLast: Record<Role, boolean> = { mech: false, elec: false, fin: false };
   const out: SimWeek[] = [];
   let minCash = s.cash;
   for (let w = 0; w < weeks; w++) {
@@ -127,7 +148,9 @@ export function simulate(team: Team, weeks: number, seed: number) {
     const order = r.shuffle([...ROLES]);
     for (const role of order) {
       const bot = team[role];
-      if (bot.absent || (bot.miss && r.chance(bot.miss))) continue;
+      const missed = bot.absent || (bot.miss ? r.chance(bot.streak && awayLast[role] ? 0.5 : bot.miss) : false);
+      awayLast[role] = !!missed;
+      if (missed) continue;
       if (role === 'fin') s = playFin(s, bot, r, now);
       else s = playOps(s, role, bot, r, now);
       s = step(s, { t: 'endTurn', role }, now);

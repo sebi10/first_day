@@ -134,7 +134,7 @@ export const teardown: PuzzleDef = {
   gesture: 'Drag parts to slots',
   howTo: 'Remove in order, swap the failed part, rebuild in reverse.',
   term: 'Teardown: disassembly per the maintenance manual; reassembly is the reverse order.',
-  seconds: (tier) => 70 + tier * 10,
+  seconds: (tier) => 60 + tier * 22,
   mount(host, p) {
     const m = generateTeardown(p.seed, p.tier, p.tools, p.context?.job);
     const trayHint = p.tools.includes('partsTray');

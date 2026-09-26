@@ -122,7 +122,7 @@ export function expectedDeferralCost(s: IslandState, o: Order) {
 export function orderTier(kind: string, a: Asset | undefined, islandTier: number) {
   const c = CATALOG_BY_KIND[kind];
   const base = c ? c.tier : 1;
-  return clamp(base + (a && a.health < 50 ? 1 : 0) + Math.floor((islandTier - 1) / 2), 1, 5);
+  return clamp(base + (a && a.health < 50 ? 1 : 0) + Math.floor(islandTier / 2), 1, 5);
 }
 
 export function orderCost(kind: string, tier: number) {

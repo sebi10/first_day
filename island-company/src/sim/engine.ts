@@ -345,7 +345,7 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       return { s };
     }
     case 'setBudget': {
-      s.autoBudget[a.role] = clamp(Math.round(a.amount / 50) * 50, 0, s.receivership > 0 ? 300 : 3000);
+      s.autoBudget[a.role] = clamp(Math.round(a.amount / 50) * 50, 0, s.receivership > 0 ? 300 : budgetCap(s));
       return { s };
     }
     case 'setInsurance': {
@@ -427,6 +427,9 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
   }
 }
 
+/** petty-cash ceiling for auto-approvals: at most one week's fixed cost per role */
+export const budgetCap = (s: IslandState) => Math.min(3000, tierDef(s.tier).fixed);
+
 export function listPrice(s: IslandState) {
   return round10(((ECON.partMarket.low + ECON.partMarket.high) / 2) * ECON.listPremium * (1 + 0.1 * (s.tier - 1)));
 }
@@ -450,6 +453,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   if (o.role !== a.role) {
     if (!a.cover) return fail('Not your trade. Use Lend a hand.');
     if ((s.coversUsed[a.role] ?? 0) >= 1) return fail('You already lent a hand this week.');
+    if (o.deferrals < 1) return fail('Lend a hand is for jobs that have already waited a week.');
     s.coversUsed[a.role] = (s.coversUsed[a.role] ?? 0) + 1;
     player.covers += 1;
     covered = true;
@@ -478,7 +482,8 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   const asset = assetOf(s, o);
   if (asset && o.gain > 0) {
     asset.health = clamp(asset.health + o.gain * cr, 0, 100);
-    asset.touchedWeek = s.week;
+    // a perfect job holds: that asset skips next week's decay too
+    asset.touchedWeek = Math.max(asset.touchedWeek, s.week + (a.perfect && !covered ? 1 : 0));
     if (o.kind === 'inspect100' && cr >= 1) asset.sinceInspection = 0;
     if (o.kind === 'codeprep' && cr >= 1) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
   }
@@ -611,9 +616,15 @@ function generateOpsOrders(s: IslandState, r: Rng) {
         if (w > 0) cands.push({ kind: c.kind, asset, w });
       }
     }
-    // must-do orders (inspections) jump the queue, capped at 6 open per role
+    // an asset in critical shape with nothing open on it always gets a job (the grid can't wait behind paperwork)
+    for (const asset of s.assets) {
+      if (asset.health >= 45 || openOrders.some((o) => o.assetId === asset.id)) continue;
+      const fix = cands.filter((c) => c.asset.id === asset.id && c.w < 100).sort((a, b) => b.w - a.w)[0];
+      if (fix) fix.w = 100;
+    }
+    // must-do orders (inspections, critical repairs) jump the queue, capped at 8 open per role
     for (const m of cands.filter((c) => c.w >= 100)) {
-      if (openCount >= 6) break;
+      if (openCount >= 8) break;
       addOps(s, m.kind, m.asset);
       openCount++;
       slots = Math.max(0, slots - 1);
@@ -651,7 +662,7 @@ function addOps(s: IslandState, kind: string, asset: Asset) {
 }
 
 /** Analyst difficulty climbs with the island: tier, plus one step every 10 weeks */
-export const finTier = (s: IslandState) => clamp(s.tier + Math.floor(s.week / 10), 1, 5);
+export const finTier = (s: IslandState) => clamp(s.tier + Math.floor(s.week / 20), 1, 5);
 
 function generateFinTasks(s: IslandState, r: Rng) {
   const W = s.week;
@@ -680,7 +691,9 @@ function autoApprove(s: IslandState) {
     for (const o of pend) {
       if (s.cash < ECON.freezeBelow) break;
       if (s.receivership > 0 && o.cost > 300) continue;
-      if (s.autoSpent[role] + o.cost <= s.autoBudget[role] && s.cash - o.cost >= ECON.freezeBelow) {
+      // auto-approval is petty cash for routine work: parts-free, tier ≤ 2, ≤ $150 per tier
+      const routine = o.parts === 0 && o.tier <= 2 && o.cost <= 150 * o.tier;
+      if (routine && s.autoSpent[role] + o.cost <= s.autoBudget[role] && s.cash - o.cost >= ECON.freezeBelow) {
         s.autoSpent[role] += o.cost;
         markApproved(s, o, true);
       }
@@ -881,6 +894,7 @@ export function resolveWeek(s: IslandState, now: number) {
   for (const o of s.orders) {
     if (!open(o) || o.role === 'fin' || o.gain === 0 || o.deferrals < 1 || (o.lastDeferredWeek ?? W) >= W) continue;
     if (o.assetId && isTagged(s, o.assetId)) continue; // out of service: it can't fail in service
+    if (o.status === 'waiting_part') continue; // approved and waiting on logistics: not a deferral
     const p = deferralRisk(o);
     if (r.chance(p)) {
       const asset = assetOf(s, o);
@@ -894,8 +908,7 @@ export function resolveWeek(s: IslandState, now: number) {
           line('elec', 'bad', `Guests at ${asset.name} refunded half after the incident.`);
         }
       }
-      const who: ReportLine['role'] =
-        o.status === 'waiting_part' ? 'all' : o.deferReason === 'open' && o.approvedWeek !== undefined ? o.role : 'fin';
+      const who: ReportLine['role'] = o.deferReason === 'open' && o.approvedWeek !== undefined ? o.role : 'fin';
       line(who, 'bad', `Incident: ${o.title}${asset ? ` on ${asset.name}` : ''} (carried ${o.deferrals} wk, ${Math.round(p * 100)}% risk).`);
     }
   }
@@ -931,6 +944,10 @@ export function resolveWeek(s: IslandState, now: number) {
     a.health = clamp(Math.round(a.health * 10) / 10, 0, 100);
   }
   if (s.weather === 'storm') line('elec', 'bad', `Storm damage: houses −${6 * shield}, grid −${8 * shield}.`);
+  // weather claims: roof, dock and hangar-door damage that no maintenance prevents (this is what insurance is for)
+  let weatherCost = 0;
+  if (s.weather === 'storm' && r.chance(0.6)) weatherCost = Math.round((1500 + 1000 * Math.max(0, s.tier - 2)) * shield);
+  else if (s.weather === 'wind' && s.tier >= 2 && r.chance(0.15)) weatherCost = 600 + 200 * s.tier;
 
   // 10. analyst money hunts: close / bank rec / invoice match recover a hidden leak
   let leak = 0;
@@ -948,9 +965,10 @@ export function resolveWeek(s: IslandState, now: number) {
   const revenue = Math.round(rental + charter - refunds);
   const fixed = td.fixed;
   const premium = Math.round(INSURANCE[s.insurance].premium * (1 + 0.25 * (s.tier - 1)));
-  const grossIncidents = incidents.reduce((n, i) => n + i.cost, 0);
+  const grossIncidents = incidents.reduce((n, i) => n + i.cost, 0) + weatherCost;
   const netIncidents = Math.round(grossIncidents * (1 - INSURANCE[s.insurance].cover));
-  if (grossIncidents) line('fin', 'info', `Incidents ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
+  if (weatherCost) line('all', 'bad', `${s.weather === 'storm' ? 'Storm' : 'Wind'} claim: ${usd(weatherCost)} of roof and dock damage.`);
+  if (grossIncidents) line('fin', 'info', `Claims ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
   const cashStart = s.openCash;
   s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - netIncidents);
 
@@ -960,7 +978,7 @@ export function resolveWeek(s: IslandState, now: number) {
     if (W > f.week && W <= f.week + 4) f.actual.push(s.cash);
     if (f.actual.length === 4) {
       const err = f.points.reduce((n, p, i) => n + Math.abs(p - f.actual[i]) / Math.max(5000, Math.abs(f.actual[i])), 0) / 4;
-      const bonus = err <= 0.1 ? Math.round((400 + 4000 * (0.1 - err)) * (1 + 0.25 * (s.tier - 1))) : 0;
+      const bonus = err <= 0.1 ? Math.round((800 + 6000 * (0.1 - err)) * (1 + 0.25 * (s.tier - 1))) : 0;
       f.paid = bonus;
       s.cash += bonus;
       line('fin', bonus ? 'good' : 'info', bonus ? `Forecast from week ${f.week} landed within ${Math.round(err * 100)}%: +${usd(bonus)}.` : `Forecast from week ${f.week} missed by ${Math.round(err * 100)}%.`);

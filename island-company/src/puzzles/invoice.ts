@@ -612,7 +612,7 @@ export const invoice: PuzzleDef = {
   gesture: 'Swipe cards',
   howTo: 'All three agree? Swipe right. If not, tap the problem, swipe left.',
   term: 'Three-way match: pay only what was ordered, received and billed at the agreed price.',
-  seconds: (tier) => clamp(60 + tier * 12, 60, 120),
+  seconds: (tier) => [60, 75, 95, 120, 165, 190][clamp(tier, 0, 5)], // ~24 s per card at every tier
   mount(host, p) {
     const m = generateInvoice(p.seed, p.tier, p.tools, p.context);
     const n = m.cards.length;

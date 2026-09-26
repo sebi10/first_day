@@ -747,7 +747,7 @@ export const reconcile: PuzzleDef = {
   gesture: 'Drag to pair',
   howTo: 'Drag bank lines onto their book match. Leftovers: Timing or Adjust.',
   term: 'Bank rec: explain every gap between the bank statement and your books.',
-  seconds: (tier) => clamp(60 + tier * 12, 60, 120),
+  seconds: (tier) => 50 + tier * 21,
   mount(host, p) {
     const m = generateReconcile(p.seed, p.tier, p.tools, p.context);
     const s = newRecState(m);

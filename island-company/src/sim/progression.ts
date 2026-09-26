@@ -38,7 +38,7 @@ export function nextTierProgress(s: IslandState): { name: string; items: { label
       return {
         name: next.name,
         items: [
-          { label: `Cash $${Math.round(s.cash).toLocaleString('en-US')} / $25,000`, ok: s.cash >= 25000 },
+          { label: `Cash $${Math.round(s.cash).toLocaleString('en-US')} / $18,000`, ok: s.cash >= 18000 },
           { label: `Clean weeks ${cleanStreak(st.recentIncidents)}/4`, ok: recentClean },
         ],
       };
@@ -46,7 +46,7 @@ export function nextTierProgress(s: IslandState): { name: string; items: { label
       return {
         name: next.name,
         items: [
-          { label: `Weeks ${Math.min(st.totalWeeks, 12)}/12`, ok: st.totalWeeks >= 12 },
+          { label: `Weeks ${Math.min(st.totalWeeks, 15)}/15`, ok: st.totalWeeks >= 15 },
           { label: `Perfect weeks ${Math.min(st.perfectWeeks, 2)}/2`, ok: st.perfectWeeks >= 2 },
         ],
       };
@@ -54,8 +54,8 @@ export function nextTierProgress(s: IslandState): { name: string; items: { label
       return {
         name: next.name,
         items: [
-          { label: `Weeks ${Math.min(st.totalWeeks, 24)}/24`, ok: st.totalWeeks >= 24 },
-          { label: `Cash $${Math.round(s.cash).toLocaleString('en-US')} / $100,000`, ok: s.cash >= 100000 },
+          { label: `Weeks ${Math.min(st.totalWeeks, 20)}/20`, ok: st.totalWeeks >= 20 },
+          { label: `Cash $${Math.round(s.cash).toLocaleString('en-US')} / $60,000`, ok: s.cash >= 60000 },
         ],
       };
   }

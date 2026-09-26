@@ -153,6 +153,9 @@ describe('orders and puzzles', () => {
     const o = s.orders.find((x) => x.role === 'mech' && x.status === 'ready')!;
     expect(o).toBeTruthy();
     expect(apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: false }, NOW).error).toMatch(/Lend a hand/);
+    // only for jobs that have already waited a week
+    expect(apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: false, cover: true }, NOW).error).toMatch(/waited/);
+    s.orders.find((x) => x.id === o.id)!.deferrals = 1;
     const asset = s.assets.find((a) => a.id === o.assetId)!;
     const h = asset.health;
     s = apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 0.25, perfect: false, cover: true }, NOW).s;
@@ -280,8 +283,12 @@ describe('crew decisions', () => {
   it('lend a hand: 40-59% is still a botch (the bar is a pass)', () => {
     let s = started();
     const o = s.orders.find((x) => x.role === 'mech' && x.status === 'ready')!;
-    s = apply(s, { t: 'complete', role: 'fin', orderId: o.id, score: 0.55, perfect: false, cover: true }, NOW).s;
+    s.orders.find((x) => x.id === o.id)!.deferrals = 1;
+    const r = apply(s, { t: 'complete', role: 'fin', orderId: o.id, score: 0.55, perfect: false, cover: true }, NOW);
+    expect(r.error).toBeUndefined();
+    s = r.s;
     expect(s.orders.find((x) => x.id === o.id)!.status).toBe('ready');
+    expect(s.coversUsed.fin).toBe(1);
   });
 
   it('the load sheet is paperwork: ready at once, no health gain, expires weekly', () => {

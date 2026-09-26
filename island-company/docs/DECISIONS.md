@@ -55,21 +55,47 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
 
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
+Retuned after the balance and systems critiques (Sep 26).
+
 | Team | Tier at wk 26 | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 |
 | --- | --- | --- | --- | --- | --- |
-| All good | 5 | 4 / 11 / 12 / 24 | 99% | $5,751 | 0 |
-| All average (3 jobs/turn, 10% missed turns) | 5 | 5 / 12 / 13 / 24 | 94% | $5,101 | 0 |
-| Naive analyst (approves everything, never prices) | 3 | 4 / 19 / — / — | 99% | $4,169 | 0 |
-| Mechanic absent | 1 | — | 99%* | $5,822 | 0 |
-| Analyst absent | 1 | — | 77% | −$138,352 | 136 of 780 |
-| Any solo player | 1 | — | 32–83% | −$17k to −$171k | 70–466 |
+| All good | 5 | 4 / 7 / 15 / 20 | 100% | $6,468 | 0 |
+| All average (3 jobs/turn, 10% missed turns) | 5 | 5 / 9 / 15 / 20 | 95% | $6,335 | 0 |
+| **Three friends** (skill drops with tier, absences in streaks) | 5 | 5 / 9 / 15 / 20 | 89% | $3,089 | 0 |
+| Naive analyst (approves everything, never prices) | 3 | 4 / 13 / — / — | 100% | $5,973 | 0 |
+| Any role absent / any solo player | 1 | — | 34–100% | down to −$135k | up to 447 of 780 |
 
-\* High grades, but autopilot weeks don't count, so no progress.
+What changed and why:
 
-Spec phase-0 exit tests, now automated in `tests/engine.test.ts`:
-- No role can win alone. Pass: every solo team stays at tier 1.
-- No week ends with cash < 0 under sensible play. Pass: min $5,101.
-- Every unlock is reachable within 26 weeks. Pass: tier 5 by week 24.
+- **Death spiral fixed.** Approved jobs waiting for a part no longer roll deferral incidents. Before, a grounded twin at tier 1 meant parts could never land and a 60% incident every week, forever.
+- **Pacing.**
+  - Tier 3 now needs $18k (was $25k).
+  - Tier 4 needs 15 weeks (was 12).
+  - Tier 5 needs 20 weeks and $60k (was 24 weeks and $100k).
+  - Fixed costs at tier 4 / 5 are $7,000 / $9,500 (were $5,500 / $7,500).
+  - Every tier now lasts long enough to matter: roughly 4 / 5 / 6 / 5 weeks, then the endgame.
+- **Difficulty climbs with the island.**
+  - Ops order tier = catalog tier + ⌊island tier / 2⌋.
+  - The analyst's tier gains a step every 20 weeks (was 10).
+  - Expert tiers (3+, no teaching aids) arrive from about week 5–9.
+- **Approvals matter again.** Auto-approve is petty cash only: parts-free, tier ≤2, ≤$150 per tier, capped at one week's fixed cost. Bigger work always comes to the analyst as a card.
+- **Insurance is a real call.**
+  - Storms (tier 3+) cause claims in 60% of storm weeks: $1,500 plus $1,000 per tier above 2.
+  - Wind claims can happen from tier 2.
+  - Premiums are $150 / $320.
+- **Mastery pays.**
+  - A perfect job holds: the asset skips next week's decay.
+  - The forecast bonus is up to $1,400 × tier factor.
+- **Puzzle time budgets:** tier difficulty is never a race. Invoice gets about 24 s per card at every tier; reconcile gets 50 + 21 × tier; teardown gets 60 + 22 × tier.
+- **Critical assets always get a job:**
+  - An asset under 45 health with nothing open on it jumps the queue, even past the cap (8).
+  - Before, a clogged queue let the grid rot to 5.
+
+Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
+
+- **No role can win alone.** Pass: every solo team stays at tier 1.
+- **No week ends with cash < 0 under sensible play.** Pass: minimum $3,089, including the three-friends team.
+- **Every unlock is reachable within 26 weeks.** Pass: tier 5 by week 20.
 
 **Goodhart warning.** The board grade weights revenue at 40%, so an analyst can inflate it by pricing up. The rate cap (2× base) limits that, occupancy falls off a logistic curve, and empty houses cost the electrician's "houses booked" MVP line. If players start gaming the grade, lower the revenue weight in `resolveWeek`, or grade revenue *per rentable house* instead.
 
