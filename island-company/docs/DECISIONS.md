@@ -27,6 +27,23 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
 9. **Insurance tiers** (none / standard / premium) are real: weekly premium vs share of incident cost covered.
 10. **First week is a guaranteed B or better** (spec), and nothing can fail in week 0.
 
+## Owner direction added during the build (Sep 26)
+
+- **Real trade knowledge is the gate between roles, not in-game levels.** The three players really are an A&P mechanic, an electrician and an FP&A analyst. Every puzzle models the real procedure.
+  - Tiers 0–2 teach: sequence numbers, terminal labels, fair-value markers, run-rate guides.
+  - From tier 3 that scaffolding is gone. A tradesperson solves it from knowledge, and an outsider mostly guesses.
+  - Each puzzle model has a test asserting that no answer-revealing hint survives at tier 3+.
+- **Lend a hand replaces the spec's cover rule** (the spec allowed covering after 2 missed turns, at double cost).
+  - Anyone may try another trade's ready job once a week (mentors twice), at normal cost, without their own trade's tools.
+  - Under 40% is a botch: the asset takes −6 and the job stays open for its owner.
+  - Nobody is ever fully gridlocked, and specialisation still matters.
+- **Integral but not gridlocked:**
+  - Parallel turns.
+  - Auto-approve budgets for small jobs.
+  - Autopilot at 50% for missed days.
+  - A 12-hour minimum week.
+  - Lend a hand.
+
 ## Additions (beyond MVP scope)
 
 - **Six more real-life puzzles** (15 total): weight and balance, safety wire, multimeter diagnosis, conduit bending, bank reconciliation, three-way match. Every role now has five puzzle types, each modelled on the actual procedure.
