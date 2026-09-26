@@ -1,0 +1,338 @@
+// Buildings, each drawn at its front-centre ground point in the oblique
+// projection: light roof top, mid front, dark east side. Care wears the paint.
+import { P, type V3 } from './geo';
+import { K, mix, shade, tones, weather } from './paint';
+import { box, gable, gableZ, hip, post, seg, shadowOf } from './solid';
+
+export type Win = 'glass' | 'lit' | 'shut' | 'dark';
+const winFill = (w: Win) => (w === 'lit' ? K.lit : w === 'dark' ? '#33455a' : w === 'shut' ? K.wood : K.glass);
+const pt = (v: V3) => P(v).map((n) => Math.round(n * 10) / 10).join(' ');
+
+/** windows (screen rects on the front face, which is undistorted) */
+function Windows({ rects, w }: { rects: [number, number, number, number][]; w: Win }) {
+  const d = rects.map(([x, y, ww, hh]) => `M${x} ${y}h${ww}v${hh}h${-ww}z`).join('');
+  return (
+    <>
+      <path d={d} fill={winFill(w)} stroke={w === 'lit' ? '#fff3c4' : '#ffffff'} stroke-width="1.2" />
+      {w === 'glass' && <path d={rects.map(([x, y, ww, hh]) => `M${x + 1} ${y + hh - 1.5}l${Math.min(ww, hh) * 0.6} ${-hh + 3}`).join('')} stroke="#fff" stroke-width="1.3" opacity=".8" />}
+      {w === 'shut' && <path d={rects.map(([x, y, ww, hh]) => `M${x + ww / 2} ${y}v${hh}`).join('')} stroke={K.woodDark} stroke-width="1" />}
+    </>
+  );
+}
+
+/** faded patches when the island is poorly kept */
+function Wear({ wear, spots }: { wear: number; spots: [number, number, number][] }) {
+  if (wear < 0.25) return null;
+  return (
+    <>
+      <path d={spots.map(([x, y, r]) => `M${x - r * 1.3} ${y}q${r * 0.5} ${-r} ${r * 1.3} ${-r * 0.6}q${r} ${r * 0.1} ${r * 1.3} ${r * 0.8}q${-r * 0.8} ${r * 0.7} ${-r * 1.8} ${r * 0.2}z`).join('')} fill="#8f7f6a" opacity={Math.min(0.5, wear * 0.7)} />
+      <path d={spots.map(([x, y, r]) => `M${x + r * 0.2} ${y + r * 0.4}v${r * 1.4}M${x + r * 0.7} ${y + r * 0.2}v${r}`).join('')} stroke="#7d6e5c" stroke-width="1.1" opacity={Math.min(0.5, wear * 0.7)} />
+    </>
+  );
+}
+
+export function Ribbon({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x} ${y})`}>
+      <path d="M-11 -6L0 0L-11 6ZM11 -6L0 0L11 6Z" fill="#e8453c" />
+      <path d="M0 0L-6 12L-3 12L0 5L3 12L6 12Z" fill="#c9302a" />
+      <circle r={3} fill="#ff6b5e" />
+    </g>
+  );
+}
+
+// ------------------------------------------------------------- cottage ---
+export function Cottage({ tint, win, wear, open }: { tint: string; win: Win; wear: number; open: boolean }) {
+  const w = 20, d = 26, h = 18, rh = 16, o = 5;
+  const b = box(-w, w, 0, h, 0, d);
+  const r = gable(-w, w, h, 0, d, rh, o);
+  const roof = tones(weather(tint, wear * 0.7));
+  const thatch = tint.toLowerCase() === '#e6d0a6';
+  const wall = weather(K.wall, wear);
+  return (
+    <g>
+      <path d={shadowOf(-w, w, 0, d, h + rh)} fill={K.shadow} />
+      <path d={r.back} fill={roof.lo} />
+      <path d={b.side + r.end} fill={weather(K.wallDark, wear)} />
+      <path d={b.front} fill={wall} />
+      <path d="M-20 -3h40v3h-40z" fill={weather(K.wallShade, wear)} />
+      <Wear wear={wear} spots={[[-12, -4, 5], [12, -10, 4]]} />
+      <path d="M-4.5 0v-11.5a4.5 4 0 0 1 9 0V0z" fill={open ? K.woodDark : '#6b4a2e'} />
+      <circle cx={2.4} cy={-5.5} r={0.9} fill={K.yellow} />
+      <Windows rects={[[-16, -12.5, 7.5, 6.5], [8.5, -12.5, 7.5, 6.5]]} w={win} />
+      {wear < 0.4 && <path d="M-16.5 -5.2h8.5v2h-8.5zM8 -5.2h8.5v2h-8.5z" fill={K.woodDark} />}
+      {wear < 0.4 && <path d="M-15 -6a1.4 1.4 0 1 0 .1 0M-11.5 -6.4a1.4 1.4 0 1 0 .1 0M10 -6a1.4 1.4 0 1 0 .1 0M13.5 -6.4a1.4 1.4 0 1 0 .1 0" fill={K.pink} />}
+      <path d={r.front} fill={thatch ? mix(roof.mid, '#f3d57e', 0.35) : roof.mid} />
+      <path d={r.courses(thatch ? 4 : 3)} stroke={roof.lo} stroke-width={thatch ? 1.6 : 1.1} opacity=".55" fill="none" />
+      <path d={r.ridge} stroke={roof.hi} stroke-width="3" stroke-linecap="round" />
+      {wear >= 0.25 && <path d={`M-10 ${-24}l6 -1l1 4l-6 1z`} fill={roof.dk} opacity=".45" />}
+    </g>
+  );
+}
+
+// --------------------------------------------------------------- villa ---
+export function Villa({ tint, win, wear, open }: { tint: string; win: Win; wear: number; open: boolean }) {
+  const w = 30, d = 32, h = 32, rh = 13, o = 5;
+  const b = box(-w, w, 0, h, 0, d);
+  const r = hip(-w, w, h, 0, d, rh, o, 14);
+  const roof = tones(weather(tint, wear * 0.7));
+  const wall = weather('#ffffff', wear * 0.9);
+  const bal = box(-w + 2, w - 2, 14, 16.5, -8, 0);
+  return (
+    <g>
+      <path d={shadowOf(-w, w, 0, d, h + rh)} fill={K.shadow} />
+      {/* pool terrace in front */}
+      <path d={`M${pt([-w - 8, 0, -30])}L${pt([w + 6, 0, -30])}L${pt([w + 6, 0, 0])}L${pt([-w - 8, 0, 0])}Z`} fill={K.stoneLight} />
+      <path d={`M${pt([-w - 2, 0, -26])}L${pt([4, 0, -26])}L${pt([4, 0, -12])}L${pt([-w - 2, 0, -12])}Z`} fill="#4fcbe8" stroke="#fff" stroke-width="2" />
+      <path d={`M${pt([-w + 2, 0, -22])}l18 0`} stroke="#b8f2ff" stroke-width="2" stroke-linecap="round" />
+      <path d={`M${pt([12, 0, -24])}l12 -3l2 2l-12 3z`} fill="#fff" />
+      <path d={r.back} fill={roof.lo} />
+      <path d={b.side} fill={weather(K.wallShade, wear)} />
+      <path d={b.front} fill={wall} />
+      <Wear wear={wear} spots={[[-20, -6, 6], [18, -24, 5], [0, -12, 4]]} />
+      <Windows rects={[[-25, -29, 9, 9], [-4.5, -29, 9, 9], [16, -29, 9, 9], [-25, -12, 10, 10], [15, -12, 10, 10]]} w={win} />
+      <path d="M-6 0v-13h12v13z" fill={open ? '#6fb7d8' : K.wood} stroke="#fff" stroke-width="1.2" />
+      <path d={`M-27 -30h2v11h-2zM-16 -30h2v11h-2zM14 -30h2v11h-2zM25 -30h2v11h-2z`} fill={weather(tint, wear)} />
+      {/* balcony */}
+      <path d={bal.front + bal.top} fill={weather('#f1ece2', wear)} />
+      <path d={`M${pt([-w + 2, 16.5, -8])}L${pt([w - 2, 16.5, -8])}`} stroke="#fff" stroke-width="1" />
+      <path d={Array.from({ length: 12 }, (_, i) => post(-w + 3 + i * 4.9, -8, 6, 16.5)).join('') + seg([-w + 2, 22.5, -8], [w - 2, 22.5, -8])} stroke="#fff" stroke-width="1.3" />
+      <path d={r.west} fill={roof.hi} />
+      <path d={r.east} fill={roof.lo} />
+      <path d={r.front} fill={roof.mid} />
+      <path d={r.ridge} stroke={roof.hi} stroke-width="2.4" stroke-linecap="round" />
+      <path d={`M${pt([w - 8, h + 6, d * 0.7])}v-10h5v10z`} fill={weather('#e9e2d6', wear)} />
+    </g>
+  );
+}
+
+// --------------------------------------------------------------- lodge ---
+export function Lodge({ tint, win, wear, open }: { tint: string; win: Win; wear: number; open: boolean }) {
+  const w = 30, d = 40, h = 20, rh = 34, o = 5;
+  const b = box(-w, w, 0, h, 0, d);
+  const base = box(-w, w, 0, 7, 0, d);
+  const r = gableZ(-w, w, h, 0, d, rh, o);
+  const wing = box(-w - 30, -w, 0, 16, 6, 34);
+  const wr = gable(-w - 30, -w, 16, 6, 34, 11, 3);
+  const roof = tones(weather(tint, wear * 0.7));
+  const timber = weather('#c98a52', wear);
+  const deck = box(-w - 4, w + 4, 0, 4, -14, 0);
+  return (
+    <g>
+      <path d={shadowOf(-w - 30, w, 0, d, h + rh)} fill={K.shadow} />
+      {/* west wing */}
+      <path d={wr.back} fill={roof.lo} />
+      <path d={wing.front} fill={timber} />
+      <Windows rects={[[-54, -12, 8, 7], [-42, -12, 8, 7]]} w={win} />
+      <path d={wr.front} fill={roof.mid} />
+      <path d={wr.ridge} stroke={roof.hi} stroke-width="2" />
+      {/* main hall */}
+      <path d={b.side} fill={shade(timber, -0.3)} />
+      <path d={base.side} fill="#7d7468" />
+      <path d={b.front} fill={timber} />
+      <path d={base.front} fill="#a39a8c" />
+      <path d="M-28 -2h8M-16 -5h9M-2 -2h10M12 -5h8M-24 -6h6M4 -6h6" stroke="#857b6e" stroke-width="1.2" />
+      <path d={`M${pt([-w, 20, 0])}L${pt([w, 20, 0])}`} stroke={shade(timber, -0.35)} stroke-width="2" />
+      <path d={r.east} fill={roof.lo} />
+      <path d={r.west} fill={roof.hi} />
+      <path d={r.gable} fill={shade(timber, 0.12)} />
+      {/* big A-frame window */}
+      <path d="M-14 -20L0 -46L14 -20Z" fill={winFill(win)} stroke="#fff4dc" stroke-width="1.6" />
+      <path d="M0 -46V-20M-7 -33H7" stroke="#fff4dc" stroke-width="1.2" />
+      {win === 'glass' && <path d="M-9 -22l6 -12" stroke="#fff" stroke-width="1.4" opacity=".8" />}
+      <path d={r.eaves} stroke={roof.dk} stroke-width="2.4" fill="none" stroke-linejoin="round" />
+      <Wear wear={wear} spots={[[-18, -10, 5], [16, -14, 5]]} />
+      {/* chimney */}
+      {(() => {
+        const c = box(12, 20, 0, 50, 22, 30);
+        return <path d={c.front + c.side} fill="#8f8577" transform={`translate(0 0)`} />;
+      })()}
+      {/* deck */}
+      <path d={deck.top} fill={weather(K.woodLight, wear)} />
+      <path d={deck.front} fill={K.woodDark} />
+      <path d={Array.from({ length: 13 }, (_, i) => post(-w - 3 + i * 5.5, -14, 7, 4)).join('') + seg([-w - 4, 11, -14], [w + 4, 11, -14])} stroke={K.woodDark} stroke-width="1.4" />
+      <path d="M-5 -4v-14h10v14z" fill={open ? '#6fb7d8' : K.woodDark} stroke="#fff4dc" stroke-width="1.2" />
+    </g>
+  );
+}
+
+// -------------------------------------------------------------- hangar ---
+export function Hangar({ tint, wear, doorOpen }: { tint: string; wear: number; doorOpen: boolean }) {
+  const w = 50, d = 54, h = 22, ah = 20;
+  const bx = P([0, 0, d]); // back shift
+  const [sx, sy] = bx;
+  const roof = tones(weather(tint, wear * 0.7));
+  const side = box(-w, w, 0, h, 0, d);
+  const arch = (dx: number, dy: number, rev = false) =>
+    rev ? `L${w + dx} ${-h + dy}A${w} ${ah} 0 0 0 ${-w + dx} ${-h + dy}` : `M${-w + dx} ${-h + dy}A${w} ${ah} 0 0 1 ${w + dx} ${-h + dy}`;
+  const ribs = [0.33, 0.66].map((k) => `M${-w + sx * k} ${-h + sy * k}A${w} ${ah} 0 0 1 ${w + sx * k} ${-h + sy * k}`).join('');
+  return (
+    <g>
+      <path d={shadowOf(-w, w, 0, d, h + ah + 6)} fill={K.shadow} />
+      <path d={side.side} fill={weather('#b9b3a6', wear)} />
+      <path d={`M${w + sx * 0.25} ${-h + 6 + sy * 0.25}l${sx * 0.5} ${sy * 0.5}v5l${-sx * 0.5} ${-sy * 0.5}z`} fill="#8fb4c8" />
+      <path d={arch(0, 0) + arch(sx, sy, true) + 'Z'} fill={roof.mid} />
+      <path d={`M${-w} ${-h}A${w} ${ah} 0 0 1 ${-w * 0.2} ${-h - ah * 0.98}L${-w * 0.2 + sx} ${-h - ah * 0.98 + sy}A${w} ${ah} 0 0 0 ${-w + sx} ${-h + sy}Z`} fill={roof.hi} />
+      <path d={ribs} stroke={roof.lo} stroke-width="1.6" fill="none" opacity=".7" />
+      {/* facade */}
+      <path d={`M${-w} 0V${-h}A${w} ${ah} 0 0 1 ${w} ${-h}V0Z`} fill={weather('#ece6da', wear)} />
+      <path d={`M${-w} ${-h}A${w} ${ah} 0 0 1 ${w} ${-h}`} stroke={roof.lo} stroke-width="3" fill="none" />
+      <Wear wear={wear} spots={[[-40, -8, 6], [38, -14, 5]]} />
+      <path d="M-36 0V-30H36V0Z" fill="#2c3840" />
+      <path d="M-36 -30H36" stroke="#6c7780" stroke-width="3" />
+      {doorOpen ? (
+        <path d="M-44 0V-29H-34V0ZM34 0V-29H44V0Z" fill="#cfd6d8" stroke="#9aa5ab" stroke-width="1" />
+      ) : (
+        <path d="M-36 0V-29H36V0Z" fill="#cfd6d8" stroke="#9aa5ab" stroke-width="1" />
+      )}
+      <path d={doorOpen ? 'M-39 -2V-27M-41 -2V-27M39 -2V-27M41 -2V-27' : 'M-24 -2V-27M-12 -2V-27M0 -2V-27M12 -2V-27M24 -2V-27'} stroke="#9aa5ab" stroke-width="1" />
+      {/* emblem: a propeller in a roundel */}
+      <circle cx={0} cy={-35} r={5.5} fill={roof.mid} stroke="#fff" stroke-width="1.4" />
+      <path d="M0 -35l-3.5 -3M0 -35l4 -1.5M0 -35l-.5 4.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+  );
+}
+
+// -------------------------------------------------------------- office ---
+export function Office({ tint, win, wear, flag, motion }: { tint: string; win: Win; wear: number; flag: string; motion: boolean }) {
+  const w = 32, d = 32, h = 34, rh = 14, o = 4;
+  const b = box(-w, w, 0, h, 0, d);
+  const r = hip(-w, w, h, 0, d, rh, o, 14);
+  const roof = tones(weather('#3f6fb5', wear * 0.6));
+  const wall = weather('#fde9b8', wear);
+  const aw = tones(weather(tint, wear * 0.6));
+  // striped awning from the wall (y 17) out to the valance (y 12, z -10)
+  const stripes = Array.from({ length: 8 }, (_, i) => {
+    const x0 = -29 + i * 7.25, x1 = x0 + 7.25;
+    return { d: `M${pt([x0, 17, 0])}L${pt([x1, 17, 0])}L${pt([x1, 11.5, -10])}L${pt([x0, 11.5, -10])}Z`, c: i % 2 ? '#ffffff' : aw.mid };
+  });
+  return (
+    <g>
+      <path d={shadowOf(-w, w, 0, d, h + rh + 10)} fill={K.shadow} />
+      <path d={r.back} fill={roof.lo} />
+      <path d={b.side} fill={weather('#e3c98f', wear)} />
+      <path d={b.front} fill={wall} />
+      <path d="M-32 -34h64v3h-64z" fill="#fff" opacity=".7" />
+      <path d="M-32 -17.5h64" stroke="#fff" stroke-width="1.6" />
+      <Wear wear={wear} spots={[[-22, -6, 5], [20, -26, 5]]} />
+      <Windows rects={[[-27, -30, 10, 9], [-5, -30, 10, 9], [17, -30, 10, 9], [-26, -12, 10, 9], [16, -12, 10, 9]]} w={win} />
+      <path d="M-7 0V-13H7V0Z" fill={win === 'lit' ? K.lit : '#7fc3dc'} stroke="#fff" stroke-width="1.4" />
+      <path d="M0 0V-13" stroke="#fff" stroke-width="1" />
+      {stripes.map((s, i) => (
+        <path key={i} d={s.d} fill={s.c} />
+      ))}
+      <path d={Array.from({ length: 8 }, (_, i) => `M${pt([-29 + i * 7.25, 11.5, -10])}q3.6 4 7.25 0`).join('')} fill={aw.mid} stroke={aw.lo} stroke-width=".6" />
+      <path d="M-11 0h22v2.5h-22z" fill={K.stoneDark} />
+      <path d={r.west} fill={roof.hi} />
+      <path d={r.east} fill={roof.lo} />
+      <path d={r.front} fill={roof.mid} />
+      <path d={r.ridge} stroke={roof.hi} stroke-width="2.2" stroke-linecap="round" />
+      {/* sign on the roof: a little rising bar chart */}
+      <rect x={-10} y={-45} width={20} height={11} rx={2.5} fill="#fff" stroke={aw.lo} stroke-width="1.4" />
+      <path d="M-5.5 -36.5v-3M-1.8 -36.5v-5M1.9 -36.5v-4M5.6 -36.5v-6.5" stroke={aw.lo} stroke-width="2.4" />
+      {/* potted plants by the door */}
+      <path d="M-16 0l1 -5h6l1 5zM10 0l1 -5h6l1 5z" fill="#c07a4a" />
+      <path d="M-12 -5a4 4 0 1 0 .1 0M14 -5a4 4 0 1 0 .1 0" fill={K.tree} />
+      {/* flagpole on the roof */}
+      {(() => {
+        const [fx, fy] = P([0, h + rh, d / 2]);
+        return (
+          <g transform={`translate(${fx} ${fy})`}>
+            <path d="M0 0V-26" stroke="#e6e1d8" stroke-width="1.8" />
+            <circle cy={-26.5} r={1.4} fill={K.yellow} />
+            <g transform="translate(1 -25)">
+              <g class={motion ? 'flag' : undefined}>
+                <path d="M0 0q7 -2 14 1v9q-7 -3 -14 -1z" fill={flag} />
+                <circle cx={7} cy={4.8} r={2.2} fill={K.yellow} />
+              </g>
+            </g>
+          </g>
+        );
+      })()}
+    </g>
+  );
+}
+
+// ------------------------------------------------------------ generator ---
+export function GenHouse({ wear, running, motion }: { wear: number; running: boolean; motion: boolean }) {
+  const w = 18, d = 22, h = 16;
+  const b = box(-w, w, 0, h, 0, d);
+  const para = box(-w, w, h, h + 2, 0, d);
+  const tank = box(w + 4, w + 20, 0, 8, 4, 18);
+  const [sx, sy] = P([10, h, 14]);
+  return (
+    <g>
+      <path d={shadowOf(-w, w + 20, 0, d, h + 4)} fill={K.shadow} />
+      <path d={b.side} fill={weather('#a9a391', wear)} />
+      <path d={b.front} fill={weather('#d9d3c2', wear)} />
+      <path d={para.top} fill={weather('#8d9489', wear)} />
+      <path d={para.front + para.side} fill={weather('#c4bda9', wear)} />
+      <path d={`M${pt([-w + 3, h + 2, 4])}L${pt([w - 3, h + 2, 4])}L${pt([w - 3, h + 2, d - 4])}L${pt([-w + 3, h + 2, d - 4])}Z`} fill="#7b8378" />
+      <Wear wear={wear} spots={[[-10, -6, 4], [10, -10, 4]]} />
+      {/* louvres + door + hazard stripe */}
+      <path d="M4 -12h11M4 -9.5h11M4 -7h11M4 -4.5h11" stroke="#6d7470" stroke-width="1.4" />
+      <path d="M-14 0v-12h9v12z" fill="#5d8a72" />
+      <path d="M-18 -1.5h36" stroke="#f2c230" stroke-width="3" stroke-dasharray="3 3" />
+      {/* fuel tank */}
+      <path d={tank.side + tank.front} fill="#e8e3d6" />
+      <path d={tank.top} fill="#f7f4ec" />
+      <path d={`M${pt([w + 6, 0, 4])}v-4M${pt([w + 18, 0, 4])}v-4`} stroke="#6d7470" stroke-width="1.6" />
+      {/* exhaust stack */}
+      <path d={`M${sx} ${sy}v-16`} stroke="#5a6064" stroke-width="3.6" stroke-linecap="round" />
+      <path d={`M${sx - 2.6} ${sy - 16}h5.2`} stroke="#3e4448" stroke-width="2" />
+      {running && (
+        <g transform={`translate(${sx} ${sy - 20})`}>
+          <g class={motion ? 'puff' : undefined}>
+            <circle r={4} fill="#d9dde0" />
+            <circle cx={3} cy={-6} r={5} fill="#e9ecee" />
+            <circle cx={7} cy={-13} r={4} fill="#f2f4f5" opacity=".8" />
+          </g>
+        </g>
+      )}
+    </g>
+  );
+}
+
+// ------------------------------------------------------ substation (g1) ---
+export function Substation({ wear }: { wear: number }) {
+  const pad = box(-18, 18, 0, 2, -2, 22);
+  const tr = box(-10, 4, 2, 16, 6, 16);
+  const cab = box(7, 15, 2, 14, 3, 10);
+  const fence = [
+    [-18, -2], [18, -2], [18, 22], [-18, 22],
+  ] as const;
+  const fpost = fence.map(([x, z]) => post(x, z, 10)).join('');
+  const frail = seg([-18, 10, -2], [18, 10, -2]) + seg([18, 10, -2], [18, 10, 22]) + seg([18, 10, 22], [-18, 10, 22]) + seg([-18, 10, 22], [-18, 10, -2]);
+  return (
+    <g>
+      <path d={shadowOf(-18, 18, -2, 22, 16)} fill={K.shadow} />
+      <path d={pad.top} fill={K.concrete} />
+      <path d={pad.front + pad.side} fill={K.concreteDark} />
+      {/* back fence first */}
+      <path d={seg([18, 10, 22], [-18, 10, 22]) + seg([-18, 10, 22], [-18, 10, -2]) + seg([18, 10, -2], [18, 10, 22])} stroke="#9aa5ab" stroke-width="1" />
+      <path d={tr.side} fill={weather('#6f8a80', wear)} />
+      <path d={tr.front} fill={weather('#8fa99e', wear)} />
+      <path d={tr.top} fill={weather('#b5c9c0', wear)} />
+      <path d="M-8 -5v-8M-5 -5v-8M-2 -5v-8M1 -5v-8" stroke="#5f776d" stroke-width="1.3" />
+      <path d={`M${pt([-7, 16, 11])}v-5M${pt([-3, 16, 11])}v-5M${pt([1, 16, 11])}v-5`} stroke="#c9d3d6" stroke-width="2.2" stroke-linecap="round" />
+      <path d={cab.side} fill="#8a9298" />
+      <path d={cab.front} fill="#b7c0c5" />
+      <path d="M9.5 -9.5l2 -2.5h-1.8l1.8 -2.6" stroke={K.yellow} stroke-width="1.4" fill="none" />
+      <path d={fpost + seg([-18, 10, -2], [18, 10, -2])} stroke="#9aa5ab" stroke-width="1.2" />
+      <path d={frail} stroke="#c4ccd0" stroke-width=".6" opacity=".7" />
+    </g>
+  );
+}
+
+/** a timber power pole at a screen point; returns the top for wiring */
+export const POLE_H = 34;
+export function Pole({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x} ${y})`}>
+      <ellipse cx={4} cy={1} rx={5} ry={1.8} fill={K.shadow} />
+      <path d={`M0 0V${-POLE_H}`} stroke="#7a5534" stroke-width="2.6" />
+      <path d={`M-7 ${-POLE_H + 4}H7`} stroke="#7a5534" stroke-width="2" />
+      <path d={`M-6 ${-POLE_H + 3}v-2M0 ${-POLE_H + 3}v-2M6 ${-POLE_H + 3}v-2`} stroke="#dfe7ea" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+  );
+}
