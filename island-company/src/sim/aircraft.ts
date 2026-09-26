@@ -114,6 +114,8 @@ export type AdRecord = {
   /** next due (airframe TT), recurring only */
   nextDue?: number;
   note: string;
+  /** method of compliance as the record states it (14 CFR 91.417(a)(2)(v)) */
+  moc: string;
 };
 
 export type Alteration = {
@@ -121,6 +123,7 @@ export type Alteration = {
   kind: 'stc' | 'field';
   /** STC number (SA0xxxxCH style) or the field-approval 337 block text */
   stc?: string;
+  /** STC holder, or the applicant of a field approval */
   holder: string;
   title: string;
   ata: string;
@@ -682,7 +685,7 @@ function fig3240(model: PlaneModel, env: Env): IpcFigure {
     { item: '20', pn: `080-${k}100`, ind: 2, nomen: 'PLATE, PRESSURE', upa: 1, v: CW, shape: 'plate', ord: 11 },
     { item: '21', pn: `066-${k}500`, ind: 2, nomen: 'LINING', upa: 2, v: CW, eff: 'D', sup: [`066-${k}600`, 3], tag: 'lining', note: `REPLACE AS A SET WITH ITEM 23A PER ${figSb(model, '32-40').id}`, shape: 'lining', ord: 9 },
     { item: '21A', pn: `066-${k}600`, ind: 2, nomen: 'LINING, HEAVY DUTY (METALLIC)', upa: 2, v: CW, eff: 'C', sups: `066-${k}500`, tag: 'lining' },
-    { item: '22', pn: '105-00500', ind: 3, nomen: 'RIVET, LINING', upa: 16, v: CW, tag: 'rivet', shape: 'pin', near: '21' },
+    { item: '22', pn: '105-00500', ind: 3, nomen: 'RIVET, LINING', upa: 4, v: CW, tag: 'rivet', shape: 'pin', near: '21' },
     { item: '23', pn: `069-${k}400`, ind: 2, nomen: 'PLATE, BACK', upa: 1, v: CW, eff: 'D', tag: 'backPlate', shape: 'plate', ord: 8 },
     { item: '23A', pn: `069-${k}450`, ind: 2, nomen: 'PLATE, BACK', upa: 1, v: CW, eff: 'C', tag: 'backPlate' },
     { item: '24', pn: `069-${k}800`, ind: 2, nomen: 'BOLT, ANCHOR', upa: 2, v: CW, np: 'ORDER KIT, ITEM -25', tag: 'anchorBolt', shape: 'pin', near: '16' },
@@ -879,26 +882,27 @@ function otherSbs(model: PlaneModel): { id: string; title: string; ata: string }
   return list;
 }
 
-type AdDef = { id: string; subject: string; ata: string; every?: number; atInspection?: boolean };
+/** moc: the method of compliance a record states, with the AD paragraph (and the SB it calls up) */
+type AdDef = { id: string; subject: string; ata: string; moc: string; every?: number; atInspection?: boolean };
 
 function adsOf(model: PlaneModel): AdDef[] {
   const s = SPECS[model];
   const hub = `Beaumont ${s.propHub.split('-').slice(0, 2).join('-')}`;
   if (model === 'cargo') {
     return [
-      { id: 'AD 2014-22-08', subject: `${hub} hub: blade clamp bolt torque check`, ata: '61-10', every: 400 },
-      { id: 'AD 2020-11-02', subject: 'Flap actuator jackscrew lubrication and end-play check', ata: '27-50', every: 200, atInspection: true },
-      { id: 'AD 2018-03-04', subject: `${s.engineMaker} ${s.engineModel}: compressor turbine blade inspection`, ata: '72-00' },
-      { id: 'AD 2017-06-15', subject: 'Halden HSG-250 starter-generator: drive shaft shear section inspection', ata: '24-30' },
+      { id: 'AD 2014-22-08', subject: `${hub} hub: blade clamp bolt torque check`, ata: '61-10', moc: 'torque check of the blade clamp bolts per paragraph (g)(1)', every: 400 },
+      { id: 'AD 2020-11-02', subject: 'Flap actuator jackscrew lubrication and end-play check', ata: '27-50', moc: 'lubrication and end-play check per paragraph (g)', every: 200, atInspection: true },
+      { id: 'AD 2018-03-04', subject: `${s.engineMaker} ${s.engineModel}: compressor turbine blade inspection`, ata: '72-00', moc: 'borescope inspection per paragraph (g)' },
+      { id: 'AD 2017-06-15', subject: 'Halden HSG-250 starter-generator: drive shaft shear section inspection', ata: '24-30', moc: 'visual inspection of the shear section per paragraph (g)' },
     ];
   }
   const list: AdDef[] = [
-    { id: 'AD 2016-09-12', subject: `${hub} hub: hub arm crack inspection`, ata: '61-10', every: 100, atInspection: true },
-    { id: 'AD 2012-07-22', subject: 'Pilot and copilot seat rail and seat stop inspection', ata: '25-10', every: 100, atInspection: true },
-    { id: 'AD 2019-14-03', subject: `Halden HA-24${s.k} alternator: pulley nut and rectifier inspection`, ata: '24-30' },
+    { id: 'AD 2016-09-12', subject: `${hub} hub: hub arm crack inspection`, ata: '61-10', moc: 'eddy-current inspection of the hub arms per paragraph (g)(1)', every: 100, atInspection: true },
+    { id: 'AD 2012-07-22', subject: 'Pilot and copilot seat rail and seat stop inspection', ata: '25-10', moc: 'visual inspection of the seat rails and stops per paragraph (g)', every: 100, atInspection: true },
+    { id: 'AD 2019-14-03', subject: `Halden HA-24${s.k} alternator: pulley nut and rectifier inspection`, ata: '24-30', moc: `inspection per paragraph (g), IAW Halden SB HA-${s.k + 2} Part I` },
   ];
-  if (model === 'twin') list.push({ id: 'AD 2011-20-05', subject: `${s.designation} wing spar lower cap inspection`, ata: '57-10', every: 500 });
-  if (model === 'float') list.push({ id: 'AD 2015-18-06', subject: 'Float attach fittings and spreader bars (seaplane operation)', ata: '32-00', every: 100, atInspection: true });
+  if (model === 'twin') list.push({ id: 'AD 2011-20-05', subject: `${s.designation} wing spar lower cap inspection`, ata: '57-10', moc: 'visual inspection per paragraph (g)', every: 500 });
+  if (model === 'float') list.push({ id: 'AD 2015-18-06', subject: 'Float attach fittings and spreader bars (seaplane operation)', ata: '32-00', moc: 'visual inspection per paragraph (g)', every: 100, atInspection: true });
   return list;
 }
 
@@ -911,7 +915,7 @@ function stcPool(model: PlaneModel): StcDef[] {
     { title: 'Vortex generator kit', holder: 'Airflow Dynamics', ata: '57-00', weightLb: 1.1 },
     { title: 'Inertia-reel shoulder harnesses', holder: 'SafeRest Restraints', ata: '25-10', weightLb: 3.4 },
     { title: 'Flap and aileron gap seal kit', holder: 'Slick Surfaces Inc.', ata: '57-50', weightLb: 2.2 },
-    { title: 'Portable fire extinguisher bracket, cockpit floor', holder: 'Island Company (owner)', ata: '26-20', weightLb: 0.9, field: true },
+    { title: 'Belly-mounted com 2 antenna on an external skin doubler', holder: 'Island Company (owner)', ata: '53-10', weightLb: 0.6, field: true },
   ];
   if (model === 'cargo') pool.push({ title: 'Cargo tie-down rails and barrier net', holder: 'Freightline Interiors', ata: '25-50', weightLb: 14.6 });
   if (model === 'float') pool.push({ title: 'Water rudder retract handle and cable upgrade', holder: 'Pontoon Works', ata: '27-20', weightLb: 0.7 });
@@ -1249,7 +1253,7 @@ const icaRef = (p: PlantState) => `IAW ${p.def.icaDoc} (STC ${p.stc})`;
 function adText(c: Ctx, day: number, ad: AdDef, tt: number): string {
   const p = IPC_ATAS.includes(ad.ata as Ata) ? plantedAt(c, ad.ata as Ata, day) : undefined;
   if (p) return `${ad.id} N/A: ${p.def.removed} per STC ${p.stc}.`;
-  return ad.every ? `${ad.id} (${ad.subject}) complied with, next due ${hrs(tt + ad.every)} TT.` : `${ad.id} (${ad.subject}) complied with.`;
+  return ad.every ? `${ad.id} (${ad.subject}) complied with by ${ad.moc}, next due ${hrs(tt + ad.every)} TT.` : `${ad.id} (${ad.subject}) complied with by ${ad.moc}.`;
 }
 
 const altInspected = (a: Alteration) =>
@@ -1810,7 +1814,7 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
     } else {
       const day = whenDone(adr, 0.5);
       if (day >= startDay)
-        evs.push({ day, book: bookFor(ad.ata), kind: 'ad', ata: ad.ata, key: 'ad', who: 'crew', body: (cx) => ({ text: plantedAt(cx, ad.ata as Ata, day) ? adText(cx, day, ad, 0) : `${ad.id} (${ad.subject}) complied with by inspection, no defects found. One-time AD; no repetitive action.`, ref: `IAW ${ad.id}` }) });
+        evs.push({ day, book: bookFor(ad.ata), kind: 'ad', ata: ad.ata, key: 'ad', who: 'crew', body: (cx) => ({ text: plantedAt(cx, ad.ata as Ata, day) ? adText(cx, day, ad, 0) : `${ad.id} (${ad.subject}) complied with by ${ad.moc}, no defects found. One-time AD; no repetitive action.`, ref: `IAW ${ad.id}` }) });
       done = [{ day, tt: ttOf(day) }];
     }
     const before = na ? done.filter((d) => d.day < na.day) : done;
@@ -1820,6 +1824,7 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
       subject: ad.subject,
       ata: ad.ata,
       method: ad.every ? 'recurring' : 'one-time',
+      moc: ad.moc,
       last: { date: isoOf(last.day), tt: r1(last.tt) },
       note: na
         ? `N/A since ${fmtDate(isoOf(na.day))}: assembly replaced per STC ${na.stc}`
