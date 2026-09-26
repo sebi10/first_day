@@ -16,7 +16,12 @@ Start screen → **New island** → **1 device · pass & play**. All three seats
 
 ## Play online (three phones and/or computers), free
 
-You need to do this once, about 5 minutes. Firebase's **Spark plan is free** and has no card on file. Three players use roughly 0.1% of the free Firestore quota.
+**Live project: `islandgame-efc37`** → <https://islandgame-efc37.web.app> once deployed. Steps 1–4 below are already done for it: Anonymous auth is on, Firestore exists, and the web config is committed in `.env.production` (with `.firebaserc` pointing at the project). What remains is step 5, by either route:
+
+- **Auto-deploy from GitHub (recommended, repeatable):** create a service-account key with the *Firebase Admin* role (Google Cloud console → IAM & Admin → Service accounts → project islandgame-efc37 → Create → role *Firebase Admin* → Keys → Add key → JSON). In GitHub → sebi10/first_day → Settings → Secrets and variables → Actions, add it as **`FIREBASE_SERVICE_ACCOUNT`** (paste the whole JSON). Then Actions → *Deploy island* → Run workflow. From then on every push that touches `island-company/` tests, builds and deploys hosting + `firestore.rules`.
+- **One-off from your computer:** `cd island-company && npm ci && npm run build && npx firebase-tools login && npx firebase-tools deploy --only hosting,firestore:rules`.
+
+For a different project, do it once, about 5 minutes. Firebase's **Spark plan is free** and has no card on file. Three players use roughly 0.1% of the free Firestore quota.
 
 1. **Create the project.** Go to <https://console.firebase.google.com> → *Add project*. Analytics is not needed.
 2. **Auth.** *Build → Authentication → Get started →* enable **Anonymous**.

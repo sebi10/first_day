@@ -4,7 +4,7 @@ About 10 minutes to read and set up. One person (the "host") does the setup once
 
 ## 0. Host setup (once, ~5 min, free)
 
-Follow README → *Play online*: create a Firebase project, turn on Anonymous auth, create Firestore, put the web config in `.env.local`, then `npm run build` and `npx firebase-tools deploy`. You get a URL like `https://your-project.web.app`.
+The live project is `islandgame-efc37`: the game is at <https://islandgame-efc37.web.app> once it has been deployed (README → *Play online*, step 5: a GitHub secret enables auto-deploy on every push).
 
 Short on time? Anyone can try the whole game alone first with *New island → 1 device · pass & play*.
 
