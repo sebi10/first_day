@@ -328,6 +328,73 @@ describe('planted alteration: the part is not in the IPC', () => {
     }
   });
 
+  it('a field approval: the same kit on a field-approved 337, and the 337 (not the STC) is the approval', () => {
+    for (const seed of SEEDS.slice(0, 4)) {
+      for (const [id, model] of PLANES) {
+        const base = aircraftOf(seed, id, model);
+        for (const ata of IPC_ATAS) {
+          const stc = aircraftOf(seed, id, model, { plant: ata });
+          const ac = aircraftOf(seed, id, model, { plant: ata, via: 'field' });
+          const p = ac.plant!;
+          const why = `${seed} ${model} ${ata}`;
+          expect(p.via).toBe('field');
+          expect(p.stc).toBe('');
+          expect(p.basisStc).toBe(stc.plant!.stc);
+          expect(p.entryId.slice(1)).toBe(stc.plant!.entryId.slice(1));
+          const alt = ac.alterations.find((a) => a.displaces)!;
+          expect(alt.kind).toBe('field');
+          expect(alt.stc).toBeUndefined();
+          const entry = ac.log.find((e) => e.id === p.entryId)!;
+          expect(entry.text).toContain(`Form 337 dated ${fmtDate(p.form337)}, field approved`);
+          expect(entry.text).toContain(`STC ${p.basisStc} data used as the basis`);
+          expect(entry.book).toBe(ata === '61-10' ? 'propeller' : 'airframe');
+          expect(ipcFor(ac, ata).rows.some((r) => r.pn === p.neededPn), why).toBe(false);
+          for (const lid of p.laterEntryIds) expect(ac.log.find((e) => e.id === lid)!.text + ac.log.find((e) => e.id === lid)!.ref).toContain(`Form 337 dated ${fmtDate(p.form337)}`);
+          for (const e of base.log) if (e.date < entry.date) expect(ac.log.find((x) => x.id === e.id), `${why} ${e.id}`).toEqual(e);
+          expect(approvalBasis(ac, ata, p.neededPn)).toMatchObject({ basis: 'alteration', entry: { id: p.entryId } });
+          const req = { ata, pn: p.neededPn, stc: '', form337: fmtDate(p.form337), entryId: p.entryId };
+          expect(reviewRequest(ac, req)).toEqual({ approved: true, problems: [] });
+          const viaStc = reviewRequest(ac, { ...req, stc: p.basisStc! });
+          expect(viaStc.approved).toBe(false);
+          expect(viaStc.problems[0]).toMatch(/approved model list/);
+          expect(reviewRequest(ac, { ...req, form337: '01/01/2001' }).approved).toBe(false);
+          expect(ac.ads.filter((a) => a.ata === ata).every((a) => !a.note.includes('STC '))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('a PMA part: the last replacement used an FAA-PMA part, and nothing else changed', () => {
+    for (const seed of SEEDS) {
+      for (const [id, model] of PLANES) {
+        const base = aircraftOf(seed, id, model);
+        for (const ata of ['32-40', '29-10'] as const) {
+          const ac = aircraftOf(seed, id, model, { plant: ata, via: 'pma' });
+          const p = ac.plant!;
+          const why = `${seed} ${model} ${ata}`;
+          expect(p.via, why).toBe('pma');
+          expect(ac.alterations).toEqual(base.alterations);
+          const entry = ac.log.find((e) => e.id === p.entryId)!;
+          expect(entry.text).toContain(`FAA-PMA P/N ${p.neededPn}`);
+          expect(entry.text).toContain(`replaces ${p.ipcPn}`);
+          expect(entry.text).toContain(`includes ${ac.designation}`);
+          // it is the last replacement of that part, and the IPC part it replaces is the one in force
+          const key = ata === '32-40' ? 'brake' : 'component';
+          const same = ac.log.filter((e) => e.kind === key && e.ata === ata);
+          expect(same[same.length - 1].id).toBe(entry.id);
+          expect(rowFor(ipcFor(ac, ata), ata === '32-40' ? 'lining' : 'filter')!.pn).toBe(p.ipcPn);
+          expect(approvalBasis(ac, ata, p.neededPn).basis).toBe('pma');
+          expect(approvalBasis(base, ata, p.neededPn).basis).toBe('none');
+          // only that one entry differs
+          const diff = ac.log.filter((e, i) => JSON.stringify(e) !== JSON.stringify(base.log[i]));
+          expect(ac.log.length).toBe(base.log.length);
+          expect(diff.map((e) => e.id)).toEqual([entry.id]);
+        }
+        expect(aircraftOf(seed, id, model, { plant: '61-10', via: 'pma' }).plant).toBeUndefined();
+      }
+    }
+  });
+
   it('ADs against the removed assembly are marked not applicable', () => {
     const ac = aircraftOf(3, 'p3', 'float', { plant: '61-10' });
     const hub = ac.ads.find((a) => a.ata === '61-10')!;

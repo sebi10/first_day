@@ -2,6 +2,7 @@ import { auction } from './auction';
 import { balance } from './balance';
 import { conduit } from './conduit';
 import { invoice } from './invoice';
+import { logbook } from './logbook';
 import { meter } from './meter';
 import { reconcile } from './reconcile';
 import { safetywire } from './safetywire';
@@ -31,4 +32,5 @@ export const PUZZLES: Record<PuzzleId, PuzzleDef> = {
   conduit,
   reconcile,
   invoice,
+  logbook,
 };

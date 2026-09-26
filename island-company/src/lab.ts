@@ -1,5 +1,6 @@
 // Puzzle lab: mount one puzzle with a fake host.
 // /lab.html?p=torque&tier=3&seed=1&tools=clickWrench,gaugeDamper
+// optional context: &asset=Cargo%20C-7 (which plane) &job=avionics (work-order kind)
 import type { PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
 import { fx } from './ui/feedback';
 import '@fontsource-variable/manrope';
@@ -41,7 +42,8 @@ const context = {
   projection: [10400, 11100, 11500, 12300],
   hints: ['Tier 2 fixed costs start week 6', 'Pending: Panel upgrade $2,200'],
   leak: 540,
-  assetName: 'Twin N-12',
+  assetName: q.get('asset') ?? 'Twin N-12',
+  job: q.get('job') ?? undefined,
 };
 
 const inst = def.mount(

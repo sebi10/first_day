@@ -24,6 +24,10 @@
 // that swapped an assembly, so the part the job needs is NOT in the
 // manufacturer's IPC for this aircraft: the only trail is the logbook entry,
 // the Form 337 and the STC holder's ICA parts list (see Plant).
+// { plant, via: 'field' } puts the same kit on under an FSDO field approval
+// (the 337 is the approval; the STC it borrowed data from does not list this
+// model), and { plant, via: 'pma' } makes the last lining / filter change an
+// FAA-PMA part instead (no alteration at all).
 import { hashSeed, rng, type Rng } from './rng';
 
 // ---------------------------------------------------------------------------
@@ -139,12 +143,30 @@ export type Alteration = {
   weightLb: number;
 };
 
+/** how the planted part got onto the airplane legally */
+export type PlantVia = 'stc' | 'field' | 'pma';
+
 export type Plant = {
   ata: Ata;
+  /**
+   * 'stc': an STC swapped the assembly (default).
+   * 'field': the same kit went on under an FAA field approval (Form 337 block 3),
+   *   using the STC holder's data as the basis because this model is not on the
+   *   STC's approved model list: the approval is the 337, not the STC.
+   * 'pma': the last replacement used an FAA-PMA part (no alteration at all).
+   */
+  via: PlantVia;
+  /** how a record cites the approval: "STC SA02507SE", "Form 337 dated 04/10/2023 (field approval)", "FAA-PMA RF066-19600" */
+  ref: string;
+  /** '' for pma */
   alterationId: string;
+  /** '' unless via = 'stc' */
   stc: string;
+  /** field approval: the STC whose data was the basis (not approved for this model) */
+  basisStc?: string;
   holder: string;
   ica: string;
+  /** '' for pma */
   form337: string;
   /** logbook entry that recorded the installation */
   entryId: string;
@@ -1090,6 +1112,44 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
   }
 }
 
+/**
+ * The part an STC kit puts on the airplane for this job, without building an
+ * aircraft: what a mechanic finds stamped on the removed part when the kit is
+ * there (with or without the paperwork to show for it).
+ */
+export function plantPart(model: PlaneModel, ata: Ata): { holder: string; title: string; ica: string; item: string; tag: string; pn: string; kit: string } {
+  const d = plantDef(model, ata);
+  return { holder: d.holder, title: d.title, ica: d.icaDoc, item: d.item, tag: d.tag, pn: d.rows.find((x) => x.tag === d.tag)!.pn, kit: d.rows[0].pn };
+}
+
+/** An FAA-PMA replacement for one IPC part: the PMA holder's number carries the OEM number it replaces. */
+type PmaDef = { holder: string; item: string; tag: string; key: string; pn(ipcPn: string): string; eligibility: string };
+
+export const PMA_ATAS: readonly Ata[] = ['32-40', '29-10'];
+
+function pmaDef(model: PlaneModel, ata: Ata): PmaDef | undefined {
+  const s = SPECS[model];
+  if (ata === '32-40')
+    return {
+      holder: 'Rimrock Friction Products',
+      item: 'Brake lining',
+      tag: 'lining',
+      key: 'lining',
+      pn: (ipc) => `RF${ipc}`,
+      eligibility: `Rimrock PMA supplement RF-${s.k}, eligibility list includes ${s.designation}`,
+    };
+  if (ata === '29-10')
+    return {
+      holder: 'Pacific Filtration Co.',
+      item: 'Hydraulic filter element',
+      tag: 'filter',
+      key: 'hyd',
+      pn: (ipc) => `PF${ipc.replace(/^DH-/, '')}`,
+      eligibility: `Pacific Filtration PMA supplement PF-${s.k + 3}, eligibility list includes ${s.designation}`,
+    };
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Torque tables (shared by the task cards and the logbook text)
 // ---------------------------------------------------------------------------
@@ -1211,7 +1271,10 @@ function makeClock(r: Rng, startDay: number, endDay: number, ttStart: number, ut
   return { ttAt, dayAt };
 }
 
-type PlantState = { ata: Ata; day: number; stc: string; def: PlantDef; alt: Alteration };
+/** stc: the STC number; field: '' (basis holds the STC whose data the field approval used) */
+type PlantState = { ata: Ata; day: number; via: 'stc' | 'field'; stc: string; basis: string; def: PlantDef; alt: Alteration };
+/** the last replacement of one part used an FAA-PMA part */
+type PmaState = { ata: Ata; day: number; def: PmaDef; pn: string; replaces: string };
 
 /** everything the logbook text needs to know about the airframe's configuration over time */
 type Ctx = {
@@ -1223,6 +1286,7 @@ type Ctx = {
   clock: Clock;
   alts: Alteration[];
   plant?: PlantState;
+  pma?: PmaState;
 };
 
 const envAt = (c: Ctx, ata: Ata, day: number): Env => ({ snB: c.snB[ata], postSb: c.sbDay[ata] !== undefined && day >= c.sbDay[ata]! });
@@ -1230,6 +1294,7 @@ const figAt = (c: Ctx, ata: Ata, day: number) => buildFigure(c.m, ata, envAt(c, 
 const pnAt = (c: Ctx, ata: Ata, day: number, tag: string) => rowFor(figAt(c, ata, day), tag)!.pn;
 const plantedAt = (c: Ctx, ata: Ata, day: number) => (c.plant && c.plant.ata === ata && day >= c.plant.day ? c.plant : undefined);
 const plantPn = (p: PlantState, tag: string) => p.def.rows.find((x) => x.tag === tag)?.pn;
+const pmaAt = (c: Ctx, ata: Ata, day: number) => (c.pma && c.pma.ata === ata && day === c.pma.day ? c.pma : undefined);
 const tq = (t: { lo: number; hi: number; unit: string }) => `${t.lo}-${t.hi} ${t.unit}`;
 
 // ---------------------------------------------------------------------------
@@ -1244,11 +1309,13 @@ type Ev = { day: number; book: LogBook; kind: LogKind; ata?: string; key: string
 
 const bookFor = (ata: string): LogBook => (ata.startsWith('61') ? 'propeller' : /^(7[1-9]|8[0-5])/.test(ata) ? 'engine' : 'airframe');
 const mm = (c: Ctx, task: string) => `IAW ${c.s.family} MM ${task}`;
-const icaRef = (p: PlantState) => `IAW ${p.def.icaDoc} (STC ${p.stc})`;
+/** how a record cites the approval the planted assembly rests on */
+const approvalCite = (p: PlantState) => (p.via === 'stc' ? `STC ${p.stc}` : `Form 337 dated ${fmtDate(p.alt.form337)} (field approval)`);
+const icaRef = (p: PlantState) => (p.via === 'stc' ? `IAW ${p.def.icaDoc} (STC ${p.stc})` : `IAW ICA attached to ${approvalCite(p)}`);
 
 function adText(c: Ctx, day: number, ad: AdDef, tt: number): string {
   const p = IPC_ATAS.includes(ad.ata as Ata) ? plantedAt(c, ad.ata as Ata, day) : undefined;
-  if (p) return `${ad.id} N/A: ${p.def.removed} per STC ${p.stc}.`;
+  if (p) return `${ad.id} N/A: ${p.def.removed} per ${approvalCite(p)}.`;
   return ad.every ? `${ad.id} (${ad.subject}) complied with, next due ${hrs(tt + ad.every)} TT.` : `${ad.id} (${ad.subject}) complied with.`;
 }
 
@@ -1433,6 +1500,13 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
         const env = envAt(cx, '32-40', day);
         const fig = buildFigure(m, '32-40', env);
         const lining = rowFor(fig, 'lining')!.pn;
+        const q = pmaAt(cx, '32-40', day);
+        if (q)
+          return {
+            text: `Brake linings worn to 0.100 in. Replaced LH and RH main brake linings with FAA-PMA P/N ${q.pn} (${q.def.holder}; replaces ${lining}; ${q.def.eligibility}), riveted with P/N ${rowFor(fig, 'rivet')!.pn}. Discs measured within limits. Back plate bolts torqued ${tq(torqueOf(m, '32-40', env, 'backPlateBolt'))}. Linings conditioned per MM.`,
+            ref: `${mm(cx, '32-40-02')}; FAA-PMA ${q.pn}`,
+            pns: [{ on: q.pn }],
+          };
         return {
           text: `Brake linings worn to 0.100 in. Replaced LH and RH main brake linings with P/N ${lining}, riveted with P/N ${rowFor(fig, 'rivet')!.pn}. Discs measured within limits. Back plate bolts torqued ${tq(torqueOf(m, '32-40', env, 'backPlateBolt'))}. Linings conditioned per MM.`,
           ref: mm(cx, '32-40-02'),
@@ -1542,6 +1616,13 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
         const env = envAt(cx, '29-10', day);
         const fig = buildFigure(m, '29-10', env);
         const filter = rowFor(fig, 'filter')!.pn;
+        const q = pmaAt(cx, '29-10', day);
+        if (q)
+          return {
+            text: `Hydraulic power pack serviced: filter element replaced with FAA-PMA P/N ${q.pn} (${q.def.holder}; replaces ${filter}; ${q.def.eligibility}), bowl O-ring P/N ${rowFor(fig, 'bowlOring')!.pn}; bowl torqued ${tq(torqueOf(m, '29-10', env, 'filterBowl'))} and safety wired. Reservoir filled to FULL with MIL-PRF-5606. Gear swing on jacks normal, pump run ${rng(day).int(6, 9)} s.`,
+            ref: `${mm(cx, '29-10-01')}; FAA-PMA ${q.pn}`,
+            pns: [{ on: q.pn }],
+          };
         return {
           text: `Hydraulic power pack serviced: filter element replaced with P/N ${filter}, bowl O-ring P/N ${rowFor(fig, 'bowlOring')!.pn}; bowl torqued ${tq(torqueOf(m, '29-10', env, 'filterBowl'))} and safety wired. Reservoir filled to FULL with MIL-PRF-5606. Gear swing on jacks normal, pump run ${rng(day).int(6, 9)} s.`,
           ref: mm(cx, '29-10-01'),
@@ -1611,6 +1692,13 @@ function componentEvents(c: Ctx, r: (tag: string) => Rng, startDay: number, endD
 export type AircraftOpts = {
   /** plant exactly one logbook-recorded STC that replaced this assembly */
   plant?: Ata;
+  /**
+   * how the planted part got there: 'stc' (default), 'field' (the same kit on a
+   * field-approved Form 337), or 'pma' (the last replacement used an FAA-PMA
+   * part; 32-40 linings and 29-10 filter elements only, and only when the log
+   * has such a replacement: otherwise `plant` stays unset).
+   */
+  via?: PlantVia;
 };
 
 const FIG_SB_TAGS: Record<Ata, string[]> = {
@@ -1745,9 +1833,10 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
       return a;
     });
 
-  // the planted case: one STC that replaced an IPC assembly
+  // the planted case: one STC (or the same kit on a field-approved 337) that replaced an IPC assembly
   let plant: PlantState | undefined;
-  if (opts.plant) {
+  const via: PlantVia = opts.via ?? 'stc';
+  if (opts.plant && via !== 'pma') {
     const ata = opts.plant;
     const pr = R(`plant:${ata}`);
     let lo = startDay + Math.round(span * 0.15);
@@ -1757,30 +1846,34 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
     const day = pr.int(lo, Math.max(lo, hi));
     const def = plantDef(m, ata);
     const stc = stcNumber(pr);
+    const field = via === 'field';
+    const d337 = fmtDate(isoOf(day));
     const alt: Alteration = {
       id: 'ALT-P',
-      kind: 'stc',
-      stc,
+      kind: field ? 'field' : 'stc',
       holder: def.holder,
       title: def.title,
       ata,
       date: isoOf(day),
       tt: ttOf(day),
       form337: isoOf(day),
-      ica: def.icaDoc,
+      ica: field ? `ICA attached to Form 337 dated ${d337}` : def.icaDoc,
       displaces: ata,
       parts: def.rows.map((x) => rowFrom(x, { snB: true, postSb: true })),
       icaNotes: def.icaNotes,
       weightLb: def.weightLb,
     };
-    plant = { ata, day, stc, def, alt };
+    if (!field) alt.stc = stc;
+    plant = { ata, day, via, stc: field ? '' : stc, basis: stc, def, alt };
     alterations.push(alt);
     const w = `${def.weightLb > 0 ? '+' : ''}${def.weightLb} lb`;
     evs.push({
-      day, book: 'airframe', kind: 'stc', ata, key: 'plant', who: 'ia',
+      day, book: bookFor(ata), kind: 'stc', ata, key: 'plant', who: 'ia',
       body: (cx) => ({
-        text: `Removed ${def.off(figAt(cx, ata, day - 1))}. Installed ${def.on} IAW STC ${stc} (${def.holder}) and ${def.icaDoc}. Weight and balance revised (${w}), equipment list updated, ICA inserted in aircraft records. See FAA Form 337 dated ${fmtDate(alt.form337)}.`,
-        ref: `per STC ${stc}, Form 337 dated ${fmtDate(alt.form337)}`,
+        text: field
+          ? `Removed ${def.off(figAt(cx, ata, day - 1))}. Installed ${def.on} IAW FAA Form 337 dated ${d337}, field approved by the Honolulu FSDO (block 3). Data: ${def.holder} STC ${stc} data used as the basis (${s.designation} is not on the STC approved model list), with DER-approved data on FAA Form 8110-3. Weight and balance revised (${w}), equipment list updated, ICA attached to the Form 337 and inserted in aircraft records.`
+          : `Removed ${def.off(figAt(cx, ata, day - 1))}. Installed ${def.on} IAW STC ${stc} (${def.holder}) and ${def.icaDoc}. Weight and balance revised (${w}), equipment list updated, ICA inserted in aircraft records. See FAA Form 337 dated ${d337}.`,
+        ref: field ? `per FAA Form 337 (field approval) dated ${d337}` : `per STC ${stc}, Form 337 dated ${d337}`,
         pns: [{ off: rowFor(figAt(cx, ata, day - 1), def.tag)?.pn, on: def.rows.find((x) => x.tag === def.tag)!.pn }],
       }),
     });
@@ -1792,6 +1885,24 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
   // inspections, oil, components, checks and squawks
   const ins = inspectionEvents(ctx, R('inspections'), startDay, asOfDay, ttStart);
   evs.push(...ins.evs, ...oilEvents(ctx, R('oil'), ins.insp, asOfDay), ...componentEvents(ctx, R, startDay, asOfDay, ttStart));
+
+  // the PMA case: the last replacement of that part in these books used an FAA-PMA part
+  if (opts.plant && via === 'pma') {
+    const ata = opts.plant;
+    const def = pmaDef(m, ata);
+    // an SB that changes the part (32-40 linings) must be behind it, or the SB set is what is installed
+    const sd = def && FIG_SB_TAGS[ata].includes(def.tag) ? ctx.sbDay[ata] : undefined;
+    const last = def
+      ? evs
+          .filter((e) => e.key === def.key && e.ata === ata && e.day >= startDay && e.day <= asOfDay && (sd === undefined || e.day > sd))
+          .sort((a, b) => a.day - b.day)
+          .pop()
+      : undefined;
+    if (def && last) {
+      const replaces = pnAt(ctx, ata, last.day, def.tag);
+      ctx.pma = { ata, day: last.day, def, pn: def.pn(replaces), replaces };
+    }
+  }
 
   // airworthiness directives
   const adr = R('ads');
@@ -1822,7 +1933,7 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
       method: ad.every ? 'recurring' : 'one-time',
       last: { date: isoOf(last.day), tt: r1(last.tt) },
       note: na
-        ? `N/A since ${fmtDate(isoOf(na.day))}: assembly replaced per STC ${na.stc}`
+        ? `N/A since ${fmtDate(isoOf(na.day))}: assembly replaced per ${approvalCite(na)}`
         : ad.every
           ? `Recurring every ${ad.every} hr in service`
           : 'One-time; no repetitive action',
@@ -1893,18 +2004,42 @@ export function aircraftOf(islandSeed: number, assetId: string, model: string, o
   if (plant) {
     const entry = log.find((e) => e.id.endsWith('-plant'))!;
     const current = buildFigure(m, plant.ata, envAt(ctx, plant.ata, asOfDay));
+    // later records cite the STC number, or for a field approval the 337 by its date
+    const cite = plant.via === 'stc' ? plant.stc : `Form 337 dated ${fmtDate(plant.alt.form337)}`;
     ac.plant = {
       ata: plant.ata,
+      via: plant.via,
+      ref: approvalCite(plant),
       alterationId: plant.alt.id,
       stc: plant.stc,
       holder: plant.def.holder,
-      ica: plant.def.icaDoc,
+      ica: plant.alt.ica,
       form337: plant.alt.form337,
       entryId: entry.id,
-      laterEntryIds: log.filter((e) => e.date > entry.date && (e.text.includes(plant!.stc) || e.ref.includes(plant!.stc))).map((e) => e.id),
+      laterEntryIds: log.filter((e) => e.date > entry.date && (e.text.includes(cite) || e.ref.includes(cite))).map((e) => e.id),
       item: plant.def.item,
       ipcPn: rowFor(current, plant.def.tag)!.pn,
       neededPn: plant.def.rows.find((x) => x.tag === plant!.def.tag)!.pn,
+    };
+    if (plant.via === 'field') ac.plant.basisStc = plant.basis;
+  } else if (ctx.pma) {
+    const q = ctx.pma;
+    const entry = log.find((e) => e.date === isoOf(q.day) && e.ata === q.ata && e.pns?.some((x) => x.on === q.pn))!;
+    const current = buildFigure(m, q.ata, envAt(ctx, q.ata, asOfDay));
+    ac.plant = {
+      ata: q.ata,
+      via: 'pma',
+      ref: `FAA-PMA ${q.pn}`,
+      alterationId: '',
+      stc: '',
+      holder: q.def.holder,
+      ica: q.def.eligibility,
+      form337: '',
+      entryId: entry.id,
+      laterEntryIds: [],
+      item: q.def.item,
+      ipcPn: rowFor(current, q.def.tag)!.pn,
+      neededPn: q.pn,
     };
   }
   return ac;
@@ -1995,24 +2130,27 @@ export function findPart(ac: Aircraft, pn: string): PartHit {
   };
 }
 
+/** the logbook entry that recorded an alteration's installation */
+const installEntry = (ac: Aircraft, alt: Alteration) => ac.log.find((e) => e.kind === 'stc' && e.date === alt.date && e.ata === alt.ata);
+
 /**
  * Where the approval to install `pn` comes from, the way the mechanic works it:
  * the IPC first; if the part "does not exist" there, the logbooks for the
- * alteration that put it on the airplane, then engineering approval on that data.
+ * alteration that put it on the airplane (STC or field-approved 337), then
+ * engineering approval on that data. An FAA-PMA part logged at its last
+ * replacement is approved by its PMA eligibility.
  */
 export function approvalBasis(
   ac: Aircraft,
   ata: Ata | string,
   pn: string,
-): { basis: 'ipc' | 'ipc-not-effective' | 'alteration' | 'none'; alteration?: Alteration; entry?: LogEntry } {
+): { basis: 'ipc' | 'ipc-not-effective' | 'alteration' | 'pma' | 'none'; alteration?: Alteration; entry?: LogEntry } {
   const a = ataOf(ata);
   const rows = ipcFor(ac, a).rows.filter((r) => r.pn === pn);
   if (rows.some((r) => r.applies)) return { basis: 'ipc' };
   const alt = ac.alterations.find((x) => x.displaces === a && x.parts?.some((r) => r.pn === pn));
-  if (alt) {
-    const entry = ac.log.find((e) => e.kind === 'stc' && alt.stc !== undefined && e.ref.includes(alt.stc));
-    return { basis: 'alteration', alteration: alt, entry };
-  }
+  if (alt) return { basis: 'alteration', alteration: alt, entry: installEntry(ac, alt) };
+  if (ac.plant?.via === 'pma' && ac.plant.ata === a && ac.plant.neededPn === pn) return { basis: 'pma', entry: ac.log.find((e) => e.id === ac.plant!.entryId) };
   if (rows.length) return { basis: 'ipc-not-effective' };
   return { basis: 'none' };
 }
@@ -2021,7 +2159,7 @@ export type EngineeringRequest = {
   ata: Ata | string;
   /** the part to install */
   pn: string;
-  /** approved data the request cites */
+  /** approved data the request cites: an STC number, or '' / "FIELD" / "337" for a field-approved Form 337 */
   stc: string;
   /** Form 337 date, ISO or MM/DD/YYYY */
   form337: string;
@@ -2029,21 +2167,30 @@ export type EngineeringRequest = {
   entryId: string;
 };
 
+const isoDate = (d: string) => (d.includes('/') ? d.replace(/^(\d\d)\/(\d\d)\/(\d{4})$/, '$3-$1-$2') : d);
+
 /** Engineering's review of a request to install a part the IPC does not list. */
 export function reviewRequest(ac: Aircraft, req: EngineeringRequest): { approved: boolean; problems: string[] } {
   const problems: string[] = [];
   const a = ataOf(req.ata);
   const basis = approvalBasis(ac, a, req.pn);
   if (basis.basis === 'ipc') problems.push('Part is in the IPC for this aircraft: no engineering approval needed.');
-  const alt = ac.alterations.find((x) => x.stc === req.stc.trim().toUpperCase());
-  if (!alt) problems.push(`No STC ${req.stc} in this aircraft's records.`);
-  else {
-    if (alt.ata !== a) problems.push(`STC ${alt.stc} does not cover ATA ${a}.`);
+  const cited = req.stc.trim().toUpperCase();
+  const d = isoDate(req.form337.trim());
+  const fieldCite = !cited || /337|FIELD/.test(cited);
+  const alt = fieldCite ? ac.alterations.find((x) => x.kind === 'field' && x.form337 === d) : ac.alterations.find((x) => x.stc === cited);
+  if (!alt) {
+    if (fieldCite) problems.push(`No field-approved Form 337 dated ${fmtDate(d)} in this aircraft's records.`);
+    else if (ac.plant?.basisStc === cited)
+      problems.push(`STC ${cited} does not list ${ac.designation} on its approved model list: this airplane's approval is the field-approved Form 337.`);
+    else problems.push(`No STC ${req.stc} in this aircraft's records.`);
+  } else {
+    const name = alt.stc ? `STC ${alt.stc}` : `Form 337 dated ${fmtDate(alt.form337)}`;
+    if (alt.ata !== a) problems.push(`${name} does not cover ATA ${a}.`);
     if (!alt.parts?.some((r) => r.pn === req.pn)) problems.push(`P/N ${req.pn} is not in the ${alt.ica} parts list.`);
-    const d = req.form337.includes('/') ? req.form337.replace(/^(\d\d)\/(\d\d)\/(\d{4})$/, '$3-$1-$2') : req.form337;
     if (d !== alt.form337) problems.push(`Form 337 date does not match the one on file (${fmtDate(alt.form337)}).`);
     const e = ac.log.find((x) => x.id === req.entryId);
-    if (!e || !(e.text.includes(alt.stc!) || e.ref.includes(alt.stc!)) || e.date !== alt.date) problems.push('Logbook entry cited does not record the installation of this STC.');
+    if (!e || e.id !== installEntry(ac, alt)?.id) problems.push('Logbook entry cited does not record the installation of this alteration.');
   }
   return { approved: problems.length === 0, problems };
 }

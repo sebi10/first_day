@@ -1,3 +1,4 @@
+import type { Aircraft } from '../sim/aircraft';
 import type { Fx } from '../ui/feedback';
 
 export type PuzzleId =
@@ -16,7 +17,9 @@ export type PuzzleId =
   | 'meter'
   | 'conduit'
   | 'reconcile'
-  | 'invoice';
+  | 'invoice'
+  // paperwork
+  | 'logbook';
 
 export type PuzzleRole = 'mech' | 'elec' | 'fin';
 
@@ -35,6 +38,8 @@ export interface PuzzleContext {
   assetName?: string;
   /** the work-order kind that launched it (e.g. "alternator", "cylinder") so a puzzle can pick the real procedure */
   job?: string;
+  /** the plane's paper trail (src/sim/aircraft.ts aircraftOf): identity, logbooks, IPC, alterations */
+  aircraft?: Aircraft;
 }
 
 export interface PuzzleParams {
