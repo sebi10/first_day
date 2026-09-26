@@ -74,23 +74,28 @@ describe('cash forecast', () => {
 });
 
 describe('crack hunt', () => {
-  it('cracks start at holes; tagging each crack is perfect; tagging scratches is not', () => {
+  it('cracks start at hole walls; circling each crack is perfect; circling decoys is not', () => {
     for (const s of seeds) {
       const m = generateCrack(s, 4);
-      const cracks = m.indications.filter((i) => i.kind === 'crack');
-      for (const c of cracks) expect(Math.min(...m.holes.map((h) => Math.hypot(h.x - c.pts[0].x, h.y - c.pts[0].y)))).toBeLessThan(0.04);
-      const tags = cracks.map((c) => c.pts[2]);
-      expect(scoreCrack(m, tags, m.allowedSweeps).score).toBe(1);
-      const scratches = m.indications.filter((i) => i.kind === 'scratch').map((sc) => sc.pts[0]);
-      expect(scoreCrack(m, scratches, m.allowedSweeps).score).toBeLessThanOrEqual(0.1);
+      const idx = (k: 'crack' | 'decoy') => m.indications.map((ind, i) => ((ind.kind === 'crack') === (k === 'crack') ? i : -1)).filter((i) => i >= 0);
+      for (const i of idx('crack')) {
+        const c = m.indications[i];
+        if (c.riser === 'hole') expect(Math.min(...m.holes.map((h) => Math.abs(Math.hypot(h.x - c.pts[0].x, h.y - c.pts[0].y) - h.r)))).toBeLessThan(0.01);
+      }
+      expect(scoreCrack(m, idx('crack')).score).toBe(1);
+      expect(scoreCrack(m, idx('decoy')).score).toBe(0);
     }
   });
-  it('harder with tier; decoys look real from tier 3', () => {
+  it('harder with tier; decoys look as bright as cracks from tier 3', () => {
     expect(generateCrack(1, 5).cracks).toBeGreaterThan(generateCrack(1, 1).cracks);
-    expect(generateCrack(1, 5).battery).toBeLessThan(generateCrack(1, 1).battery);
-    expect(generateCrack(1, 2).decoyDim).toBeLessThan(1);
-    expect(generateCrack(1, 3).decoyDim).toBe(1);
-    expect(generateCrack(1, 3).teach).toBe(false);
+    expect(generateCrack(1, 5).indications.length).toBeGreaterThan(generateCrack(1, 1).indications.length);
+    const glow = (m: ReturnType<typeof generateCrack>, crack: boolean) => Math.max(...m.indications.filter((i) => (i.kind === 'crack') === crack).map((i) => i.glow));
+    const t2 = generateCrack(1, 2);
+    expect(glow(t2, false)).toBeLessThan(glow(t2, true));
+    const t3 = generateCrack(1, 3);
+    expect(glow(t3, false)).toBeGreaterThanOrEqual(glow(t3, true) * 0.85);
+    expect(glow(t3, true)).toBeLessThan(glow(t2, true));
+    expect(t3.teach).toBe(false);
   });
 });
 
