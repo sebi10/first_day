@@ -184,6 +184,7 @@ function modelFromName(name?: string): PlaneModel | undefined {
 
 const upaOf = (r: IpcRow) => (typeof r.upa === 'number' ? r.upa : 1);
 export const baseItem = (item: string) => item.replace(/A$/, '');
+const lcFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /** Work one callout through the book: the row that fits, then NP / SUPSD BY to what can be ordered. */
 export function solveItem(fig: IpcFigure, item: string, mult: number) {
@@ -222,6 +223,12 @@ export function solveItem(fig: IpcFigure, item: string, mult: number) {
 
 export function difficultyOf(f: IpcFeatures): number {
   return (f.effAB ? 1 : 0) + (f.effCD ? 1 : 0) + f.sup + (f.np ? 2 : 0) + (f.set ? 1 : 0) + (f.mult ? 1 : 0) + (f.manual ? 1 : 0);
+}
+
+/** "UPA 2 × 2 (AMM: replace the linings on both main wheels together)" */
+function qtyWhy(m: Pick<IpcModel, 'mult' | 'multWhy'>, e: Expected): string {
+  const upa = e.qty / m.mult;
+  return `UPA ${upa}${m.mult > 1 ? ` × ${m.mult} (AMM: ${lcFirst((m.multWhy ?? 'both sides').replace(/\.$/, ''))})` : ''}`;
 }
 
 /** difficulty band each tier draws from */
@@ -325,11 +332,11 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
     const p = ac.plant!;
     const row = alteration.parts!.find((x) => x.pn === p.neededPn)!;
     expect = [{ pn: row.pn, qty: upaOf(row) * mult, item: row.item, nomen: row.nomen, accept: [row.pn] }];
-    why.push(`${ac.registration} carries STC ${p.stc} (${p.holder}), Form 337 dated ${fmtDate(p.form337)}: ${alteration.title.toLowerCase()}.`);
-    why.push(`The IPC lists ${p.ipcPn}; the ${p.item.toLowerCase()} really installed is ${p.neededPn}, listed only in ${p.ica}.`);
+    why.push(`${ac.registration} carries STC ${p.stc} (${p.holder}), Form 337 dated ${fmtDate(p.form337)}: ${lcFirst(alteration.title)}.`);
+    why.push(`The IPC lists ${p.ipcPn}; the ${lcFirst(p.item)} really installed is ${p.neededPn}, listed only in ${p.ica}.`);
     why.push(`Engineering approves it on the STC, the 337 and the logbook entry of ${fmtDate(alteration.date)}.`);
   } else {
-    why.push(`The squawked part is item ${s.start.item}, ${s.start.pn} (${s.start.nomen.toLowerCase()})${effLine(s.start)}.`);
+    why.push(`The squawked part is item ${s.start.item}, ${s.start.pn} (${s.start.nomen})${effLine(s.start)}.`);
     for (let i = 1; i < s.pathRows.length; i++) {
       const prev = s.pathRows[i - 1];
       const row = s.pathRows[i];
@@ -338,9 +345,7 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
     }
     if (s.companion) why.push(`Code 3: order it as a set with item ${s.companion.item}, ${s.companion.pn}.`);
   }
-  const e0 = expect[0];
-  const upa = e0.qty / mult;
-  why.push(`Qty ${e0.qty}: UPA ${upa}${mult > 1 ? ` × ${mult} (AMM: ${(multWhy ?? 'both sides').replace(/\.$/, '').toLowerCase()})` : ''}.`);
+  why.push(`Qty ${expect[0].qty}: ${qtyWhy({ mult, multWhy }, expect[0])}.`);
 
   return {
     tier: t,
@@ -427,18 +432,18 @@ export function scoreIpc(m: IpcModel, a: IpcAttempt): IpcScore {
     }
     hit[i] = li >= 0;
     if (li < 0) {
-      notes.push({ ok: false, text: `Needed ${e.pn} × ${e.qty} (${m.planted ? 'ICA' : 'Fig ' + m.fig.fig} item ${e.item}, ${e.nomen.toLowerCase()})` });
+      notes.push({ ok: false, text: `Needed ${e.pn} × ${e.qty} (${m.planted ? 'ICA' : 'Fig ' + m.fig.fig} item ${e.item}, ${e.nomen})` });
       return;
     }
     used.add(li);
     const l = a.lines[li];
     pn += w[i] * credit;
     if (credit < 1) notes.push({ ok: false, text: `${l.pn} is superseded by ${e.pn} (code 1, two-way): legal, but order the current P/N` });
-    else notes.push({ ok: true, text: `${l.pn}: ${e.nomen.toLowerCase()}${i > 0 ? ' (the code-3 set)' : ''}` });
+    else notes.push({ ok: true, text: `${l.pn}: ${e.nomen}${i > 0 ? ' (the code-3 set)' : ''}` });
     if (l.qty === e.qty) {
       qty += 1 / m.expect.length;
       notes.push({ ok: true, text: `Qty ${l.qty}` });
-    } else notes.push({ ok: false, text: `Qty ${l.qty}: needs ${e.qty} (${m.why[m.why.length - 1].replace(/^Qty \d+: /, '').replace(/\.$/, '')})` });
+    } else notes.push({ ok: false, text: `Qty ${l.qty}: needs ${e.qty} (${qtyWhy(m, e)})` });
   });
   let extras = 0;
   a.lines.forEach((l, j) => {
@@ -509,11 +514,20 @@ type Look = { body: string; face: string; line: string; hole: string; lw: number
 
 const K = 0.17; // perspective: ellipse width / height for faces seen at an angle
 
+/** '#rrggbb' or 'rgb(r,g,b)' -> [r, g, b] */
+function rgbOf(c: string): number[] {
+  if (c.startsWith('#')) {
+    const n = parseInt(c.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  return (c.match(/\d+/g) ?? ['0', '0', '0']).slice(0, 3).map(Number);
+}
+
 function mix(a: string, b: string, t: number): string {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
-  const ch = (s: number) => Math.round(((pa >> s) & 255) * (1 - t) + ((pb >> s) & 255) * t);
-  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+  const pa = rgbOf(a);
+  const pb = rgbOf(b);
+  const ch = (i: number) => Math.round(pa[i] * (1 - t) + pb[i] * t);
+  return `rgb(${ch(0)},${ch(1)},${ch(2)})`;
 }
 
 const MATS: Record<Mat, [string, string]> = {
@@ -621,7 +635,7 @@ function block(ctx: CanvasRenderingContext2D, b: Box, lk: Look, depth = 0.22) {
   paint(ctx, lk.body, lk);
   ctx.beginPath();
   ctx.rect(fx, fy, fw, fh);
-  paint(ctx, mix(lk.face.startsWith('#') ? lk.face : '#e9edee', '#c3cbce', 0.35), lk);
+  paint(ctx, mix(lk.face, lk.body, 0.35), lk);
   return { fx, fy, fw, fh, d };
 }
 
@@ -1070,7 +1084,10 @@ const CSS = `
 .ipcz .vd.on{opacity:1;pointer-events:auto}
 .ipcz .vc{width:100%;max-width:380px;background:${C.white};border-radius:18px;padding:16px 16px 14px;box-shadow:0 10px 30px rgba(31,42,48,.3);transform:scale(.92);transition:transform .25s cubic-bezier(.2,1.4,.4,1)}
 .ipcz .vd.on .vc{transform:none}
-.ipcz .istamp{display:inline-block;font-weight:900;font-size:22px;letter-spacing:2px;border:3px solid currentColor;border-radius:8px;padding:2px 10px;transform:rotate(-4deg);margin:2px 0 10px}
+.ipcz .istamp{display:inline-block;font-weight:900;font-size:22px;letter-spacing:2px;border:3px solid currentColor;border-radius:8px;padding:2px 10px;transform:rotate(-4deg);margin:2px 0 10px;animation:ipcstamp .32s cubic-bezier(.3,1.5,.5,1) both .08s}
+@keyframes ipcstamp{0%{transform:scale(1.9) rotate(-10deg);opacity:0}100%{transform:scale(1) rotate(-4deg);opacity:1}}
+.ipcz.rm .istamp{animation:none}
+.ipcz .fly{position:absolute;z-index:11;pointer-events:none;font-family:${MONO};font-weight:800;font-size:12.5px;background:${C.white};color:${C.seaDeep};border-radius:8px;padding:4px 8px;box-shadow:0 4px 14px rgba(31,42,48,.3);white-space:nowrap}
 .ipcz .vn{display:flex;gap:8px;font-size:13px;font-weight:700;line-height:1.35;margin:5px 0}
 .ipcz .vn i{flex:none;font-style:normal;font-weight:900;width:16px}
 .ipcz .vwhy{margin-top:10px;padding-top:8px;border-top:1px dashed rgba(31,42,48,.2);font-size:11.5px;color:${C.inkSoft};font-weight:600;line-height:1.4}
@@ -1110,7 +1127,6 @@ export const ipc: PuzzleDef = {
     let sheet: null | { kind: 'amm' | 'rec' | 'ica'; tab?: 'sb' | 'alt' | 'log'; citeMode?: boolean } = null;
     let logQuery = '';
     let logChip: 'all' | 'ata' | 'sb' | 'stc' = 'all';
-    let visitedRecords = false;
     let flourishAt = 0;
 
     // ---- DOM
@@ -1237,7 +1253,7 @@ export const ipc: PuzzleDef = {
       if (!m.teach) return '';
       const t: string[] = [];
       if (r.upa === 'RF') t.push('RF: the installation this figure shows, for reference. Order the parts under it.');
-      if (r.np) t.push(`NP: not sold on its own. ${m.tier <= 1 ? `Order what the note names (${r.notes.find((n) => n.startsWith('NP'))!.replace('NP — ', '').toLowerCase()}), the one whose EFF fits.` : 'Order the next higher assembly or kit the note names.'}`);
+      if (r.np) t.push(`NP: not sold on its own. ${m.tier <= 1 ? `Order what the note names (${r.notes.find((n) => n.startsWith('NP'))!.replace('NP — ', '')}), the one whose EFF fits.` : 'Order the next higher assembly or kit the note names.'}`);
       if (r.supsdBy) {
         const c = r.supsdBy.code;
         t.push(`Code ${c}: ${INTCHG[c]} ${c === 3 ? 'Order the new part together with the set the note names.' : `Order the current P/N, ${r.supsdBy.pn}.`}`);
@@ -1302,13 +1318,15 @@ export const ipc: PuzzleDef = {
     function selectItem(item: string) {
       selItem = item;
       const vars = fig.rows.map((r, i) => ({ r, i })).filter((x) => baseItem(x.r.item) === item);
-      // land on the first variant; the whole group lights up
-      selRow = vars[0]?.i ?? -1;
+      // land on the first variant (the whole group lights up); where effectivity is pre-marked
+      // for teaching, land on the one that fits
+      const land = (m.premarked && vars.find((x) => x.r.applies && !x.r.alt)) || vars[0];
+      selRow = land?.i ?? -1;
       refreshList();
       coach();
       if (selRow >= 0) scrollToRow(selRow);
       const nm = vars[0]?.r.nomen;
-      host.status(nm ? `Item ${item}: ${nm.toLowerCase()}` : `Item ${item}`);
+      host.status(nm ? `Item ${item}: ${nm}` : `Item ${item}`);
     }
 
     // ---- order slip
@@ -1317,7 +1335,7 @@ export const ipc: PuzzleDef = {
       const lh = lines
         .map(
           (l, i) => `<div class="ln${l.src === 'ica' ? ' ica' : ''}">
-            <div class="lpn"><b>${esc(l.pn)}</b><small>${l.src === 'ica' ? 'ICA' : `Fig ${fig.fig}`}-${esc(l.item)} · ${esc(l.nomen.toLowerCase())}</small></div>
+            <div class="lpn"><b>${esc(l.pn)}</b><small>${l.src === 'ica' ? 'ICA' : `Fig ${fig.fig}`}-${esc(l.item)} · ${esc(l.nomen)}</small></div>
             <div class="qs"><button data-q="-1" data-l="${i}" aria-label="Fewer">−</button><span>${l.qty}</span><button data-q="1" data-l="${i}" aria-label="More">+</button></div>
             <button class="lx" data-rm="${i}" aria-label="Remove">✕</button>
           </div>`,
@@ -1336,7 +1354,34 @@ export const ipc: PuzzleDef = {
         ${apr}`;
     }
 
-    function addLine(src: 'ipc' | 'ica', r: IpcRow) {
+    /** the P/N flies from where it was picked into its line on the slip */
+    function fly(pn: string, from: DOMRect | undefined) {
+      if (rm || !from) return;
+      const lineEl = [...slip.querySelectorAll<HTMLElement>('.ln b')].find((b) => b.textContent === pn);
+      if (!lineEl) return;
+      const to = lineEl.getBoundingClientRect();
+      const base = root.getBoundingClientRect();
+      const chip = document.createElement('div');
+      chip.className = 'fly';
+      chip.textContent = pn;
+      chip.style.left = `${from.left - base.left}px`;
+      chip.style.top = `${from.top - base.top}px`;
+      root.appendChild(chip);
+      const dx = to.left - from.left;
+      const dy = to.top - from.top;
+      const an = chip.animate?.(
+        [
+          { transform: 'translate(0,0) scale(1)', opacity: 1 },
+          { transform: `translate(${dx * 0.5}px,${dy * 0.5 - 40}px) scale(1.12)`, opacity: 1, offset: 0.5 },
+          { transform: `translate(${dx}px,${dy}px) scale(0.9)`, opacity: 0.2 },
+        ],
+        { duration: 420, easing: 'cubic-bezier(.3,.7,.4,1)' },
+      );
+      if (an) an.onfinish = () => chip.remove();
+      else chip.remove();
+    }
+
+    function addLine(src: 'ipc' | 'ica', r: IpcRow, from?: DOMRect) {
       if (finished) return;
       const have = lines.find((l) => l.pn === r.pn && l.src === src);
       if (have) {
@@ -1352,6 +1397,7 @@ export const ipc: PuzzleDef = {
       lines.push({ pn: r.pn, qty: 1, src, item: r.item, nomen: r.nomen });
       host.fx.snap();
       refreshSlip();
+      fly(r.pn, from);
       flashSlip();
       coach();
       host.status(`Request: ${lines.map((l) => `${l.pn} ×${l.qty}`).join(' + ')}`);
@@ -1494,7 +1540,6 @@ export const ipc: PuzzleDef = {
           renderLog();
         });
       }
-      if (sheet.kind === 'rec' && sheet.tab === 'alt') visitedRecords = true;
     }
 
     // ---- verdict / reveal
@@ -1519,7 +1564,7 @@ export const ipc: PuzzleDef = {
         refreshSlip();
         showCard(`
           <div class="istamp" style="color:${C.mech}">DOESN’T FIT</div>
-          <div class="vn"><i>!</i><span>At the airplane: the unit installed is ${esc(alt.holder)} P/N ${esc(main.pn)}, ${esc(main.nomen.toLowerCase())}. IPC Fig ${fig.fig} does not list it.</span></div>
+          <div class="vn"><i>!</i><span>At the airplane: the unit installed is ${esc(alt.holder)} P/N ${esc(main.pn)}, ${esc(main.nomen)}. IPC Fig ${fig.fig} does not list it.</span></div>
           <div class="vn"><i>→</i><span>The part does not exist in this book. Check the logged history of this airplane, then get engineering approval.</span></div>
           <div class="vbtns"><button data-act="vclose">Back to the IPC</button><button class="pri" data-act="vlogs">Open the logbooks</button></div>`);
         host.status('Not in the IPC: research the records');
@@ -1954,11 +1999,12 @@ export const ipc: PuzzleDef = {
       const add = t.closest<HTMLElement>('[data-add]');
       if (add) {
         const icaRow = t.closest('.icarows');
+        const from = add.closest('.r')?.querySelector('.rp')?.getBoundingClientRect();
         if (icaRow) {
           const a = ac.alterations.find((x) => x.displaces)!;
-          addLine('ica', a.parts![Number(add.dataset.add)]);
           closeSheet();
-        } else addLine('ipc', fig.rows[Number(add.dataset.add)]);
+          addLine('ica', a.parts![Number(add.dataset.add)], from);
+        } else addLine('ipc', fig.rows[Number(add.dataset.add)], from);
         return;
       }
       const q = t.closest<HTMLElement>('[data-q]');
@@ -2063,7 +2109,6 @@ export const ipc: PuzzleDef = {
     refreshSlip();
     coach();
     host.status(`${ac.registration} · IPC Fig ${fig.fig}`);
-    void visitedRecords;
 
     return {
       timeUp(): PuzzleResult {
