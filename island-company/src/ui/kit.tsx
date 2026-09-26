@@ -1,6 +1,6 @@
 // Small shared UI building blocks.
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { fx } from './feedback';
 import { C } from './theme';
 
@@ -91,11 +91,38 @@ export function TierDots({ tier }: { tier: number }) {
 }
 
 export function Sheet({ open, onClose, children, label }: { open: boolean; onClose(): void; children: ComponentChildren; label: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Phones: the on-screen keyboard covers a bottom sheet (iOS doesn't shrink the
+  // layout viewport), hiding the field you're typing in and the button under it.
+  // Ride above the keyboard using the visual viewport, and keep the focused field in view.
+  useEffect(() => {
+    const el = ref.current;
+    const vv = window.visualViewport;
+    if (!open || !el || !vv) return;
+    const fit = () => {
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      el.style.bottom = kb > 40 ? `${kb}px` : '';
+      el.style.maxHeight = kb > 40 ? `${vv.height - 8}px` : '';
+    };
+    const onFocus = (e: FocusEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.matches('input, textarea')) setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+    };
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+    el.addEventListener('focusin', onFocus);
+    fit();
+    return () => {
+      vv.removeEventListener('resize', fit);
+      vv.removeEventListener('scroll', fit);
+      el.removeEventListener('focusin', onFocus);
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <>
       <div class="scrim" onClick={onClose} />
-      <div class="sheet" role="dialog" aria-label={label}>
+      <div class="sheet" role="dialog" aria-label={label} ref={ref}>
         <div class="grip" />
         {children}
       </div>

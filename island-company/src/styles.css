@@ -684,6 +684,16 @@ h3 {
   overflow: auto;
   animation: slide-up 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+.sheet .sheet-actions {
+  /* the sheet's main button stays reachable however long the sheet gets */
+  position: sticky;
+  bottom: calc(-18px - var(--safe-b));
+  margin: 0 calc(-1 * var(--g)) calc(-18px - var(--safe-b));
+  padding: 10px var(--g) calc(18px + var(--safe-b));
+  background: var(--paper);
+  box-shadow: 0 -12px 14px -12px rgba(31, 42, 48, 0.22);
+  z-index: 1;
+}
 .sheet .grip {
   width: 44px;
   height: 5px;

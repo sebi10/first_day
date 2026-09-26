@@ -1,5 +1,5 @@
 // Start: your islands, new island, join by code, online setup.
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { configBakedIn, saveFirebaseConfig } from '../net/firebase';
 import { onlineAvailable, sessions, storeFor } from '../net/session';
 import type { Mode } from '../net/store';
@@ -163,27 +163,29 @@ function NewIsland({ open, onClose, playerName }: { open: boolean; onClose(): vo
             ))}
           </div>
         )}
-        <Btn
-          block
-          disabled={!role || !island.trim() || busy || (mode === 'online' && !onlineAvailable())}
-          onClick={async () => {
-            if (!role) return;
-            setBusy(true);
-            try {
-              const m: Mode = mode === 'online' ? 'firebase' : 'local';
-              const id = await storeFor(m).create({ name: island.trim(), role, playerName, passAndPlay: mode === 'pp', names: others });
-              sessions.upsert({ id, name: island.trim(), mode: m, role, passAndPlay: mode === 'pp' });
-              fx.flourish();
-              location.hash = `#/i/${id}`;
-            } catch (e) {
-              toast(String((e as Error).message ?? e));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? 'Building…' : 'Found the island'}
-        </Btn>
+        <div class="sheet-actions">
+          <Btn
+            block
+            disabled={!role || !island.trim() || busy || (mode === 'online' && !onlineAvailable())}
+            onClick={async () => {
+              if (!role) return;
+              setBusy(true);
+              try {
+                const m: Mode = mode === 'online' ? 'firebase' : 'local';
+                const id = await storeFor(m).create({ name: island.trim(), role, playerName, passAndPlay: mode === 'pp', names: others });
+                sessions.upsert({ id, name: island.trim(), mode: m, role, passAndPlay: mode === 'pp' });
+                fx.flourish();
+                location.hash = `#/i/${id}`;
+              } catch (e) {
+                toast(String((e as Error).message ?? e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? 'Building…' : 'Found the island'}
+          </Btn>
+        </div>
       </div>
     </Sheet>
   );
@@ -197,6 +199,7 @@ function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: bo
   const [found, setFound] = useState<IslandState | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [seatKey, setSeatKey] = useState('');
+  const seatKeyInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const store = storeFor('firebase');
@@ -236,6 +239,25 @@ function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: bo
     if (open && initial && !found) void find();
   }, [open]);
 
+  const join = async () => {
+    if (!found || !role || busy) return;
+    setBusy(true);
+    try {
+      // the session may have been re-created since the island was found: use the current id
+      const me = await store.uid();
+      const taken = seatState(role) === 'taken';
+      const r = await store.dispatch(found.id, { t: 'join', uid: me, name: playerName, role, reclaim: taken, key: taken ? seatKey : undefined });
+      if (r.error) return toast(r.error);
+      sessions.upsert({ id: found.id, name: found.name, mode: 'firebase', role });
+      fx.flourish();
+      location.hash = `#/i/${found.id}`;
+    } catch (e) {
+      toast(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const seatState = (r: Role) => {
     const p = found?.players[r];
     if (!p) return 'open';
@@ -254,15 +276,40 @@ function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: bo
     >
       <div class="col" style={{ gap: 14 }}>
         <h2>{found ? found.name : 'Join with a code'}</h2>
+        {found && (
+          <span class="label">
+            Island code <b class="code">{found.id}</b> ·{' '}
+            <button
+              class="linkish"
+              onClick={() => {
+                setFound(null);
+                setRole(null);
+              }}
+            >
+              change
+            </button>
+          </span>
+        )}
         {!found && (
           <>
             <div class="field">
               <span class="label">Island code or invite link</span>
-              <input type="text" value={code} placeholder="e.g. 7qk2m9x4ab" autoCapitalize="off" onInput={(e) => setCode((e.target as HTMLInputElement).value)} />
+              <input
+                type="text"
+                value={code}
+                placeholder="e.g. 7qk2m9x4ab"
+                autoCapitalize="off"
+                autoComplete="off"
+                enterKeyHint="search"
+                onInput={(e) => setCode((e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => e.key === 'Enter' && code.trim() && !busy && void find()}
+              />
             </div>
-            <Btn block disabled={!code.trim() || busy} onClick={find}>
-              {busy ? 'Looking…' : 'Find island'}
-            </Btn>
+            <div class="sheet-actions">
+              <Btn block disabled={!code.trim() || busy} onClick={find}>
+                {busy ? 'Looking…' : 'Find island'}
+              </Btn>
+            </div>
           </>
         )}
         {found && (
@@ -296,6 +343,8 @@ function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: bo
                     onClick={() => {
                       fx.tap();
                       setRole(r);
+                      // a taken seat needs its code next: take the player straight there
+                      if (seatState(r) === 'taken') setTimeout(() => seatKeyInput.current?.focus(), 60);
                     }}
                   >
                     <span class="avatar" style={{ ['--tint' as string]: ROLE_TINT[r] }}>
@@ -314,26 +363,25 @@ function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: bo
             {role && seatState(role) === 'taken' && (
               <div class="field">
                 <span class="label">Seat code</span>
-                <input type="text" value={seatKey} maxLength={6} autoCapitalize="off" onInput={(e) => setSeatKey((e.target as HTMLInputElement).value.toLowerCase())} />
+                <input
+                  ref={seatKeyInput}
+                  type="text"
+                  value={seatKey}
+                  maxLength={6}
+                  autoCapitalize="off"
+                  autoComplete="one-time-code"
+                  enterKeyHint="go"
+                  placeholder="6 letters, from Me → Crew and devices"
+                  onInput={(e) => setSeatKey((e.target as HTMLInputElement).value.toLowerCase().trim())}
+                  onKeyDown={(e) => e.key === 'Enter' && seatKey.length === 6 && void join()}
+                />
               </div>
             )}
-            <Btn
-              block
-              disabled={!role || busy || !uid || !playerName || (seatState(role) === 'taken' && seatKey.length !== 6)}
-              onClick={async () => {
-                if (!role || !uid) return;
-                setBusy(true);
-                const taken = seatState(role) === 'taken';
-                const r = await store.dispatch(found.id, { t: 'join', uid, name: playerName, role, reclaim: taken, key: taken ? seatKey : undefined });
-                setBusy(false);
-                if (r.error) return toast(r.error);
-                sessions.upsert({ id: found.id, name: found.name, mode: 'firebase', role });
-                fx.flourish();
-                location.hash = `#/i/${found.id}`;
-              }}
-            >
-              {role && seatState(role) === 'taken' ? 'Link this device' : 'Join'}
-            </Btn>
+            <div class="sheet-actions">
+              <Btn block disabled={!role || busy || !uid || !playerName || (seatState(role) === 'taken' && seatKey.length !== 6)} onClick={join}>
+                {busy ? 'Linking…' : role && seatState(role) === 'taken' ? 'Link this device' : 'Join'}
+              </Btn>
+            </div>
           </>
         )}
       </div>
