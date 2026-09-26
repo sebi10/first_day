@@ -1,14 +1,15 @@
 // Mechanic · Ground power start. Start an aircraft off a ground power cart
 // (GPU) the way the flight manual says: read the external-power placard, set
 // the cart to match, avionics master OFF, battery master as placarded, plug in
-// fully seated, cart ON, check the bus on the voltmeter, start; then cart OFF,
-// unplug, alternator ON, avionics ON. A turbine (tiers 4-5) also needs the
-// cart's current limit set to the placard, fuel in at 12% N1 and an eye on ITT:
-// a weak, slow start runs hot and must be aborted with the fuel lever.
+// fully seated, cart ON, check the volts, start; then cart OFF, unplug,
+// alternator ON, avionics ON. A turbine (tiers 4-5) also needs the cart's
+// current limit set to the placard, fuel in at 12% N1 and an eye on ITT: a weak,
+// slow start runs hot and must be aborted with the fuel lever, dry-motored to
+// clear it, and the starter rested before a second try.
 // Tiers 0-2 print the checklist; from tier 3 it is done from memory, as on the ramp.
 import { hashSeed, rng } from '../sim/rng';
-import { C, backdrop, clamp, ease, fitLabel, label, lerp, loop, markInput, pointer, roundRect, settle, shade, stage, tnum } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { C, FONT, backdrop, clamp, ease, fitLabel, label, lerp, loop, markInput, pointer, roundRect, settle, shade, stage, tnum } from './kit';
+import { PASS, result, type PuzzleDef, type PuzzleResult } from './types';
 
 // ---------------------------------------------------------------------------
 // Model
@@ -17,9 +18,11 @@ import { result, type PuzzleDef, type PuzzleResult } from './types';
 export type GpuKind = 'piston' | 'turbine';
 
 export type GpuAircraft = {
-  id: 'single28' | 'single14' | 'twin28' | 'twin14' | 'turbine';
+  id: 'high28' | 'low14' | 'low28' | 'high14' | 'turbine';
   name: string;
   kind: GpuKind;
+  /** high wing (Cessna-style: the master closes the external power relay) or low wing (Piper-style: start with the master OFF) */
+  wing: 'high' | 'low';
   /** external power placard: system voltage the cart must deliver */
   volts: 14 | 28;
   /** placard: battery master ON (it closes the external power relay) or OFF during a ground power start */
@@ -32,17 +35,47 @@ export type GpuAircraft = {
   gen: 'ALT' | 'GEN';
 };
 
-// Pistons cover every placard combination, so the placard has to be read:
-// Cessna-style ships need the master ON to pull in the external power relay,
-// Piper-style ships start on ground power with the master OFF.
+// Pistons cover every placard combination, so the placard has to be read.
+// High-wing (Cessna-style) ships need the battery master ON to pull in the
+// external power relay, and their POH starts with the whole master (BAT and ALT)
+// ON. Low-wing (Piper-style) ships feed ground power to the battery side of the
+// master contactor: BATT OFF and ALT OFF for the start, so the panel bus (and its
+// voltmeter) stays dead until the master goes ON after the cart is unplugged.
+// Newer ships are 28 V, older ones 14 V.
 const PISTONS: GpuAircraft[] = [
-  { id: 'single28', name: 'Piston single', kind: 'piston', volts: 28, master: 'on', ampMax: 0, battV: 23.2, gen: 'ALT' },
-  { id: 'single14', name: 'Piston single', kind: 'piston', volts: 14, master: 'off', ampMax: 0, battV: 11.6, gen: 'ALT' },
-  { id: 'twin28', name: 'Piston twin', kind: 'piston', volts: 28, master: 'off', ampMax: 0, battV: 23.0, gen: 'ALT' },
-  { id: 'twin14', name: 'Piston twin', kind: 'piston', volts: 14, master: 'on', ampMax: 0, battV: 11.5, gen: 'ALT' },
+  { id: 'high28', name: 'High-wing single', kind: 'piston', wing: 'high', volts: 28, master: 'on', ampMax: 0, battV: 23.2, gen: 'ALT' },
+  { id: 'low14', name: 'Low-wing single', kind: 'piston', wing: 'low', volts: 14, master: 'off', ampMax: 0, battV: 11.6, gen: 'ALT' },
+  { id: 'low28', name: 'Low-wing single', kind: 'piston', wing: 'low', volts: 28, master: 'off', ampMax: 0, battV: 23.0, gen: 'ALT' },
+  { id: 'high14', name: 'High-wing single', kind: 'piston', wing: 'high', volts: 14, master: 'on', ampMax: 0, battV: 11.5, gen: 'ALT' },
 ];
 
+/** the charging system has to be OFF for the start: Piper-style POHs and the turbine (a Cessna-style master starts with ALT and BAT ON) */
+export const altOffForStart = (ac: GpuAircraft) => ac.kind === 'turbine' || ac.master === 'off';
+/** the panel voltmeter is on the main bus: live on ground power only with the battery master ON */
+export const shipMeterLive = (ac: GpuAircraft) => ac.master === 'on';
+
 export type StepId = 'avOff' | 'batt' | 'altOff' | 'cartV' | 'cartA' | 'plug' | 'cartOn' | 'verify' | 'start' | 'cartOff' | 'unplug' | 'altOn' | 'avOn';
+
+/** turbine: the cart's current limit is right from this share of the placard up to the placard */
+export const AMP_FLOOR = 0.9;
+/** turbine: the ITT red line may be touched for a moment in a start, not held (the AFM's 1090 °C for a couple of seconds) */
+export const ITT_HOLD = 1;
+/** turbine: past this the start is a hot start at once */
+export const ITT_INSTANT = 1150;
+/** the ITT only climbs this fast (°C/s) once it is past 900 °C, so a watching mechanic has time to abort */
+const ITT_RISE_CAP = 110;
+/** turbine starter-generator duty: this many seconds running, then it has to rest (the AFM's 30 s on, 60 s off, with the rest shortened for the game) */
+export const STARTER_DUTY = 30;
+const DUTY_COOL = 3;
+/** after an abort, the starter has to be OFF this long before the next try */
+export const STARTER_REST = 5;
+/** after an abort: seconds of dry motoring that clear the residual fuel */
+export const CLEAR_SECS = 4;
+/** after an abort: a relight sooner than this, or with ITT above RELIGHT_ITT, lights into residual fuel */
+export const RELIGHT_WAIT = 12;
+export const RELIGHT_ITT = 200;
+/** seconds with the bus steady on the cart before the needle has been seen (a tap reads it at once) */
+export const LOOK_SECS = 1.5;
 
 export type GpuModel = {
   tier: number;
@@ -83,7 +116,7 @@ export function generateGpu(seed: number, tier: number, tools: string[] = [], ki
   const k: GpuKind = kind ?? (t >= 4 ? 'turbine' : 'piston');
   let ac: GpuAircraft;
   if (k === 'turbine') {
-    ac = { id: 'turbine', name: 'Turbine cargo single', kind: 'turbine', volts: 28, master: 'on', ampMax: r.pick([800, 900, 1000]), battV: 23.4, gen: 'GEN' };
+    ac = { id: 'turbine', name: 'Turbine cargo single', kind: 'turbine', wing: 'high', volts: 28, master: 'on', ampMax: r.pick([800, 900, 1000]), battV: 23.4, gen: 'GEN' };
   } else {
     // the tutorial is the common 28 V, master-ON single; tier 1 adds the 14 V single
     const pool = t === 0 ? PISTONS.slice(0, 1) : t === 1 ? PISTONS.slice(0, 2) : PISTONS;
@@ -129,14 +162,14 @@ function checklistFor(m: GpuModel): { id: StepId; text: string }[] {
   const s: { id: StepId; text: string }[] = [
     { id: 'avOff', text: 'Avionics master OFF' },
     { id: 'batt', text: `Battery master ${ac.master === 'on' ? 'ON' : 'OFF'} (placard)` },
-    { id: 'altOff', text: tb ? 'Generator OFF' : 'Alternator OFF' },
-    { id: 'cartV', text: `Cart output ${ac.volts} V (placard)` },
   ];
+  if (altOffForStart(ac)) s.push({ id: 'altOff', text: tb ? 'Generator OFF' : 'Alternator OFF' });
+  s.push({ id: 'cartV', text: `Cart output ${ac.volts} V (placard)` });
   if (tb) s.push({ id: 'cartA', text: `Current limit at ${ac.ampMax} A, not over` });
   s.push(
     { id: 'plug', text: 'Plug in, push until fully seated' },
     { id: 'cartOn', text: 'Cart ON' },
-    { id: 'verify', text: `Tap the voltmeter: ${ac.volts} V on the bus` },
+    { id: 'verify', text: shipMeterLive(ac) ? `Voltmeter: ${ac.volts} V on the bus` : `Cart voltmeter: ${ac.volts} V out` },
     {
       id: 'start',
       text: tb ? `Starter ON, fuel at ${m.fuelMin}% N1, starter OFF at idle` : 'Hold START, let go when it fires',
@@ -167,6 +200,9 @@ export type ErrId =
   | 'overAmps'
   | 'lowAmps'
   | 'earlyFuel'
+  | 'noClear'
+  | 'hotRelight'
+  | 'starterDuty'
   | 'starterLong'
   | 'genEarly'
   | 'avionicsEarly'
@@ -176,11 +212,12 @@ export type FaultId = 'overVolt' | 'lowVoltCrank' | 'avionicsStart' | 'hotStart'
 
 /** point deductions for procedure slips (each counted once) */
 export const ERRORS: Record<ErrId, { pen: number; text: string }> = {
-  arcIn: { pen: 0.2, text: 'plugged in live' },
-  arcOut: { pen: 0.2, text: 'unplugged live' },
+  // arcing pits the receptacle pins: both ways and the job fails
+  arcIn: { pen: 0.25, text: 'plugged in live' },
+  arcOut: { pen: 0.25, text: 'unplugged live' },
   avionicsPower: { pen: 0.15, text: 'avionics on at power-up' },
   wrongVolts: { pen: 0.1, text: 'cart on the wrong voltage' },
-  noVerify: { pen: 0.05, text: 'bus voltage not checked' },
+  noVerify: { pen: 0.05, text: 'volts not checked' },
   battPlacard: { pen: 0.1, text: 'battery master against placard' },
   genOnStart: { pen: 0.1, text: 'charging system on for the start' },
   noBus: { pen: 0.05, text: 'cranked on the flat battery' },
@@ -189,6 +226,9 @@ export const ERRORS: Record<ErrId, { pen: number; text: string }> = {
   overAmps: { pen: 0.2, text: 'current over the placard' },
   lowAmps: { pen: 0.1, text: 'current limit set low' },
   earlyFuel: { pen: 0.1, text: 'fuel in below 12% N1' },
+  noClear: { pen: 0.1, text: 'no dry-motoring run after the abort' },
+  hotRelight: { pen: 0.2, text: 'relit into residual fuel' },
+  starterDuty: { pen: 0.1, text: 'starter over its duty cycle' },
   starterLong: { pen: 0.05, text: 'starter left on at idle' },
   genEarly: { pen: 0.1, text: 'charging on before unplugging' },
   avionicsEarly: { pen: 0.1, text: 'avionics on before unplugging' },
@@ -217,6 +257,7 @@ export type GpuEvent =
   | { k: 'fire' }
   | { k: 'light' }
   | { k: 'abort' }
+  | { k: 'cleared' }
   | { k: 'run' }
   | { k: 'finish' }
   | { k: 'err'; id: ErrId }
@@ -239,11 +280,13 @@ export type GpuSim = {
   cartA: number;
   plug: Plug;
   plugIns: number;
-  /** external power relay closed: the bus is on the cart */
+  /** external power relay closed: the ship is on the cart */
   fed: boolean;
+  /** the main bus (battery master ON) is on the cart */
+  busOnCart: boolean;
   poweredAt: number;
   verifiedAt: number;
-  /** true bus voltage and cart output current (the UI lags its needles behind these) */
+  /** true panel-bus voltage and cart output current (the UI lags its needles behind these) */
   busV: number;
   amps: number;
   // piston
@@ -256,14 +299,29 @@ export type GpuSim = {
   n1: number;
   itt: number;
   peakItt: number;
+  /** seconds the ITT has spent over the red line */
+  ittOver: number;
   lit: boolean;
   fuelAt: number;
-  /** fuel brought in below the minimum N1 is too much fuel for the air: the start runs rich (hot) */
+  /** fuel for the air: >1 runs hot (fuel below the minimum N1, or a relight into residual fuel) */
   rich: number;
   idleT: number;
+  /** starter-generator heat, seconds of running (cools while it rests) */
+  duty: number;
   aborts: number;
+  abortAt: number;
+  /** highest ITT seen up to the last abort */
+  abortPeak: number;
+  /** dry motoring (starter on, fuel off) since the last abort, seconds */
+  clearT: number;
+  /** residual fuel in the engine after an abort, 0..1 (dry motoring blows it out) */
+  wet: number;
+  /** seconds the starter has been off since the last abort */
+  restT: number;
   running: boolean;
   everRunning: boolean;
+  /** turbine: the start was aborted, cleared and the cart put away without a second try */
+  stopped: boolean;
   errors: ErrId[];
   faults: FaultId[];
   events: GpuEvent[];
@@ -285,6 +343,7 @@ export function newSim(m: GpuModel): GpuSim {
     plug: 'stowed',
     plugIns: 0,
     fed: false,
+    busOnCart: false,
     poweredAt: -1,
     verifiedAt: -2,
     busV: 0,
@@ -297,13 +356,21 @@ export function newSim(m: GpuModel): GpuSim {
     n1: 0,
     itt: m.ambient,
     peakItt: m.ambient,
+    ittOver: 0,
     lit: false,
     fuelAt: -1,
     rich: 1,
     idleT: 0,
+    duty: 0,
     aborts: 0,
+    abortAt: -1,
+    abortPeak: 0,
+    clearT: 0,
+    wet: 0,
+    restT: 0,
     running: false,
     everRunning: false,
+    stopped: false,
     errors: [],
     faults: [],
     events: [],
@@ -336,13 +403,17 @@ function updateFeed(s: GpuSim) {
     s.fed = true;
     s.poweredAt = s.t;
     const need = s.m.ac.volts;
+    // 28 V on a 14 V ship cooks the battery side even with the master off
     if (s.cartV > need) fault(s, 'overVolt');
     else if (s.cartV < need) err(s, 'wrongVolts');
-    if (s.avionics) err(s, 'avionicsPower');
     ev(s, { k: 'power' });
     // power arriving with the starter already engaged: the start begins now
     if (s.starter && !s.running && !(s.m.ac.kind === 'piston' && s.fired)) crankChecks(s);
   } else if (!f) s.fed = false;
+  // the relay's transient reaches the avionics only through a live main bus
+  const onCart = s.fed && s.batt;
+  if (onCart && !s.busOnCart && s.avionics && !s.everRunning) err(s, 'avionicsPower');
+  s.busOnCart = onCart;
   s.busV = trueBus(s);
 }
 
@@ -358,13 +429,23 @@ export function crankPower(s: GpuSim): number {
   return 0;
 }
 
+const cranking = (s: GpuSim) => s.starter && !(s.m.ac.kind === 'piston' && s.fired);
+
+/** the cart's own output voltmeter: its terminal volts, sagging under the starter's load */
+export function cartOut(s: GpuSim): number {
+  if (!s.cartOn) return 0;
+  if (!s.fed) return s.cartV;
+  return s.cartV - (cranking(s) ? clamp(s.amps / 1000, 0, 1.2) * 2.6 : 0) - (s.running ? 0 : 0.1);
+}
+
+/** the panel voltmeter reads the main bus: dead with the battery master OFF, else the strongest source on it */
 function trueBus(s: GpuSim): number {
   const { ac } = s.m;
-  const cranking = s.starter && !(ac.kind === 'piston' && s.fired);
-  if (s.fed) return s.cartV - (cranking ? clamp(s.amps / 1000, 0, 1.2) * 2.6 : 0) - (s.running ? 0 : 0.1);
-  if (s.running && s.alt && s.batt) return ac.volts + 0.3;
-  if (s.batt) return ac.battV * (cranking ? 0.62 : 1);
-  return 0;
+  if (!s.batt) return 0;
+  const charging = s.running && s.alt ? ac.volts + 0.3 : 0;
+  // a low battery sags hard under the starter
+  const batt = ac.battV * (cranking(s) && !s.fed ? 0.62 : cranking(s) ? 0.75 : 1);
+  return Math.max(charging, batt, s.fed ? cartOut(s) : 0);
 }
 
 /** the start attempt begins (START pressed / STARTER switch on): the checks a mechanic is judged on */
@@ -380,7 +461,7 @@ function crankChecks(s: GpuSim) {
     return;
   }
   ev(s, { k: 'crank' });
-  if (s.alt) err(s, 'genOnStart');
+  if (s.alt && altOffForStart(ac)) err(s, 'genOnStart');
   if (ac.master === 'off' && s.batt) err(s, 'battPlacard');
   if (!s.fed) err(s, 'noBus');
   else {
@@ -398,10 +479,10 @@ export function flip(s: GpuSim, sw: Switch, on?: boolean) {
   const v = on ?? !s[sw];
   if (s[sw] === v) return;
   const { ac } = s.m;
-  if (sw === 'alt' && v && s.everRunning) {
-    if (s.plug !== 'stowed') err(s, 'genEarly');
-  }
-  if (sw === 'avionics' && v && s.everRunning) {
+  const tb = ac.kind === 'turbine';
+  if (sw === 'alt' && v && s.everRunning && s.plug !== 'stowed') err(s, 'genEarly');
+  // after the start the avionics come alive with their own master, or with the battery master under them
+  if (v && s.everRunning && ((sw === 'avionics' && s.batt) || (sw === 'batt' && s.avionics))) {
     if (s.plug !== 'stowed') err(s, 'avionicsEarly');
     else if (!s.alt) err(s, 'avionicsBeforeGen');
   }
@@ -411,17 +492,36 @@ export function flip(s: GpuSim, sw: Switch, on?: boolean) {
     if (v) {
       s.crankRun = 0;
       crankChecks(s);
-    } else if (ac.kind === 'piston' && !s.fired) s.crankT *= 0.5;
+    } else {
+      if (!tb && !s.fired) s.crankT *= 0.5;
+      // after an abort the starter keeps motoring until the engine is cleared
+      if (tb && s.aborts > 0 && !s.everRunning && !s.lit && s.clearT < CLEAR_SECS) err(s, 'noClear');
+    }
   }
-  if (sw === 'fuel' && ac.kind === 'turbine') {
+  if (sw === 'fuel' && tb) {
     if (v) {
+      if (!s.running) {
+        if (s.aborts > 0) {
+          // residual fuel in a hot engine: a second hot start, or torching
+          if (s.t - s.abortAt < RELIGHT_WAIT || s.itt > RELIGHT_ITT) err(s, 'hotRelight');
+          if (s.clearT < CLEAR_SECS) err(s, 'noClear');
+          // straight back in without resting the starter-generator
+          if (s.restT < STARTER_REST) err(s, 'starterDuty');
+        }
+        if (s.n1 < s.m.fuelMin) err(s, 'earlyFuel');
+        // a weak cart only bites once there is fire to feed: that is when it counts
+        if (s.fed && s.cartA < ac.ampMax * AMP_FLOOR) err(s, 'lowAmps');
+      }
       s.fuelAt = s.t;
-      s.rich = 1 + clamp(s.m.fuelMin - s.n1, 0, 12) * 0.06;
-      if (!s.running && s.n1 < s.m.fuelMin) err(s, 'earlyFuel');
-      // a weak cart only bites once there is fire to feed: that is when it counts
-      if (!s.running && s.fed && s.cartA < ac.ampMax * 0.8) err(s, 'lowAmps');
+      s.rich = 1 + clamp(s.m.fuelMin - s.n1, 0, 12) * 0.06 + 0.35 * s.wet;
     } else if (s.lit && !s.running) {
       s.aborts++;
+      s.abortAt = s.t;
+      s.abortPeak = Math.max(s.abortPeak, s.peakItt);
+      s.clearT = 0;
+      s.wet = 1;
+      s.restT = 0;
+      s.lit = false; // the fire goes out with the fuel
       ev(s, { k: 'abort' });
     }
   }
@@ -484,10 +584,13 @@ export function unplug(s: GpuSim) {
   updateFeed(s);
 }
 
-/** tap the voltmeter: a reading taken while the bus is on the cart counts as the check */
-export function readVolts(s: GpuSim): number {
-  if (s.fed && !s.everRunning) s.verifiedAt = s.t;
-  return s.busV;
+export type Meter = 'ship' | 'cart';
+
+/** tap a voltmeter to read it: the panel one (the main bus) or the cart's output. Read on ground power before the start, it is the check */
+export function readVolts(s: GpuSim, meter: Meter = shipMeterLive(s.m.ac) ? 'ship' : 'cart'): number {
+  const v = meter === 'ship' ? s.busV : cartOut(s);
+  if (s.fed && !s.everRunning && (meter === 'cart' || s.batt)) s.verifiedAt = s.t;
+  return v;
 }
 
 const smooth = (x: number) => {
@@ -495,9 +598,13 @@ const smooth = (x: number) => {
   return u * u * (3 - 2 * u);
 };
 
-/** ITT the combustion would settle at for this N1 (low airflow = hot) */
-export function ittTarget(m: GpuModel, n1: number, rich = 1): number {
-  return Math.min(1900, m.heat * rich * (600 + 900 * Math.exp(-(n1 - 12) / 10)));
+/**
+ * ITT the combustion would settle at for this N1 (low airflow = hot). The fuel
+ * control schedules fuel for a normal acceleration, so less starter assist than
+ * the placard (a weak cart, or the starter cut early) leaves fuel over for heat.
+ */
+export function ittTarget(m: GpuModel, n1: number, rich = 1, assist = 1): number {
+  return Math.min(1900, m.heat * rich * (520 + 820 * Math.exp(-(n1 - 12) / 10)) * (1 + 0.9 * clamp(1 - assist, 0, 1)));
 }
 
 export function step(s: GpuSim, dt: number) {
@@ -506,10 +613,12 @@ export function step(s: GpuSim, dt: number) {
   s.t += dt;
   updateFeed(s);
   const p = crankPower(s);
+  // the needle has been in view long enough to be read
+  if (s.fed && !s.everRunning && s.verifiedAt < s.poweredAt && s.t - s.poweredAt >= LOOK_SECS && !cranking(s)) s.verifiedAt = s.t;
   if (m.ac.kind === 'piston') {
-    const cranking = s.starter && p > 0;
-    if (cranking && !s.fired) {
-      if (s.avionics) fault(s, 'avionicsStart');
+    const crank = s.starter && p > 0;
+    if (crank && !s.fired) {
+      if (s.avionics && s.batt) fault(s, 'avionicsStart');
       s.crankRun += dt;
       if (s.crankRun > 10) err(s, 'longCrank');
       if (p >= 0.6) {
@@ -529,12 +638,20 @@ export function step(s: GpuSim, dt: number) {
         ev(s, { k: 'run' });
       }
     }
-    const target = s.fired ? 1000 : cranking ? 240 * Math.min(p, 1.1) : 0;
+    const target = s.fired ? 1000 : crank ? 240 * Math.min(p, 1.1) : 0;
     s.rpm += (target - s.rpm) * (1 - Math.exp(-dt / (s.fired ? 0.35 : 0.25)));
-    s.amps = s.fed ? (cranking && !s.fired ? Math.min(s.cartA, 210) : 18) : 0;
+    s.amps = s.fed ? (crank && !s.fired ? Math.min(s.cartA, 210) : 18) : 0;
   } else {
     const a = s.starter ? Math.min(p, 1.3) : 0;
-    if (s.starter && s.avionics && p > 0) fault(s, 'avionicsStart');
+    if (s.starter && s.avionics && s.batt && p > 0) fault(s, 'avionicsStart');
+    // starter-generator duty cycle
+    if (s.starter && p > 0) {
+      s.duty += dt;
+      if (s.duty > STARTER_DUTY) err(s, 'starterDuty');
+    } else {
+      s.duty = Math.max(0, s.duty - dt * DUTY_COOL);
+      if (s.aborts > 0) s.restT += dt;
+    }
     if (s.fuel && !s.lit && s.starter && s.n1 >= 6 && s.t - s.fuelAt >= m.lightDelay) {
       s.lit = true;
       ev(s, { k: 'light' });
@@ -547,11 +664,21 @@ export function step(s: GpuSim, dt: number) {
     if (s.lit && s.n1 > m.idle - 1) dn = (m.idle + (s.starter ? 1 : 0) - s.n1) * 2;
     s.n1 = Math.max(0, s.n1 + dn * dt);
     if (s.lit && s.n1 < 5) s.lit = false; // flamed out
-    const tgt = s.lit ? ittTarget(m, s.n1, s.rich) : m.ambient + 10;
-    const tau = tgt > s.itt ? 1.8 / m.heat : s.n1 > 8 ? 2.2 : 6;
-    s.itt += (tgt - s.itt) * (1 - Math.exp(-dt / tau));
+    // after an abort: airflow blows the residual fuel out, a stopped engine only drains it slowly
+    if (!s.fuel && s.wet > 0) s.wet *= Math.exp(-dt / (s.n1 > 6 ? 2.5 : 20));
+    if (s.aborts > 0 && !s.fuel && s.starter && s.n1 > 6 && !s.everRunning) {
+      const before = s.clearT;
+      s.clearT += dt;
+      if (before < CLEAR_SECS && s.clearT >= CLEAR_SECS) ev(s, { k: 'cleared' });
+    }
+    const tgt = s.lit ? ittTarget(m, s.n1, s.rich, s.running ? 1 : a) : m.ambient + 10;
+    const tau = tgt > s.itt ? 1.8 / m.heat : s.n1 > 8 ? 2.2 : 8;
+    let d = (tgt - s.itt) * (1 - Math.exp(-dt / tau));
+    if (d > 0 && s.itt > 900) d = Math.min(d, ITT_RISE_CAP * dt);
+    s.itt += d;
     s.peakItt = Math.max(s.peakItt, s.itt);
-    if (s.lit && s.itt > m.ittLimit) fault(s, 'hotStart');
+    if (s.lit && s.itt > m.ittLimit) s.ittOver += dt;
+    if (s.lit && (s.itt > ITT_INSTANT || s.ittOver > ITT_HOLD)) fault(s, 'hotStart');
     const atIdle = s.lit && s.n1 >= m.idle - 2;
     if (atIdle && s.starter) {
       s.idleT += dt;
@@ -568,12 +695,35 @@ export function step(s: GpuSim, dt: number) {
   if (isComplete(s)) {
     s.done = true;
     ev(s, { k: 'finish' });
+  } else if (isSafeStop(s)) {
+    s.done = s.stopped = true;
+    ev(s, { k: 'finish' });
   }
 }
 
 export function isComplete(s: GpuSim): boolean {
   const tb = s.m.ac.kind === 'turbine';
   return s.running && s.plug === 'stowed' && !s.cartOn && s.alt && s.batt && s.avionics && !s.starter && (!tb || s.fuel);
+}
+
+/** turbine: a start aborted, dry-motored clear, starter off and the cart put away. A job ended safely, not a start */
+export function isSafeStop(s: GpuSim): boolean {
+  return (
+    s.m.ac.kind === 'turbine' &&
+    s.aborts > 0 &&
+    !s.everRunning &&
+    !s.fuel &&
+    !s.lit &&
+    !s.starter &&
+    s.clearT >= CLEAR_SECS &&
+    !s.cartOn &&
+    s.plug === 'stowed'
+  );
+}
+
+/** the abort was the right call: the start was running hot, or was set up to */
+export function abortWarranted(s: GpuSim): boolean {
+  return s.abortPeak >= 1000 || s.errors.includes('lowAmps') || s.errors.includes('earlyFuel') || s.errors.includes('hotRelight');
 }
 
 /** checklist tick for one item, from the live state (before the start) or the after-start state */
@@ -590,7 +740,7 @@ export function stepDone(s: GpuSim, id: StepId): boolean {
     case 'cartV':
       return !pre || s.cartV === ac.volts;
     case 'cartA':
-      return !pre || (s.cartA <= ac.ampMax && s.cartA >= ac.ampMax * 0.8);
+      return !pre || (s.cartA <= ac.ampMax && s.cartA >= ac.ampMax * AMP_FLOOR);
     case 'plug':
       return !pre || s.plug === 'seated';
     case 'cartOn':
@@ -629,22 +779,32 @@ export function scoreGpu(s: GpuSim): { score: number; summary: string } {
   const pen = s.errors.reduce((n, id) => n + ERRORS[id].pen, 0);
   let v = 1 - pen;
   if (s.faults.length) v = Math.min(v, FAULT_CAP - 0.1 * (s.faults.length - 1));
-  if (!s.done) v = Math.min(v, progressOf(s));
+  // a hot start aborted and cleared, with the cart put away, is a safe call: a bare pass
+  if (s.stopped) v = Math.min(v, abortWarranted(s) ? PASS : progressOf(s));
+  else if (!s.done) v = Math.min(v, progressOf(s));
   return { score: clamp(v, 0, 1), summary: summarize(s) };
 }
 
 function summarize(s: GpuSim): string {
   const head = s.faults.length
     ? `Fault: ${FAULTS[s.faults[0]]}`
-    : s.done
-      ? s.errors.length
-        ? 'Started'
-        : 'By the book: clean start'
-      : s.everRunning
-        ? 'Running, after-start not done'
-        : 'Engine not started';
-  const slips = s.errors.slice(0, s.faults.length ? 1 : 2).map((id) => ERRORS[id].text);
-  const more = s.errors.length - slips.length;
+    : s.stopped
+      ? abortWarranted(s)
+        ? s.errors.includes('lowAmps')
+          ? 'Hot start aborted and cleared: cart too weak'
+          : 'Hot start aborted and cleared'
+        : 'Aborted a normal start'
+      : s.done
+        ? s.errors.length
+          ? 'Started'
+          : 'By the book: clean start'
+        : s.everRunning
+          ? 'Running, after-start not done'
+          : 'Engine not started';
+  // the head already says the cart was too weak
+  const errs = head.endsWith('cart too weak') ? s.errors.filter((id) => id !== 'lowAmps') : s.errors;
+  const slips = errs.slice(0, s.faults.length ? 1 : 2).map((id) => ERRORS[id].text);
+  const more = errs.length - slips.length;
   return [head, ...slips, ...(more > 0 ? [`${more} more slip${more > 1 ? 's' : ''}`] : [])].join(', ');
 }
 
@@ -655,7 +815,7 @@ function summarize(s: GpuSim): string {
 type P2 = { x: number; y: number };
 type Rect = { x: number; y: number; w: number; h: number };
 type Ctl = 'batt' | 'alt' | 'avionics' | 'starter' | 'fuel';
-type Target = Ctl | 'volts' | 'amps' | 'cartSw' | 'plug' | 'voltmeter';
+type Target = Ctl | 'volts' | 'amps' | 'cartSw' | 'plug' | 'voltmeter' | 'cartMeter';
 
 const METAL = '#c9cfd2';
 const CABLE = '#23292c';
@@ -672,8 +832,8 @@ export const gpu: PuzzleDef = {
   role: 'mech',
   title: 'Ground power start',
   gesture: 'Flip switches, drag the plug',
-  howTo: 'Read the placard, set the cart, plug in, start, unplug.',
-  term: 'GPU: a ground power cart that starts the aircraft instead of its weak battery.',
+  howTo: 'Read the placard, set the cart, plug in, check the volts, start, unplug.',
+  term: 'GPU: a ground power cart that starts the aircraft instead of its weak battery. Tap a meter for a close reading.',
   seconds: (tier) => (tier >= 4 ? 110 + (tier - 4) * 10 : 70 + clamp(tier, 0, 3) * 8),
   mount(host, p) {
     const job = p.context?.job;
@@ -681,7 +841,7 @@ export const gpu: PuzzleDef = {
     const m = generateGpu(p.seed, p.tier, p.tools, kind);
     const { ac } = m;
     const tb = ac.kind === 'turbine';
-    const twin = ac.id.startsWith('twin');
+    const high = ac.wing === 'high';
     const s = newSim(m);
     const st = stage(host.el);
     const { ctx } = st;
@@ -692,15 +852,16 @@ export const gpu: PuzzleDef = {
     let flourishT = -1;
     let clock = 0;
     // needles lag the truth like real movements
-    const nd = { v: s.busV, vv: 0, rpm: 0, n1: 0, itt: s.itt, amps: 0 };
+    const nd = { v: s.busV, vv: 0, rpm: 0, n1: 0, itt: s.itt, amps: 0, cv: 0 };
     const lever: Record<Ctl | 'cart', number> = { batt: +s.batt, alt: +s.alt, avionics: +s.avionics, starter: 0, fuel: 0, cart: 0 };
     let sel = s.cartV === 28 ? 1 : 0; // output selector position, animated
     let propA = 0.3;
-    let reading: { text: string; until: number } | null = null;
+    let reading: { text: string; until: number; at: 'ship' | 'cart' } | null = null;
     let wiggleT = -9;
+    let cartTapT = -9;
     let seatedT = -9;
     let listOpen = false;
-    const toast = { text: '', until: 0, bad: false };
+    const toast = { text: '', until: 0, bad: false, key: '' };
     type Drag =
       | { kind: 'plug'; id: number; from: 'stowed' | 'in'; sx: number; sy: number; x: number; y: number; ox: number; oy: number; moved: boolean }
       | { kind: 'amps'; id: number; lastA: number; raw: number }
@@ -740,22 +901,25 @@ export const gpu: PuzzleDef = {
       const fr = tb ? [0.1, 0.29, 0.48, 0.69, 0.89] : [0.13, 0.35, 0.57, 0.83];
       const ctl = {} as Record<Ctl, P2>;
       ids.forEach((id, i) => (ctl[id] = { x: ck.x + ck.w * fr[i], y: sy }));
-      // aircraft, nose left
-      const fh = clamp(rampH * 0.33, 46, 92);
-      let fy = rampTop + rampH * 0.47;
-      // wheels stay clear of the plug parked on top of the cart
-      const maxGround = cart.y - 46;
+      // aircraft, nose left. The placard callout sits in the sky over the cabin
+      // (and the high wing), so on a short ramp the aircraft shrinks to leave it room
+      const PL_MIN = 46;
+      const rise = 0.26 + (high ? 0.17 : 0); // cabin roof (and wing) above the fuselage top, × fh
+      const maxGround = cart.y - 46; // wheels stay clear of the plug parked on top of the cart
+      const skyTop = rampTop + 6 + PL_MIN + 5;
+      const fh = clamp(Math.min(rampH * 0.33, (maxGround - 14 - skyTop) / (1 + rise)), 40, 92);
+      let fy = Math.max(rampTop + rampH * 0.47, skyTop + fh * (0.5 + rise));
       let legs = clamp(rampH * 0.17, 14, 40);
       if (fy + fh / 2 + legs > maxGround) {
         legs = Math.max(12, maxGround - fy - fh / 2);
         fy = Math.min(fy, maxGround - legs - fh / 2);
       }
-      const recF = tb ? 0.45 : twin ? 0.25 : 0.34;
+      const recF = tb ? 0.45 : 0.34;
       const rec: P2 = { x: w * recF, y: fy + fh * 0.1 };
       const groundY = fy + fh / 2 + legs;
       const horizon = fy - fh * 0.12;
       const plW = Math.min(168, w - 24 - w * 0.5);
-      const plH = clamp(fy - fh / 2 - rampTop - 12, 42, 62);
+      const plH = clamp(fy - fh / 2 - fh * rise - 5 - (rampTop + 6), 36, 62);
       const placard: Rect = { x: w - 12 - plW, y: rampTop + 6, w: plW, h: plH };
       // cart
       const panel: Rect = { x: cart.x + 12, y: cart.y + 34, w: cart.w - 24, h: cart.h - 58 };
@@ -767,7 +931,11 @@ export const gpu: PuzzleDef = {
       const cartSw: P2 = { x: panel.x + panel.w * 0.84, y: ky + 4 };
       const outlet: P2 = { x: cart.x + 22, y: cart.y + 12 };
       const holster: P2 = { x: cart.x + 70, y: cart.y - 18 };
-      return { w, h, head, ck, gr, gy, gxs, ctl, ids, cart, rampTop, rampH, fh, fy, rec, groundY, horizon, placard, panel, kr, volts, amps, cartSw, outlet, holster };
+      // the cart's own edgewise meters, top row of its panel: output volts, then amps
+      const mw = Math.min(118, (panel.w - 56) * 0.44);
+      const vMeter: Rect = { x: panel.x + 10, y: panel.y + 8, w: mw, h: 20 };
+      const aMeter: Rect = { x: vMeter.x + mw + 8, y: panel.y + 8, w: Math.min(150, panel.w - 56 - mw - 8), h: 20 };
+      return { w, h, head, ck, gr, gy, gxs, ctl, ids, cart, rampTop, rampH, fh, fy, rec, groundY, horizon, placard, panel, kr, volts, amps, cartSw, outlet, holster, vMeter, aMeter };
     };
     type Geo = ReturnType<typeof geo>;
     const voltmeterAt = (g: Geo): P2 => ({ x: tb ? g.gxs[2] : g.gxs[0], y: g.gy });
@@ -790,10 +958,11 @@ export const gpu: PuzzleDef = {
     };
 
     // ---- feedback -----------------------------------------------------------
-    const say = (text: string, bad = false, secs = 2.4) => {
+    const say = (text: string, bad = false, secs = 2.4, key = '') => {
       toast.text = text;
       toast.bad = bad;
       toast.until = clock + secs;
+      toast.key = key;
     };
     const burst = (x: number, y: number, n = 16) => {
       if (rm) return;
@@ -841,11 +1010,13 @@ export const gpu: PuzzleDef = {
             break;
           case 'stuck':
             host.fx.tick();
-            if (teach) say('Not fully seated: push it home');
+            if (teach) say('Not fully seated: push it home', false, 2.4, 'stuck');
             break;
           case 'seated':
             host.fx.thunk();
             seatedT = clock;
+            // it is home now: don't leave the push-it-home note up over the next item
+            if (toast.key === 'stuck') toast.until = clock;
             break;
           case 'crank':
             host.fx.snap();
@@ -857,7 +1028,7 @@ export const gpu: PuzzleDef = {
           case 'fire':
             host.fx.good();
             fireT = clock;
-            puff(g.w * (tb ? 0.36 : twin ? 0.62 : 0.22), g.fy + g.fh * 0.36, true, 7);
+            puff(g.w * (tb ? 0.36 : 0.22), g.fy + g.fh * 0.36, true, 7);
             break;
           case 'light':
             host.fx.thunk();
@@ -865,7 +1036,13 @@ export const gpu: PuzzleDef = {
             break;
           case 'abort':
             host.fx.tap();
-            say(teach ? 'Fuel cut off: keep motoring to cool it' : 'Fuel cut off');
+            say(teach ? 'Fuel cut off: keep motoring to clear it' : 'Fuel cut off');
+            break;
+          case 'cleared':
+            if (teach) {
+              host.fx.tick();
+              say('Cleared. Starter OFF and let it rest');
+            }
             break;
           case 'run':
             host.fx.good();
@@ -923,7 +1100,7 @@ export const gpu: PuzzleDef = {
         case 'cartOff':
           return 'cartSw';
         case 'verify':
-          return 'voltmeter';
+          return shipMeterLive(ac) ? 'voltmeter' : 'cartMeter';
         case 'start':
           if (!tb) return 'starter';
           if (!s.starter && !s.lit) return 'starter';
@@ -932,7 +1109,17 @@ export const gpu: PuzzleDef = {
       }
     };
     const updateStatus = () => {
-      const txt = s.done ? 'Done' : s.everRunning ? 'Engine running · after-start' : s.starter || s.lit ? 'Starting' : `${ac.name} · before start`;
+      const txt = s.stopped
+        ? 'Start aborted'
+        : s.done
+          ? 'Done'
+          : s.everRunning
+            ? 'Engine running · after-start'
+            : s.starter || s.lit
+              ? 'Starting'
+              : s.aborts
+                ? 'Aborted · before a restart'
+                : `${ac.name} · before start`;
       if (txt !== lastStatus) {
         lastStatus = txt;
         host.status(txt);
@@ -952,7 +1139,7 @@ export const gpu: PuzzleDef = {
       host.status(res.summary);
       settle(host, res, res.perfect ? 900 : 400);
     }
-    const dataOf = () => ({ errors: s.errors.slice(), faults: s.faults.slice(), aborts: s.aborts, peakItt: Math.round(s.peakItt) });
+    const dataOf = () => ({ errors: s.errors.slice(), faults: s.faults.slice(), aborts: s.aborts, stopped: s.stopped, peakItt: Math.round(s.peakItt) });
 
     // ---- input --------------------------------------------------------------
     const near = (a: P2, x: number, y: number, r: number) => Math.hypot(a.x - x, a.y - y) <= r;
@@ -993,9 +1180,20 @@ export const gpu: PuzzleDef = {
         }
         const vm = voltmeterAt(g);
         if (near(vm, pt.x, pt.y, g.gr + 6)) {
-          const v = readVolts(s);
-          reading = { text: `${v.toFixed(1)} V`, until: clock + 2.6 };
+          const v = readVolts(s, 'ship');
+          reading = { text: `${v.toFixed(1)} V`, until: clock + 2.6, at: 'ship' };
           wiggleT = clock;
+          host.fx.tick();
+          // a Piper-style ship on ground power: the panel bus is dead until the master goes ON
+          if (teach && s.fed && !s.batt && !s.everRunning) say('Master OFF: panel is dead. Read the cart meter');
+          return;
+        }
+        // the cart's output voltmeter (a 44 px band around the 20 px meter)
+        const cm = g.vMeter;
+        if (pt.x > cm.x - 6 && pt.x < cm.x + cm.w + 6 && pt.y > cm.y - 12 && pt.y < cm.y + cm.h + 12) {
+          const v = readVolts(s, 'cart');
+          reading = { text: `${v.toFixed(1)} V`, until: clock + 2.6, at: 'cart' };
+          cartTapT = clock;
           host.fx.tick();
           return;
         }
@@ -1099,7 +1297,7 @@ export const gpu: PuzzleDef = {
       }
       drain(g);
       // keep the frame rate up while things move on their own (starts, needles settling)
-      if (s.starter || (s.lit && !s.running) || Math.abs(nd.itt - s.itt) > 3 || Math.abs(nd.n1 - s.n1) > 0.3 || Math.abs(nd.rpm - s.rpm) > 5) markInput();
+      if (s.starter || (s.lit && !s.running) || Math.abs(nd.itt - s.itt) > 3 || Math.abs(nd.n1 - s.n1) > 0.3 || Math.abs(nd.rpm - s.rpm) > 5 || Math.abs(nd.cv - cartOut(s)) > 0.2) markInput();
       // needles
       if (rm) nd.v = s.busV;
       else {
@@ -1109,8 +1307,10 @@ export const gpu: PuzzleDef = {
       }
       nd.rpm = spring(nd.rpm, s.rpm, dt, 0.18);
       nd.n1 = spring(nd.n1, s.n1, dt, 0.25);
-      nd.itt = spring(nd.itt, s.itt, dt, 0.3);
+      // a fast needle: the abort call is made off it
+      nd.itt = spring(nd.itt, s.itt, dt, 0.1);
       nd.amps = spring(nd.amps, s.amps, dt, 0.2);
+      nd.cv = spring(nd.cv, cartOut(s), dt, 0.12);
       for (const id of Object.keys(lever) as (Ctl | 'cart')[]) {
         const on = id === 'cart' ? s.cartOn : s[id];
         lever[id] = spring(lever[id], on ? 1 : 0, dt, 0.045);
@@ -1128,7 +1328,7 @@ export const gpu: PuzzleDef = {
           host.fx.tick();
         }
       }
-      if (!tb && s.running && Math.random() < dt * 2.5) puff(g.w * (twin ? 0.62 : 0.22), g.fy + g.fh * 0.36, false, 1);
+      if (!tb && s.running && Math.random() < dt * 2.5) puff(g.w * 0.22, g.fy + g.fh * 0.36, false, 1);
       if (clock < smokeUntil && Math.random() < dt * 8) puff(smokeAt.x + (Math.random() - 0.5) * 30, smokeAt.y, true, 1, 1);
       for (const sp of sparks) {
         sp.life -= dt;
@@ -1161,13 +1361,16 @@ export const gpu: PuzzleDef = {
         /** on a small dial, label only every nth major tick */
         smallEvery?: number;
         fmt?: (v: number) => string;
+        /** title under the pivot; a small dial takes the short form */
         title: string;
-        unit: string;
+        short?: string;
         red?: number;
         green?: [number, number];
-        flash?: boolean;
+        /** 1: warning (blinks), 2: over the limit (blinks fast) */
+        flash?: number;
       },
     ) {
+      const small = r < 34;
       const a0 = Math.PI * 0.75;
       const sweep = Math.PI * 1.5;
       // a needle can swing a hair past full scale onto its stop pin
@@ -1196,9 +1399,12 @@ export const gpu: PuzzleDef = {
         ctx.moveTo(c.x + Math.cos(a) * (r - (major ? 8 : 5)), c.y + Math.sin(a) * (r - (major ? 8 : 5)));
         ctx.lineTo(c.x + Math.cos(a) * (r - 1.5), c.y + Math.sin(a) * (r - 1.5));
         ctx.stroke();
-        if (major && (r >= 34 || Math.abs(v / (o.major * (o.smallEvery ?? 1)) - Math.round(v / (o.major * (o.smallEvery ?? 1)))) < 1e-6)) {
-          const lr = r - 16;
-          label(ctx, o.fmt ? o.fmt(v) : String(v), c.x + Math.cos(a) * lr, c.y + Math.sin(a) * lr, { size: r >= 34 ? 9 : 8, weight: 700, color: 'rgba(251,245,233,.8)' });
+        // no 0 (the needle rests on it); a small dial numbers fewer ticks and leaves the top end (by the title) bare too
+        const every = o.major * (small ? (o.smallEvery ?? 1) : 1);
+        const bare = v < 1e-6 || (small && v > o.max - 1e-6);
+        if (major && Math.abs(v / every - Math.round(v / every)) < 1e-6 && !bare) {
+          const lr = r - (small ? 13 : 16);
+          label(ctx, o.fmt ? o.fmt(v) : String(v), c.x + Math.cos(a) * lr, c.y + Math.sin(a) * lr, { size: small ? 8 : 9, weight: 700, color: 'rgba(251,245,233,.8)' });
         }
       }
       if (o.red != null) {
@@ -1210,11 +1416,25 @@ export const gpu: PuzzleDef = {
         ctx.lineTo(c.x + Math.cos(a) * (r - 1), c.y + Math.sin(a) * (r - 1));
         ctx.stroke();
       }
-      // title below the scale ends, unit tucked under the top of the scale
-      label(ctx, o.title, c.x, c.y + r * 0.7, { size: r >= 34 ? 9 : 8, weight: 900, color: 'rgba(251,245,233,.75)' });
-      if (o.unit && r >= 34) label(ctx, o.unit, c.x, c.y - r * 0.3, { size: 7, weight: 700, color: 'rgba(251,245,233,.5)' });
+      // title (with its unit) below the scale ends, clear of the numbers and the needle's rest
+      // the long title if it fits the gap between the scale ends, else the short one
+      const tw = r * 1.5;
+      const tsize = small ? 7.5 : 9;
+      ctx.font = `900 ${Math.min(tsize, 8)}px ${FONT}`;
+      const title = o.short && ctx.measureText(o.title).width > tw ? o.short : o.title;
+      fitLabel(ctx, title, c.x, c.y + r * 0.7, tw, { size: tsize, weight: 900, color: 'rgba(251,245,233,.75)' });
       const a = toA(o.val);
-      const hot = o.flash && Math.floor(clock * 6) % 2 === 0;
+      const hot = !!o.flash && Math.floor(clock * (o.flash > 1 ? 8 : 4)) % 2 === 0;
+      if (o.flash) {
+        // a warning glow round the bezel
+        ctx.strokeStyle = C.rust;
+        ctx.globalAlpha = hot ? 0.9 : 0.35;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r + 5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       ctx.strokeStyle = hot ? C.rust : C.mech;
       ctx.lineWidth = 2.6;
       ctx.lineCap = 'round';
@@ -1287,6 +1507,50 @@ export const gpu: PuzzleDef = {
       ctx.globalAlpha = 1;
     }
 
+    function ringRect(R: Rect) {
+      const k = 0.5 + 0.5 * Math.sin(clock * 5);
+      ctx.strokeStyle = C.seaLight;
+      ctx.globalAlpha = 0.55 + 0.45 * k;
+      ctx.lineWidth = 3;
+      roundRect(ctx, R.x - 4 - 2 * k, R.y - 4 - 2 * k, R.w + 8 + 4 * k, R.h + 8 + 4 * k, 8);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    /** an edgewise panel meter on the cart: scale numbers along the top, unit at the right; digital with the meter tool */
+    function edgewise(R: Rect, unit: string, max: number, minor: number, major: number, val: number, digital: string | null) {
+      roundRect(ctx, R.x, R.y, R.w, R.h, 4);
+      if (digital != null) {
+        ctx.fillStyle = '#9fb59a';
+        ctx.fill();
+        tnum(ctx, digital, R.x + R.w / 2, R.y + R.h / 2 + 1, { size: 12, weight: 800, color: '#1d2a1a', align: 'center' });
+        return;
+      }
+      ctx.fillStyle = '#efe8d6';
+      ctx.fill();
+      const x0 = R.x + 6;
+      const sw = R.w - 22;
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 1;
+      for (let v = 0; v <= max + 1e-6; v += minor) {
+        const x = x0 + (v / max) * sw;
+        const big = Math.abs(v / major - Math.round(v / major)) < 1e-6;
+        ctx.beginPath();
+        ctx.moveTo(x, R.y + R.h - 2);
+        ctx.lineTo(x, R.y + R.h - (big ? 8 : 5));
+        ctx.stroke();
+        if (big && v > 0 && v < max - 1e-6) label(ctx, String(v), x, R.y + 7, { size: 7, weight: 800, color: C.inkSoft });
+      }
+      label(ctx, unit, R.x + R.w - 8, R.y + R.h / 2, { size: 9, weight: 900, color: C.inkSoft });
+      const nx = x0 + (clamp(val, 0, max * 1.02) / max) * sw;
+      ctx.strokeStyle = C.rust;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(nx, R.y + 2);
+      ctx.lineTo(nx, R.y + R.h - 2);
+      ctx.stroke();
+    }
+
     function drawCockpit(g: Geo) {
       const { ck } = g;
       roundRect(ctx, ck.x, ck.y, ck.w, ck.h, 16);
@@ -1300,15 +1564,17 @@ export const gpu: PuzzleDef = {
       const tapped = clock - wiggleT < 0.6 && !rm ? Math.sin((clock - wiggleT) * 40) * (0.6 - (clock - wiggleT)) * 1.6 : 0;
       const green: [number, number] | undefined = teach ? (ac.volts === 28 ? [27, 29] : [13.3, 14.7]) : undefined;
       if (tb) {
-        gaugeDial({ x: g.gxs[0], y: g.gy }, g.gr, { max: 1200, val: nd.itt, step: 100, major: 400, fmt: (v) => String(v / 100), title: 'ITT °C', unit: '×100', red: m.ittLimit, flash: s.itt > m.ittLimit });
-        gaugeDial({ x: g.gxs[1], y: g.gy }, g.gr, { max: 110, val: nd.n1, step: 10, major: 20, smallEvery: 2, fmt: (v) => String(v), title: 'N1 %', unit: '' });
+        // the needle warns from 1000 °C, well before the red line
+        const warn = nd.itt > m.ittLimit ? 2 : nd.itt >= 1000 && s.lit ? 1 : 0;
+        gaugeDial({ x: g.gxs[0], y: g.gy }, g.gr, { max: 1200, val: nd.itt, step: 100, major: 400, fmt: (v) => String(v / 100), title: 'ITT °C ×100', short: 'ITT ×100', red: m.ittLimit, flash: warn });
+        gaugeDial({ x: g.gxs[1], y: g.gy }, g.gr, { max: 110, val: nd.n1, step: 10, major: 20, smallEvery: 2, fmt: (v) => String(v), title: 'N1 %' });
       } else {
-        gaugeDial({ x: g.gxs[1], y: g.gy }, g.gr, { max: 3000, val: nd.rpm, step: 250, major: 1000, fmt: (v) => String(v / 100), title: 'RPM', unit: '×100' });
+        gaugeDial({ x: g.gxs[1], y: g.gy }, g.gr, { max: 3000, val: nd.rpm, step: 250, major: 1000, fmt: (v) => String(v / 100), title: 'RPM ×100' });
       }
       // the ship's own voltmeter: 0-16 V on a 14 V system, 0-32 V on a 28 V one (28 V into a 14 V ship pegs it)
       const v14 = ac.volts === 14;
-      gaugeDial(vm, g.gr, { max: v14 ? 16 : 32, val: nd.v + tapped * (v14 ? 0.5 : 1), step: v14 ? 1 : 2, major: v14 ? 4 : 8, smallEvery: 2, title: 'VOLTS', unit: 'DC', green });
-      if (reading && clock < reading.until) {
+      gaugeDial(vm, g.gr, { max: v14 ? 16 : 32, val: nd.v + tapped * (v14 ? 0.5 : 1), step: v14 ? 1 : 2, major: v14 ? 4 : 8, title: 'VOLTS', green });
+      if (reading && reading.at === 'ship' && clock < reading.until) {
         const bw = 58;
         const by = vm.y - g.gr - 2;
         roundRect(ctx, vm.x - bw / 2, by - 9, bw, 20, 10);
@@ -1449,16 +1715,39 @@ export const gpu: PuzzleDef = {
       const { fy, fh, w } = g;
       const top = fy - fh / 2;
       const bot = fy + fh / 2;
-      const noseX = tb ? 26 : twin ? 12 : 30;
+      const noseX = tb ? 26 : 30;
       const skin = '#f7f4ec';
+      const fw0 = w * (tb ? 0.5 : 0.42); // firewall: where the cabin starts
+      // wing root, seen side-on as an airfoil: on the cabin roof (high wing) or under the cabin (low wing)
+      const chord = fh * 1.5;
+      const wx = high ? fw0 + fh * 0.95 : fw0 - fh * 0.08;
+      const wt = fh * (high ? 0.2 : 0.17);
+      const roof = top - fh * 0.26;
+      const wingPath = (x0: number, base: number, up: boolean) => {
+        ctx.beginPath();
+        if (up) {
+          // flat-ish underside on the roof, cambered top
+          ctx.moveTo(x0, base);
+          ctx.quadraticCurveTo(x0 - wt * 0.35, base - wt * 0.75, x0 + chord * 0.22, base - wt);
+          ctx.quadraticCurveTo(x0 + chord * 0.6, base - wt * 0.95, x0 + chord, base - wt * 0.12);
+          ctx.lineTo(x0 + chord, base + 1);
+        } else {
+          ctx.moveTo(x0, base);
+          ctx.quadraticCurveTo(x0, base - wt * 0.9, x0 + chord * 0.3, base - wt);
+          ctx.lineTo(x0 + chord, base - wt * 0.25);
+          ctx.lineTo(x0 + chord, base + wt * 0.12);
+          ctx.quadraticCurveTo(x0 + chord * 0.2, base + wt * 0.4, x0, base);
+        }
+        ctx.closePath();
+      };
       // shadow
       ctx.fillStyle = 'rgba(31,42,48,.1)';
       ctx.beginPath();
       ctx.ellipse(w * 0.6, g.groundY + 2, w * 0.42, 5, 0, 0, Math.PI * 2);
       ctx.fill();
-      // gear legs + wheels
-      const nwX = w * (tb ? 0.2 : twin ? 0.16 : 0.18);
-      const mwX = w * (twin ? 0.74 : 0.74);
+      // gear legs + wheels (a low wing hangs its mains from the wing)
+      const nwX = w * (tb ? 0.2 : 0.18);
+      const mwX = high ? w * 0.74 : wx + chord * 0.55;
       const wr = clamp(fh * 0.17, 8, 14);
       ctx.strokeStyle = '#56646b';
       ctx.lineWidth = 4;
@@ -1473,111 +1762,94 @@ export const gpu: PuzzleDef = {
       // fuselage
       ctx.fillStyle = skin;
       ctx.beginPath();
-      if (twin) {
-        ctx.moveTo(noseX, fy + fh * 0.12);
-        ctx.quadraticCurveTo(noseX + 4, top + fh * 0.2, noseX + fh * 0.9, top + fh * 0.18);
-        ctx.lineTo(w * 0.33, top + fh * 0.12);
-        ctx.quadraticCurveTo(w * 0.4, top - fh * 0.1, w * 0.47, top - fh * 0.12);
-        ctx.lineTo(w + 10, top - fh * 0.12);
-        ctx.lineTo(w + 10, bot);
-        ctx.lineTo(noseX + fh * 0.6, bot);
-        ctx.quadraticCurveTo(noseX, bot - fh * 0.05, noseX, fy + fh * 0.12);
-      } else {
-        const fw0 = w * (tb ? 0.5 : 0.42);
-        ctx.moveTo(noseX, fy - fh * 0.18);
-        ctx.quadraticCurveTo(noseX + 2, top + fh * 0.08, noseX + 26, top + fh * 0.06);
-        ctx.lineTo(fw0, top + fh * 0.04);
-        ctx.quadraticCurveTo(fw0 + fh * 0.5, top - fh * 0.22, fw0 + fh * 1.1, top - fh * 0.26);
-        ctx.lineTo(w + 10, top - fh * 0.26);
-        ctx.lineTo(w + 10, bot);
-        ctx.lineTo(noseX + 30, bot);
-        ctx.quadraticCurveTo(noseX, bot - 2, noseX, fy + fh * 0.2);
-      }
+      ctx.moveTo(noseX, fy - fh * 0.18);
+      ctx.quadraticCurveTo(noseX + 2, top + fh * 0.08, noseX + 26, top + fh * 0.06);
+      ctx.lineTo(fw0, top + fh * 0.04);
+      ctx.quadraticCurveTo(fw0 + fh * 0.5, top - fh * 0.22, fw0 + fh * 1.1, roof);
+      ctx.lineTo(w + 10, roof);
+      ctx.lineTo(w + 10, bot);
+      ctx.lineTo(noseX + 30, bot);
+      ctx.quadraticCurveTo(noseX, bot - 2, noseX, fy + fh * 0.2);
       ctx.closePath();
       ctx.fill();
       ctx.strokeStyle = 'rgba(31,42,48,.35)';
       ctx.lineWidth = 1.2;
       ctx.stroke();
       // cheat line
-      const cx0 = twin ? w * 0.3 : w * (tb ? 0.5 : 0.42);
       ctx.fillStyle = C.sea;
-      ctx.fillRect(cx0, fy + fh * 0.28, w - cx0, fh * 0.07);
+      ctx.fillRect(fw0, fy + fh * 0.28, w - fw0, fh * 0.07);
       ctx.fillStyle = C.mech;
-      ctx.fillRect(cx0, fy + fh * 0.37, w - cx0, fh * 0.03);
+      ctx.fillRect(fw0, fy + fh * 0.37, w - fw0, fh * 0.03);
       // windows
       ctx.fillStyle = '#3d5560';
-      const wy = top - fh * (twin ? 0.04 : 0.16);
+      const wy = top - fh * 0.16;
       const wh = fh * 0.3;
-      const ws = twin ? [0.5, 0.64, 0.78, 0.92] : tb ? [0.66, 0.8, 0.94] : [0.6, 0.75, 0.9];
-      for (const f of ws) {
+      for (const f of tb ? [0.66, 0.8, 0.94] : [0.6, 0.75, 0.9]) {
         roundRect(ctx, w * f - fh * 0.2, wy + 2, fh * 0.34, wh, 5);
         ctx.fill();
       }
       // cowling panel lines (firewall + cowl split) and the nose air inlet
-      const fw = twin ? w * 0.36 : w * (tb ? 0.5 : 0.42);
       ctx.strokeStyle = 'rgba(31,42,48,.25)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(fw, top + 4);
-      ctx.lineTo(fw, bot - 2);
-      if (!twin) {
-        ctx.moveTo(noseX + 22, fy - fh * 0.04);
-        ctx.lineTo(fw, fy - fh * 0.04);
-      }
+      ctx.moveTo(fw0, top + 4);
+      ctx.lineTo(fw0, bot - 2);
+      ctx.moveTo(noseX + 22, fy - fh * 0.04);
+      ctx.lineTo(fw0, fy - fh * 0.04);
       ctx.stroke();
-      if (!twin) {
-        ctx.fillStyle = '#2b3236';
-        roundRect(ctx, noseX + 4, fy + fh * 0.16, tb ? 22 : 16, 9, 4.5);
+      ctx.fillStyle = '#2b3236';
+      roundRect(ctx, noseX + 4, fy + fh * 0.16, tb ? 22 : 16, 9, 4.5);
+      ctx.fill();
+      // rivet rows
+      ctx.fillStyle = 'rgba(31,42,48,.22)';
+      for (let x = noseX + 30; x < fw0 - 4; x += 9) {
+        ctx.beginPath();
+        ctx.arc(x, fy - fh * 0.04 - 3, 0.9, 0, Math.PI * 2);
         ctx.fill();
-        // rivet rows
-        ctx.fillStyle = 'rgba(31,42,48,.22)';
-        for (let x = noseX + 30; x < fw - 4; x += 9) {
-          ctx.beginPath();
-          ctx.arc(x, fy - fh * 0.04 - 3, 0.9, 0, Math.PI * 2);
-          ctx.fill();
-        }
       }
-      // engine: exhaust + prop
-      if (twin) {
-        // near-side nacelle on the wing
-        const nx = w * 0.6;
-        const ny = fy + fh * 0.12;
-        const nh = fh * 0.46;
-        // low wing, seen end-on at the root: an airfoil under the nacelle
-        const wy = bot - fh * 0.1;
-        ctx.fillStyle = '#e1dccf';
-        ctx.beginPath();
-        ctx.moveTo(w * 0.5, wy);
-        ctx.quadraticCurveTo(w * 0.5, wy - fh * 0.13, w * 0.58, wy - fh * 0.14);
-        ctx.lineTo(w + 10, wy - fh * 0.08);
-        ctx.lineTo(w + 10, wy + fh * 0.03);
-        ctx.quadraticCurveTo(w * 0.56, wy + fh * 0.05, w * 0.5, wy);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(31,42,48,.3)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        const ng = ctx.createLinearGradient(0, ny - nh / 2, 0, ny + nh / 2);
-        ng.addColorStop(0, '#fbf9f3');
-        ng.addColorStop(1, '#d9d3c4');
-        ctx.fillStyle = ng;
-        ctx.beginPath();
-        ctx.moveTo(nx + nh * 0.4, ny - nh / 2);
-        ctx.lineTo(w + 10, ny - nh * 0.42);
-        ctx.lineTo(w + 10, ny + nh * 0.42);
-        ctx.lineTo(nx + nh * 0.4, ny + nh / 2);
-        ctx.quadraticCurveTo(nx - nh * 0.12, ny + nh / 2, nx - nh * 0.12, ny);
-        ctx.quadraticCurveTo(nx - nh * 0.12, ny - nh / 2, nx + nh * 0.4, ny - nh / 2);
+      // the wing
+      const wg = ctx.createLinearGradient(0, high ? roof - wt : bot - wt, 0, high ? roof : bot + wt * 0.4);
+      wg.addColorStop(0, '#fbf9f3');
+      wg.addColorStop(1, '#ddd7c8');
+      ctx.fillStyle = wg;
+      if (high) {
+        wingPath(wx, roof, true);
         ctx.fill();
         ctx.strokeStyle = 'rgba(31,42,48,.35)';
         ctx.lineWidth = 1.2;
         ctx.stroke();
-        ctx.fillStyle = '#2b3236';
-        roundRect(ctx, nx + 2, ny + nh * 0.18, 14, 7, 3.5);
-        ctx.fill();
-        prop({ x: nx - nh * 0.16, y: ny }, fh * 0.6, 3);
+        // the wing's shadow on the roof
+        ctx.fillStyle = 'rgba(31,42,48,.12)';
+        ctx.fillRect(wx + 2, roof + 1, chord - 4, 3);
+        // lift strut: lower fuselage up to the wing
+        ctx.strokeStyle = '#b9b3a4';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(wx + chord * 0.5, bot - fh * 0.08);
+        ctx.lineTo(wx + chord * 0.3, roof + 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(31,42,48,.25)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
       } else {
-        prop({ x: noseX - 4, y: fy - fh * 0.02 }, fh * (tb ? 0.8 : 0.72), tb ? 3 : 2);
+        // the root hangs below the belly line, as on a low wing seen from the side
+        const wb = bot + wt * 0.3;
+        wingPath(wx, wb, false);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(31,42,48,.35)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        // walkway on the wing root
+        ctx.fillStyle = 'rgba(31,42,48,.18)';
+        ctx.beginPath();
+        ctx.moveTo(wx + chord * 0.3, wb - wt * 0.98);
+        ctx.lineTo(wx + chord * 0.62, wb - wt * 0.7);
+        ctx.lineTo(wx + chord * 0.62, wb - wt * 0.5);
+        ctx.lineTo(wx + chord * 0.3, wb - wt * 0.78);
+        ctx.fill();
       }
+      prop({ x: noseX - 4, y: fy - fh * 0.02 }, fh * (tb ? 0.8 : 0.72), tb ? 3 : 2);
       if (tb) {
         // exhaust stack on the side of the nose, with heat or flame
         const ex = w * 0.34;
@@ -1595,9 +1867,12 @@ export const gpu: PuzzleDef = {
         ctx.ellipse(ex + 2, ey - 2, 4, 6.5, -0.5, 0, Math.PI * 2);
         ctx.fill();
         if (s.lit) {
-          const hot = clamp((nd.itt - 850) / 250, 0, 1.4);
-          if (hot > 0) {
-            // torching
+          // torching: too much fuel for the air (fuel in early, a relight into residual
+          // fuel) flames at light-off; any start flames once it runs toward the red line
+          const sinceLight = s.t - s.fuelAt - m.lightDelay;
+          const wet = s.running ? 0 : clamp((s.rich - 1) * 3.5, 0, 1.4) * clamp(1 - sinceLight / 6, 0.25, 1);
+          const hot = Math.max(wet, clamp((nd.itt - 1000) / 110, 0, 1.4));
+          if (hot > 0.05) {
             const fl = (0.6 + 0.4 * Math.sin(clock * 30)) * hot * 1.4;
             ctx.fillStyle = C.rust;
             ctx.globalAlpha = 0.85;
@@ -1615,6 +1890,7 @@ export const gpu: PuzzleDef = {
             ctx.globalAlpha = 1;
           }
           if (!rm) {
+            // heat shimmer
             ctx.strokeStyle = 'rgba(86,100,107,.35)';
             ctx.lineWidth = 1.5;
             for (let k = 0; k < 3; k++) {
@@ -1630,10 +1906,19 @@ export const gpu: PuzzleDef = {
               ctx.stroke();
             }
           }
+        } else if (s.wet > 0.25 && s.n1 > 8 && !rm) {
+          // dry motoring blows the residual fuel out as white vapour
+          ctx.fillStyle = `rgba(150,158,162,${0.55 * clamp(s.wet, 0, 1)})`;
+          for (let k = 0; k < 3; k++) {
+            const ph = (clock * 1.4 + k / 3) % 1;
+            ctx.beginPath();
+            ctx.arc(ex + 6 + ph * 34, ey - 6 - ph * 18, 4 + ph * 9, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       } else {
         // exhaust pipe under the cowling
-        const ex = w * (twin ? 0.62 : 0.22);
+        const ex = w * 0.22;
         ctx.strokeStyle = '#56646b';
         ctx.lineWidth = 5;
         ctx.beginPath();
@@ -1730,19 +2015,22 @@ export const gpu: PuzzleDef = {
         ctx.arc(x, y, 1.6, 0, Math.PI * 2);
         ctx.fill();
       }
-      const lines: [string, number, number][] = tb
-        ? [
-            ['EXTERNAL POWER', 9, 800],
-            [`${ac.volts} V DC · ${ac.ampMax} A MAX`, 13, 900],
-            ['BATTERY SWITCH ON', 9, 800],
-          ]
-        : [
-            ['EXTERNAL POWER', 9, 800],
-            [`${ac.volts} VOLTS DC`, 15, 900],
-            [`BATTERY MASTER ${ac.master === 'on' ? 'ON' : 'OFF'}`, 9, 800],
-          ];
-      const gap = P.h / 3.3;
-      lines.forEach(([t, size, weight], i) => fitLabel(ctx, t, P.x + P.w / 2, P.y + P.h / 2 + (i - 1) * gap, P.w - 14, { size, weight, color: C.ink }));
+      const batt = tb ? 'BATTERY SWITCH ON' : `BATTERY MASTER ${ac.master === 'on' ? 'ON' : 'OFF'}`;
+      const main = tb ? `${ac.volts} V DC · ${ac.ampMax} A MAX` : `${ac.volts} VOLTS DC`;
+      // a short ramp gets the two-line plate
+      const lines: [string, number, number][] =
+        P.h >= 44
+          ? [
+              ['EXTERNAL POWER', 9, 800],
+              [main, tb ? 13 : 15, 900],
+              [batt, 9, 800],
+            ]
+          : [
+              [tb ? main : `EXT POWER ${main}`, 12, 900],
+              [batt, 9, 800],
+            ];
+      const gap = P.h / (lines.length + 0.3);
+      lines.forEach(([t, size, weight], i) => fitLabel(ctx, t, P.x + P.w / 2, P.y + P.h / 2 + (i - (lines.length - 1) / 2) * gap, P.w - 14, { size, weight, color: C.ink }));
     }
 
     function drawCart(g: Geo) {
@@ -1784,41 +2072,19 @@ export const gpu: PuzzleDef = {
       roundRect(ctx, P.x, P.y, P.w, P.h, 10);
       ctx.fillStyle = PANEL;
       ctx.fill();
-      // output ammeter (edgewise) + lamp, top row
-      const am: Rect = { x: P.x + 10, y: P.y + 8, w: Math.min(150, P.w * 0.44), h: 20 };
-      roundRect(ctx, am.x, am.y, am.w, am.h, 4);
-      ctx.fillStyle = '#efe8d6';
-      ctx.fill();
-      ctx.strokeStyle = C.ink;
-      ctx.lineWidth = 1;
-      for (let v = 0; v <= 1500; v += 250) {
-        const x = am.x + 6 + (v / 1500) * (am.w - 12);
-        ctx.beginPath();
-        ctx.moveTo(x, am.y + am.h - 3);
-        ctx.lineTo(x, am.y + am.h - (v % 500 === 0 ? 9 : 6));
-        ctx.stroke();
-      }
-      label(ctx, 'DC AMPS', am.x + 30, am.y + 7, { size: 7, weight: 900, color: C.inkSoft });
-      const nx = am.x + 6 + (clamp(nd.amps, 0, 1500) / 1500) * (am.w - 12);
-      ctx.strokeStyle = C.ink;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(nx, am.y + 2);
-      ctx.lineTo(nx, am.y + am.h - 2);
-      ctx.stroke();
-      if (m.meter) {
-        const lx = am.x + am.w + 8;
-        const lw = P.x + P.w - 40 - lx;
-        if (lw > 60) {
-          roundRect(ctx, lx, am.y, lw, am.h, 4);
-          ctx.fillStyle = '#9fb59a';
-          ctx.fill();
-          const vOut = s.cartOn ? (s.fed ? s.busV : s.cartV) : 0;
-          tnum(ctx, `${vOut.toFixed(1)}V ${Math.round(s.amps)}A`, lx + lw / 2, am.y + am.h / 2 + 1, { size: 11, weight: 800, color: '#1d2a1a', align: 'center' });
-        }
+      // output voltmeter and ammeter (edgewise), or the digital meter; lamp at the end of the row
+      const vTap = clock - cartTapT < 0.6 && !rm ? Math.sin((clock - cartTapT) * 40) * (0.6 - (clock - cartTapT)) * 1.2 : 0;
+      edgewise(g.vMeter, 'V', 40, 2, 10, nd.cv + vTap, m.meter ? `${cartOut(s).toFixed(1)} V` : null);
+      edgewise(g.aMeter, 'A', 1500, 100, 500, nd.amps, m.meter ? `${Math.round(s.amps)} A` : null);
+      if (reading && reading.at === 'cart' && clock < reading.until) {
+        const R = g.vMeter;
+        roundRect(ctx, R.x + R.w / 2 - 30, R.y, 60, R.h, 10);
+        ctx.fillStyle = C.sea;
+        ctx.fill();
+        tnum(ctx, reading.text, R.x + R.w / 2, R.y + R.h / 2 + 1, { size: 12, weight: 800, color: C.white, align: 'center' });
       }
       // output lamp
-      const lampP = { x: P.x + P.w - 18, y: am.y + am.h / 2 };
+      const lampP = { x: P.x + P.w - 18, y: g.vMeter.y + g.vMeter.h / 2 };
       if (s.cartOn) {
         const gl = ctx.createRadialGradient(lampP.x, lampP.y, 1, lampP.x, lampP.y, 16);
         gl.addColorStop(0, 'rgba(244,211,94,.7)');
@@ -1921,6 +2187,7 @@ export const gpu: PuzzleDef = {
       toggle(g.cartSw, lever.cart, 'OUTPUT', 'ON', 'OFF', 1.25);
       if (m.guide && !finished) {
         const t = stepTarget();
+        if (t === 'cartMeter') ringRect(g.vMeter);
         if (t === 'volts') ring(V, kr + 6);
         if (t === 'amps') ring(A, ar + 6);
         if (t === 'cartSw') ring(g.cartSw, 30);
