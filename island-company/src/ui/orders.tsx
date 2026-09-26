@@ -1,10 +1,13 @@
 // Work-order cards: the universal container (same radius, shadow, grammar).
-import { ECON, ROLE_LABEL } from '../sim/data';
+import { defectRule, ECON, incidentText, ROLE_LABEL } from '../sim/data';
 import { deferralRisk, expectedDeferralCost } from '../sim/econ';
-import { isEmergency } from '../sim/engine';
+import { isEmergency, tracedTo } from '../sim/engine';
 import type { IslandState, Order, Role } from '../sim/types';
 import { Icon, TierDots, usd } from './kit';
-import { ROLE_TINT } from './theme';
+import { capWords, reportSaid } from './select';
+import { C, ROLE_TINT } from './theme';
+
+const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
 
 const PUZZLE_ICON: Record<Role, string> = { mech: 'wrench', elec: 'bolt', fin: 'chart' };
 
@@ -23,6 +26,8 @@ export function statusChip(s: IslandState, o: Order) {
         </span>
       );
     case 'done':
+      // blind sign-off: no score, no verdict (how good it was shows up later)
+      if (o.result?.blind) return <span class="chip">Signed off</span>;
       return <span class="chip palm">Done · {Math.round((o.result?.score ?? 0) * 100)}%{o.result?.perfect ? ' ★' : ''}</span>;
     default:
       return null;
@@ -30,11 +35,41 @@ export function statusChip(s: IslandState, o: Order) {
   void s;
 }
 
-export function OrderCard({ s, o, onOpen }: { s: IslandState; o: Order; onOpen(o: Order): void }) {
+/** Where a job came from: a repair for an earlier sign-off, the redo after it, or a crewmate's report. */
+function OriginChips({ s, o }: { s: IslandState; o: Order }) {
+  const rep = o.report;
+  return (
+    <>
+      {o.repair && <span class="chip ink">Repair · from week {o.repair.defect.week}</span>}
+      {o.redo && <span class="chip ink">Redo · week {o.redo.week} sign-off</span>}
+      {rep && (
+        <span class="chip" style={{ background: `${ROLE_TINT[rep.by]}66` }}>
+          Reported by {nameOf(s, rep.by)}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** While a report is open, what it costs the crew. */
+function ReportEffect({ s, o }: { s: IslandState; o: Order }) {
+  const rep = o.report;
+  if (!rep || o.status === 'done' || o.status === 'cancelled') return null;
+  return (
+    <>
+      <span class="chip rust">{rep.effect === 'cap' ? `${nameOf(s, rep.by)}: ${capWords(rep.by)}` : `−${usd(rep.amount)}/week`}</span>
+      {rep.again && <span class="chip">Came back · week {rep.again} fix didn't hold</span>}
+    </>
+  );
+}
+
+/** `held`: this seat can't start anything right now (turn over, or a per-turn limit): a ready card isn't highlighted. */
+export function OrderCard({ s, o, onOpen, held }: { s: IslandState; o: Order; onOpen(o: Order): void; held?: boolean }) {
   const asset = s.assets.find((a) => a.id === o.assetId);
-  const carried = o.deferrals > 0 && o.status !== 'done';
+  // reports carry forward but never roll deferral incidents: their cost is the effect chip
+  const carried = o.deferrals > 0 && o.status !== 'done' && o.kind !== 'report';
   const risk = carried ? deferralRisk(o, o.lastDeferredWeek === s.week ? 0 : 1) : 0;
-  const cls = `card order ${o.status === 'ready' ? 'ready' : ''} ${o.status === 'done' ? 'done' : ''}`;
+  const cls = `card order ${o.status === 'ready' && !held ? 'ready' : ''} ${o.status === 'done' ? 'done' : ''} ${o.status === 'ready' && held ? 'held' : ''}`;
   return (
     <button
       class={cls}
@@ -51,14 +86,17 @@ export function OrderCard({ s, o, onOpen }: { s: IslandState; o: Order; onOpen(o
           {o.cost > 0 && <span class="num" style={{ fontWeight: 800, fontSize: 15 }}>{usd(o.cost)}</span>}
         </span>
         <span class="row wrap" style={{ gap: 6 }}>
-          <span class="label">{asset?.name ?? (o.leak ? `${usd(o.leak)} at stake` : 'Desk')}</span>
+          <span class="label">{asset?.name ?? (o.report ? 'Cross-trade report' : o.leak ? `${usd(o.leak)} at stake` : 'Desk')}</span>
           <TierDots tier={o.tier} />
           {o.parts > 0 && <span class="label">· {o.parts} kit</span>}
+          {o.redo && o.cost === 0 && <span class="label">· already paid</span>}
         </span>
         <span class="row wrap" style={{ gap: 6 }}>
           {o.kind === 'project' && <span class="chip palm">Crew project</span>}
           {o.squawk && <span class="chip">✎ {o.squawk}</span>}
+          <OriginChips s={s} o={o} />
           {statusChip(s, o)}
+          <ReportEffect s={s} o={o} />
           {carried && (
             <span class={`chip ${risk >= 0.3 ? 'rust' : ''}`}>
               ⚠ carried {o.deferrals} wk · {Math.round(risk * 100)}% risk
@@ -80,13 +118,21 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
         <TierDots tier={o.tier} />
       </div>
       <span class="muted">
-        {asset ? `${asset.name} · health ${Math.round(asset.health)} → up to ${Math.min(100, Math.round(asset.health + o.gain))}` : 'Analyst desk task'}
+        {asset
+          ? `${asset.name} · health ${Math.round(asset.health)}${o.status === 'done' ? '' : ` → up to ${Math.min(100, Math.round(asset.health + o.gain))}`}`
+          : o.report
+            ? `Cross-trade report · ${nameOf(s, o.report.by)} (${ROLE_LABEL[o.report.by]}) → ${nameOf(s, o.role)}`
+            : o.kind === 'project'
+              ? 'Crew project part'
+              : 'Analyst desk task'}
       </span>
       <div class="row wrap" style={{ gap: 6 }}>
+        <OriginChips s={s} o={o} />
         {statusChip(s, o)}
-        {o.cost > 0 && <span class="chip">Cost {usd(o.cost)}</span>}
+        {o.cost > 0 && <span class="chip">{o.report ? 'Paid' : 'Cost'} {usd(o.cost)}</span>}
         {o.parts > 0 && <span class="chip">Needs {o.parts} parts kit</span>}
       </div>
+      <Origin s={s} o={o} />
       {o.status === 'pending' && (
         <p class="muted" style={{ margin: 0 }}>
           {role === 'fin'
@@ -100,12 +146,28 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
           {s.parts.inTransit === 0 ? ` Nothing is in transit: ${ROLE_LABEL.fin} needs to buy one.` : ''}
         </p>
       )}
-      {o.status === 'done' && o.result && (
+      {o.status === 'done' && o.result?.blind && (
+        <p class="muted" style={{ margin: 0 }}>
+          Signed off by {nameOf(s, o.result.by)} in week {o.result.week}. No verdict: how good it was shows up later
+          {asset ? `, in ${asset.name}'s health, an inspection, or an incident.` : o.report ? `, if the fix doesn't hold.` : '.'}
+        </p>
+      )}
+      {o.status === 'done' && o.result && !o.result.blind && (
         <p class="muted" style={{ margin: 0 }}>
           {Math.round(o.result.score * 100)}% · {Math.round(Math.min(1.15, o.result.credit) * 100)}% credit{o.result.auto ? ' · autopilot' : ''}
           {o.result.covered ? ' · covered by a teammate' : ''}
           {o.result.summary ? ` · ${o.result.summary}` : ''}
         </p>
+      )}
+      {o.repair && o.status !== 'done' && o.status !== 'cancelled' && (
+        <span class="label">
+          {o.repair.via === 'inspection'
+            ? asset?.kind === 'plane'
+              ? 'Not airworthy until it’s repaired: ground it, or it flies with a known defect (a near-miss on the safety grade). '
+              : 'Not safe until it’s repaired: red-tag it, or it stays in service with a known defect (a near-miss on the safety grade). '
+            : ''}
+          {o.status === 'pending' ? 'Safety-critical: it can be approved even through a cash freeze.' : ''}
+        </span>
       )}
       {s.cash < ECON.freezeBelow && o.status === 'pending' && (
         <p class="fault" style={{ margin: 0 }}>
@@ -114,4 +176,84 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       )}
     </div>
   );
+}
+
+/** Why this job exists: the repair's trace, the redo's history, or the crewmate's report. */
+function Origin({ s, o }: { s: IslandState; o: Order }) {
+  const asset = s.assets.find((a) => a.id === o.assetId);
+  const on = asset ? ` on ${asset.name}` : '';
+  if (o.repair) {
+    const r = o.repair;
+    const d = r.defect;
+    // what happened, as the review told it (older saves: rebuilt from the rule)
+    const happened = r.incident ?? incidentText(defectRule(d.puzzle, d.role, d.orderKind), d.severity, asset?.name ?? 'the asset');
+    return (
+      <div class="card col" style={{ gap: 6, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${r.via === 'incident' ? C.rust : C.palm}` }}>
+        <span class="label">{r.via === 'incident' ? 'Failed in service' : 'Caught by an inspection'}</span>
+        <span>
+          {r.via === 'incident' ? (
+            <>
+              {happened}. Traced to {tracedTo(d)}.
+            </>
+          ) : (
+            <>
+              {r.foundBy}'s {r.foundIn}
+              {on} found {r.problem}, left by {tracedTo(d)}.
+            </>
+          )}
+        </span>
+        <b style={{ fontSize: 15 }}>
+          {o.status === 'done'
+            ? d.redo
+              ? 'Repaired. Now the original job gets redone (already paid).'
+              : 'Repaired and closed.'
+            : d.redo
+              ? 'Repair first, then redo the original job (already paid).'
+              : 'Repair it and it’s closed.'}
+        </b>
+      </div>
+    );
+  }
+  if (o.redo) {
+    return (
+      <div class="card col" style={{ gap: 6, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${C.ink}` }}>
+        <span class="label">Redo</span>
+        <span>
+          The original job again, now the repair is done: {o.redo.name}'s week {o.redo.week} sign-off didn't hold. Already paid, so no cost and no approval.
+        </span>
+      </div>
+    );
+  }
+  if (o.report) {
+    const rep = o.report;
+    const by = nameOf(s, rep.by);
+    const open = o.status !== 'done' && o.status !== 'cancelled';
+    return (
+      <div class="card col" style={{ gap: 6, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${ROLE_TINT[rep.by]}` }}>
+        <span>
+          <b>{by} reports:</b> {reportSaid(o)}.
+        </span>
+        {rep.again && (
+          <span>
+            It came back: the {o.role === 'fin' ? 'correction' : 'fix'} from week {rep.again} didn't {o.role === 'fin' ? 'stick' : 'hold'}.
+            {rep.owed ? ` It cost ${usd(rep.owed)} while it only looked fixed; that's charged when this week resolves.` : ''}
+          </span>
+        )}
+        {open && (
+          <span class="fault" style={{ fontWeight: 700 }}>
+            {rep.effect === 'cap'
+              ? `Until it's fixed, ${by} is held to ${capWords(rep.by).replace(' max', '')} a turn.`
+              : `Costs ${usd(rep.amount)} every week it stays open.`}
+          </span>
+        )}
+        {open && (
+          <span class="label">
+            {o.cost > 0 ? `${usd(o.cost)} out of pocket, already paid: no approval needed. ` : 'No approval needed. '}
+            It never rolls an incident, but the effect lasts until it's fixed.
+          </span>
+        )}
+      </div>
+    );
+  }
+  return null;
 }

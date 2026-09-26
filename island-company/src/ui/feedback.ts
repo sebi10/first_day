@@ -163,6 +163,12 @@ export const fx = {
     tone(660, 0.08, 'triangle', 0.18);
     tone(990, 0.12, 'triangle', 0.18, undefined, 0.07);
   },
+  /** neutral close-out: the job is signed off, no verdict either way (blind sign-off) */
+  done() {
+    buzz(14);
+    noise(0.03, 0.2, 2400, 1.5);
+    tone(587, 0.11, 'triangle', 0.16);
+  },
   /** perfect-run flourish */
   flourish() {
     buzz([10, 50, 10, 50, 30]);

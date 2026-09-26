@@ -120,7 +120,8 @@ describe('approvals, counters, freeze', () => {
     const o = s.orders.find((x) => x.status === 'pending')!;
     const a = s.assets.find((x) => x.id === o.assetId);
     if (a) a.health = 80;
-    o.kind = 'repair';
+    // a routine job ('repair' is now a real kind: a known defect's fix, which is safety-critical)
+    o.kind = 'tires';
     expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toMatch(/safety-critical/);
     // safety-critical work (asset under 60) can still be approved if cash covers it
     if (a) {
@@ -173,6 +174,11 @@ describe('orders and puzzles', () => {
     const a2 = s.assets.find((a) => a.id === o.assetId)!;
     expect(a2.health).toBeGreaterThan(before);
     expect(s.players.elec!.xp).toBeGreaterThan(0);
+    // a blind sign-off (tier 2+) books its perfect run when the week resolves, not at hand-in
+    if (s.orders.find((x) => x.id === o.id)!.result!.blind) {
+      expect(s.players.elec!.perfects).toBe(0);
+      s = apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
+    }
     expect(s.players.elec!.perfects).toBe(1);
   });
 

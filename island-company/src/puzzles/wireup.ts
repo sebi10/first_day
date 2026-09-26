@@ -30,7 +30,9 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
   const t = Math.max(0, tier);
   const byTier: WireModel['device'] = t <= 1 ? 'receptacle' : t === 2 ? (r.chance(0.5) ? 'switch3' : 'receptacle') : t === 3 ? r.pick(['passthrough', 'switch3'] as const) : t === 4 ? 'gfci' : 'switch3src';
   // the job decides the device: a GFCI job is a GFCI, a 3-way job is a 3-way
-  const device: WireModel['device'] = job === 'gfci' ? 'gfci' : job === 'switch3' ? (t >= 5 ? 'switch3src' : 'switch3') : byTier;
+  // a repair on an outlet (a scorched device, a backstab, a re-landed run) is a receptacle job
+  const device: WireModel['device'] =
+    job === 'gfci' ? 'gfci' : job === 'switch3' ? (t >= 5 ? 'switch3src' : 'switch3') : job === 'outlet' ? (t >= 3 ? 'passthrough' : 'receptacle') : byTier;
   const labels = t <= 2;
   let terms: Term[] = [];
   let wires: Wire[] = [];
@@ -257,7 +259,8 @@ export const wireup: PuzzleDef = {
         if (!gsx || finished) return;
         if (gsx.kind === 'strip') {
           const s = strip.get(gsx.wire) ?? 0;
-          if (s > 0) (!m.stripReadout || Math.abs(s - m.stripTarget) <= 0.2 ? host.fx.snap : host.fx.bad)();
+          // the strip gauge's verdict click only while teaching; blind, every strip sounds the same
+          if (s > 0) (p.blind || !m.stripReadout || Math.abs(s - m.stripTarget) <= 0.2 ? host.fx.snap : host.fx.bad)();
           return;
         }
         // landing: nearest terminal to the release point
@@ -413,7 +416,7 @@ export const wireup: PuzzleDef = {
           ctx.stroke();
         }
         const exposed = l.strip > m.stripTarget + 0.2;
-        const wrong = finished && !w.target.includes(l.term);
+        const wrong = finished && !p.blind && !w.target.includes(l.term);
         if (exposed || wrong) {
           ctx.strokeStyle = C.rust;
           ctx.lineWidth = 3;
@@ -479,7 +482,7 @@ export const wireup: PuzzleDef = {
       if (finished) return;
       finished = true;
       const res = makeResult();
-      if (res.perfect) {
+      if (res.perfect && !p.blind) {
         flash = performance.now();
         host.fx.flourish();
       } else host.fx.good();

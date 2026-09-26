@@ -30,7 +30,7 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 ## 3. A week (one real day, 5–10 min each)
 
 1. Open the app. Read the 2–3 "since you left" lines.
-2. Do 2–4 jobs. Each job is a 60–120 s puzzle; the clock starts on your first touch. The better the work, the more the asset recovers: a bare pass (60%) restores 81% of the job, a clean one 105%, and perfect runs add a small permanent bonus. Under 40% the job fails its own check and comes back as **rework** with a fresh fault.
+2. Do 2–4 jobs. Each job is a 60–120 s puzzle; the clock starts on your first touch. The better the work, the more the asset recovers: a bare pass (60%) restores 81% of the job, a clean one 105%, and perfect runs add a small permanent bonus. On an easy job (tier 1) you see your score, and under 40% it comes back as **rework** with a fresh fault. From tier 2 you don't see a score at all (see *No one tells you you're wrong*).
 3. Make your calls:
    - **Analyst:** swipe cards (→ approve, ← defer, ↑ cheaper fix), then set prices on the demand curve.
    - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident). Once a week you can also **write up a squawk**: tap one of your assets and pick the job you judge it needs; it lands on the analyst's desk with your name on it.
@@ -38,11 +38,33 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 
 The week resolves at **20:00 island time**, or as soon as all three have ended their turn. Everyone gets the board review. Miss a day and your role runs on autopilot at 50%: nothing is lost, but that week doesn't count toward unlocks.
 
-## 4. Lend a hand
+## 4. No one tells you you're wrong
 
-Once a week you can try another trade's job that has already waited a week (*Lend a hand* on your panel). It's always expert difficulty: no tools, no rule text. Under 60% botches it: the asset takes −6 and the job stays open for its owner. Only do it if you actually know how.
+On the job, nobody grades you. From tier 2 every real work order is **signed off blind**:
 
-## 5. Getting better together
+- **While you work:** nothing says "wrong". A bolt torqued out of sequence is taken. Safety wire pulled the loosening way stays that way. Your multimeter call and the spot where you open the wall are final. An invoice is simply paid or held. What real instruments show is still there: the gauge needle, the voltage, the tester's 120/0, the UV glow, a part that won't come off.
+- **When you finish:** you get a logbook entry, a closed work order or a filed task. No score, no ✓. The asset's health moves by a standard amount, and the real result lands quietly when the week resolves.
+- **Later:** careless work can leave a **hidden defect**. A few weeks later it becomes an incident, like a pilot write-up, a callback from a guest, or a failure in service. It costs money and health, counts against the safety grade, and the review traces it back: *"Pilot wrote up a vibration on Twin N-12: prop bolts found loose. Traced to the prop bolt re-torque Seb signed off in week 6."*
+- **Your chance to catch it:** a passed inspection finds what your trade left in the work it looks at. The 100-hr inspection and code inspection prep check everything; an oil change looks at the engine and the prop; an outlet trace opens the house's boxes. A defect you find is *not airworthy / not safe until repaired*: ground or red-tag the asset, or it counts as a near-miss.
+- **Then you fix it:** a found or failed defect becomes a **repair** for the same trade (a sensible corrective job on a different puzzle, which the analyst approves). When it's done, the **original job comes back as a redo**, already paid. A botched repair or redo can leave another defect.
+
+Tier 1 jobs, week 0, the weekly challenge and Lend a hand still show your score. They're for learning.
+
+## 5. Crewmates' problems (cross-trade reports)
+
+From week 3 the island throws up problems one trade has and another has to fix. All three of you report and all three fix:
+
+- The mechanic: "the hangar work lights are dead" (electrician), "the parts vendor put us on credit hold" (analyst).
+- The electrician: "the trencher drive belt snapped" (mechanic), "utility autopay is drafting more than the bills" (analyst).
+- The analyst: "office outlets go dead when the printer runs" (electrician), "the van wheel is wobbling" (mechanic).
+
+A report lands on the fixer's list, ready, no approval. While it's open it either **slows the reporter down** (2 jobs a turn, or 1 desk task) or **costs cash every week**. Tap it to see who's waiting on you, then *Start*. A fix that doesn't hold comes back a week or two later. A money leak that comes back also charges the weeks it only looked fixed. Autopilot patches a slow-down, but a money leak waits for a person.
+
+## 6. Lend a hand
+
+Once a week you can try another trade's job that has already waited a week (*Lend a hand* on your panel). It's always expert difficulty: no tools, no rule text, and you do see the score. Under 60% botches it: the asset takes −6 and the job stays open for its owner. You can't fix your own report this way: the trade you reported it to has to (the third crewmate can help). Only do it if you actually know how.
+
+## 7. Getting better together
 
 - **Board → Weekly challenge:** the same puzzle and seed for all three this week. Try each other's trades and compare. No XP; bragging only.
 - **Streaks:** every third B+ week in a row brings a story card. Two of three votes decide it.
@@ -51,12 +73,12 @@ Once a week you can try another trade's job that has already waited a week (*Len
 - **Crew projects:** qualifying for the next tier (tier 2: 4 full-crew B+ weeks) opens one job per trade. The tier arrives when all three are done, and your average score sets how healthy the new buildings start. Nobody can do your part for you.
 - **Cash trouble:** under $2,000 only safety-critical work gets approved. Two weeks below zero puts the island in receivership, with one bridge loan to climb out.
 
-## 6. What to test and report
+## 8. What to test and report
 
 After each of your first 3 days, send one message in the group chat:
 
 - **Bugs:** anything stuck, blank, or a job you couldn't finish. Include a screenshot and your role.
-- **Realism:** "a real mechanic/electrician/analyst would never…". This is the most valuable feedback.
+- **Realism:** "a real mechanic/electrician/analyst would never…". This is the most valuable feedback, and it matters most for the incidents and repairs: tell us when the failure, the find or the fix isn't what would really happen.
 - **Difficulty:** name any puzzle that was too easy or too hard at its tier.
 - **Waiting:** any time you felt blocked by a teammate, and for how long.
 - **Fun:** the best moment and the most boring moment.

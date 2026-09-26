@@ -1,5 +1,6 @@
 // Puzzle lab: mount one puzzle with a fake host.
 // /lab.html?p=torque&tier=3&seed=1&tools=clickWrench,gaugeDamper
+//   &blind=1  blind sign-off (no verdict while you work)   &job=prop  the scenario a work order picks
 import type { PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
 import { fx } from './ui/feedback';
 import '@fontsource-variable/manrope';
@@ -10,13 +11,15 @@ const id = (q.get('p') ?? 'torque') as PuzzleId;
 const tier = Number(q.get('tier') ?? 2);
 const seed = Number(q.get('seed') ?? 1);
 const tools = (q.get('tools') ?? '').split(',').filter(Boolean);
+const blind = q.has('blind');
+const job = q.get('job') ?? undefined;
 // load only the puzzle under test, so one half-written puzzle can't break the lab
 const mods = import.meta.glob('./puzzles/*.ts');
 const mod = (await mods[`./puzzles/${id}.ts`]()) as Record<string, PuzzleDef>;
 const def = mod[id];
 const el = document.getElementById('stage')!;
 const res = document.getElementById('res')!;
-document.getElementById('title')!.textContent = `${def.title} · tier ${tier} · seed ${seed}`;
+document.getElementById('title')!.textContent = `${def.title} · tier ${tier} · seed ${seed}${blind ? ' · blind' : ''}`;
 
 const lab = {
   result: null as PuzzleResult | null,
@@ -42,6 +45,7 @@ const context = {
   hints: ['Tier 2 fixed costs start week 6', 'Pending: Panel upgrade $2,200'],
   leak: 540,
   assetName: 'Twin N-12',
+  job,
 };
 
 const inst = def.mount(
@@ -55,7 +59,7 @@ const inst = def.mount(
     },
     paused: () => false,
   },
-  { seed, tier, tools, reducedMotion: false, context },
+  { seed, tier, tools, reducedMotion: false, context, blind },
 );
 
 const total = def.seconds(tier) * 1000;

@@ -316,6 +316,9 @@ export const safetywire: PuzzleDef = {
     // the right side for each bolt, from geometry; never part of the model
     const answer = (k: number) => tighteningDir(m.bolts, k);
     const teach = m.aids.spelled;
+    // blind: a wire threaded or wrapped the loosening way stays that way (scored, never flagged),
+    // no rust wire, no backing-out head, no in-band click on release
+    const blind = !!p.blind;
     const sides: number[] = new Array(n).fill(0); // threading direction used per bolt
     let phase: Phase = 'thread';
     let cur = 0; // bolt (thread/wrap) or span (twist) index
@@ -444,7 +447,8 @@ export const safetywire: PuzzleDef = {
 
     const threadBolt = (k: number, s: number, back: P2) => {
       tipDrag = null;
-      if (answer(k) !== s) {
+      if (answer(k) !== s && blind) run.wrongWay++;
+      else if (answer(k) !== s) {
         run.wrongWay++;
         wrongTries++;
         host.fx.bad();
@@ -471,7 +475,7 @@ export const safetywire: PuzzleDef = {
       phase = 'done';
       tipDrag = twisting = wrapping = null;
       const res = result(scoreWire(m, run), summarize(m, run), dataOf());
-      if (res.perfect) {
+      if (res.perfect && !blind) {
         flourishT = clock;
         host.fx.flourish();
       } else host.fx.good();
@@ -647,7 +651,8 @@ export const safetywire: PuzzleDef = {
           if (Math.abs(wrapping.acc) >= Math.PI * 1.25) {
             const cw = wrapping.acc > 0;
             wrapping = null;
-            if (cw) {
+            if (cw || blind) {
+              if (!cw) run.wrongWay++;
               run.wraps = cur + 1;
               host.fx.snap();
               afterBolt(cur);
@@ -688,7 +693,7 @@ export const safetywire: PuzzleDef = {
           const isPig = phase === 'pigtail';
           const val = isPig ? twists : twists / m.spans[cur];
           const [lo, hi] = isPig ? m.pigtail : m.band;
-          if (isPig && !teach) host.fx.tick();
+          if ((isPig && !teach) || blind) host.fx.tick();
           else if (val >= lo && val <= hi) host.fx.snap();
           else if (val > hi) host.fx.bad();
           return;
@@ -939,7 +944,7 @@ export const safetywire: PuzzleDef = {
         if (!active && run.twists[k] == null) continue;
         const isSnap = snapped && snapped.span === k && now - snapped.at < 0.7;
         const tpi = count / m.spans[k];
-        const over = run.twists[k] != null && tpi > m.band[1];
+        const over = !blind && run.twists[k] != null && tpi > m.band[1];
         twisted(a, b, count, tpi / m.band[0], isSnap || over ? C.rust : WIRE, !!isSnap);
         if (run.threaded > k + 1) around(g, k + 1, b, -sides[k + 1]);
       }
@@ -952,7 +957,7 @@ export const safetywire: PuzzleDef = {
         if (!done && wrapping && cur === i) sweep = clamp(wrapping.acc, -Math.PI * 1.25, Math.PI * 1.25) * (Math.PI / (Math.PI * 1.25));
         // through-hole strand
         strand([holeEnd(g, i, -sides[i]), holeEnd(g, i, sides[i])], WIRE, 2.4);
-        if (sweep !== 0) ink(() => ctx.arc(c.x, c.y, g.R + 4, a0, a0 + sweep, sweep < 0), sweep < 0 ? C.rust : WIRE, 2.4);
+        if (sweep !== 0) ink(() => ctx.arc(c.x, c.y, g.R + 4, a0, a0 + sweep, sweep < 0), sweep < 0 && !blind ? C.rust : WIRE, 2.4);
       }
 
       // wrong-way thread: rust wire through the hole, head starts backing out
@@ -1175,7 +1180,7 @@ export const safetywire: PuzzleDef = {
       // from tier 3 the pigtail count is trade knowledge: no band on the gauge
       const banded = !isPig || teach;
       const out = banded && show && (val > hi || (!active && val < lo && count > 0));
-      label(ctx, readout, G.x1, G.y - 26, { size: 15, weight: 800, color: out && val > hi ? C.rust : C.ink, align: 'right' });
+      label(ctx, readout, G.x1, G.y - 26, { size: 15, weight: 800, color: out && val > hi && !blind ? C.rust : C.ink, align: 'right' });
       // bar
       ctx.fillStyle = shade(C.sandDeep, -0.04);
       roundRect(ctx, G.x0, G.y - 6, G.x1 - G.x0, 12, 6);
@@ -1243,7 +1248,7 @@ export const safetywire: PuzzleDef = {
           steps.push({
             done: tw != null,
             now: phase === 'twist' && cur === i,
-            bad: tw != null && tpiScore(tw / m.spans[i], m.band) < 1,
+            bad: !blind && tw != null && tpiScore(tw / m.spans[i], m.band) < 1,
           });
         }
       }

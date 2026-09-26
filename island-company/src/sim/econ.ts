@@ -1,6 +1,6 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
-import { CATALOG_BY_KIND, ECON, MODELS, TIERS } from './data';
-import type { Asset, IslandState, Order, Weather } from './types';
+import { CATALOG_BY_KIND, DEFECT, ECON, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
+import type { Asset, IslandState, Order, Role, Weather } from './types';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round10 = (v: number) => Math.round(v / 10) * 10;
@@ -145,15 +145,76 @@ export function credit(score: number, perfects: number) {
   return workCredit(score) * (1 + Math.min(15, perfects) / 100);
 }
 
-/** Does a result this low send an owner's job back for rework? (Trade jobs on an asset, not crew projects.) */
-export function isRework(o: { role: string; kind: string; assetId: string | null }, score: number) {
-  return o.role !== 'fin' && o.kind !== 'project' && o.assetId !== null && score < REWORK_BELOW;
+/**
+ * Does a result this low send an owner's job back for rework? Trade jobs on an
+ * asset and report fixes, not crew projects. Teaching tiers only: a blind
+ * sign-off never reworks (hidden defects replace it), so pass `blind`.
+ */
+export function isRework(o: { role: string; kind: string; assetId: string | null }, score: number, blind = false) {
+  if (blind || o.kind === 'project') return false;
+  return (o.kind === 'report' || (o.role !== 'fin' && o.assetId !== null)) && score < REWORK_BELOW;
+}
+
+// ---------------------------------------------------------------------------
+// Blind sign-off and hidden defects
+
+/** The puzzle tier a seat plays an order at: lending a hand is expert (3+), a new player's grace plays tier 1. */
+export function launchTier(s: IslandState, o: Pick<Order, 'tier'>, role: Role, assist = false) {
+  const p = s.players[role];
+  const grace = !assist && !!p && s.week <= p.graceUntil;
+  return assist ? Math.max(3, o.tier) : grace ? 1 : o.tier;
+}
+
+/**
+ * Blind sign-off: a real work order (not week 0, not practice or the weekly
+ * challenge, not lend-a-hand) launched at puzzle tier 2+. The puzzle gives no
+ * verdict; how good it was shows up later.
+ */
+export function isBlind(s: IslandState, o: Pick<Order, 'tier' | 'role'>, role: Role, assist = false) {
+  return s.week >= 1 && !assist && o.role === role && launchTier(s, o, role) >= DEFECT.blindFromTier;
+}
+
+/** Chance a signed-off job leaves a latent defect, from its TRUE score. */
+export function defectChance(q: number) {
+  const d = DEFECT;
+  if (q >= d.clean) return 0;
+  if (q >= SIGNOFF) return (d.clean - q) * d.slope;
+  return Math.min(1, d.botchBase + (SIGNOFF - q) * d.botchSlope);
+}
+
+export const defectSeverity = (q: number): 1 | 2 => (q < DEFECT.severeBelow ? 2 : 1);
+
+/** Open cross-trade reports (reports the fixer hasn't done yet). */
+export const openReports = (s: IslandState) => s.orders.filter((o) => o.kind === 'report' && o.status !== 'done' && o.status !== 'cancelled');
+
+/**
+ * A 'cap' report this role raised and nobody has fixed: its jobs per turn are
+ * limited. `text` is the ready-made notice for the reporter's screen.
+ */
+export function reportCap(s: IslandState, role: Role): { order: Order; limit: number; text: string } | null {
+  const o = openReports(s).find((x) => x.report?.by === role && x.report.effect === 'cap');
+  if (!o) return null;
+  const def = REPORT_BY_KEY[o.report!.key];
+  const limit = role === 'fin' ? REPORT.capFin : REPORT.capOps;
+  const fixer = s.players[o.role]?.name ?? ROLE_LABEL[o.role];
+  const what = role === 'fin' ? (limit === 1 ? 'desk task' : 'desk tasks') : limit === 1 ? 'job' : 'jobs';
+  return { order: o, limit, text: `${def?.notice ?? o.title}: ${limit} ${what} max until ${fixer} ${def?.fixes ?? 'fixes'} ${def?.it ?? 'it'}.` };
 }
 
 export function urgency(s: IslandState, o: Order) {
   if (o.kind === 'project') return 1000; // the crew's shared build always comes first
   const a = s.assets.find((x) => x.id === o.assetId);
-  return o.deferrals * 30 + o.tier * 10 + (a ? 100 - a.health : 0) + (o.kind === 'codeprep' || o.kind === 'inspect100' ? 40 : 0) + (o.squawk ? 20 : 0);
+  return (
+    o.deferrals * 30 +
+    o.tier * 10 +
+    (a ? 100 - a.health : 0) +
+    (o.kind === 'codeprep' || o.kind === 'inspect100' ? 40 : 0) +
+    (o.squawk ? 20 : 0) +
+    // a crewmate is stuck until it's fixed; a known defect is still in service
+    (o.kind === 'report' ? 150 : 0) +
+    (o.kind === 'repair' ? 40 : 0) +
+    (o.redo ? 15 : 0)
+  );
 }
 
 /** Expected revenue for the current week with no noise (analyst desk preview). */

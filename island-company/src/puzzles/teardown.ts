@@ -65,7 +65,98 @@ const ASSEMBLIES: Record<string, Assembly> = {
     ],
     faults: [['radio'], ['radio'], ['radio', 'tray']],
   },
+  // repairs and crewmates' reports: the assembly the job is actually about
+  wheel: { title: 'Main wheel and brake', note: 'Jack it and let the tire down before the axle nut.', parts: [], faults: [['bolts'], ['bolts'], ['bolts', 'wheel']] },
+  wheelhalf: { title: 'Main wheel and brake', note: 'Jack it and let the tire down before the axle nut.', parts: [], faults: [['wheel'], ['wheel'], ['wheel', 'bolts']] },
+  prop: {
+    title: 'Propeller (flange bolts)',
+    note: 'Mags off and the prop chocked before a wrench touches it.',
+    parts: [
+      { id: 'mags', name: 'Mags OFF, prop chocked', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#3b464b' },
+      { id: 'spinner', name: 'Spinner', above: ['mags'], box: [0.2, 0.2, 0.6, 0.13], minTier: 0, shade: '#dcd2bd' },
+      { id: 'wire', name: 'Safety wire', above: ['spinner'], box: [0.05, 0.4, 0.42, 0.11], minTier: 1, shade: '#9aa5a9' },
+      { id: 'bolts', name: 'Prop bolts', above: ['wire', 'spinner'], box: [0.53, 0.4, 0.42, 0.11], minTier: 0, shade: '#7f8b90' },
+      { id: 'prop', name: 'Propeller', above: ['bolts'], box: [0.08, 0.58, 0.84, 0.16], minTier: 0, shade: '#56646b' },
+      { id: 'plate', name: 'Crush plate', above: ['prop'], box: [0.25, 0.8, 0.5, 0.12], minTier: 3, shade: '#b8c0c2' },
+    ],
+    faults: [['bolts'], ['bolts'], ['bolts', 'plate']],
+  },
+  exhaust: {
+    title: 'Exhaust riser',
+    note: 'Heat muff off before the riser clamp.',
+    parts: [
+      { id: 'cowl', name: 'Lower cowling', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#dcd2bd' },
+      { id: 'muff', name: 'Heat muff shroud', above: ['cowl'], box: [0.05, 0.2, 0.42, 0.12], minTier: 1, shade: '#9aa5a9' },
+      { id: 'clamp', name: 'Riser clamp', above: ['cowl'], box: [0.53, 0.2, 0.42, 0.12], minTier: 0, shade: '#7f8b90' },
+      { id: 'nuts', name: 'Flange nuts', above: ['clamp'], box: [0.53, 0.4, 0.42, 0.12], minTier: 0, shade: '#9aa5a9' },
+      { id: 'riser', name: 'Exhaust riser', above: ['nuts', 'muff'], box: [0.1, 0.58, 0.8, 0.18], minTier: 0, shade: '#56646b' },
+      { id: 'gasket', name: 'Flange gasket', above: ['riser'], box: [0.2, 0.82, 0.6, 0.1], minTier: 2, shade: '#c9a86a' },
+    ],
+    faults: [['riser'], ['riser'], ['riser', 'gasket']],
+  },
+  sparcap: {
+    title: 'Wing root: spar-cap doubler',
+    note: 'Drain and vent the tank before you drill.',
+    parts: [
+      { id: 'fairing', name: 'Wing-root fairing', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#dcd2bd' },
+      { id: 'panel', name: 'Access panel', above: ['fairing'], box: [0.05, 0.2, 0.42, 0.12], minTier: 0, shade: '#b8c0c2' },
+      { id: 'fuel', name: 'Drain + vent the tank', above: ['fairing'], box: [0.53, 0.2, 0.42, 0.12], minTier: 1, shade: '#3b464b' },
+      { id: 'rivets', name: 'Drill out rivets', above: ['panel', 'fuel'], box: [0.1, 0.4, 0.8, 0.12], minTier: 0, shade: '#9aa5a9' },
+      { id: 'cap', name: 'Cracked spar-cap section', above: ['rivets'], box: [0.1, 0.6, 0.8, 0.16], minTier: 0, shade: '#7f8b90' },
+      { id: 'web', name: 'Spar web', above: ['cap'], box: [0.2, 0.82, 0.6, 0.1], minTier: 4, shade: '#56646b' },
+    ],
+    faults: [['cap'], ['cap'], ['cap', 'web']],
+  },
+  genmount: {
+    title: 'Generator mounts',
+    note: 'Lock it out and tag it before you lift it.',
+    parts: [
+      { id: 'lockout', name: 'Lock out + tag', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#3b464b' },
+      { id: 'flex', name: 'Exhaust flex clamp', above: ['lockout'], box: [0.05, 0.2, 0.42, 0.12], minTier: 1, shade: '#9aa5a9' },
+      { id: 'cover', name: 'Sound cover', above: ['lockout'], box: [0.53, 0.2, 0.42, 0.12], minTier: 0, shade: '#dcd2bd' },
+      { id: 'bolts', name: 'Mount bolts', above: ['cover', 'flex'], box: [0.1, 0.4, 0.8, 0.12], minTier: 0, shade: '#7f8b90' },
+      { id: 'iso', name: 'Rubber isolators', above: ['bolts'], box: [0.1, 0.6, 0.8, 0.16], minTier: 0, shade: '#56646b' },
+      { id: 'rail', name: 'Base rail', above: ['iso'], box: [0.2, 0.82, 0.6, 0.1], minTier: 4, shade: '#b8c0c2' },
+    ],
+    faults: [['bolts', 'iso'], ['bolts', 'iso'], ['bolts', 'iso', 'rail']],
+  },
+  fan: {
+    title: 'Generator radiator fan',
+    note: 'Lock out the generator before the guard comes off.',
+    parts: [
+      { id: 'lockout', name: 'Lock out + tag', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#3b464b' },
+      { id: 'guard', name: 'Fan guard', above: ['lockout'], box: [0.05, 0.2, 0.9, 0.12], minTier: 0, shade: '#b8c0c2' },
+      { id: 'belt', name: 'Fan belt', above: ['guard'], box: [0.05, 0.4, 0.42, 0.12], minTier: 1, shade: '#3b464b' },
+      { id: 'hub', name: 'Fan blade + hub nut', above: ['guard'], box: [0.53, 0.4, 0.42, 0.12], minTier: 0, shade: '#9aa5a9' },
+      { id: 'bearing', name: 'Fan bearing', above: ['hub', 'belt'], box: [0.1, 0.6, 0.8, 0.16], minTier: 0, shade: '#7f8b90' },
+    ],
+    faults: [['bearing'], ['bearing'], ['bearing', 'belt']],
+  },
+  trencher: {
+    title: 'Trencher drive',
+    note: 'Engine off, key out, chain stopped.',
+    parts: [
+      { id: 'key', name: 'Engine off, key out', above: [], box: [0.05, 0.02, 0.9, 0.12], minTier: 0, shade: '#3b464b' },
+      { id: 'cover', name: 'Belt cover', above: ['key'], box: [0.05, 0.2, 0.9, 0.12], minTier: 0, shade: '#dcd2bd' },
+      { id: 'tension', name: 'Belt tensioner', above: ['cover'], box: [0.05, 0.4, 0.42, 0.12], minTier: 0, shade: '#9aa5a9' },
+      { id: 'idler', name: 'Idler pulley', above: ['cover'], box: [0.53, 0.4, 0.42, 0.12], minTier: 3, shade: '#b8c0c2' },
+      { id: 'belt', name: 'Drive belt', above: ['tension', 'idler'], box: [0.1, 0.6, 0.8, 0.16], minTier: 0, shade: '#3b464b' },
+    ],
+    faults: [['belt'], ['belt'], ['belt', 'idler']],
+  },
 };
+
+// the main wheel: jack it, let the tire down, then hub cap → cotter pin → axle nut
+ASSEMBLIES.wheel.parts = ASSEMBLIES.wheelhalf.parts = [
+  { id: 'jack', name: 'Jack + chocks', above: [], box: [0.05, 0.02, 0.9, 0.11], minTier: 0, shade: '#dcd2bd' },
+  { id: 'deflate', name: 'Let the tire down', above: ['jack'], box: [0.05, 0.18, 0.42, 0.11], minTier: 1, shade: '#56646b' },
+  { id: 'cap', name: 'Hub cap', above: ['jack'], box: [0.53, 0.18, 0.42, 0.11], minTier: 0, shade: '#b8c0c2' },
+  { id: 'caliper', name: 'Brake caliper bolts', above: ['jack'], box: [0.05, 0.34, 0.42, 0.1], minTier: 1, shade: '#7f8b90' },
+  { id: 'pin', name: 'Cotter pin', above: ['cap'], box: [0.53, 0.34, 0.42, 0.1], minTier: 2, shade: '#9aa5a9' },
+  { id: 'nut', name: 'Axle nut', above: ['pin', 'cap'], box: [0.53, 0.49, 0.42, 0.1], minTier: 0, shade: '#9aa5a9' },
+  { id: 'wheel', name: 'Wheel half + tire', above: ['nut', 'caliper', 'deflate'], box: [0.1, 0.64, 0.8, 0.16], minTier: 0, shade: '#3b464b' },
+  { id: 'bolts', name: 'Through-bolts', above: ['wheel'], box: [0.15, 0.85, 0.7, 0.11], minTier: 0, shade: '#7f8b90' },
+];
 
 export type TeardownModel = {
   title: string;
@@ -90,7 +181,7 @@ export function installable(m: TeardownModel, id: string, installed: Set<string>
 
 export function generateTeardown(seed: number, tier: number, _tools: string[] = [], job?: string): TeardownModel {
   const r = rng(seed);
-  const key = job === 'cylinder' || job === 'alternator' || job === 'avionics' ? job : tier >= 3 ? 'cylinder' : r.pick(['alternator', 'avionics']);
+  const key = job && ASSEMBLIES[job] ? job : tier >= 3 ? 'cylinder' : r.pick(['alternator', 'avionics']);
   const a = ASSEMBLIES[key];
   const parts = a.parts.filter((p) => p.minTier <= Math.max(0, tier)).map((p) => ({ ...p, above: [...p.above] }));
   // drop references to parts that aren't in this tier's version
@@ -118,6 +209,24 @@ export function mustRemove(m: TeardownModel) {
   };
   m.faults.forEach(add);
   return need;
+}
+
+export type TeardownRun = { removed: Set<string>; installed: Set<string>; forced: number; wrongInstall: number; replaced: string[]; goodReplaced: number };
+
+/**
+ * The hand-in score, finished or not. Nothing removed is nothing done: an
+ * untouched assembly is "all installed" but it isn't a rebuild, so it scores
+ * like any unfinished job (it used to pass at 60%).
+ */
+export function scoreTeardownRun(m: TeardownModel, r: TeardownRun) {
+  const reinstalled = r.removed.size > 0 && m.parts.every((pt) => r.installed.has(pt.id));
+  let score = scoreTeardown(m, { ...r, reinstalled });
+  if (!reinstalled) {
+    const need = mustRemove(m);
+    const progress = (r.removed.size ? [...r.removed].filter((id) => r.installed.has(id)).length / r.removed.size : 0) * 0.3 + Math.min(1, r.removed.size / need.size) * 0.3;
+    score = Math.min(score, progress + (r.replaced.length === m.faults.length ? 0.2 : 0));
+  }
+  return { score, reinstalled };
 }
 
 export function scoreTeardown(m: TeardownModel, s: { forced: number; wrongInstall: number; replaced: string[]; goodReplaced: number; reinstalled: boolean }) {
@@ -385,16 +494,9 @@ export const teardown: PuzzleDef = {
       }
     }
 
-    function state() {
-      return { forced, wrongInstall, replaced, goodReplaced, reinstalled: m.parts.every((pt) => installed.has(pt.id)) };
-    }
     function makeResult(): PuzzleResult {
-      const s = state();
-      let sc = scoreTeardown(m, s);
-      if (!s.reinstalled) {
-        const progress = (removed.size ? [...removed].filter((id) => installed.has(id)).length / removed.size : 0) * 0.3 + Math.min(1, removed.size / need.size) * 0.3;
-        sc = Math.min(sc, progress + (replaced.length === m.faults.length ? 0.2 : 0));
-      }
+      const { score: sc, reinstalled } = scoreTeardownRun(m, { removed, installed, forced, wrongInstall, replaced, goodReplaced });
+      const s = { reinstalled };
       const parts = [];
       parts.push(replaced.length === m.faults.length ? 'failed part replaced' : `${m.faults.length - replaced.length} fault missed`);
       if (forced) parts.push(`${forced} forced`);
@@ -407,7 +509,7 @@ export const teardown: PuzzleDef = {
       if (finished) return;
       finished = true;
       const res = makeResult();
-      if (res.perfect) {
+      if (res.perfect && !p.blind) {
         flourish = performance.now();
         host.fx.flourish();
       } else host.fx.good();

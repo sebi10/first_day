@@ -6,7 +6,8 @@ import { generateAuction, lotScore, scoreAuction } from '../src/puzzles/auction'
 import { generateCrack, scoreCrack } from '../src/puzzles/crack';
 import { generateForecast, scoreForecast } from '../src/puzzles/forecast';
 import { AMPACITY, generatePanel, legOf, scorePanel, type Placement } from '../src/puzzles/panel';
-import { generateTeardown, installable, mustRemove, removable, scoreTeardown } from '../src/puzzles/teardown';
+import { generateTeardown, installable, mustRemove, removable, scoreTeardown, scoreTeardownRun } from '../src/puzzles/teardown';
+import { SIGNOFF } from '../src/sim/econ';
 import { generateTrace, isFaultMark, scoreTrace } from '../src/puzzles/trace';
 import { generateVariance, scoreVariance } from '../src/puzzles/variance';
 import { generateWireup, scoreWireup, type Landing } from '../src/puzzles/wireup';
@@ -96,7 +97,8 @@ describe('crack hunt', () => {
 
 describe('engine teardown', () => {
   it('follows the real removal order and reinstalls in reverse', () => {
-    for (const job of ['alternator', 'cylinder', 'avionics']) {
+    // the catalog's assemblies, plus the ones repairs and crewmates' reports open
+    for (const job of ['alternator', 'cylinder', 'avionics', 'wheel', 'wheelhalf', 'prop', 'exhaust', 'sparcap', 'genmount', 'fan', 'trencher']) {
       for (const tier of [1, 3, 5]) {
         const m = generateTeardown(2, tier, [], job);
         const removed = new Set<string>();
@@ -119,6 +121,26 @@ describe('engine teardown', () => {
     // avionics: master off before anything else
     const av = generateTeardown(1, 1, [], 'avionics');
     expect(av.order[0]).toBe('master');
+  });
+  it('a repair opens the assembly it is about, with the failed part in it', () => {
+    expect(generateTeardown(1, 2, [], 'prop').title).toBe('Propeller (flange bolts)');
+    expect(generateTeardown(1, 2, [], 'prop').faults).toEqual(['bolts']);
+    expect(generateTeardown(1, 2, [], 'wheelhalf').faults).toEqual(['wheel']);
+    expect(generateTeardown(1, 2, [], 'genmount').faults).toEqual(['bolts', 'iso']);
+  });
+  it('handed in untouched is not a pass (it used to score 60%)', () => {
+    for (const job of ['alternator', 'cylinder', 'avionics', 'prop', 'wheel', 'fan']) {
+      for (const tier of [1, 2, 3, 5]) {
+        const m = generateTeardown(3, tier, [], job);
+        const all = new Set(m.parts.map((p) => p.id));
+        const untouched = scoreTeardownRun(m, { removed: new Set(), installed: all, forced: 0, wrongInstall: 0, replaced: [], goodReplaced: 0 });
+        expect(untouched.score, `${job} t${tier}`).toBeLessThan(SIGNOFF);
+        expect(untouched.reinstalled).toBe(false);
+        // the real job, done right, is still perfect
+        const done = scoreTeardownRun(m, { removed: new Set(m.order), installed: all, forced: 0, wrongInstall: 0, replaced: m.faults, goodReplaced: 0 });
+        expect(done.score).toBe(1);
+      }
+    }
   });
   it('perfect only when every fault is replaced cleanly', () => {
     const m = generateTeardown(1, 5, [], 'cylinder');

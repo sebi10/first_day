@@ -145,5 +145,73 @@ await shot('me');
 await page.mouse.wheel(0, 900);
 await shot('me-scrolled');
 
+// Blind sign-off (a real job at tier 2+): a wrong move is accepted silently. No "Wrong",
+// no hint of the right answer, and the job carries on; the score still counts it.
+{
+  const lab = await ctx.newPage();
+  lab.on('pageerror', (e) => errors.push(String(e)));
+  const statuses = () => lab.evaluate(() => window.__lab.statuses);
+  const labShot = async (name) => {
+    await lab.waitForTimeout(300);
+    await lab.screenshot({ path: `${out}/${String(++n).padStart(2, '0')}-${name}.png` });
+  };
+  // torque, 6 bolts: tap two neighbours (a star pattern never goes to the neighbour next), both are taken
+  await lab.goto(`${base}/lab.html?p=torque&tier=3&seed=5&blind=1&notimer=1`);
+  await lab.waitForFunction(() => window.__lab);
+  const box = await lab.locator('#stage').boundingBox();
+  const fr = Math.min(box.width * 0.36, box.height * 0.19);
+  for (const i of [0, 1]) {
+    const a = -Math.PI / 2 + (i / 6) * Math.PI * 2;
+    await lab.mouse.click(box.x + box.width / 2 + Math.cos(a) * fr * 0.72, box.y + box.height * 0.23 + Math.sin(a) * fr * 0.72);
+    await lab.waitForTimeout(200);
+  }
+  await labShot('blind-torque-out-of-order');
+  const ts = await statuses();
+  const tr = await lab.evaluate(() => window.__lab.timeUp());
+  if (ts.some((x) => /wrong|sequence|order/i.test(x)) || !/^Bolt 2 of 6/.test(ts[ts.length - 1] ?? '') || !/out of sequence/.test(tr.summary))
+    throw new Error(`blind torque gave a verdict or refused a bolt: ${ts.join(' | ')} / ${tr.summary}`);
+  // safety wire: thread bolt 1 the loosening way; it's kept, and the job moves on to the twist
+  await lab.goto(`${base}/lab.html?p=safetywire&tier=3&seed=5&blind=1&notimer=1`);
+  await lab.waitForFunction(() => window.__lab);
+  const path = await lab.evaluate(async () => {
+    const mod = await import('/src/puzzles/safetywire.ts');
+    const m = mod.generateWire(5, 3);
+    const el = document.getElementById('stage').getBoundingClientRect();
+    const [w, h] = [el.width, el.height];
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    // the puzzle's own layout (safetywire.ts geo())
+    const padR = clamp(Math.min(w * 0.25, h * 0.14), 58, 96);
+    const room = h - padR - 22 - padR - 18 - 52;
+    const ppi = Math.min((w - 24) / m.plate.w, (room - 118) / m.plate.h);
+    const spare = Math.max(0, room - m.plate.h * ppi - 118);
+    const px = el.left + (w - m.plate.w * ppi) / 2;
+    const py = el.top + 56 + spare * 0.12;
+    const R = clamp(ppi * 0.28, 22, 32);
+    const b = m.bolts[0];
+    const c = { x: px + b.x * ppi, y: py + b.y * ppi };
+    const s = -mod.tighteningDir(m.bolts, 0); // the wrong way
+    const u = { x: Math.cos(b.hole) * s, y: Math.sin(b.hole) * s };
+    const start = { x: px + m.start.x * ppi, y: py + m.start.y * ppi };
+    // go round to the entry side without touching the head, then straight through the hole
+    const side = { x: -u.y, y: u.x };
+    const k = (start.x - c.x) * side.x + (start.y - c.y) * side.y >= 0 ? 1 : -1;
+    const around = { x: c.x + side.x * k * (R + 70), y: c.y + side.y * k * (R + 70) };
+    const entry = { x: c.x - u.x * (R + 26), y: c.y - u.y * (R + 26) };
+    const exit = { x: c.x + u.x * (R + 26), y: c.y + u.y * (R + 26) };
+    return [start, around, entry, exit];
+  });
+  await lab.mouse.move(path[0].x, path[0].y);
+  await lab.mouse.down();
+  for (const q of path.slice(1)) await lab.mouse.move(q.x, q.y, { steps: 14 });
+  await lab.mouse.up();
+  await labShot('blind-safetywire-wrong-way');
+  const ws = await statuses();
+  const wr = await lab.evaluate(() => window.__lab.timeUp());
+  if (ws.some((x) => /wrong|back out/i.test(x)) || !/^Span 1 of/.test(ws[ws.length - 1] ?? '') || wr.data?.wrongWay !== 1)
+    throw new Error(`blind safety wire gave a verdict or refused the thread: ${ws.join(' | ')} / wrongWay ${wr.data?.wrongWay}`);
+  console.log('blind check: torque and safety wire take a wrong move silently');
+  await lab.close();
+}
+
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors');
 await browser.close();

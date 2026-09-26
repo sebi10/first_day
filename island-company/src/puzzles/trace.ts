@@ -22,9 +22,12 @@ export type TraceModel = {
 };
 
 const ROOMS = ['Kitchen', 'Bath', 'Bedroom', 'Porch', 'Living room', 'Deck'];
+/** a crewmate's report from the hangar: the same wall-and-cable hunt, the hangar's own stations */
+const HANGAR = ['Bay', 'Bench', 'Crib', 'Stores', 'Office', 'Door'];
 
-export function generateTrace(seed: number, tier: number, _tools: string[] = []): TraceModel {
+export function generateTrace(seed: number, tier: number, _tools: string[] = [], job?: string): TraceModel {
   const r = rng(seed);
+  const ROOMS_ = job === 'hangar' ? HANGAR : ROOMS;
   const n = tier <= 0 ? 3 : tier <= 2 ? 3 + tier : tier === 3 ? 6 : tier === 4 ? 7 : 8;
   const devices: Device[] = [{ id: 0, kind: 'outlet', pos: { x: 0.08, y: 0.1 }, live: true, name: 'Breaker 12' }];
   const segs: Seg[] = [];
@@ -35,7 +38,7 @@ export function generateTrace(seed: number, tier: number, _tools: string[] = [])
     const x = 0.1 + (i / (cols + 0.3)) * 0.85;
     const y = i % 2 ? r.range(0.3, 0.42) : r.range(0.55, 0.7);
     const kind: Device['kind'] = i === n ? r.pick(['outlet', 'light'] as const) : r.chance(0.2) ? 'switch' : 'outlet';
-    devices.push({ id: i, kind, pos: { x, y }, live: true, name: `${r.pick(ROOMS)} ${kind}` });
+    devices.push({ id: i, kind, pos: { x, y }, live: true, name: `${r.pick(ROOMS_)} ${kind}` });
     chain.push(i);
   }
   const route = (a: P, b: P): P[] => {
@@ -50,13 +53,13 @@ export function generateTrace(seed: number, tier: number, _tools: string[] = [])
     const jb: Device = { id: devices.length, kind: 'jbox', pos: { x: devices[at].pos.x + 0.04, y: 0.83 }, live: true, name: 'Junction box' };
     devices.push(jb);
     segs.push({ from: at, to: jb.id, pts: [devices[at].pos, { x: devices[at].pos.x, y: 0.83 }, jb.pos], circuit: 1 });
-    const spur: Device = { id: devices.length, kind: 'outlet', pos: { x: jb.pos.x + 0.22, y: 0.86 }, live: true, name: `${r.pick(ROOMS)} outlet` };
+    const spur: Device = { id: devices.length, kind: 'outlet', pos: { x: jb.pos.x + 0.22, y: 0.86 }, live: true, name: `${r.pick(ROOMS_)} outlet` };
     devices.push(spur);
     segs.push({ from: jb.id, to: spur.id, pts: [jb.pos, spur.pos], circuit: 1 });
   }
   // a second circuit crossing the wall (tier >= 4): don't follow the wrong cable
   if (tier >= 4) {
-    const a: Device = { id: devices.length, kind: 'light', pos: { x: 0.9, y: 0.9 }, live: true, name: 'Porch light (other circuit)' };
+    const a: Device = { id: devices.length, kind: 'light', pos: { x: 0.9, y: 0.9 }, live: true, name: job === 'hangar' ? 'Yard light (other circuit)' : 'Porch light (other circuit)' };
     devices.push(a);
     segs.push({ from: 0, to: a.id, pts: [{ x: 0.12, y: 0.12 }, { x: 0.12, y: 0.48 }, { x: 0.86, y: 0.48 }, a.pos], circuit: 2 });
   }
@@ -113,7 +116,7 @@ export const trace: PuzzleDef = {
   term: 'Open circuit: a break in the path. Everything past it goes dead.',
   seconds: (tier) => 70 + tier * 10,
   mount(host, p) {
-    const m = generateTrace(p.seed, p.tier, p.tools);
+    const m = generateTrace(p.seed, p.tier, p.tools, p.context?.job);
     const tone = p.tools.includes('toneTracer');
     const fish = p.tools.includes('fishTape');
     const st = stage(host.el);
@@ -145,7 +148,7 @@ export const trace: PuzzleDef = {
     };
     const tolN = () => 20 / Math.min(area().pw, area().ph);
     const status = () =>
-      host.status(`${m.symptom} · ${mode === 'trace' ? 'trace + test' : 'tap the fault'}${m.showStates ? '' : ` · ${tests} tests`}`);
+      host.status(`${m.symptom} · ${mode === 'trace' ? 'trace + test' : p.blind ? 'tap the fault (one mark: you open the wall there)' : 'tap the fault'}${m.showStates ? '' : ` · ${tests} tests`}`);
     status();
 
     const segLen = (s: Seg) => s.pts.reduce((n, q, i) => (i ? n + Math.hypot(q.x - s.pts[i - 1].x, q.y - s.pts[i - 1].y) : 0), 0);
@@ -255,6 +258,10 @@ export const trace: PuzzleDef = {
       if (isFaultMark(m, n, tolN())) {
         correctSpot = n;
         finish();
+      } else if (p.blind) {
+        // blind: where you open the wall is where you fix it (no X, no second guess)
+        wrongMarks++;
+        finish();
       } else {
         wrongMarks++;
         wrongSpots.push(n);
@@ -268,7 +275,7 @@ export const trace: PuzzleDef = {
       const a = area();
       backdrop(ctx, a.w, a.h);
       label(ctx, m.symptom, 14, 20, { size: 14, weight: 800, align: 'left' });
-      label(ctx, 'Drywall cutaway · studs every 16 in', 14, 38, { size: 11, color: C.inkSoft, align: 'left' });
+      label(ctx, p.context?.job === 'hangar' ? 'Hangar wall cutaway · studs every 16 in' : 'Drywall cutaway · studs every 16 in', 14, 38, { size: 11, color: C.inkSoft, align: 'left' });
       // wall
       roundRect(ctx, a.x, a.y, a.pw, a.ph, 12);
       ctx.fillStyle = '#efe6d6';
@@ -369,7 +376,7 @@ export const trace: PuzzleDef = {
         ctx.lineTo(s.x - 7, s.y + 7);
         ctx.stroke();
       });
-      if (finished) {
+      if (finished && !p.blind) {
         const aDev = m.devices[m.chain[m.faultAfter]];
         const q = S(aDev.pos);
         ctx.strokeStyle = correctSpot ? C.palm : C.rust;
@@ -412,7 +419,7 @@ export const trace: PuzzleDef = {
       if (finished) return;
       finished = true;
       const res = makeResult();
-      res.perfect ? host.fx.flourish() : host.fx.good();
+      res.perfect && !p.blind ? host.fx.flourish() : host.fx.good();
       settle(host, res, res.perfect ? 1000 : 600);
     }
 

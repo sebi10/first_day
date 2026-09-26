@@ -89,6 +89,8 @@ export const torque: PuzzleDef = {
   mount(host, p) {
     const m = generateTorque(p.seed, p.tier, p.tools);
     const hasClick = p.tools.includes('clickWrench');
+    // blind: any bolt may go first (an out-of-order one is scored, never flagged), no ✓/! heads, no hint
+    const blind = !!p.blind;
     const st = stage(host.el);
     const { ctx } = st;
     const torques = new Array(m.bolts).fill(0);
@@ -142,7 +144,7 @@ export const torque: PuzzleDef = {
       finished = true;
       const s = scoreTorque(m, torques, seqErrors);
       const res = result(s, summarize(m, torques, seqErrors));
-      if (res.perfect) {
+      if (res.perfect && !blind) {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
@@ -153,6 +155,18 @@ export const torque: PuzzleDef = {
       if (i === active) return;
       lockActive();
       if (torques[i] === 0 && !firstTouchOrder.includes(i)) {
+        if (blind) {
+          // the next bolt of the star pattern that hasn't been started: anything else is out of sequence
+          if (i !== m.sequence.find((b) => !firstTouchOrder.includes(b))) seqErrors++;
+          firstTouchOrder.push(i);
+          step++;
+          active = i;
+          shown = torques[i];
+          wasInBand = false;
+          host.fx.tap();
+          host.status(`Bolt ${Math.min(step, m.bolts)} of ${m.bolts} · target ${m.target} ft-lb`);
+          return;
+        }
         const expected = m.sequence[step];
         if (i !== expected) {
           seqErrors++;
@@ -201,8 +215,11 @@ export const torque: PuzzleDef = {
         if (onDial) {
           if (active < 0) {
             host.fx.bad();
-            hint.bolt = m.sequence[Math.min(step, m.bolts - 1)];
-            hint.until = performance.now() + 900;
+            // blind: the dial says "tap a bolt first", it doesn't point at the right one
+            if (!blind) {
+              hint.bolt = m.sequence[Math.min(step, m.bolts - 1)];
+              hint.until = performance.now() + 900;
+            }
             return;
           }
           dragging = { id: pt.id, lastA: angleAt(pt.x, pt.y) };
@@ -235,7 +252,8 @@ export const torque: PuzzleDef = {
       up(pt) {
         if (dragging && dragging.id === pt.id) {
           dragging = null;
-          if (active >= 0 && boltScore(torques[active], m.target, m.band) === 1) {
+          // letting go in band clicks like a click-type wrench; blind, only the real click wrench does
+          if (active >= 0 && boltScore(torques[active], m.target, m.band) === 1 && (!blind || hasClick)) {
             host.fx.snap();
           }
           if (allTouched() && step >= m.bolts && active >= 0 && torques[active] >= m.target * (1 - m.band)) {
@@ -292,7 +310,8 @@ export const torque: PuzzleDef = {
           ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
         }
         ctx.closePath();
-        ctx.fillStyle = sc === 1 ? C.palm : sc >= 0 && t > m.target ? C.rust : sc >= 0 ? C.mech : '#d7dcdf';
+        // blind: a torqued bolt is just torqued (the gauge showed its value while you turned)
+        ctx.fillStyle = blind ? (sc >= 0 ? C.mech : '#d7dcdf') : sc === 1 ? C.palm : sc >= 0 && t > m.target ? C.rust : sc >= 0 ? C.mech : '#d7dcdf';
         if (gleam > 0 && sc === 1) ctx.fillStyle = shade(C.palm, 0.5 * Math.sin(gleam * Math.PI));
         ctx.fill();
         ctx.lineWidth = isActive || isHint ? 3 : 1.5;
@@ -300,9 +319,10 @@ export const torque: PuzzleDef = {
         ctx.stroke();
         const seqIdx = m.sequence.indexOf(i);
         // colour plus a glyph: never colour alone
-        const glyph = sc === 1 ? '✓' : sc >= 0 && t > m.target ? '!' : '';
+        const glyph = blind ? '' : sc === 1 ? '✓' : sc >= 0 && t > m.target ? '!' : '';
         if (glyph) label(ctx, glyph, 0, 1, { size: 15, weight: 900, color: C.white });
-        else if (seqIdx < m.labelled || t > 0) label(ctx, String(seqIdx + 1), 0, 1, { size: 13, weight: 800, color: C.ink });
+        // blind: only the numbers printed on the work card (a torqued bolt doesn't reveal its place in the pattern)
+        else if (seqIdx < m.labelled || (t > 0 && !blind)) label(ctx, String(seqIdx + 1), 0, 1, { size: 13, weight: 800, color: C.ink });
         ctx.restore();
       }
 

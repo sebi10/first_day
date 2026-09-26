@@ -529,6 +529,10 @@ h3 {
 .order.done {
   opacity: 0.6;
 }
+/* ready, but this seat can't start it right now (turn over, or a per-turn limit) */
+.order.held {
+  opacity: 0.75;
+}
 .tierdots {
   display: inline-flex;
   gap: 3px;
@@ -772,6 +776,75 @@ h3 {
   font-size: 64px;
   font-weight: 900;
   line-height: 1;
+  animation: pop-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+/* blind sign-off: the job is sealed under its logbook entry, no verdict */
+.sealed {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: var(--sand);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 28px var(--g) 0;
+  animation: fade 0.2s ease both;
+}
+.logentry {
+  width: 100%;
+  max-width: 340px;
+  background: var(--paper);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  border-top: 6px solid var(--ink);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: slide-up 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.logentry .sig {
+  font-family: 'Segoe Script', 'Bradley Hand', 'Snell Roundhand', cursive;
+  font-size: 22px;
+  line-height: 1.2;
+  color: var(--sea-deep);
+  border-bottom: 1.5px solid rgba(31, 42, 48, 0.35);
+  padding: 0 18px 0 2px;
+}
+.rubber {
+  border: 3px solid var(--ink);
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.85;
+  transform: rotate(-6deg);
+  white-space: nowrap;
+  animation: stamp-in 0.35s 0.15s cubic-bezier(0.3, 1.3, 0.5, 1) both;
+}
+@keyframes stamp-in {
+  from {
+    transform: scale(1.7) rotate(-6deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(-6deg);
+    opacity: 0.85;
+  }
+}
+.signed-mark {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--sand);
+  color: var(--ink);
   animation: pop-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both;
 }
 

@@ -37,6 +37,82 @@ export interface OrderResult {
   auto?: boolean;
   covered?: boolean;
   summary?: string;
+  /** blind sign-off (a real job at puzzle tier 2+): the UI shows "Signed off", never the score; the engine still uses it */
+  blind?: boolean;
+  /**
+   * blind: the credit that landed on the asset at sign-off (a fixed stand-in,
+   * and XP gets the floor, so nothing gives the score away). The true `credit`
+   * settles silently when the week resolves; then this is removed.
+   */
+  provisional?: number;
+}
+
+/** A cross-trade report: one trade's problem that another trade has to fix. */
+export interface ReportInfo {
+  /** REPORTS key in data.ts (title, notice, puzzle) */
+  key: string;
+  /** who raised it (the trade that suffers while it is open) */
+  by: Role;
+  /** cap: the reporter works at reduced capacity; leak: cash lost every resolved week */
+  effect: 'cap' | 'leak';
+  /** leak: USD lost per resolved week while open (0 for a cap) */
+  amount: number;
+  /** a fix that didn't hold: the week of the fix that failed */
+  again?: number;
+  /** leak that came back: what it cost while it only looked fixed (charged with the next resolved week) */
+  owed?: number;
+}
+
+/**
+ * A hidden defect left by a signed-off job. Lives in s.defects, never shown
+ * until it is found by an inspection or surfaces as an incident.
+ */
+export interface Defect {
+  id: string;
+  /** kind of the job that left it (a catalog kind, 'repair', or 'report') */
+  orderKind: string;
+  /** the catalog kind of the work it belongs to (a repair or redo counts as the job it corrects): what an inspection's scope checks */
+  job?: string;
+  /** the job as a noun ("prop bolt re-torque", "alternator replacement redo") for the review's "traced to" line */
+  log?: string;
+  puzzle: PuzzleId;
+  /** that job's title, as it appeared on the card */
+  title: string;
+  /** null for a report fix that won't hold (it reopens instead of causing an incident) */
+  assetId: string | null;
+  /** the trade that owns the job (gets the repair; its inspections find it) */
+  role: Role;
+  /** the seat that signed it off (differs from `role` after a lend-a-hand) */
+  by: Role;
+  /** who signed it off */
+  name: string;
+  /** week it was signed off */
+  week: number;
+  /** resolveWeek of this week surfaces it (a tagged asset waits a week) */
+  dueWeek: number;
+  severity: 1 | 2;
+  /** the job's cost, tier and gain: the incident and the repair scale from them, the redo repeats them */
+  cost: number;
+  tier: number;
+  gain: number;
+  /** after the repair, the original job is done again */
+  redo: boolean;
+  /** report comebacks: which report reopens */
+  report?: ReportInfo;
+}
+
+/** Corrective job for a defect that was found or surfaced. */
+export interface RepairInfo {
+  defect: Defect;
+  /** how it came to light */
+  via: 'inspection' | 'incident';
+  /** what is wrong, e.g. "fasteners below torque, with fretting at the joint" */
+  problem: string;
+  /** via 'incident': what happened, as the review told it */
+  incident?: string;
+  /** inspection finds: who found it, and on which job */
+  foundBy?: string;
+  foundIn?: string;
 }
 
 export interface Order {
@@ -67,7 +143,15 @@ export interface Order {
   seed: number;
   /** analyst tasks: extra numbers for the puzzle context */
   leak?: number;
+  /** the puzzle's scenario when the kind doesn't say it (a repair's assembly, a report's device); defaults to `kind` */
+  job?: string;
   result?: OrderResult;
+  /** kind 'report': a crewmate's problem this trade has to fix */
+  report?: ReportInfo;
+  /** kind 'repair': corrects a hidden defect; completing it spawns the redo */
+  repair?: RepairInfo;
+  /** the original job done again after its repair (cost 0, already paid): the sign-off it replaces, and what it cost then */
+  redo?: { week: number; by: Role; name: string; cost: number };
 }
 
 export interface Player {
@@ -101,11 +185,22 @@ export interface TurnState {
 }
 
 export interface Incident {
-  kind: 'deferral' | 'fire' | 'flight';
+  kind: 'deferral' | 'fire' | 'flight' | 'defect';
   role: Role;
   assetId: string | null;
   title: string;
   cost: number;
+  /** kind 'defect': the signed-off job it was traced to */
+  from?: {
+    title: string;
+    name: string;
+    week: number;
+    /** "the prop bolt re-torque Ana signed off in week 5" */
+    traced?: string;
+    /** the repair order it created, and whether the original job is redone after it */
+    repairId?: string;
+    redo?: boolean;
+  };
 }
 
 export interface ReportLine {
@@ -142,7 +237,7 @@ export interface WeekReport {
   nearMisses: number;
   cashStart: number;
   cashEnd: number;
-  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number; loan?: number };
+  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number; loan?: number; /** open 'leak' reports */ reports?: number };
   housesBooked: number;
   housesRentable: number;
   partsDelivered: number;
@@ -253,6 +348,8 @@ export interface IslandState {
   boardNextId?: number;
   /** the crew project that builds the next tier: one job per trade */
   project?: { tier: number; title: string; orders: Partial<Record<Role, string>> } | null;
+  /** hidden defects from signed-off jobs (never shown until found or surfaced; resolved ones are removed) */
+  defects?: Defect[];
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */

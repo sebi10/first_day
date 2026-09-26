@@ -7,7 +7,7 @@
 // payout lands net of card fees, a euro booking converts at the bank's rate.
 // Done when adjusted bank == adjusted books.
 import { rng, type Rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, shade, stage, tnum } from './kit';
+import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, settle, shade, stage, tnum } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 export type RecKind =
@@ -724,6 +724,9 @@ export const reconcile: PuzzleDef = {
   seconds: (tier) => 50 + tier * 21,
   mount(host, p) {
     const m = generateReconcile(p.seed, p.tier, p.tools, p.context);
+    // blind: a misfile is posted like any entry (the rec just won't balance), with no rust flash, ✕ or "why"
+    const blind = !!p.blind;
+    if (blind) m.strict = true;
     const s = newRecState(m);
     const st = stage(host.el);
     const { ctx } = st;
@@ -839,12 +842,12 @@ export const reconcile: PuzzleDef = {
       final = res;
       shownBank = m.bankEnd + s.bankAdj;
       shownBook = m.bookEnd + s.bookAdj;
-      if (res.perfect) {
+      if (res.perfect && !blind) {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
       const balanced = Math.abs(recDiff(m, s)) < 0.005;
-      toast = {
+      toast = blind ? null : {
         str: res.perfect
           ? 'Adjusted bank = adjusted books'
           : balanced
@@ -854,10 +857,7 @@ export const reconcile: PuzzleDef = {
         color: balanced ? C.palmDark : C.rust,
         hold: true,
       };
-      doneTimer = setTimeout(() => {
-        doneTimer = null;
-        host.done(res);
-      }, res.perfect ? 850 : 350);
+      settle(host, res, res.perfect ? 850 : 350);
     };
 
     const act = (a: RecAction): RecOutcome => {
@@ -870,9 +870,11 @@ export const reconcile: PuzzleDef = {
       }
       if (out.result === 'wrong') {
         host.fx.bad();
-        flash(`l${dragged}`, C.rust);
-        if (a.t === 'pair') flash(`l${a.b}`, C.rust);
-        else flash(`b${a.bin}`, C.rust);
+        if (!blind) {
+          flash(`l${dragged}`, C.rust);
+          if (a.t === 'pair') flash(`l${a.b}`, C.rust);
+          else flash(`b${a.bin}`, C.rust);
+        }
         // teaching tiers say why; from tier 3 a misfile is simply posted and the rec won't balance
         const why =
           a.t === 'pair'
@@ -886,7 +888,9 @@ export const reconcile: PuzzleDef = {
                   ? 'Only the bank has it: book an adjustment'
                   : 'Only your books have it: a timing difference'
               : 'Misfiled — the rec won’t balance';
-        toast = { str: why, t0: now, color: C.rust };
+        // blind: a pair that isn't one transaction simply won't tick (that's what the amounts say); a misfile posts quietly
+        if (blind) toast = a.t === 'pair' ? { str: 'Those two aren’t the same transaction', t0: now, color: C.ink } : null;
+        else toast = { str: why, t0: now, color: C.rust };
         if (m.tier <= 1) hint = { ...out.hint, until: now + 1400 };
         if (a.t === 'bin' && out.cleared.length) {
           // committed misfile: it still lands in the bin and moves that balance
@@ -1299,7 +1303,7 @@ export const reconcile: PuzzleDef = {
           ctx.fill();
           text(ctx, tagOf.get(L.item) ?? '✓', r.w - 13, 12.5, { size: 10, weight: 800, color: C.white, align: 'center' });
         } else {
-          const bad = s.botched[id];
+          const bad = s.botched[id] && !blind;
           const word = (bad ? '✕ ' : '') + (how === 'timing' ? 'timing' : 'adjust');
           ctx.font = `800 9.5px ${FONT}`;
           const pw = ctx.measureText(word).width + 12;

@@ -38,7 +38,7 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
   - It always plays at expert difficulty (tier ≥3): no tools, no rule text in the help card.
   - Under 60% is a botch: the asset takes −6 and the job stays open for its owner.
   - Nobody is ever fully gridlocked, and specialisation still matters.
-- **Skill keeps paying above a pass.** Work credit = 0.45 + 0.6 × score: a bare pass (60%) restores 81% of the job's gain, a clean job 105%, plus up to +15% from perfect runs. An owner under 40% gets **rework**: the job stays open with a fresh fault (new seed, so no replaying a memorised answer). Inspection sign-offs are pass/fail at 60%.
+- **Skill keeps paying above a pass.** Work credit = 0.45 + 0.6 × score: a bare pass (60%) restores 81% of the job's gain, a clean job 105%, plus up to +15% from perfect runs. An owner under 40% gets **rework**: the job stays open with a fresh fault (new seed, so no replaying a memorised answer). Inspection sign-offs are pass/fail at 60%. *(Since the consequences update, both rules apply at teaching tiers 0–1 only; from tier 2 a job is signed off blind and hidden defects take their place. See "Consequences" below.)*
 - **Crew projects build each new tier.** Qualifying for the next tier opens one job per trade (e.g. tier 2: first cargo load sheet, put cottages 3–4 on the panel, pay the builders by three-way match). The tier arrives the moment all three are done; new buildings start at 60 + 30 × the average score. Autopilot and lend-a-hand can't do a project part.
 - **Safety calls and votes.** The mechanic can ground a plane and the electrician can red-tag a house or the generator for the week (no revenue, but no incident rolls). Story cards are a 2-of-3 crew vote.
 - **Integral but not gridlocked:**
@@ -66,9 +66,102 @@ Spec: *Island Company — Game Spec Sheet* (Sep 23, 2026). The brief changed to 
 - **Story cards** every 3-week B+ streak (6 at launch).
 - **Analyst money hunts:** each week's close alternates between variance find and bank reconciliation, plus a three-way match whenever last week's spend was ≥ $500. Each recovers a hidden leak, so an absent analyst costs real money.
 
+## Consequences: blind sign-off, hidden defects, repairs, cross-trade reports
+
+Owner direction: *"If we mess something up we shouldn't see an immediate sign that we're wrong, so it's realistic, and there's an incident if we mess up."* Plus: *"I get a chance to fix it with a reasonable repair, and then I have to complete the original task."* And: *"Cross-dependency reports from random things, using all 3 jobs."* Three reviewers (the three trades' realism, systems and balance, mobile UX) went over the first version; their fixes are folded in below.
+
+**Blind sign-off.** A real work order launched at puzzle tier 2+ gives no verdict, while you work or after.
+- Not blind: tiers 0–1 (teaching), week 0, practice and the weekly challenge, lend-a-hand (an explicit expert try that keeps its botch rule), and a new player's grace weeks (they play tier 1).
+- **In the puzzle** (`PuzzleParams.blind`): wrong moves are accepted silently and still scored. A bolt torqued out of sequence is taken, with no hint of the right one and no ✓/! heads. Safety wire threaded or wrapped the loosening way stays that way. The multimeter call and the spot where you open the wall are final. An invoice is just paid or held, with no "Should hold", ✓/✕ or coloured dots. A bank-rec misfile posts quietly. No end-of-job reveal (missed cracks, the true fault row, miswired terminals) and no perfect flourish.
+- What real instruments show stays: the gauge needle and its band, the voltage, the tester's 120/0, the UV glow, a part that won't come off, a panel slot that's taken, bare copper past the terminal, and the load sheet's "Can't sign".
+- **In the host:** wrong-input sounds are a neutral tap, and the job is sealed the moment it's handed in (every puzzle finishes through `settle()`/`host.hold`, so the timing is the same whatever the score). The entry reads by trade: an A&P's *Logbook entry* stamped *Return to service*, *Airworthy* (inspections) or *Released* (load sheet); an electrician's *Work order closed*; the analyst's *Filed*.
+- **In the numbers:** at sign-off the asset gets a fixed stand-in (the credit of a 75% job) and XP gets the floor of the credit curve. The true credit, a perfect run's bonus and its week without decay settle silently at the start of the week's resolution, before anything flies. So health, XP and the perfect count don't give the score away at hand-in. XP only ever settles upward, so no level-up is taken back.
+- Cards and details show "Signed off", never a %. Feed lines, the MVP line and personal bests never show a blind score. Blind jobs never rework (hidden defects replace it). A signed-off inspection is in the logbook whatever it missed.
+
+**Hidden defects.** A mechanic or electrician job on an asset can leave a latent defect; crew-project parts and desk work can't. The roll is seeded from the order and uses the true score q: none from 0.85; (0.85 − q) × 0.2 between 0.6 and 0.85; 10% + 1.8 per point under 0.6. Under 0.4 it's severe.
+- Defects live hidden in `s.defects`. They surface 1–4 weeks later (1–2 if severe), never before week 3. A grounded or red-tagged asset can't fail in service, so its defect waits a week.
+- **What it looks like** depends on the job (`DEFECT_RULES_BY_KIND`, then `DEFECT_RULES` by puzzle, then a per-trade fallback for puzzles other branches add). Every rule is a pair: a write-up or callback when minor, a failure when severe. For example, prop bolts: *"Pilot wrote up a vibration on Twin N-12: prop bolts found loose"* / *"Prop bolts on Twin N-12 backed off in flight: heavy vibration, precautionary landing"*. A missed spar-cap crack is smoking rivets, then a wing root working in flight. A panel job's defect is a breaker oversized for its wire. A meter job misses a loose neutral.
+- **Found first:** a passed inspection-type job by the same trade on the same asset finds defects left in an earlier week, but only in the work it looks at (`INSPECTS[kind].scope`):
+
+| Inspection | Finds defects in |
+| --- | --- |
+| 100-hr inspection, code inspection prep | everything on the asset |
+| Wheel-half penetrant check | tires, wheel halves |
+| Wing spar inspection | spar, load sheet (hard-landing damage) |
+| Oil change (engine look-over, filter check) | oil, prop, prop safety wire, cylinder, alternator |
+| Outlet trace / flicker diagnosis | outlets, GFCIs, 3-way switches, storm rewires (and flicker jobs) |
+| Generator circuit test | transfer panel, generator circuits |
+| Panel diagnosis | dead-circuit diagnosis, feeder, panel upgrade, fuel-dock run |
+
+  A repair or redo counts as the job it corrects. The feed says *"Seb's 100-hr inspection on Twin N-12 found prop bolts below torque, with fretting on the flange, left from week 5. Repair written up: … Not airworthy until it's repaired."* Until the repair is done, an asset in service with a known defect is a near-miss on the safety grade (ground it or red-tag it).
+- **Surfaces:** otherwise it becomes an incident (kind `defect`): 1.2× the original job's cost (2.5× severe), −12 / −25 health, and it counts like any incident (insurance, safety grade, clean-week unlocks, guest refunds). The review traces it with the job's noun form (`CatalogEntry.log`): *"… Traced to the prop bolt re-torque Seb signed off in week 5."* A repair is quoted: *"the repair “Re-torque the prop bolts” Seb signed off in week 7"*.
+
+**Repair, then the original task.** A found or surfaced defect creates a repair for the same trade and asset, on a different puzzle from the original. It's a real corrective job: repair the damage first, then redo the original.
+- Mechanic: loose prop bolts → *Pull the prop, replace the bolts, inspect the flange for fretting* (teardown of the propeller). Wheel through-bolts → replace them and check the holes for elongation. A missed crack → *Replace the cracked exhaust riser*, *Replace the wheel half and tire*, *Spar-cap doubler repair per the SRM* (parts kit; the spar repair costs 1.2× the inspection). Safety wire the wrong way → re-torque the hardware. A botched install → inspect the bracket / case / radio tray for damage (crack hunt), then the redo reinstalls.
+- Electrician: a missed backstab → *Replace the scorched outlet and move it off the backstab*. A missed loose neutral → *Replace the scorched device and re-terminate the neutral*. An oversized breaker → *Replace the scorched run and land it on the right-size breaker*. A kinked conduit run → *Find where the run is faulted to ground* (make it safe and find it); the redo re-bends the run and pulls new conductors.
+- A load sheet has no redo (it's redone every week anyway).
+- The puzzle shows the part the repair is about (`Order.job`): the propeller, the main wheel, the exhaust riser, the wing root, the alternator bracket, a receptacle. Seven teardown assemblies were added for this (and for the reports).
+- The repair goes to the analyst as a pending card at 0.6× the original's cost. It counts as safety-critical, so it can be approved through a cash freeze, and deferring it rolls deferral risk like any job. It restores a little health, plus half of what an incident took.
+- Finishing the repair spawns the **redo**: "<original title> (redo)", ready, cost 0 (already paid), approved in the trade's name, restoring half the original's gain (the botched sign-off already landed part of it; at 1× a caught defect ended up health-positive). If the same job is already open on that asset, that order becomes the redo, so there's never a second copy. A botched repair or redo can leave a defect again, so the chain continues.
+
+**Cross-trade reports** (`REPORTS`: 14 rows; all three trades report and fix; a branch that adds a puzzle adds its rows).
+
+| Reporter → fixer | Report | Puzzle | Effect |
+| --- | --- | --- | --- |
+| Mechanic → electrician | Hangar work lights are dead · Hangar compressor keeps tripping its breaker · Aircraft battery charger keeps tripping the hangar GFCI | trace (hangar wall) · meter (hangar circuit) · meter | cap |
+| Mechanic → analyst | Parts vendor is billing list price, not our contract price · Avgas went up $1.20/gal and charter prices never moved | invoice · variance | leak |
+| Mechanic → analyst | Parts vendor put us on credit hold | reconcile | cap |
+| Electrician → mechanic | Generator radiator fan bearing is screaming (tier 3+) · Trencher drive belt snapped · Work truck ladder rack is cracked at the welds | teardown (fan) · teardown (trencher) · crack (welds) | cap |
+| Electrician → analyst | Utility autopay is drafting more than the bills · Supply house auto-ship keeps billing wire we cancelled · Copper jumped 20%: fixed-price house jobs are underwater | reconcile · invoice · variance | leak |
+| Analyst → electrician | Office outlets go dead and come back when the printer runs | meter (office circuit) | cap |
+| Analyst → mechanic | Company van wheel is wobbling: lug nuts loose | torque | leak |
+
+- Changed from the spec's list after review: leaks are causes that really recur (list price, auto-ship, autopay), not one-off double bills. "Office circuit trips when the printer and kettle run" is an overload (a dedicated circuit, not a meter job), so it's now the loose-connection version. It's the generator's *radiator* fan. "Van brakes feel soft" is hydraulic, so until the hydraulics puzzle lands it's a wobbling wheel the torque puzzle really fixes; the hydraulics branch brings the soft brakes, the bucket-truck boom and the GPU cart. The hangar-door row played a residential 3-way switch and was dropped.
+- From week 3, a 30% chance each week of a new report. At most 2 are open, counting fixes that are about to come back, and never two for one fixer.
+- A report is a ready card for the fixer: a small cost paid at once, no approval. Tapping it (like a repair or a redo) opens the story first, then *Start*.
+- **cap:** the reporter gets 2 jobs per turn, or 1 desk task for the analyst ("No shop air: 2 jobs max until Mia fixes it"). When it's used up, the dock says *End turn · limit reached* and ready cards dim. **leak:** cash every resolved week, a review line and `costs.reports`.
+- A fix under a pass always comes back 1–2 weeks later; a sloppy pass comes back with the defect-curve chance. A leak that comes back also charges the weeks it only looked fixed ("It cost $480 while it looked fixed").
+- Autopilot patches a missed fixer's *cap* report at 50% (so it comes back), but leaves a leak for a person.
+- The reporter can't sign off their own report through Lend a hand (engine refusal, and it's not listed); the third trade can.
+
+**Paper sim.** Bots fix a crewmate's report as a favour on top of their usual jobs. They rank repairs and redos as urgent, and the analyst treats repairs as safety work. Attendance and each seat's week have their own random streams, so a rule that adds a job doesn't reshuffle every absence; before/after runs compare the same crew weeks. `npm run balance -- robust` re-rolls the crews 4 ways over 90 seeds.
+
+**Tuning** (spec value → shipped), all in `DEFECT` / `REPORT` in data.ts:
+
+| Knob | Spec | Shipped | Why |
+| --- | --- | --- | --- |
+| Defect chance, 0.6 ≤ q < 0.85 | (0.85 − q) × 0.4 | × 0.2 | The three-friends bots live in this band from tier 3. At 0.4, tier 4 tipped into deferral spirals. |
+| Defect chance, q < 0.6 | 10% + 1.8/pt | unchanged | A real botch should bite. |
+| Weeks until a defect surfaces | 1–3 | 1–4 (severe 1–2) | Gives an inspection a real chance to catch it. |
+| Incident cost | 1.5× / 3× | 1.2× / 2.5× | Big-ticket jobs (a $2,900 panel upgrade) made one defect a $6k+ hit. |
+| Repair cost | ~0.8× | 0.6× (spar doubler 1.2×) | Same reason. |
+| Redo gain | — | 0.5× the original's | At 1× a caught defect was health-positive. |
+| Blind stand-in | — | a 75% job's credit | Near the bots' average, so the week's economics barely move. |
+| Report chance per week | ~0.4 | 0.3 | Each report costs a job slot plus the reporter's cap. |
+
+Results, same bots, 26 weeks × 30 seeds (`npm run balance`, after the review fixes):
+
+| Team | Wk → T5 | Weeks < $0 | Min cash | Incidents / wk | **Defect incidents / wk** | Revenue / wk |
+| --- | --- | --- | --- | --- | --- | --- |
+| Three friends | **22** | **0** | $6,444 | 0.31 | **0.118** | $9,068 |
+| All average | **22** | **0** | $6,521 | 0.21 | **0.097** | $9,889 |
+| All good | 21 | 0 | $6,493 | 0.03 | 0.013 | $11,899 |
+| Naive analyst | stays at tier 3 | 0 | | | | |
+| Every solo / absent team | stays at tier 1 | | | | | |
+
+- Per 26-week season, three friends see about 3 defect incidents (and about 1.6 caught first by an inspection), 8 reports plus 2 that come back, and 2 known-defect near-misses. All average: 2.5 incidents, 1.9 caught. Defect incidents are about 40% of all incidents: noticeable, not dominant. Deferrals are still the main risk.
+- Before the review fixes: three friends week 22, 0.109 defect incidents / week, $9,322 revenue / week. All average: week 21, 0.086, $9,912.
+
+Robustness (`npm run balance -- robust`, 90 seeds × 4 crews = 360 games per team):
+- **Three friends:** median tier 5 in week 22–23. 61 of 360 miss tier 5 by week 26 (53 before the review fixes, 38 with consequences off). 1 week below $0 in 360 games.
+- **All average:** tier 5 in week 22. 32 of 360 miss (31 before, 11 off). 1 week below $0.
+- Both negative weeks are week 26 of a late tier-4 collapse: the grid and the generator go down together and revenue goes to zero for three weeks. The previous version had none in this sweep. Variants didn't remove them: a full-value redo, a 25% report chance, and dropping the three new cap reports gave 1, 2–3 and 3–6 negative weeks. It is the known tier-4 knife-edge ($7k/week fixed), reshuffled by any rule change, not one consequence rule.
+
+**Knobs if it feels too soft or too harsh:** `DEFECT.slope` (0.2), `REPORT.chance` (0.3), `REPORT.capOps` (2), and the `INSPECTS` scopes (wider scopes catch more before they fail). Re-run `npm run balance -- robust` after any change.
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
-Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26, latest).
+Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; see that section for current numbers.
 
 | Team | Tier at wk 26 | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 |
 | --- | --- | --- | --- | --- | --- |
