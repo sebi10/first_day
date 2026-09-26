@@ -156,6 +156,8 @@ export const TIERS: TierDef[] = [
 
 export type CatalogEntry = {
   kind: string;
+  /** the job as a noun, for "traced to the <log> Ana signed off in week 5" */
+  log: string;
   role: OpsRole;
   title: string;
   puzzle: PuzzleId;
@@ -174,41 +176,41 @@ const below = (h: number, w: number) => (a: Asset) => (a.health < h ? w : 0);
 export const CATALOG: CatalogEntry[] = [
   // Mechanic — planes
   {
-    kind: 'inspect100', role: 'mech', title: '100-hr inspection', puzzle: 'crack', tier: 1, cost: 180, parts: 0, gain: 10,
+    kind: 'inspect100', log: '100-hr inspection', role: 'mech', title: '100-hr inspection', puzzle: 'crack', tier: 1, cost: 180, parts: 0, gain: 10,
     targets: ['twin', 'cargo', 'float'],
     weight: (a) => ((a.sinceInspection ?? 0) >= ECON.planeInspectionFlights - 2 ? 100 : 0),
   },
-  { kind: 'tires', role: 'mech', title: 'Tire and brake', puzzle: 'torque', tier: 1, cost: 320, parts: 1, gain: 10, targets: ['twin', 'cargo', 'float'], weight: below(96, 3) },
-  { kind: 'prop', role: 'mech', title: 'Prop bolt re-torque', puzzle: 'torque', tier: 2, cost: 280, parts: 0, gain: 12, targets: ['twin', 'cargo', 'float'], weight: below(90, 3) },
-  { kind: 'corrosion', role: 'mech', title: 'Wheel-half penetrant check', puzzle: 'crack', tier: 2, cost: 520, parts: 0, gain: 16, targets: ['twin', 'cargo', 'float'], weight: below(86, 4) },
-  { kind: 'avionics', role: 'mech', title: 'Swap the com radio', puzzle: 'teardown', tier: 2, cost: 640, parts: 1, gain: 14, targets: ['twin', 'cargo', 'float'], weight: below(92, 2) },
-  { kind: 'alternator', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4) },
-  { kind: 'cylinder', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'cargo', 'float'], weight: below(65, 8) },
-  { kind: 'spar', role: 'mech', title: 'Wing spar inspection', puzzle: 'crack', tier: 3, cost: 880, parts: 0, gain: 22, targets: ['twin', 'cargo', 'float'], weight: below(60, 8) },
+  { kind: 'tires', log: 'tire and brake job', role: 'mech', title: 'Tire and brake', puzzle: 'torque', tier: 1, cost: 320, parts: 1, gain: 10, targets: ['twin', 'cargo', 'float'], weight: below(96, 3) },
+  { kind: 'prop', log: 'prop bolt re-torque', role: 'mech', title: 'Prop bolt re-torque', puzzle: 'torque', tier: 2, cost: 280, parts: 0, gain: 12, targets: ['twin', 'cargo', 'float'], weight: below(90, 3) },
+  { kind: 'corrosion', log: 'wheel-half penetrant check', role: 'mech', title: 'Wheel-half penetrant check', puzzle: 'crack', tier: 2, cost: 520, parts: 0, gain: 16, targets: ['twin', 'cargo', 'float'], weight: below(86, 4) },
+  { kind: 'avionics', log: 'com radio swap', role: 'mech', title: 'Swap the com radio', puzzle: 'teardown', tier: 2, cost: 640, parts: 1, gain: 14, targets: ['twin', 'cargo', 'float'], weight: below(92, 2) },
+  { kind: 'alternator', log: 'alternator replacement', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4) },
+  { kind: 'cylinder', log: 'cylinder swap', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'cargo', 'float'], weight: below(65, 8) },
+  { kind: 'spar', log: 'wing spar inspection', role: 'mech', title: 'Wing spar inspection', puzzle: 'crack', tier: 3, cost: 880, parts: 0, gain: 22, targets: ['twin', 'cargo', 'float'], weight: below(60, 8) },
   // paperwork, not a repair: no health gain, but no load sheet means half the charters stay on the ramp
-  { kind: 'wb', role: 'mech', title: 'Charter load sheet', puzzle: 'balance', tier: 1, cost: 0, parts: 0, gain: 0, targets: ['twin', 'float'], weight: () => 100 },
-  { kind: 'wire', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
-  { kind: 'oil', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
+  { kind: 'wb', log: 'charter load sheet', role: 'mech', title: 'Charter load sheet', puzzle: 'balance', tier: 1, cost: 0, parts: 0, gain: 0, targets: ['twin', 'float'], weight: () => 100 },
+  { kind: 'wire', log: 'prop bolt safety wiring', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
+  { kind: 'oil', log: 'oil change', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
   // Electrician — houses
-  { kind: 'trip', role: 'elec', title: 'Trace dead outlets', puzzle: 'trace', tier: 1, cost: 120, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(95, 4) },
-  { kind: 'gfci', role: 'elec', title: 'GFCI in wet rooms', puzzle: 'wireup', tier: 1, cost: 210, parts: 0, gain: 10, targets: ['cottage', 'villa', 'lodge'], weight: below(92, 3) },
-  { kind: 'switch3', role: 'elec', title: 'Rewire a 3-way switch', puzzle: 'wireup', tier: 2, cost: 290, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(88, 2) },
+  { kind: 'trip', log: 'dead-outlet trace', role: 'elec', title: 'Trace dead outlets', puzzle: 'trace', tier: 1, cost: 120, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(95, 4) },
+  { kind: 'gfci', log: 'wet-room GFCI install', role: 'elec', title: 'GFCI in wet rooms', puzzle: 'wireup', tier: 1, cost: 210, parts: 0, gain: 10, targets: ['cottage', 'villa', 'lodge'], weight: below(92, 3) },
+  { kind: 'switch3', log: '3-way switch rewire', role: 'elec', title: 'Rewire a 3-way switch', puzzle: 'wireup', tier: 2, cost: 290, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(88, 2) },
   {
-    kind: 'codeprep', role: 'elec', title: 'Code inspection prep', puzzle: 'panel', tier: 1, cost: 150, parts: 0, gain: 6,
+    kind: 'codeprep', log: 'code inspection prep', role: 'elec', title: 'Code inspection prep', puzzle: 'panel', tier: 1, cost: 150, parts: 0, gain: 6,
     targets: ['cottage', 'villa', 'lodge'],
     weight: (a, week) => ((a.inspectionUntil ?? 0) - week <= 2 ? 100 : 0),
   },
-  { kind: 'storm', role: 'elec', title: 'Storm rewire', puzzle: 'trace', tier: 3, cost: 880, parts: 1, gain: 24, targets: ['cottage', 'villa', 'lodge'], weight: below(60, 8) },
-  { kind: 'flicker', role: 'elec', title: 'Diagnose flickering lights', puzzle: 'meter', tier: 1, cost: 90, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(94, 4) },
-  { kind: 'hottub', role: 'elec', title: 'Run conduit to the hot tub', puzzle: 'conduit', tier: 2, cost: 460, parts: 1, gain: 16, targets: ['cottage', 'villa', 'lodge'], weight: below(86, 2) },
+  { kind: 'storm', log: 'storm rewire', role: 'elec', title: 'Storm rewire', puzzle: 'trace', tier: 3, cost: 880, parts: 1, gain: 24, targets: ['cottage', 'villa', 'lodge'], weight: below(60, 8) },
+  { kind: 'flicker', log: 'flicker diagnosis', role: 'elec', title: 'Diagnose flickering lights', puzzle: 'meter', tier: 1, cost: 90, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(94, 4) },
+  { kind: 'hottub', log: 'hot-tub conduit run', role: 'elec', title: 'Run conduit to the hot tub', puzzle: 'conduit', tier: 2, cost: 460, parts: 1, gain: 16, targets: ['cottage', 'villa', 'lodge'], weight: below(86, 2) },
   // Electrician — grid + generator
-  { kind: 'feeder', role: 'elec', title: 'Trace a dead cottage feeder', puzzle: 'trace', tier: 2, cost: 420, parts: 0, gain: 16, targets: ['panel'], weight: below(90, 4) },
-  { kind: 'panelUp', role: 'elec', title: 'Panel upgrade', puzzle: 'panel', tier: 3, cost: 2100, parts: 1, gain: 30, targets: ['panel'], weight: below(66, 8) },
-  { kind: 'genService', role: 'mech', title: 'Generator engine service', puzzle: 'torque', tier: 2, cost: 380, parts: 0, gain: 15, targets: ['gen'], weight: below(90, 3) },
-  { kind: 'transfer', role: 'elec', title: 'Generator transfer panel', puzzle: 'panel', tier: 3, cost: 1150, parts: 1, gain: 22, targets: ['gen'], weight: below(78, 4) },
-  { kind: 'xfmr', role: 'elec', title: 'Diagnose a dead circuit at the panel', puzzle: 'meter', tier: 2, cost: 200, parts: 0, gain: 14, targets: ['panel'], weight: below(88, 3) },
-  { kind: 'dockrun', role: 'elec', title: 'Conduit run to the fuel dock', puzzle: 'conduit', tier: 3, cost: 520, parts: 1, gain: 18, targets: ['panel'], weight: below(80, 2) },
-  { kind: 'genTest', role: 'elec', title: 'Test generator-backed circuits', puzzle: 'meter', tier: 2, cost: 160, parts: 0, gain: 12, targets: ['gen'], weight: below(94, 3) },
+  { kind: 'feeder', log: 'feeder trace', role: 'elec', title: 'Trace a dead cottage feeder', puzzle: 'trace', tier: 2, cost: 420, parts: 0, gain: 16, targets: ['panel'], weight: below(90, 4) },
+  { kind: 'panelUp', log: 'panel upgrade', role: 'elec', title: 'Panel upgrade', puzzle: 'panel', tier: 3, cost: 2100, parts: 1, gain: 30, targets: ['panel'], weight: below(66, 8) },
+  { kind: 'genService', log: 'generator engine service', role: 'mech', title: 'Generator engine service', puzzle: 'torque', tier: 2, cost: 380, parts: 0, gain: 15, targets: ['gen'], weight: below(90, 3) },
+  { kind: 'transfer', log: 'transfer panel install', role: 'elec', title: 'Generator transfer panel', puzzle: 'panel', tier: 3, cost: 1150, parts: 1, gain: 22, targets: ['gen'], weight: below(78, 4) },
+  { kind: 'xfmr', log: 'dead-circuit diagnosis', role: 'elec', title: 'Diagnose a dead circuit at the panel', puzzle: 'meter', tier: 2, cost: 200, parts: 0, gain: 14, targets: ['panel'], weight: below(88, 3) },
+  { kind: 'dockrun', log: 'fuel-dock conduit run', role: 'elec', title: 'Conduit run to the fuel dock', puzzle: 'conduit', tier: 3, cost: 520, parts: 1, gain: 18, targets: ['panel'], weight: below(80, 2) },
+  { kind: 'genTest', log: 'generator circuit test', role: 'elec', title: 'Test generator-backed circuits', puzzle: 'meter', tier: 2, cost: 160, parts: 0, gain: 12, targets: ['gen'], weight: below(94, 3) },
 ];
 
 export const CATALOG_BY_KIND = Object.fromEntries(CATALOG.map((c) => [c.kind, c]));
@@ -233,6 +235,12 @@ export const FIN_TASKS = {
 export const DEFECT = {
   /** launch tier from which a real job is signed off blind (tiers 0-1 keep teaching feedback) */
   blindFromTier: 2,
+  /**
+   * A blind sign-off lands a fixed provisional result at once (health, XP), as
+   * if it scored this; the true result settles silently when the week resolves,
+   * so nothing on screen gives the score away the moment it's handed in.
+   */
+  provisional: 0.75,
   /** at or above this true score a job leaves nothing behind */
   clean: 0.85,
   /** 0.6 ≤ q < 0.85: chance = (0.85 − q) × slope, so a bare pass is 5% (spec 0.4 → 10%) */
@@ -251,74 +259,258 @@ export const DEFECT = {
   healthHit: [12, 25] as const,
   /** jobs with no price tag (load sheets) still cost at least this much to put right */
   minBase: 300,
-  /** repair cost = this × the original's (spec ~0.8); gain = 0.4 × the original's gain, at least 4 */
+  /** repair cost = this × the original's (spec ~0.8; a rule can override); gain = 0.4 × the original's gain, at least 4 */
   repairCost: 0.6,
   repairGain: 0.4,
   repairMinGain: 4,
   /** after an incident, the repair also restores this share of the health the failure took (the failed part is replaced) */
   repairRestores: 0.5,
-  /** the redo is free (already paid) and restores this share of the original's gain: it is the original job, done properly */
-  redoGain: 1,
+  /**
+   * The redo is free (already paid) and restores this share of the original's
+   * gain. Half, not all: the botched sign-off already landed part of it, so a
+   * caught defect doesn't end up health-positive against doing it right.
+   */
+  redoGain: 0.5,
   /** an inspection needs at least a pass to find anything */
   detectAt: 0.6,
 };
 
-/** What a hidden defect looks like, and the reasonable repair for it, by the ORIGINAL job's puzzle. */
+/** What a hidden defect looks like, and the reasonable repair for it. */
 export type DefectRule = {
-  /** incident text: "<incident> on <asset>: traced to …" */
-  incident: string;
-  /** inspection find: "found <found> on <asset>, left from week N" */
+  /**
+   * What happened, by severity: [a write-up or callback, a failure]. `{a}` is
+   * the asset's name. The review adds "Traced to …".
+   */
+  incident: readonly [string, string];
+  /** inspection find: "Ana's 100-hr inspection found <found> on Twin N-12, left from week N" */
   found: string;
-  /** the corrective job: a different puzzle from the original */
-  fix: { puzzle: PuzzleId; title: string; parts?: number };
+  /**
+   * The corrective job, on a different puzzle from the original. `job` picks
+   * the puzzle's scenario (the assembly, part or device it shows); `cost`
+   * overrides DEFECT.repairCost for repairs that are bigger than the job.
+   */
+  fix: { puzzle: PuzzleId; title: string; parts?: number; job?: string; cost?: number };
   /** redo the original afterwards (default true; paperwork that is redone every week anyway says false) */
   redo?: boolean;
 };
 
 /**
- * Keyed by puzzle id (a plain string, so a branch that adds a puzzle only adds
- * its row). Unknown puzzles fall back to DEFECT_FALLBACK for their trade.
+ * Keyed by the ORIGINAL job's puzzle (a plain string, so a branch that adds a
+ * puzzle only adds its row). DEFECT_RULES_BY_KIND overrides a row for one work
+ * order kind, where the part matters (a missed spar crack is not a missed
+ * wheel-hub crack). Unknown puzzles fall back to DEFECT_FALLBACK for their trade.
  */
 export const DEFECT_RULES: Record<string, DefectRule> = {
-  torque: { incident: 'Fasteners worked loose in service', found: 'under-torqued fasteners', fix: { puzzle: 'teardown', title: 'Replace the stretched fasteners' } },
-  crack: { incident: 'A crack the inspection missed grew until the part failed', found: 'a crack the last inspection missed', fix: { puzzle: 'teardown', title: 'Remove the cracked part and fit a serviceable one' } },
-  safetywire: { incident: 'Safety wire let go and the hardware backed off', found: 'safety wire twisted the wrong way', fix: { puzzle: 'torque', title: 'Re-torque the loosened hardware' } },
-  teardown: { incident: 'A part fitted wrong failed in service', found: 'a misassembled installation', fix: { puzzle: 'teardown', title: 'Rework the installation' } },
-  balance: { incident: 'Hard landing with an out-of-limits load', found: 'hard-landing damage from an out-of-limits load', fix: { puzzle: 'crack', title: 'Hard-landing inspection of the gear' }, redo: false },
-  trace: { incident: 'A connection left loose started arcing', found: 'an open splice left in a junction box', fix: { puzzle: 'meter', title: 'Find the arcing connection' } },
-  panel: { incident: 'An overloaded breaker cooked its lugs', found: 'an overloaded leg in the panel', fix: { puzzle: 'wireup', title: 'Replace the heat-damaged breaker lugs' } },
-  wireup: { incident: 'A loose terminal overheated', found: 'a loose terminal', fix: { puzzle: 'meter', title: 'Locate the loose terminal' } },
-  meter: { incident: 'The fault that was misdiagnosed came back', found: 'a misdiagnosed fault', fix: { puzzle: 'trace', title: 'Trace the real fault' } },
-  conduit: { incident: 'Conductors nicked in a kinked run shorted out', found: 'a kinked conduit run with nicked conductors', fix: { puzzle: 'wireup', title: 'Pull new conductors through the damaged run' } },
+  torque: {
+    incident: ['Fasteners on {a} found loose at the postflight walkaround', 'Fasteners on {a} backed off in service'],
+    found: 'fasteners below torque, with fretting at the joint',
+    fix: { puzzle: 'teardown', title: 'Replace the loose fasteners and check the holes for elongation', job: 'wheel' },
+  },
+  crack: {
+    incident: ['A crack the last inspection of {a} missed was found growing', 'A crack the last inspection of {a} missed let go'],
+    found: 'a crack the last inspection missed',
+    fix: { puzzle: 'teardown', title: 'Remove the cracked part and fit a serviceable one', parts: 1 },
+  },
+  safetywire: {
+    incident: ['Hardware on {a} found backing off: its safety wire pulls the wrong way', 'Safety wire on {a} was pulling the wrong way and the hardware backed off'],
+    found: 'safety wire pulling in the loosening direction',
+    fix: { puzzle: 'torque', title: 'Re-torque the loosened hardware' },
+  },
+  teardown: {
+    incident: ['A part fitted wrong on {a} came loose in service', 'A part fitted wrong on {a} failed in service'],
+    found: 'a misassembled installation',
+    fix: { puzzle: 'crack', title: 'Inspect the mount and surrounding structure for damage', job: 'mount' },
+  },
+  balance: {
+    incident: ['Pilot wrote up a heavy landing on {a}: the load sheet had the CG near the aft limit', 'Hard landing on {a} with an out-of-limits load: gear overstressed'],
+    found: 'hard-landing damage from an out-of-limits load',
+    fix: { puzzle: 'crack', title: 'Hard-landing inspection of the gear', job: 'gear' },
+    redo: false,
+  },
+  // a missed diagnosis leaves damage: repair it first, then do the diagnosis again
+  trace: {
+    incident: ['Callback from {a}: an outlet is warm and smells burnt', 'A loose backstab at {a} arced and scorched the outlet'],
+    found: 'a loose backstab at the last live outlet',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched outlet and move it off the backstab', job: 'outlet' },
+  },
+  panel: {
+    incident: ['Callback from {a}: a bedroom circuit smells hot, its breaker oversized for the wire', 'An oversized breaker at {a} let the branch wire overheat: scorched insulation in the wall'],
+    found: 'a breaker oversized for its wire',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched run and land it on the right-size breaker', parts: 1, job: 'outlet' },
+  },
+  wireup: {
+    incident: ['Callback from {a}: a device is warm, a terminal is loose', 'A loose terminal at {a} overheated and scorched the box'],
+    found: 'a loose terminal',
+    fix: { puzzle: 'meter', title: 'Locate the loose terminal' },
+  },
+  meter: {
+    incident: ['Callback from {a}: the lights are still flickering', 'A loose neutral at {a} let go: the lights surged and fried a guest’s TV'],
+    found: 'a loose neutral the diagnosis missed',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched device and re-terminate the neutral', job: 'outlet' },
+  },
+  // make it safe and find the fault first; the redo re-bends the run and pulls new conductors
+  conduit: {
+    incident: ['The GFCI on a run at {a} keeps tripping: a conductor nicked in a kinked run', 'A nicked conductor in a kinked run at {a} faulted to ground: circuit dead'],
+    found: 'a kinked conduit run with a nicked conductor',
+    fix: { puzzle: 'meter', title: 'Find where the run is faulted to ground' },
+  },
+};
+
+/** Per work-order kind: checked before the puzzle row. A repair's own defect uses the puzzle row. */
+export const DEFECT_RULES_BY_KIND: Record<string, DefectRule> = {
+  // mechanic
+  tires: {
+    incident: ['Wheel through-bolts on {a} found loose at the walkaround', 'Wheel through-bolts on {a} backed off on the landing roll and flat-spotted the tire'],
+    found: 'wheel through-bolts below torque, with fretting at the joint',
+    fix: { puzzle: 'teardown', title: 'Replace the wheel through-bolts and check the holes for elongation', job: 'wheel' },
+  },
+  prop: {
+    incident: ['Pilot wrote up a vibration on {a}: prop bolts found loose', 'Prop bolts on {a} backed off in flight: heavy vibration, precautionary landing'],
+    found: 'prop bolts below torque, with fretting on the flange',
+    fix: { puzzle: 'teardown', title: 'Pull the prop, replace the bolts, inspect the flange for fretting', job: 'prop' },
+  },
+  genService: {
+    incident: ['{a}: the generator shook on its weekly run, mount bolts found loose', '{a}: the generator mount bolts backed off and it walked on its pad'],
+    found: 'generator mount bolts below torque',
+    fix: { puzzle: 'teardown', title: 'Replace the mount bolts and the worn isolators', job: 'genmount' },
+  },
+  inspect100: {
+    incident: ['Pilot wrote up an exhaust smell in the {a} cabin: a cracked exhaust riser the 100-hr missed', 'CO detector went off in flight on {a}: a cracked exhaust riser the 100-hr missed'],
+    found: 'a cracked exhaust riser the last 100-hr missed',
+    fix: { puzzle: 'teardown', title: 'Replace the cracked exhaust riser', parts: 1, job: 'exhaust' },
+  },
+  corrosion: {
+    incident: ['{a} lost tire pressure overnight: a wheel-half crack the penetrant check missed', 'A wheel half on {a} cracked through on landing and blew the tire'],
+    found: 'a wheel-half crack the penetrant check missed',
+    fix: { puzzle: 'teardown', title: 'Replace the wheel half and tire', parts: 1, job: 'wheelhalf' },
+  },
+  spar: {
+    incident: [
+      'Pilot reported smoking rivets at the {a} wing root: the spar-cap crack the inspection missed has grown',
+      'The spar-cap crack the inspection missed on {a} has grown past limits: the wing root is working in flight',
+    ],
+    found: 'a spar-cap crack the last inspection missed',
+    fix: { puzzle: 'teardown', title: 'Spar-cap doubler repair per the SRM', parts: 1, job: 'sparcap', cost: 1.2 },
+  },
+  wire: {
+    incident: ['Pilot wrote up a vibration on {a}: prop bolts backing off, their safety wire pulls the wrong way', 'Prop bolts on {a} backed off in flight, the safety wire pulling the wrong way: precautionary landing'],
+    found: 'prop bolt safety wire pulling in the loosening direction',
+    fix: { puzzle: 'torque', title: 'Re-torque the prop bolts' },
+  },
+  oil: {
+    incident: ['Oil on the belly of {a} after one flight: the drain plug is backing off', 'Oil pressure dropped in flight on {a}: the drain plug backed off, precautionary landing'],
+    found: 'a drain plug wired in the loosening direction',
+    fix: { puzzle: 'torque', title: 'Re-torque the sump and filter adapter bolts' },
+  },
+  alternator: {
+    incident: ['Pilot wrote up a low-voltage light on {a}: the alternator belt was never tensioned', 'The alternator on {a} came off its bracket in flight: electrical failure, precautionary landing'],
+    found: 'an alternator belt left untensioned',
+    fix: { puzzle: 'crack', title: 'Inspect the alternator bracket for cracks', job: 'bracket' },
+  },
+  cylinder: {
+    incident: ['Oil weeping at a cylinder base on {a}: the base nuts were never torqued in sequence', 'Cylinder base nuts on {a} let go: engine roughness, precautionary landing'],
+    found: 'cylinder base nuts out of sequence, with fretting at the flange',
+    fix: { puzzle: 'crack', title: 'Check the case and through-bolts for fretting', job: 'case' },
+  },
+  avionics: {
+    incident: ['Pilot wrote up an intermittent com radio on {a}: it isn’t latched in its tray', 'The com radio on {a} dropped out on approach: lost comms'],
+    found: 'a com radio not latched in its tray',
+    fix: { puzzle: 'crack', title: 'Inspect the radio tray and connector pins', job: 'tray' },
+  },
+  // electrician
+  storm: {
+    incident: ['Callback from {a}: one room is still dead after the storm rewire', 'A storm-damaged splice at {a} arced in the wall: scorched box, guests moved'],
+    found: 'a storm-damaged splice left in a junction box',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched box and re-splice the storm run', job: 'outlet' },
+  },
+  feeder: {
+    incident: ['Two cottages flicker when the {a} feeder is loaded: a loose splice', 'A loose splice on the {a} feeder arced and dropped two cottages'],
+    found: 'a loose wire-nut splice in the feeder junction box',
+    fix: { puzzle: 'wireup', title: 'Replace the burnt splice on the feeder', job: 'outlet' },
+  },
+  transfer: {
+    incident: ['{a}: the transfer panel tripped under load in a test, a breaker oversized for its wire', '{a}: the transfer panel overheated in a real outage, scorched conductors and houses dark'],
+    found: 'a transfer-panel breaker oversized for its wire',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched conductors and land them on the right-size breaker', parts: 1, job: 'outlet' },
+  },
+  gfci: {
+    incident: ['Callback from {a}: the bathroom GFCI trips at random', 'A loose terminal on the {a} bathroom GFCI overheated: scorched box, room closed'],
+    found: 'a loose terminal on the GFCI',
+    fix: { puzzle: 'meter', title: 'Find the loose terminal on the GFCI circuit' },
+  },
+  switch3: {
+    incident: ['Callback from {a}: the hall lights only work from one end', 'A loose traveler at {a} arced in the switch box: scorched box, hall dark'],
+    found: 'a traveler on the wrong terminal',
+    fix: { puzzle: 'meter', title: 'Find the miswired traveler' },
+  },
+  xfmr: {
+    incident: ['Callback: the dead circuit on {a} dropped out again', 'A loose lug on {a} arced and dropped a feeder'],
+    found: 'a loose lug the diagnosis missed',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched lug and re-terminate the circuit', job: 'outlet' },
+  },
+  genTest: {
+    incident: ['{a}: a backed-up circuit failed to pick up in the weekly test', '{a}: a backed-up circuit dropped out in a real outage, houses dark'],
+    found: 'a backed-up circuit that won’t pick up',
+    fix: { puzzle: 'wireup', title: 'Re-terminate the generator circuit', job: 'outlet' },
+  },
+  hottub: {
+    incident: ['The hot-tub GFCI at {a} keeps tripping: a conductor nicked in a kinked run', 'The hot-tub run at {a} faulted to ground: tub closed'],
+    found: 'a kinked hot-tub run with a nicked conductor',
+    fix: { puzzle: 'meter', title: 'Find where the hot-tub run is faulted to ground' },
+  },
+  dockrun: {
+    incident: ['The fuel-dock GFCI keeps tripping: a conductor nicked in a kinked run from {a}', 'The fuel-dock run from {a} faulted to ground: pumps down'],
+    found: 'a kinked fuel-dock run with a nicked conductor',
+    fix: { puzzle: 'meter', title: 'Find where the fuel-dock run is faulted to ground' },
+  },
 };
 
 /** For a puzzle with no row yet (new puzzles land from other branches): a sensible default per trade. */
 export const DEFECT_FALLBACK: Record<OpsRole, DefectRule> = {
-  mech: { incident: 'A job signed off unfinished failed in service', found: 'work that was signed off unfinished', fix: { puzzle: 'teardown', title: 'Rework the job' } },
-  elec: { incident: 'A fault the last job left behind tripped the circuit', found: 'a fault the last job left behind', fix: { puzzle: 'meter', title: 'Find the fault the last job left' } },
+  mech: {
+    incident: ['Work signed off unfinished on {a} came loose in service', 'Work signed off unfinished on {a} failed in service'],
+    found: 'work that was signed off unfinished',
+    fix: { puzzle: 'teardown', title: 'Rework the job' },
+  },
+  elec: {
+    incident: ['Callback from {a}: a fault the last job left behind', 'A fault the last job at {a} left behind tripped the circuit'],
+    found: 'a fault the last job left behind',
+    fix: { puzzle: 'meter', title: 'Find the fault the last job left' },
+  },
 };
 
-export function defectRule(puzzle: string, role: Role): DefectRule {
-  return DEFECT_RULES[puzzle] ?? DEFECT_FALLBACK[role === 'elec' ? 'elec' : 'mech'];
+/** The rule for a defect: its job kind first (a repair's own defect has kind 'repair' and uses its puzzle's row), then its puzzle, then the trade default. */
+export function defectRule(puzzle: string, role: Role, kind?: string): DefectRule {
+  return (kind ? DEFECT_RULES_BY_KIND[kind] : undefined) ?? DEFECT_RULES[puzzle] ?? DEFECT_FALLBACK[role === 'elec' ? 'elec' : 'mech'];
 }
 
+/** "Pilot wrote up a vibration on Twin N-12: …" */
+export const incidentText = (rule: DefectRule, severity: 1 | 2, asset: string) => rule.incident[severity - 1].split('{a}').join(asset);
+
 /**
- * Inspection-type jobs (kind → how the feed names it). A pass finds the latent
- * defects its own trade left on the same asset in an earlier week: the chance
- * to fix it before it fails.
+ * Inspection-type jobs. A pass finds the latent defects its own trade left on
+ * the same asset in an earlier week (the chance to fix it before it fails),
+ * but only in the work it actually looks at: `scope` lists the job kinds it
+ * can find ('all' for a full inspection). A repair or redo counts as the kind
+ * of the job it corrects.
  */
-export const INSPECTS: Record<string, string> = {
-  inspect100: '100-hr inspection',
-  corrosion: 'wheel-half penetrant check',
-  spar: 'wing spar inspection',
+export const INSPECTS: Record<string, { name: string; scope: readonly string[] | 'all' }> = {
+  inspect100: { name: '100-hr inspection', scope: 'all' },
+  corrosion: { name: 'wheel-half penetrant check', scope: ['tires', 'corrosion'] },
+  spar: { name: 'wing spar inspection', scope: ['spar', 'wb'] },
   // an oil change includes the engine-compartment look and a filter check for metal
-  oil: 'oil change and engine look-over',
-  codeprep: 'code inspection prep',
+  oil: { name: 'oil change and engine look-over', scope: ['oil', 'prop', 'wire', 'cylinder', 'alternator'] },
+  codeprep: { name: 'code inspection prep', scope: 'all' },
   // tracing and metering a house's circuits opens the boxes a bad splice hides in
-  trip: 'outlet trace',
-  flicker: 'flicker diagnosis',
-  genTest: 'generator circuit test',
-  xfmr: 'panel diagnosis',
+  trip: { name: 'outlet trace', scope: ['trip', 'gfci', 'switch3', 'storm'] },
+  flicker: { name: 'flicker diagnosis', scope: ['flicker', 'trip', 'gfci', 'switch3', 'storm'] },
+  genTest: { name: 'generator circuit test', scope: ['transfer', 'genTest'] },
+  xfmr: { name: 'panel diagnosis', scope: ['xfmr', 'feeder', 'panelUp', 'dockrun'] },
+};
+
+export const inspects = (inspection: string, job: string) => {
+  const s = INSPECTS[inspection]?.scope;
+  return s === 'all' || !!s?.includes(job);
 };
 
 /** Cross-trade reports: one trade's problem that another trade has to fix. All three trades report and fix. */
@@ -326,7 +518,7 @@ export const REPORT = {
   fromWeek: 3,
   /** chance per week of a new report (spec ~0.4; 0.3 keeps the tier-4 economy off its knife-edge) */
   chance: 0.3,
-  /** at most this many open at once, and never two for the same fixer */
+  /** at most this many open at once (counting fixes that are about to come back), and never two for the same fixer */
   maxOpen: 2,
   /** a 'cap' report limits the reporter to this many jobs per turn (the analyst: desk tasks) */
   capOps: 2,
@@ -346,31 +538,50 @@ export type ReportDef = {
   title: string;
   /** feed: "<reporter> reports: <said>. <fixer>, it's yours." */
   said: string;
+  /** feed when a fix didn't hold: "<reporter>: <back>. The fix from week N didn't hold." */
+  back: string;
   puzzle: PuzzleId;
+  /** the puzzle's scenario (teardown assembly, crack part, wire-up device) */
+  job?: string;
   effect: 'cap' | 'leak';
   /** leak: USD per resolved week at tier 1 */
   amount?: number;
   /** out of pocket for the fix (paid at once, no approval) */
   cost: number;
-  /** the reporter's notice: "<notice>: 2 jobs max until <fixer> fixes <it>" */
+  /** the reporter's notice: "<notice>: 2 jobs max until <fixer> <fixes> <it>" */
   notice: string;
   it?: 'it' | 'them';
+  /** "fixes" (default), "clears", "sorts out" */
+  fixes?: string;
   /** only once the island has this tier (the generator exists from tier 3) */
   minTier?: number;
 };
 
+/**
+ * Data-driven: a branch that adds a puzzle adds its reports here (the
+ * hydraulics branch brings "Bucket truck boom is leaking hydraulic fluid" and
+ * "Company van brakes feel soft"; the GPU cart comes with its puzzle).
+ * Leaks are causes that really recur week after week, not one-off errors.
+ */
 export const REPORTS: ReportDef[] = [
-  { key: 'hangarLights', by: 'mech', fixer: 'elec', title: 'Hangar work lights are dead', said: 'the hangar work lights are dead', puzzle: 'trace', effect: 'cap', cost: 60, notice: 'Hangar lights out', it: 'them' },
-  { key: 'compressor', by: 'mech', fixer: 'elec', title: 'Hangar compressor keeps tripping its breaker', said: 'the hangar compressor keeps tripping its breaker', puzzle: 'meter', effect: 'cap', cost: 40, notice: 'No shop air' },
-  { key: 'hangarDoor', by: 'mech', fixer: 'elec', title: 'Hangar door motor starter keeps dropping out', said: 'the hangar door motor starter keeps dropping out', puzzle: 'wireup', effect: 'cap', cost: 90, notice: 'Hangar door stuck half open' },
-  { key: 'doubleBilled', by: 'mech', fixer: 'fin', title: 'Parts vendor billed the brake kit twice', said: 'the parts vendor billed the brake kit twice', puzzle: 'invoice', effect: 'leak', amount: 240, cost: 0, notice: 'Brake kit billed twice' },
-  { key: 'genFan', by: 'elec', fixer: 'mech', title: 'Generator housing fan bearing is screaming', said: 'the generator housing fan bearing is screaming', puzzle: 'teardown', effect: 'cap', cost: 110, notice: 'Generator fan failing', minTier: 3 },
-  { key: 'trencher', by: 'elec', fixer: 'mech', title: 'Trencher drive belt snapped', said: 'the trencher drive belt snapped', puzzle: 'teardown', effect: 'cap', cost: 80, notice: 'Trencher down' },
-  { key: 'utilityBill', by: 'elec', fixer: 'fin', title: "Utility bill doesn't match the meter readings", said: "the utility bill doesn't match the meter readings", puzzle: 'reconcile', effect: 'leak', amount: 200, cost: 0, notice: 'Utility overbilling' },
-  { key: 'supplyHouse', by: 'elec', fixer: 'fin', title: 'Supply house charged for wire we sent back', said: 'the supply house charged us for wire we sent back', puzzle: 'invoice', effect: 'leak', amount: 180, cost: 0, notice: 'Returned wire still billed' },
-  { key: 'officeCircuit', by: 'fin', fixer: 'elec', title: 'Office circuit trips when the printer and kettle run', said: 'the office circuit trips whenever the printer and the kettle run', puzzle: 'meter', effect: 'cap', cost: 50, notice: 'Office breaker keeps tripping' },
-  // moves to the hydraulics puzzle when that branch lands
-  { key: 'vanBrakes', by: 'fin', fixer: 'mech', title: 'Company van brakes feel soft', said: 'the company van brakes feel soft', puzzle: 'torque', effect: 'leak', amount: 160, cost: 120, notice: 'Van off the road' },
+  // the mechanic reports
+  { key: 'hangarLights', by: 'mech', fixer: 'elec', title: 'Hangar work lights are dead', said: 'the hangar work lights are dead', back: 'the hangar work lights are out again', puzzle: 'trace', job: 'hangar', effect: 'cap', cost: 60, notice: 'Hangar lights out', it: 'them' },
+  { key: 'compressor', by: 'mech', fixer: 'elec', title: 'Hangar compressor keeps tripping its breaker', said: 'the hangar compressor keeps tripping its breaker', back: 'the hangar compressor is tripping its breaker again', puzzle: 'meter', job: 'shop', effect: 'cap', cost: 40, notice: 'No shop air' },
+  { key: 'charger', by: 'mech', fixer: 'elec', title: 'Aircraft battery charger keeps tripping the hangar GFCI', said: 'the aircraft battery charger keeps tripping the hangar GFCI', back: 'the battery charger is tripping the GFCI again', puzzle: 'meter', job: 'shop', effect: 'cap', cost: 30, notice: 'No battery charging' },
+  { key: 'vendorPrice', by: 'mech', fixer: 'fin', title: 'Parts vendor is billing list price, not our contract price', said: 'the parts vendor is billing list price, not our contract price', back: 'the parts vendor is still billing list price', puzzle: 'invoice', effect: 'leak', amount: 240, cost: 0, notice: 'Parts billed at list' },
+  { key: 'avgas', by: 'mech', fixer: 'fin', title: 'Avgas went up $1.20/gal and charter prices never moved', said: 'avgas went up $1.20 a gallon and charter prices never moved', back: 'charter pricing still hasn’t caught up with avgas', puzzle: 'variance', effect: 'leak', amount: 200, cost: 0, notice: 'Charters priced on old fuel' },
+  { key: 'creditHold', by: 'mech', fixer: 'fin', title: 'Parts vendor put us on credit hold', said: 'the parts vendor put us on credit hold', back: 'the parts vendor put us back on credit hold', puzzle: 'reconcile', effect: 'cap', cost: 0, notice: 'Parts on credit hold', fixes: 'clears' },
+  // the electrician reports
+  { key: 'genFan', by: 'elec', fixer: 'mech', title: 'Generator radiator fan bearing is screaming', said: 'the generator radiator fan bearing is screaming', back: 'the generator radiator fan is screaming again', puzzle: 'teardown', job: 'fan', effect: 'cap', cost: 110, notice: 'Generator fan failing', minTier: 3 },
+  { key: 'trencher', by: 'elec', fixer: 'mech', title: 'Trencher drive belt snapped', said: 'the trencher drive belt snapped', back: 'the trencher belt let go again', puzzle: 'teardown', job: 'trencher', effect: 'cap', cost: 80, notice: 'Trencher down' },
+  { key: 'ladderRack', by: 'elec', fixer: 'mech', title: 'Work truck ladder rack is cracked at the welds', said: 'the work truck ladder rack is cracked at the welds', back: 'the ladder rack weld has cracked again', puzzle: 'crack', job: 'ladder', effect: 'cap', cost: 50, notice: 'Ladder rack unsafe' },
+  { key: 'utilityAutopay', by: 'elec', fixer: 'fin', title: 'Utility autopay is drafting more than the bills', said: 'the utility autopay is drafting more than the bills', back: 'the utility autopay is still drafting more than the bills', puzzle: 'reconcile', effect: 'leak', amount: 200, cost: 0, notice: 'Utility overdrafting' },
+  { key: 'autoShip', by: 'elec', fixer: 'fin', title: 'Supply house auto-ship keeps billing wire we cancelled', said: 'the supply house auto-ship keeps billing wire we cancelled', back: 'the supply house is still billing the cancelled wire', puzzle: 'invoice', effect: 'leak', amount: 180, cost: 0, notice: 'Cancelled wire still billed' },
+  { key: 'copper', by: 'elec', fixer: 'fin', title: 'Copper jumped 20%: fixed-price house jobs are underwater', said: 'copper jumped 20% and the fixed-price house jobs are underwater', back: 'house jobs are still priced on last year’s copper', puzzle: 'variance', effect: 'leak', amount: 220, cost: 0, notice: 'Jobs priced on old copper' },
+  // the analyst reports
+  { key: 'officeOutlets', by: 'fin', fixer: 'elec', title: 'Office outlets go dead and come back when the printer runs', said: 'the office outlets go dead and come back whenever the printer runs', back: 'the office outlets are dropping out again', puzzle: 'meter', job: 'office', effect: 'cap', cost: 50, notice: 'Office power keeps dropping' },
+  // until the hydraulics puzzle lands: a fault the torque puzzle really fixes (a soft brake pedal is hydraulic, and moves there)
+  { key: 'vanWheel', by: 'fin', fixer: 'mech', title: 'Company van wheel is wobbling: lug nuts loose', said: 'the company van wheel is wobbling and the lug nuts are loose', back: 'the van wheel is wobbling again', puzzle: 'torque', effect: 'leak', amount: 160, cost: 60, notice: 'Van off the road' },
 ];
 
 export const REPORT_BY_KEY: Record<string, ReportDef> = Object.fromEntries(REPORTS.map((r) => [r.key, r]));

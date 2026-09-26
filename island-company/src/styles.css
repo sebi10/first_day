@@ -529,6 +529,10 @@ h3 {
 .order.done {
   opacity: 0.6;
 }
+/* ready, but this seat can't start it right now (turn over, or a per-turn limit) */
+.order.held {
+  opacity: 0.75;
+}
 .tierdots {
   display: inline-flex;
   gap: 3px;

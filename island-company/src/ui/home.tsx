@@ -462,6 +462,8 @@ function Dock({
   const ready = readyList.length;
   const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week).length : 0;
   const gridCapped = (r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1) || !!capNow(s, r)?.full;
+  // jobs this seat could still start this turn (none once a per-turn limit is used up)
+  const playable = gridCapped ? 0 : ready;
   // the next useful thing, always under the thumb
   const next: { label: string; go(): void } | null = turn?.ended
     ? null
@@ -505,13 +507,13 @@ function Dock({
                   <Btn block onClick={next.go} style={{ flex: '1 1 auto', minWidth: 0 }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{next.label}</span>
                   </Btn>
-                  <Btn kind="ink" onClick={() => (ready > 0 ? setConfirm(true) : void end())} style={{ flex: 'none', padding: '0 16px' }}>
+                  <Btn kind="ink" onClick={() => (playable > 0 ? setConfirm(true) : void end())} style={{ flex: 'none', padding: '0 16px' }}>
                     End turn
                   </Btn>
                 </div>
               ) : (
-                <Btn block kind="ink" onClick={() => (ready > 0 ? setConfirm(true) : void end())}>
-                  End turn{ready ? ` · ${ready} job${ready > 1 ? 's' : ''} left` : ''}
+                <Btn block kind="ink" onClick={() => (playable > 0 ? setConfirm(true) : void end())}>
+                  End turn{playable ? ` · ${playable} job${playable > 1 ? 's' : ''} left` : ready ? ' · limit reached' : ''}
                 </Btn>
               )}
             </div>

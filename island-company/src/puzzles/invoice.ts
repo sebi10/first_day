@@ -6,7 +6,7 @@
 // delivery billed for what arrived is fine; "2/10 net 30" means 2% off if paid
 // within 10 days — worth taking when cash allows.
 import { rng, type Rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, shade, stage, tnum } from './kit';
+import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, settle, shade, stage, tnum } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 export type InvIssue = 'qty' | 'price' | 'dupe' | 'freight' | 'tax';
@@ -594,6 +594,8 @@ export const invoice: PuzzleDef = {
     const st = stage(host.el);
     const { ctx } = st;
     const still = p.reducedMotion;
+    // blind: a card is paid or held, full stop (no "Should hold", no ✓/✕, no coloured progress); the batch closes without a verdict
+    const blind = !!p.blind;
     const decisions: (InvDecision | undefined)[] = [];
     const verdicts: (InvVerdict | null)[] = [];
     let cash = m.cash;
@@ -706,15 +708,12 @@ export const invoice: PuzzleDef = {
       finished = true;
       const res = invResult(m, decisions);
       final = res;
-      if (res.perfect) {
+      if (res.perfect && !blind) {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      toast = { str: res.summary, t0: performance.now(), color: res.perfect ? C.palmDark : C.ink, hold: true };
-      doneTimer = setTimeout(() => {
-        doneTimer = null;
-        host.done(res);
-      }, res.perfect ? 850 : 350);
+      toast = blind ? null : { str: res.summary, t0: performance.now(), color: res.perfect ? C.palmDark : C.ink, hold: true };
+      settle(host, res, res.perfect ? 850 : 350);
     };
 
     const commit = (action: InvDecision['action'], row?: number) => {
@@ -728,7 +727,9 @@ export const invoice: PuzzleDef = {
       const now = performance.now();
       host.fx.swipe();
       later(() => (v.wrong ? host.fx.bad() : host.fx.good()), 110);
-      toast = { str: v.msg, t0: now, color: v.wrong ? C.rust : v.right ? C.palmDark : C.ink };
+      toast = blind
+        ? { str: `${action === 'hold' ? 'Held' : action === 'early' && c.discount > 0 ? 'Paid early' : 'Paid'} · ${c.vendor}`, t0: now, color: C.ink }
+        : { str: v.msg, t0: now, color: v.wrong ? C.rust : v.right ? C.palmDark : C.ink };
       const dir: 1 | -1 = action === 'hold' ? -1 : 1;
       if (!still)
         flying.push({
@@ -886,7 +887,7 @@ export const invoice: PuzzleDef = {
         ctx.beginPath();
         ctx.arc(dx0, y + 40, r, 0, Math.PI * 2);
         if (v) {
-          ctx.fillStyle = v.wrong ? C.rust : v.right ? C.palm : C.sandDeep;
+          ctx.fillStyle = blind ? shade(C.fin, -0.3) : v.wrong ? C.rust : v.right ? C.palm : C.sandDeep;
           ctx.fill();
         } else {
           ctx.lineWidth = i === idx ? 2.5 : 1.5;
@@ -1128,11 +1129,11 @@ export const invoice: PuzzleDef = {
         ctx.moveTo(x + 12, ry - rowH / 2);
         ctx.lineTo(x + w - 12, ry - rowH / 2);
         ctx.stroke();
-        ctx.fillStyle = v.wrong ? C.rust : v.right ? C.palm : C.sandDeep;
+        ctx.fillStyle = blind ? shade(C.fin, -0.3) : v.wrong ? C.rust : v.right ? C.palm : C.sandDeep;
         ctx.beginPath();
         ctx.arc(x + 22, ry, 8, 0, Math.PI * 2);
         ctx.fill();
-        text(ctx, v.wrong ? '✕' : v.right ? '✓' : '·', x + 22, ry + 0.5, { size: 10, weight: 900, color: C.white, align: 'center' });
+        text(ctx, blind ? String(i + 1) : v.wrong ? '✕' : v.right ? '✓' : '·', x + 22, ry + 0.5, { size: 10, weight: 900, color: C.white, align: 'center' });
         text(ctx, c.vendor, x + 38, ry, { size: 12, weight: 700, max: w * 0.36 });
         const what =
           d.action === 'hold' ? 'held' : d.action === 'early' && c.discount > 0 ? 'paid −2%' : 'paid';

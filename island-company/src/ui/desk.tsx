@@ -6,9 +6,9 @@ import { budgetCap, listPrice } from '../sim/engine';
 import { charterLoad, expectedDeferralCost, logistic, occupancy, openReports, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
 import type { Insurance, Order } from '../sim/types';
 import { fx } from './feedback';
-import { Btn, Icon, Seg, TierDots, toast, usd } from './kit';
-import { CapNotice, CoverSection } from './ops';
-import { OrderCard } from './orders';
+import { Btn, Icon, Seg, Sheet, TierDots, toast, usd } from './kit';
+import { CapNotice, CoverSection, hasOrigin } from './ops';
+import { OrderCard, OrderDetail } from './orders';
 import { capNow, openOrders } from './select';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
@@ -24,6 +24,8 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
   // open 'leak' reports cost cash every week until someone fixes them
   const leaks = openReports(s).filter((o) => o.report!.effect === 'leak');
   const leakTotal = leaks.reduce((n, o) => n + o.report!.amount, 0);
+  // a crewmate's report opens its story first (who reported it and what it costs), with a Start button
+  const [sel, setSel] = useState<Order | null>(null);
   return (
     <>
       <div class="card col" style={{ gap: 6, ['--tint' as string]: C.fin }}>
@@ -67,13 +69,42 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           key={o.id}
           s={s}
           o={o}
+          held={ended || !!cap?.full}
           onOpen={(x) => {
+            if (hasOrigin(x)) return setSel(x);
             if (x.status !== 'ready' || ended) return;
             if (cap?.full) return toast(cap.text);
             onPlay(x);
           }}
         />
       ))}
+      <Sheet open={!!sel} onClose={() => setSel(null)} label="Desk task">
+        {sel && (
+          <div class="col" style={{ gap: 14 }}>
+            <OrderDetail s={s} o={s.orders.find((x) => x.id === sel.id) ?? sel} role="fin" />
+            {sel.status === 'ready' && (ended || cap?.full) && (
+              <p class="muted" style={{ margin: 0 }}>
+                {ended ? 'Your turn is over; this carries to next week.' : cap?.text}
+              </p>
+            )}
+            {sel.status === 'ready' && !ended && !cap?.full && (
+              <Btn
+                block
+                onClick={() => {
+                  const o = sel;
+                  setSel(null);
+                  onPlay(o);
+                }}
+              >
+                Start ▸
+              </Btn>
+            )}
+            <Btn kind="soft" block onClick={() => setSel(null)}>
+              Close
+            </Btn>
+          </div>
+        )}
+      </Sheet>
 
       <h2 style={{ marginTop: 4 }}>Pricing</h2>
       <Pricing ctl={ctl} />
@@ -208,9 +239,11 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
                 {s.players[top.role]?.name ?? ROLE_LABEL[top.role]} · {ROLE_LABEL[top.role]}
               </span>
               {/* a known defect is still in service: the card has no room for the story, the owner's detail has it */}
-              {top.repair && <span class="chip ink">Repair · known defect</span>}
+              {top.repair && <span class="chip ink">Repair</span>}
             </span>
-            <TierDots tier={top.tier} />
+            <span style={{ flex: 'none' }}>
+              <TierDots tier={top.tier} />
+            </span>
           </div>
           <h2 style={{ fontSize: 22 }}>{top.title}</h2>
           <span class="muted">
@@ -230,6 +263,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               <span class="label num">{Math.round(exp.p * 100)}% incident risk next week</span>
             </div>
           </div>
+          {top.repair && <span class="chip rust">Known defect{top.repair.via === 'incident' ? ' · failed in service' : ' · found by an inspection'}</span>}
           {top.squawk && <span class="chip">✎ Written up by {top.squawk}: their call that it needs this</span>}
           {top.pushedBack && <span class="chip ink">Owner pushed back on the cheap fix</span>}
           {hint && (

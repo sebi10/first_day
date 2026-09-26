@@ -22,8 +22,9 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
   const cap = capNow(s, role);
   const capped = gridCapped || !!cap?.full;
 
+  // a repair, a redo or a crewmate's report opens its story first (why it exists), with a Start button
   const open = (o: Order) => {
-    if (o.status === 'ready' && !turn?.ended && !capped) onPlay(o);
+    if (o.status === 'ready' && !turn?.ended && !capped && !hasOrigin(o)) onPlay(o);
     else setSel(o);
   };
 
@@ -105,7 +106,7 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
       </div>
       {orders.length === 0 && <div class="card muted">Queue clear. Nice.</div>}
       {orders.map((o) => (
-        <OrderCard key={o.id} s={s} o={o} onOpen={open} />
+        <OrderCard key={o.id} s={s} o={o} onOpen={open} held={capped || !!turn?.ended} />
       ))}
 
       <CoverSection ctl={ctl} role={role} onPlay={onPlay} />
@@ -152,6 +153,18 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
                 {turn?.ended ? 'Your turn is over; this carries to next week.' : gridCapped ? 'Hangar tools offline until the grid is back.' : cap?.text}
               </p>
             )}
+            {sel.status === 'ready' && sel.role === role && !turn?.ended && !capped && (
+              <Btn
+                block
+                onClick={() => {
+                  const o = sel;
+                  setSel(null);
+                  onPlay(o);
+                }}
+              >
+                Start the job ▸
+              </Btn>
+            )}
             <Btn kind="soft" block onClick={() => setSel(null)}>
               Close
             </Btn>
@@ -161,6 +174,9 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
     </>
   );
 }
+
+/** Orders whose detail explains why they exist: open it before the puzzle. */
+export const hasOrigin = (o: Order) => !!(o.repair || o.redo || o.report);
 
 /** A crewmate's unfixed report holds this seat to fewer jobs: say so before a puzzle is wasted. */
 export function CapNotice({ cap }: { cap: NonNullable<ReturnType<typeof capNow>> }) {
@@ -246,8 +262,9 @@ export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPl
   if (!me || s.week < 1 || s.turns[role]?.ended) return null;
   const allowance = 1;
   const used = s.coversUsed[role] ?? 0;
-  // only jobs that have already waited a week: it relieves gridlock, it doesn't steal work
-  const orders = s.orders.filter((o) => o.role !== role && o.status === 'ready' && o.deferrals >= 1);
+  // only jobs that have already waited a week: it relieves gridlock, it doesn't steal work.
+  // Never your own report: the trade you reported it to has to fix it (the third trade can help)
+  const orders = s.orders.filter((o) => o.role !== role && o.status === 'ready' && o.deferrals >= 1 && o.report?.by !== role);
   if (!orders.length) return null;
   return (
     <div class="card col" style={{ gap: 8 }}>

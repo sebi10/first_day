@@ -39,6 +39,12 @@ export interface OrderResult {
   summary?: string;
   /** blind sign-off (a real job at puzzle tier 2+): the UI shows "Signed off", never the score; the engine still uses it */
   blind?: boolean;
+  /**
+   * blind: the credit that landed on the asset at sign-off (a fixed stand-in,
+   * and XP gets the floor, so nothing gives the score away). The true `credit`
+   * settles silently when the week resolves; then this is removed.
+   */
+  provisional?: number;
 }
 
 /** A cross-trade report: one trade's problem that another trade has to fix. */
@@ -53,6 +59,8 @@ export interface ReportInfo {
   amount: number;
   /** a fix that didn't hold: the week of the fix that failed */
   again?: number;
+  /** leak that came back: what it cost while it only looked fixed (charged with the next resolved week) */
+  owed?: number;
 }
 
 /**
@@ -63,6 +71,10 @@ export interface Defect {
   id: string;
   /** kind of the job that left it (a catalog kind, 'repair', or 'report') */
   orderKind: string;
+  /** the catalog kind of the work it belongs to (a repair or redo counts as the job it corrects): what an inspection's scope checks */
+  job?: string;
+  /** the job as a noun ("prop bolt re-torque", "alternator replacement redo") for the review's "traced to" line */
+  log?: string;
   puzzle: PuzzleId;
   /** that job's title, as it appeared on the card */
   title: string;
@@ -94,8 +106,10 @@ export interface RepairInfo {
   defect: Defect;
   /** how it came to light */
   via: 'inspection' | 'incident';
-  /** what is wrong, e.g. "under-torqued fasteners" */
+  /** what is wrong, e.g. "fasteners below torque, with fretting at the joint" */
   problem: string;
+  /** via 'incident': what happened, as the review told it */
+  incident?: string;
   /** inspection finds: who found it, and on which job */
   foundBy?: string;
   foundIn?: string;
@@ -129,6 +143,8 @@ export interface Order {
   seed: number;
   /** analyst tasks: extra numbers for the puzzle context */
   leak?: number;
+  /** the puzzle's scenario when the kind doesn't say it (a repair's assembly, a report's device); defaults to `kind` */
+  job?: string;
   result?: OrderResult;
   /** kind 'report': a crewmate's problem this trade has to fix */
   report?: ReportInfo;
@@ -175,7 +191,16 @@ export interface Incident {
   title: string;
   cost: number;
   /** kind 'defect': the signed-off job it was traced to */
-  from?: { title: string; name: string; week: number };
+  from?: {
+    title: string;
+    name: string;
+    week: number;
+    /** "the prop bolt re-torque Ana signed off in week 5" */
+    traced?: string;
+    /** the repair order it created, and whether the original job is redone after it */
+    repairId?: string;
+    redo?: boolean;
+  };
 }
 
 export interface ReportLine {

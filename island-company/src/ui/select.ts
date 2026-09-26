@@ -84,7 +84,8 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   const blind = isBlind(s, o, role, assist);
   const reporter = o.report ? (s.players[o.report.by]?.name ?? ROLE_LABEL[o.report.by]) : null;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
-  const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.kind };
+  // a repair or a report names the assembly / part / device it's about; otherwise the kind says it
+  const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.job ?? o.kind };
   if (o.kind === 'project' && o.puzzle === 'auction') {
     // floatplane deposit: same auction, bigger stakes
     context.market = { low: 3000, high: 7000, fair: 4800, cap: Math.min(5600, Math.max(0, s.cash - ECON.freezeBelow)) };
@@ -111,7 +112,7 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
       ? {
           by: p?.name ?? ROLE_LABEL[role],
           week: s.week,
-          stamp: role === 'mech' ? 'Return to service' : role === 'elec' ? 'Work complete' : 'Filed',
+          ...signoffWords(o, role),
           later: asset
             ? `How good it was shows up later: in ${asset.name}'s health, an inspection, or an incident.`
             : o.report
@@ -122,6 +123,17 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
         }
       : undefined,
   };
+}
+
+/** How each trade closes a job: an A&P's logbook entry, an electrician's work order, the analyst's file. */
+function signoffWords(o: Order, role: Role): { header: string; stamp: string } {
+  if (role === 'fin') return { header: 'Filed', stamp: o.report ? 'Corrected' : 'Posted' };
+  if (role === 'elec') return { header: 'Work order closed', stamp: o.kind === 'codeprep' ? 'Ready for inspection' : 'Work complete' };
+  const kind = o.repair?.defect.job ?? o.kind;
+  if (kind === 'wb' || o.kind === 'wb') return { header: 'Load sheet', stamp: 'Released' };
+  if (o.kind === 'inspect100' || o.kind === 'corrosion' || o.kind === 'spar') return { header: 'Logbook entry', stamp: 'Airworthy' };
+  if (o.report || o.kind === 'project') return { header: 'Shop log', stamp: 'Work complete' };
+  return { header: 'Logbook entry', stamp: 'Return to service' };
 }
 
 export type MateStatus = 'done' | 'playing' | 'waiting' | 'empty' | 'week0';

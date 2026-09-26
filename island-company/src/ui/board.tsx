@@ -192,7 +192,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
   ];
   // blind sign-offs coming back: failures traced to the job, and what inspections caught first
   const defects = r.incidents.filter((i) => i.kind === 'defect');
-  const traced = new Map<Incident, ReportLine | undefined>(defects.map((i) => [i, r.lines.find((l) => l.text.startsWith(`${i.title}: traced to `))]));
+  const traced = new Map<Incident, ReportLine | undefined>(defects.map((i) => [i, r.lines.find((l) => l.text.startsWith(`${i.title}. Traced to `))]));
   const caught = r.lines.filter((l) => l.tone === 'good' && l.text.endsWith('caught before it failed.'));
   const shown = new Set<ReportLine>([...traced.values(), ...caught].filter((l): l is ReportLine => !!l));
   const bad = r.lines.filter((l) => l.tone === 'bad' && !shown.has(l));
@@ -252,8 +252,9 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
                 <span class="label">No verdict on the day: this is where signed-off work shows up.</span>
               </div>
               {defects.map((i, k) => {
-                const line = traced.get(i);
-                const to = line ? line.text.slice(line.text.indexOf(': traced to ') + ': traced to '.length) : i.from ? `${i.from.title}, signed off by ${i.from.name} in week ${i.from.week}.` : '';
+                const f = i.from;
+                const to = f?.traced ? `${f.traced}.` : f ? `“${f.title}”, signed off by ${f.name} in week ${f.week}.` : '';
+                const next = afterIncident(s, i);
                 return (
                   <div class="col" key={`d${k}`} style={{ gap: 4 }}>
                     <span class="row wrap" style={{ gap: 6 }}>
@@ -269,7 +270,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
                         {to}
                       </span>
                     )}
-                    <span class="label">Repair written up for the analyst, then the original job gets redone.</span>
+                    {next && <span class="label">{next}</span>}
                   </div>
                 );
               })}
@@ -335,6 +336,19 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
       </div>
     </div>
   );
+}
+
+/** What happens next after a defect incident: the repair (waiting on the analyst, or auto-approved), then the redo if there is one. */
+function afterIncident(s: IslandState, i: Incident) {
+  const f = i.from;
+  if (!f) return '';
+  const rep = f.repairId ? s.orders.find((o) => o.id === f.repairId) : undefined;
+  const then = f.redo ? ', then the original job gets redone (already paid)' : '';
+  if (!rep) return `A repair was written up${then}.`;
+  const who = s.players[rep.role]?.name ?? ROLE_LABEL[rep.role];
+  if (rep.status === 'done') return `${who} has done the repair${f.redo ? '; the original job gets redone next' : ''}.`;
+  if (rep.status === 'pending' || rep.status === 'countered') return `Repair “${rep.title}” is waiting on the analyst${then}.`;
+  return `Repair “${rep.title}” ${rep.autoApproved ? 'was auto-approved from the trade budget' : 'is approved'} and is ${who}'s${then}.`;
 }
 
 /** Weekly crew challenge: every puzzle, same seed for all three this week. No XP: bragging only. */

@@ -36,8 +36,8 @@ export type PuzzleLaunch = {
   rework?: boolean;
   /** blind sign-off: a real job at puzzle tier 2+ gives no verdict (the engine still gets the true score) */
   blind?: boolean;
-  /** blind: the logbook entry the sealed job shows */
-  signoff?: { by: string; week: number; stamp: string; later: string };
+  /** blind: the entry the sealed job shows (a logbook entry, a closed work order, a filed task) */
+  signoff?: { by: string; week: number; header: string; stamp: string; later: string };
 };
 
 const SEEN = 'ic.seen.';
@@ -143,7 +143,7 @@ export function PuzzleHost({
         status: (t) => !(blind && (held.current || finished.current)) && setStatus(t),
         paused: () => (pausedRef.current && startedRef.current) || !!howtoRef.current || finished.current,
       },
-      { seed: launch.seed, tier: launch.tier, tools: launch.tools, reducedMotion: settings.get().reduceMotion, context: launch.context },
+      { seed: launch.seed, tier: launch.tier, tools: launch.tools, reducedMotion: settings.get().reduceMotion, context: launch.context, blind },
     );
     return () => {
       el.removeEventListener('pointerdown', onDown, { capture: true });
@@ -376,7 +376,10 @@ function SealedEntry({ launch }: { launch: PuzzleLaunch }) {
   return (
     <div class="sealed" role="status">
       <div class="logentry">
-        <span class="label">Logbook entry{so ? ` · week ${so.week}` : ''}</span>
+        <span class="label">
+          {so?.header ?? 'Signed off'}
+          {so ? ` · week ${so.week}` : ''}
+        </span>
         <b style={{ fontSize: 17, lineHeight: 1.25 }}>{launch.title}</b>
         {launch.subtitle && <span class="label">{launch.subtitle}</span>}
         <div class="row spread" style={{ marginTop: 6, alignItems: 'flex-end' }}>

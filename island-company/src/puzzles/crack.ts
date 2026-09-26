@@ -13,6 +13,8 @@ type P = { x: number; y: number }; // normalised 0..1
 export type Indication = { pts: P[]; kind: 'crack' | 'scratch'; depth: number };
 export type CrackModel = {
   part: 'spar' | 'hub';
+  /** what is under the lamp, for the header ("wing spar", "alternator bracket") */
+  name: string;
   holes: P[];
   indications: Indication[];
   cracks: number;
@@ -36,11 +38,28 @@ function jagged(r: ReturnType<typeof rng>, from: P, angle: number, len: number, 
   return pts;
 }
 
+/**
+ * The job decides the part: spar inspections look at a spar, wheel-half checks
+ * at a hub, a repair's inspection at the part it's about. A long member reads
+ * as the spar drawing, a round or bored one as the hub.
+ */
+const PARTS: Record<string, { part: CrackModel['part']; name: string }> = {
+  spar: { part: 'spar', name: 'wing spar' },
+  corrosion: { part: 'hub', name: 'wheel hub' },
+  mount: { part: 'spar', name: 'mount tube' },
+  bracket: { part: 'hub', name: 'alternator bracket' },
+  case: { part: 'hub', name: 'crankcase at the through-bolts' },
+  tray: { part: 'spar', name: 'radio tray rails' },
+  gear: { part: 'spar', name: 'main gear leg' },
+  ladder: { part: 'spar', name: 'ladder rack welds' },
+};
+
 export function generateCrack(seed: number, tier: number, tools: string[] = [], job?: string): CrackModel {
   const r = rng(seed);
   const coin = r.chance(0.5);
-  // the job decides the part: spar inspections look at a spar, wheel-half checks at a hub
-  const part: CrackModel['part'] = job === 'spar' ? 'spar' : job === 'corrosion' ? 'hub' : coin ? 'spar' : 'hub';
+  const known = job ? PARTS[job] : undefined;
+  const part: CrackModel['part'] = known?.part ?? (coin ? 'spar' : 'hub');
+  const name = known?.name ?? (part === 'spar' ? 'wing spar' : 'wheel hub');
   const holes: P[] = [];
   if (part === 'spar') {
     for (let i = 0; i < 7; i++) {
@@ -86,6 +105,7 @@ export function generateCrack(seed: number, tier: number, tools: string[] = [], 
   const battery = tier <= 0 ? Infinity : [Infinity, 40, 32, 26, 22, 18][tier];
   return {
     part,
+    name,
     holes,
     indications,
     cracks,
@@ -341,14 +361,16 @@ export const crack: PuzzleDef = {
       // tags
       tags.forEach((t) => {
         const s = toS(t);
-        const hit = finished && m.indications.some((ind) => ind.kind === 'crack' && distToLine(t, ind.pts) < tol());
-        ctx.strokeStyle = finished ? (hit ? C.palm : C.rust) : C.fin;
+        // blind: a signed-off inspection doesn't show what it got right or missed
+        const reveal = finished && !p.blind;
+        const hit = reveal && m.indications.some((ind) => ind.kind === 'crack' && distToLine(t, ind.pts) < tol());
+        ctx.strokeStyle = reveal ? (hit ? C.palm : C.rust) : C.fin;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(s.x, s.y, 14, 0, Math.PI * 2);
         ctx.stroke();
       });
-      if (finished) {
+      if (finished && !p.blind) {
         // show missed cracks
         m.indications.forEach((ind) => {
           if (ind.kind !== 'crack') return;
@@ -367,7 +389,7 @@ export const crack: PuzzleDef = {
         });
       }
       // header
-      label(ctx, p.context?.assetName ? `${p.context.assetName} · ${m.part === 'spar' ? 'wing spar' : 'wheel hub'}` : m.part === 'spar' ? 'Wing spar' : 'Wheel hub', 16, 22, {
+      label(ctx, p.context?.assetName ? `${p.context.assetName} · ${m.name}` : m.name[0].toUpperCase() + m.name.slice(1), 16, 22, {
         size: 13,
         weight: 800,
         color: C.paper,
@@ -405,7 +427,7 @@ export const crack: PuzzleDef = {
       finished = true;
       revealT = performance.now();
       const res = makeResult();
-      if (res.perfect) host.fx.flourish();
+      if (res.perfect && !p.blind) host.fx.flourish();
       else host.fx.good();
       settle(host, res, res.perfect ? 1000 : 700);
     }

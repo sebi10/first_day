@@ -3,7 +3,7 @@
 // never from itself: the true score drives everything that happens later.
 import { afterEach, describe, expect, it } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
-import { DEFECT, DEFECT_RULES, defectRule, REPORT, REPORTS } from '../src/sim/data';
+import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
 import { defectChance, defectSeverity, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
@@ -53,6 +53,8 @@ function plant(s: IslandState, d: Partial<Defect> = {}): Defect {
   const def: Defect = {
     id: `dt${++seq}`,
     orderKind: 'prop',
+    job: 'prop',
+    log: 'prop bolt re-torque',
     puzzle: 'torque',
     title: 'Prop bolt re-torque',
     assetId: 'p1',
@@ -79,6 +81,7 @@ function reportOrder(s: IslandState, key: string, extra: Partial<Order> = {}): O
 }
 
 const complete = (s: IslandState, role: Role, o: Order, score: number) => apply(s, { t: 'complete', role, orderId: o.id, score, perfect: score >= 0.95, summary: '5/6 bolts in band' }, NOW);
+const complete2 = (s: IslandState, role: Role, o: Order, score: number, cover: boolean) => apply(s, { t: 'complete', role, orderId: o.id, score, perfect: score >= 0.95, cover }, NOW);
 const resolve = (s: IslandState) => apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
 const lastReport = (s: IslandState) => s.history[s.history.length - 1];
 
@@ -131,6 +134,39 @@ describe('blind sign-off', () => {
     s = resolve(s);
     expect(lastReport(s).mvp.mech).not.toMatch(/Prop bolt re-torque \d+%/);
     expect(lastReport(s).mvp.mech).toMatch(/1 signed off/);
+  });
+
+  it("a blind job's health and XP don't move with its score until the week resolves", () => {
+    const signOff = (q: number) => {
+      const s = started();
+      s.assets.find((a) => a.id === 'p1')!.health = 60;
+      const o = addOrder(s, { role: 'mech', kind: 'corrosion', puzzle: 'crack', assetId: 'p1', tier: 3, cost: 520, gain: 16 });
+      return complete(s, 'mech', o, q).s;
+    };
+    const hp = (x: IslandState) => x.assets.find((a) => a.id === 'p1')!.health;
+    const bad = signOff(0.2);
+    const good = signOff(1);
+    // at hand-in: the same stand-in whatever the score (no immediate verdict in the numbers)
+    expect(hp(bad)).toBe(hp(good));
+    expect(bad.players.mech!.xp).toBe(good.players.mech!.xp);
+    expect(good.players.mech!.perfects).toBe(0);
+    expect(good.orders.find((o) => o.result)!.result!.provisional).toBeDefined();
+    // the week resolves: the true result lands before anything flies (same week otherwise)
+    const rb = resolve(bad);
+    const rg = resolve(good);
+    expect(hp(rg) - hp(rb)).toBeCloseTo(16 * (1.05 - 0.57), 1);
+    expect(rg.players.mech!.xp).toBeGreaterThan(rb.players.mech!.xp);
+    expect(rg.players.mech!.perfects).toBe(1);
+    expect(rg.orders.find((o) => o.result?.blind)?.result?.provisional).toBeUndefined();
+  });
+
+  it('a teaching-tier job still shows its result at once', () => {
+    const s = started();
+    s.assets.find((a) => a.id === 'p1')!.health = 60;
+    const o = addOrder(s, { role: 'mech', kind: 'tires', puzzle: 'torque', assetId: 'p1', tier: 1, cost: 320, gain: 10 });
+    const r = complete(s, 'mech', o, 1).s;
+    expect(r.assets.find((a) => a.id === 'p1')!.health).toBeCloseTo(60 + 10 * 1.05);
+    expect(r.players.mech!.perfects).toBe(1);
   });
 
   it('a blind sign-off never sets a personal best (a new best would give the score away)', () => {
@@ -200,10 +236,19 @@ describe('hidden defects', () => {
     const r = complete(s, 'mech', insp, 0.9).s;
     expect(r.defects).toHaveLength(0);
     const rep = r.orders.find((o) => o.kind === 'repair')!;
-    expect(rep).toMatchObject({ role: 'mech', assetId: 'p1', status: 'pending', title: 'Replace the stretched fasteners', puzzle: 'teardown', cost: round10(Math.max(280, DEFECT.minBase) * DEFECT.repairCost) });
+    expect(rep).toMatchObject({
+      role: 'mech',
+      assetId: 'p1',
+      status: 'pending',
+      title: 'Pull the prop, replace the bolts, inspect the flange for fretting',
+      puzzle: 'teardown',
+      // the teardown shows the propeller, not a random assembly
+      job: 'prop',
+      cost: round10(Math.max(280, DEFECT.minBase) * DEFECT.repairCost),
+    });
     expect(rep.puzzle).not.toBe(d.puzzle);
-    expect(rep.repair).toMatchObject({ via: 'inspection', foundBy: 'Ana', foundIn: '100-hr inspection', problem: 'under-torqued fasteners' });
-    expect(r.feed.some((f) => /Ana's 100-hr inspection found under-torqued fasteners on Twin N-12, left from week 3/.test(f.text))).toBe(true);
+    expect(rep.repair).toMatchObject({ via: 'inspection', foundBy: 'Ana', foundIn: '100-hr inspection', problem: 'prop bolts below torque, with fretting on the flange' });
+    expect(r.feed.some((f) => /Ana's 100-hr inspection on Twin N-12 found prop bolts below torque, with fretting on the flange, left from week 3\..*Not airworthy until it’s repaired/.test(f.text))).toBe(true);
     // the review says so too, and nothing surfaces
     const after = resolve(r);
     expect(lastReport(after).lines.some((l) => /caught before it failed/.test(l.text))).toBe(true);
@@ -228,7 +273,11 @@ describe('hidden defects', () => {
     const rep = lastReport(r);
     const inc = rep.incidents.find((i) => i.kind === 'defect')!;
     expect(inc).toMatchObject({ role: 'mech', assetId: 'p1', cost: round10(Math.max(280, DEFECT.minBase) * DEFECT.incidentMult[0]), from: { title: 'Prop bolt re-torque', name: 'Ana', week: 2 } });
-    expect(rep.lines.some((l) => l.text === `${DEFECT_RULES.torque.incident} on Twin N-12: traced to the prop bolt re-torque Ana signed off in week 2.`)).toBe(true);
+    const what = incidentText(DEFECT_RULES_BY_KIND.prop, 1, 'Twin N-12');
+    expect(what).toBe('Pilot wrote up a vibration on Twin N-12: prop bolts found loose');
+    expect(inc.title).toBe(what);
+    expect(inc.from!.traced).toBe('the prop bolt re-torque Ana signed off in week 2');
+    expect(rep.lines.some((l) => l.text === `${what}. Traced to the prop bolt re-torque Ana signed off in week 2.`)).toBe(true);
     // health took the hit (same week otherwise), insurance paid its share, safety grade counts it
     const hp = (x: IslandState) => x.assets.find((a) => a.id === 'p1')!.health;
     expect(hp(control) - hp(r)).toBeCloseTo(DEFECT.healthHit[0]);
@@ -237,7 +286,15 @@ describe('hidden defects', () => {
     expect(r.defects).toHaveLength(0);
     const repair = r.orders.find((o) => o.kind === 'repair')!;
     expect(repair.repair!.via).toBe('incident');
+    expect(repair.repair!.incident).toBe(what);
+    expect(inc.from!.repairId).toBe(repair.id);
+    expect(inc.from!.redo).toBe(true);
     expect(repair.gain).toBeGreaterThanOrEqual(DEFECT.repairMinGain);
+    // a severe one reads as a failure, not a write-up
+    const sev = structuredClone(base);
+    plant(sev, { week: 2, dueWeek: 4, severity: 2 });
+    const r2 = lastReport(resolve(sev)).incidents.find((i) => i.kind === 'defect')!;
+    expect(r2.title).toBe('Prop bolts on Twin N-12 backed off in flight: heavy vibration, precautionary landing');
 
     const g = structuredClone(base);
     plant(g, { week: 2, dueWeek: 4 });
@@ -259,8 +316,63 @@ describe('hidden defects', () => {
   it('unknown puzzles (from other branches) fall back to a sensible repair', () => {
     expect(defectRule('hydraulics', 'mech').fix.puzzle).toBe('teardown');
     expect(defectRule('gpu', 'elec').fix.puzzle).toBe('meter');
-    // a different puzzle from the original (the spec's own table keeps teardown → teardown: "Rework the installation")
-    for (const [p, rule] of Object.entries(DEFECT_RULES)) if (p !== 'teardown') expect(rule.fix.puzzle, p).not.toBe(p);
+    expect(defectRule('hydraulics', 'mech', 'bucketBoom')).toBe(defectRule('hydraulics', 'mech'));
+    // every repair is a different puzzle from the job it corrects
+    for (const [p, rule] of Object.entries(DEFECT_RULES)) expect(rule.fix.puzzle, p).not.toBe(p);
+    for (const c of CATALOG) expect(defectRule(c.puzzle, c.role, c.kind).fix.puzzle, c.kind).not.toBe(c.puzzle);
+    // per-kind wording where the part matters, and a [write-up, failure] pair everywhere
+    expect(defectRule('crack', 'mech', 'spar').fix).toMatchObject({ title: 'Spar-cap doubler repair per the SRM', parts: 1 });
+    expect(defectRule('crack', 'mech', 'corrosion').fix.parts).toBe(1);
+    for (const rule of [...Object.values(DEFECT_RULES), ...Object.values(DEFECT_RULES_BY_KIND)]) {
+      expect(rule.incident).toHaveLength(2);
+      for (const t of rule.incident) expect(t, t).toContain('{a}');
+    }
+  });
+
+  it('every catalog job has a noun form, so the trace reads as a sentence', () => {
+    for (const c of CATALOG) {
+      expect(c.log, c.kind).toBeTruthy();
+      expect(c.log, c.kind).toBe(c.log.toLowerCase().replace('gfci', 'GFCI'));
+    }
+  });
+
+  it("an inspection finds only what it looks at: a wheel-half check doesn't find loose prop bolts", () => {
+    const s = atWeek(4);
+    plant(s, { week: 3, dueWeek: 7 }); // prop bolts on p1
+    const pen = addOrder(s, { role: 'mech', kind: 'corrosion', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 520, gain: 16 });
+    expect(complete(s, 'mech', pen, 0.9).s.defects).toHaveLength(1);
+    const oil = addOrder(s, { role: 'mech', kind: 'oil', puzzle: 'safetywire', assetId: 'p1', tier: 2, cost: 190, gain: 9 });
+    expect(complete(s, 'mech', oil, 0.9).s.defects).toHaveLength(0); // the engine look-over sees the prop
+    expect(INSPECTS.inspect100.scope).toBe('all');
+    // a repair's defect counts as the job it corrects
+    const t = atWeek(4);
+    plant(t, { orderKind: 'repair', job: 'tires', puzzle: 'teardown', title: 'Replace the wheel through-bolts and check the holes for elongation', redo: false, log: undefined });
+    const pen2 = addOrder(t, { role: 'mech', kind: 'corrosion', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 520, gain: 16 });
+    const found = complete(t, 'mech', pen2, 0.9).s;
+    expect(found.defects).toHaveLength(0);
+    expect(found.feed.some((f) => /wheel-half penetrant check on Twin N-12 found a misassembled installation/.test(f.text))).toBe(true);
+  });
+
+  it('a known defect left in service is a near-miss; grounded, it is not', () => {
+    const s = atWeek(4);
+    plant(s, { week: 3, dueWeek: 9 });
+    const insp = addOrder(s, { role: 'mech', kind: 'inspect100', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 180, gain: 10 });
+    const r = complete(s, 'mech', insp, 0.9).s;
+    const flew = lastReport(resolve(structuredClone(r)));
+    expect(flew.nearMisses).toBeGreaterThanOrEqual(1);
+    expect(flew.lines.some((l) => /Twin N-12 flew with a known defect/.test(l.text))).toBe(true);
+    const g = apply(structuredClone(r), { t: 'tag', role: 'mech', assetId: 'p1', on: true }, NOW).s;
+    expect(lastReport(resolve(g)).lines.some((l) => /known defect/.test(l.text))).toBe(false);
+  });
+
+  it('the traced-to line reads as English for every kind of job', () => {
+    const s = atWeek(4);
+    plant(s, { orderKind: 'alternator', job: 'alternator', log: 'alternator replacement', puzzle: 'teardown', title: 'Replace alternator', week: 2, dueWeek: 4 });
+    const t = lastReport(resolve(s)).lines.find((l) => /Traced to/.test(l.text))!.text;
+    expect(t).toMatch(/Traced to the alternator replacement Ana signed off in week 2\.$/);
+    const u = atWeek(4);
+    plant(u, { orderKind: 'repair', job: 'prop', log: undefined, puzzle: 'teardown', title: 'Pull the prop, replace the bolts, inspect the flange for fretting', week: 2, dueWeek: 4, redo: false });
+    expect(lastReport(resolve(u)).lines.find((l) => /Traced to/.test(l.text))!.text).toMatch(/Traced to the repair “Pull the prop, replace the bolts, inspect the flange for fretting” Ana signed off in week 2\.$/);
   });
 });
 
@@ -283,6 +395,22 @@ describe('repair, then the original task', () => {
     expect(redo).toMatchObject({ role: 'mech', kind: 'prop', assetId: 'p1', title: 'Prop bolt re-torque (redo)', puzzle: 'torque', cost: 0, status: 'ready', tier: 2 });
     expect(redo.redo).toMatchObject({ week: 3, name: 'Ana', cost: 280 });
     expect(redo.gain).toBe(Math.round(12 * DEFECT.redoGain));
+  });
+
+  it('the redo is already paid and the trade owns it: a slip is never pinned on the analyst', () => {
+    const { s, rep } = withRepair();
+    const r = complete(s, 'mech', rep, 0.9).s;
+    const redo = r.orders.find((o) => o.redo)!;
+    expect(redo).toMatchObject({ approvedWeek: 4, autoApproved: true });
+  });
+
+  it('a redo never duplicates the same job already open on that asset: that one becomes the redo', () => {
+    const { s, rep } = withRepair();
+    const open = addOrder(s, { role: 'mech', kind: 'prop', puzzle: 'torque', assetId: 'p1', tier: 2, cost: 280, gain: 12, status: 'pending', title: 'Prop bolt re-torque' });
+    const r = complete(s, 'mech', rep, 0.9).s;
+    const props = r.orders.filter((o) => o.kind === 'prop' && o.assetId === 'p1' && o.status !== 'done');
+    expect(props).toHaveLength(1);
+    expect(props[0]).toMatchObject({ id: open.id, title: 'Prop bolt re-torque (redo)', cost: 0, status: 'ready', redo: { week: 3 } });
   });
 
   it('a botched redo leaves a defect again, and the chain continues', () => {
@@ -355,7 +483,7 @@ describe('cross-trade reports', () => {
 
   it("the analyst's cap is one desk task", () => {
     let s = started();
-    reportOrder(s, 'officeCircuit');
+    reportOrder(s, 'officeOutlets');
     const tasks = s.orders.filter((o) => o.role === 'fin' && o.status === 'ready');
     expect(tasks.length).toBeGreaterThanOrEqual(2);
     s = complete(s, 'fin', tasks[0], 0.9).s;
@@ -367,24 +495,66 @@ describe('cross-trade reports', () => {
     const finPlays = (x: IslandState) => apply(x, { t: 'endTurn', role: 'fin' }, NOW).s;
     const s = finPlays(started());
     const control = resolve(structuredClone(s));
-    reportOrder(s, 'doubleBilled');
+    reportOrder(s, 'vendorPrice');
     const r = resolve(s);
     expect(control.cash - r.cash).toBe(240);
     expect(lastReport(r).costs.reports).toBe(240);
-    expect(lastReport(r).lines.some((l) => /Parts vendor billed the brake kit twice: \$240 lost this week/.test(l.text))).toBe(true);
+    expect(lastReport(r).lines.some((l) => /Parts vendor is billing list price, not our contract price: \$240 lost this week/.test(l.text))).toBe(true);
     // still open: it survives the carry-over (desk tasks don't) and charges again
     const again = resolve(finPlays(r));
     expect(again.orders.some((o) => o.kind === 'report' && o.status === 'ready')).toBe(true);
     expect(lastReport(again).costs.reports).toBe(240);
   });
 
-  it("the analyst's autopilot patches a desk report at 50% too", () => {
+  it("the analyst's autopilot patches a cap report at 50%, but a money leak waits for a person", () => {
     const s = started();
-    const rep = reportOrder(s, 'utilityBill');
+    const cap = reportOrder(s, 'creditHold');
     const r = resolve(s);
-    expect(r.orders.find((o) => o.id === rep.id)!.result).toMatchObject({ auto: true, score: 0.5 });
-    const reopened = r.orders.some((x) => x.kind === 'report' && x.status === 'ready' && x.report?.key === 'utilityBill');
-    expect(reopened || !!r.defects?.some((d) => d.report?.key === 'utilityBill')).toBe(true);
+    expect(r.orders.find((o) => o.id === cap.id)!.result).toMatchObject({ auto: true, score: 0.5 });
+    const reopened = r.orders.some((x) => x.kind === 'report' && x.status === 'ready' && x.report?.key === 'creditHold');
+    expect(reopened || !!r.defects?.some((d) => d.report?.key === 'creditHold')).toBe(true);
+    const t = started();
+    const leak = reportOrder(t, 'utilityAutopay');
+    const r2 = resolve(t);
+    expect(r2.orders.find((o) => o.id === leak.id)!.status).toBe('ready');
+    expect(lastReport(r2).costs.reports).toBe(200);
+  });
+
+  it('a leak fix that comes back also charges the weeks it only looked fixed', () => {
+    let s = started();
+    const rep = reportOrder(s, 'vendorPrice', { tier: 2 });
+    s = complete(s, 'fin', rep, 0.2).s; // blind botch: it will come back
+    const due = s.defects!.find((d) => d.report)!.dueWeek;
+    let back: Order | undefined;
+    let charged = 0;
+    for (let i = 0; i < 4 && !back; i++) {
+      s = resolve(s);
+      charged += lastReport(s).costs.reports ?? 0;
+      back = s.orders.find((o) => o.kind === 'report' && o.status === 'ready' && o.report?.again === 1);
+    }
+    expect(charged).toBe(0); // it looked fixed
+    expect(back!.report!.owed).toBe(240 * (due - 1));
+    expect(s.feed.some((f) => /still billing list price\. The correction from week 1 didn't stick\. It cost \$\d+ while it looked fixed/.test(f.text))).toBe(true);
+    const next = resolve(apply(s, { t: 'endTurn', role: 'fin' }, NOW).s);
+    expect(lastReport(next).costs.reports).toBe(240 + 240 * (due - 1));
+    expect(lastReport(next).lines.some((l) => /for the weeks it only looked fixed/.test(l.text))).toBe(true);
+  });
+
+  it("the reporter can't lend a hand on their own report; the third trade can", () => {
+    let s = started();
+    const rep = reportOrder(s, 'hangarLights', { deferrals: 1 });
+    expect(complete2(s, 'mech', rep, 0.9, true).error).toMatch(/your report: Ben has to fix this one/);
+    s = complete2(s, 'fin', rep, 0.9, true).s;
+    expect(s.orders.find((o) => o.id === rep.id)!.status).toBe('done');
+  });
+
+  it('comebacks count toward the open-report limit', () => {
+    REPORT.chance = 1;
+    const s = atWeek(5);
+    reportOrder(s, 'hangarLights');
+    plant(s, { orderKind: 'report', assetId: null, role: 'fin', report: { key: 'vendorPrice', by: 'mech', effect: 'leak', amount: 240 }, dueWeek: 9 });
+    const r = resolve(s);
+    expect(r.orders.filter((o) => o.kind === 'report' && o.status !== 'done' && o.status !== 'cancelled')).toHaveLength(1);
   });
 
   it('a blind botched fix comes back 1-2 weeks later; a teaching-tier botch stays open for rework', () => {
@@ -401,7 +571,7 @@ describe('cross-trade reports', () => {
     }
     expect(back).toMatchObject({ role: 'elec', title: 'Hangar work lights are dead (again)', report: { key: 'hangarLights', by: 'mech', effect: 'cap', again: 1 } });
     expect(s.defects!.some((d) => d.report)).toBe(false);
-    expect(s.feed.some((f) => /dead again\. The fix from week 1 didn't hold/.test(f.text))).toBe(true);
+    expect(s.feed.some((f) => /Ana: the hangar work lights are out again\. The fix from week 1 didn't hold\. Ben, it's back on your list/.test(f.text))).toBe(true);
 
     const t = started();
     const t1 = reportOrder(t, 'hangarLights', { tier: 1 });

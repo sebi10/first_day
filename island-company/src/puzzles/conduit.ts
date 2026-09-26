@@ -3,7 +3,7 @@
 // between the panel and the hot-tub disconnect. Real trade math: take-up for
 // stubs, offset multipliers and shrink, 3- and 4-point saddles, the 360° rule.
 import { rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, shade, stage } from './kit';
+import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, settle, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export const ANGLES = [10, 22.5, 30, 45, 60, 90] as const;
@@ -357,7 +357,8 @@ export const conduit: PuzzleDef = {
     let drag: { kind: 'mark' | 'dial'; id: number; ptr: number; lastInch: number } | null = null;
     let finished = false;
     let flourishT = -1;
-    let pending: { res: PuzzleResult; timer: ReturnType<typeof setTimeout> } | null = null;
+    /** the finished run, locked in (the host seals a blind job at once) */
+    let pending: PuzzleResult | null = null;
     let lastPencil = 0;
     let dragX = 0;
     const BEND_S = p.reducedMotion ? 0 : 0.3;
@@ -455,11 +456,12 @@ export const conduit: PuzzleDef = {
         bends: sticks[sticks.length - 1]?.length ?? 0,
         degrees: fit?.degrees ?? degrees(),
       });
-      if (res.perfect) {
+      if (res.perfect && !p.blind) {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      pending = { res, timer: setTimeout(() => host.done(res), res.perfect ? 850 : 350) };
+      pending = res;
+      settle(host, res, res.perfect ? 850 : 350);
     };
 
     const press = (b: Btn) => {
@@ -1071,10 +1073,7 @@ export const conduit: PuzzleDef = {
 
     return {
       timeUp(): PuzzleResult {
-        if (pending) {
-          clearTimeout(pending.timer);
-          return pending.res;
-        }
+        if (pending) return pending;
         finished = true;
         state = 'done';
         if (!sticks.length) {
@@ -1088,7 +1087,6 @@ export const conduit: PuzzleDef = {
       destroy() {
         stop();
         offPtr();
-        if (pending) clearTimeout(pending.timer);
         st.destroy();
       },
     };

@@ -3,7 +3,7 @@
 // split-phase), half-split the run like a real tech, then call the bad
 // connection. Fewer readings and no wrong calls = a clean diagnosis.
 import { hashSeed, rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, shade, stage } from './kit';
+import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, settle as settleResult, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export type Cond = 'H' | 'N' | 'G';
@@ -87,6 +87,36 @@ const RECEPS = ['Counter outlet', 'Fridge outlet', 'Island outlet', 'Dining outl
 const JBOXES = ['Attic J-box', 'Crawlspace splice', 'Wall J-box'];
 const LIGHTS = ['Pendant light', 'Hall light', 'Porch light'];
 
+/**
+ * Where the circuit is, picked by the work order's job (a crewmate's report in
+ * the hangar or the office). Same fault physics, the room's own devices and the
+ * way that crewmate would describe it.
+ */
+const PLACES: Record<string, { receps: string[]; jboxes: string[]; lights: string[]; symptoms: Partial<Record<FaultKind, string[]>> }> = {
+  shop: {
+    receps: ['Compressor outlet', 'Workbench outlet', 'Charger outlet', 'Parts-washer outlet', 'Drill-press outlet', 'Door-side outlet', 'Tug outlet', 'Crib outlet'],
+    jboxes: ['Hangar J-box', 'Conduit pull box', 'Wall J-box'],
+    lights: ['Bay light', 'Bench light', 'Crib light'],
+    symptoms: {
+      openHot: ['Half the hangar outlets are dead. Breaker is on.'],
+      openNeutral: ['Dead outlets in the hangar, but the pen tester beeps.'],
+      looseHot: ['The compressor cuts out every time it starts.', 'The battery charger drops out under load.'],
+      looseNeutral: ['The compressor cuts out every time it starts.', 'The bench lights dim when the charger kicks on.'],
+    },
+  },
+  office: {
+    receps: ['Printer outlet', 'Desk outlet', 'Copier outlet', 'Kettle outlet', 'Monitor outlet', 'Filing-room outlet', 'Router outlet', 'Window outlet'],
+    jboxes: ['Ceiling J-box', 'Wall J-box', 'Floor box'],
+    lights: ['Desk lamp', 'Ceiling light', 'Hall light'],
+    symptoms: {
+      openHot: ['Half the office outlets are dead. Breaker is on.'],
+      openNeutral: ['Office outlets dead, but the pen tester beeps.'],
+      looseHot: ['Outlets go dead and come back when the printer runs.'],
+      looseNeutral: ['Outlets go dead and come back when the printer runs.', 'The lights dim every time the printer warms up.'],
+    },
+  },
+};
+
 function pickFault(r: ReturnType<typeof rng>, tier: number): FaultKind {
   if (tier <= 1) return 'openHot';
   if (tier === 2) return r.chance(0.7) ? 'openNeutral' : 'openHot';
@@ -95,7 +125,8 @@ function pickFault(r: ReturnType<typeof rng>, tier: number): FaultKind {
   return 'mwbcNeutral';
 }
 
-export function generateMeter(seed: number, tier: number, _tools: string[] = []): MeterModel {
+export function generateMeter(seed: number, tier: number, _tools: string[] = [], job?: string): MeterModel {
+  const place = job ? PLACES[job] : undefined;
   const r = rng(seed);
   const t = clamp(Math.round(tier), 0, 5);
   const n = [3, 4, 5, 6, 7, 8][t];
@@ -104,13 +135,13 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [])
   const withAnomaly = t >= 4;
 
   // names: receptacles, plus a splice (tier 2+) and a light (tier 3+)
-  const recs = r.shuffle([...RECEPS]);
+  const recs = r.shuffle([...(place?.receps ?? RECEPS)]);
   const kinds: ItemKind[] = new Array(n).fill('recep');
   if (t >= 2) kinds[r.int(1, n - 1)] = 'jbox';
   if (t >= 3) kinds[r.pick(kinds.map((_, i) => i).filter((i) => i >= 1 && kinds[i] !== 'jbox'))] = 'light';
   const legStart = r.int(0, 1);
   const items: MeterItem[] = kinds.map((k, i) => ({
-    name: k === 'jbox' ? r.pick(JBOXES) : k === 'light' ? r.pick(LIGHTS) : recs[i % recs.length],
+    name: k === 'jbox' ? r.pick(place?.jboxes ?? JBOXES) : k === 'light' ? r.pick(place?.lights ?? LIGHTS) : recs[i % recs.length],
     kind: k,
     leg: (mwbc ? (i + legStart) % 2 : 0) as 0 | 1,
     switchedOff: false,
@@ -151,7 +182,7 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [])
     askConductor,
     par,
     maxCalls: t === 0 ? 5 : 3,
-    symptom: r.pick(SYMPTOMS[kind]),
+    symptom: r.pick(place?.symptoms[kind] ?? SYMPTOMS[kind]),
     hints: HINTS[t] ?? [],
   };
 }
@@ -337,7 +368,7 @@ export const meter: PuzzleDef = {
   term: 'Open neutral: the return path is broken, so power has nowhere to go.',
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 10,
   mount(host, p) {
-    const m = generateMeter(p.seed, p.tier, p.tools);
+    const m = generateMeter(p.seed, p.tier, p.tools, p.context?.job);
     const hasPen = p.tools.includes('nonContact');
     const st = stage(host.el);
     const { ctx } = st;
@@ -351,7 +382,11 @@ export const meter: PuzzleDef = {
     let load = false;
     let finished = false;
     let flourishT = -1;
-    let pending: { res: PuzzleResult; timer: ReturnType<typeof setTimeout> } | null = null;
+    /** a finished diagnosis, locked in (the host seals a blind job at once) */
+    let pending: PuzzleResult | null = null;
+    // blind: your call is the sign-off (no "✓ tight · not here", no second guess), and nothing is revealed after
+    const blind = !!p.blind;
+    const reveal = () => finished && !blind;
     type Probe = { pt: number; x: number; y: number; drag: number | null; ox: number; oy: number; at: number };
     const probes: Probe[] = [
       { pt: -1, x: 0, y: 0, drag: null, ox: 0, oy: 0, at: 0 },
@@ -438,7 +473,7 @@ export const meter: PuzzleDef = {
 
     const status = () => {
       const left = m.maxCalls - calls.length;
-      host.status(`${readings.length} reading${readings.length === 1 ? '' : 's'} · par ${m.par} · ${left} call${left === 1 ? '' : 's'} left`);
+      host.status(`${readings.length} reading${readings.length === 1 ? '' : 's'} · par ${m.par} · ${blind ? 'your call signs it off' : `${left} call${left === 1 ? '' : 's'} left`}`);
     };
     status();
 
@@ -487,17 +522,18 @@ export const meter: PuzzleDef = {
         calls: calls.length,
         fault: m.fault.kind,
       });
-      if (res.perfect) {
+      if (res.perfect && !blind) {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      pending = { res, timer: setTimeout(() => host.done(res), res.perfect ? 850 : 350) };
+      pending = res;
+      settleResult(host, res, res.perfect ? 850 : 350);
     };
 
     const call = (item: number, cond: 'H' | 'N') => {
       calls.push({ item, cond });
       selected = -1;
-      if (item === m.fault.at) {
+      if (item === m.fault.at || blind) {
         finish();
         return;
       }
@@ -855,7 +891,7 @@ export const meter: PuzzleDef = {
         const y = g.rowY(r);
         const it = r > 0 ? m.items[r - 1] : null;
         const i = r - 1;
-        const isFault = finished && i === m.fault.at;
+        const isFault = reveal() && i === m.fault.at;
         const chk = checked.get(i);
         if ((r > 0 && selected === i) || isFault) {
           roundRect(ctx, g.pad, y - g.rowH / 2 + 3, g.w - 2 * g.pad, g.rowH - 6, 10);
@@ -924,7 +960,7 @@ export const meter: PuzzleDef = {
           ctx.arc(q.x, q.y, 18, 0, Math.PI * 2);
           ctx.fill();
         }
-        const faultDot = finished && pt.item === m.fault.at && pt.cond === faultConductor(m.fault.kind);
+        const faultDot = reveal() && pt.item === m.fault.at && pt.cond === faultConductor(m.fault.kind);
         ctx.fillStyle = dead ? C.paper : wireColor(k);
         ctx.strokeStyle = faultDot ? C.rust : C.ink;
         ctx.lineWidth = faultDot ? 3 : 1.6;
@@ -1033,7 +1069,7 @@ export const meter: PuzzleDef = {
       // row 2: call chips or a prompt
       const ry = y + 72;
       if (selected >= 0 && !finished) {
-        label(ctx, m.askConductor ? 'Bad wire here?' : 'Fault here?', g.pad + 4, ry + 23, { size: 13, weight: 800, align: 'left' });
+        label(ctx, `${m.askConductor ? 'Bad wire here?' : 'Fault here?'}${blind ? ' (final)' : ''}`, g.pad + 4, ry + 23, { size: 13, weight: 800, align: 'left' });
         for (const c of chips(g)) {
           roundRect(ctx, c.x, c.y, c.w, c.h, 23);
           ctx.fillStyle = c.id === 'X' ? C.paper : C.sea;
@@ -1132,17 +1168,13 @@ export const meter: PuzzleDef = {
 
     return {
       timeUp(): PuzzleResult {
-        if (pending) {
-          clearTimeout(pending.timer);
-          return pending.res;
-        }
+        if (pending) return pending;
         finished = true;
         return result(scoreMeter(m, readings, calls), summarizeMeter(m, readings, calls), { readings: readings.length, par: m.par });
       },
       destroy() {
         stop();
         offPtr();
-        if (pending) clearTimeout(pending.timer);
         st.destroy();
       },
     };

@@ -174,6 +174,11 @@ describe('orders and puzzles', () => {
     const a2 = s.assets.find((a) => a.id === o.assetId)!;
     expect(a2.health).toBeGreaterThan(before);
     expect(s.players.elec!.xp).toBeGreaterThan(0);
+    // a blind sign-off (tier 2+) books its perfect run when the week resolves, not at hand-in
+    if (s.orders.find((x) => x.id === o.id)!.result!.blind) {
+      expect(s.players.elec!.perfects).toBe(0);
+      s = apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
+    }
     expect(s.players.elec!.perfects).toBe(1);
   });
 

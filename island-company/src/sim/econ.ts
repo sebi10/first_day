@@ -198,7 +198,7 @@ export function reportCap(s: IslandState, role: Role): { order: Order; limit: nu
   const limit = role === 'fin' ? REPORT.capFin : REPORT.capOps;
   const fixer = s.players[o.role]?.name ?? ROLE_LABEL[o.role];
   const what = role === 'fin' ? (limit === 1 ? 'desk task' : 'desk tasks') : limit === 1 ? 'job' : 'jobs';
-  return { order: o, limit, text: `${def?.notice ?? o.title}: ${limit} ${what} max until ${fixer} fixes ${def?.it ?? 'it'}.` };
+  return { order: o, limit, text: `${def?.notice ?? o.title}: ${limit} ${what} max until ${fixer} ${def?.fixes ?? 'fixes'} ${def?.it ?? 'it'}.` };
 }
 
 export function urgency(s: IslandState, o: Order) {

@@ -1,5 +1,5 @@
 // Work-order cards: the universal container (same radius, shadow, grammar).
-import { defectRule, ECON, ROLE_LABEL } from '../sim/data';
+import { defectRule, ECON, incidentText, ROLE_LABEL } from '../sim/data';
 import { deferralRisk, expectedDeferralCost } from '../sim/econ';
 import { isEmergency, tracedTo } from '../sim/engine';
 import type { IslandState, Order, Role } from '../sim/types';
@@ -63,12 +63,13 @@ function ReportEffect({ s, o }: { s: IslandState; o: Order }) {
   );
 }
 
-export function OrderCard({ s, o, onOpen }: { s: IslandState; o: Order; onOpen(o: Order): void }) {
+/** `held`: this seat can't start anything right now (turn over, or a per-turn limit): a ready card isn't highlighted. */
+export function OrderCard({ s, o, onOpen, held }: { s: IslandState; o: Order; onOpen(o: Order): void; held?: boolean }) {
   const asset = s.assets.find((a) => a.id === o.assetId);
   // reports carry forward but never roll deferral incidents: their cost is the effect chip
   const carried = o.deferrals > 0 && o.status !== 'done' && o.kind !== 'report';
   const risk = carried ? deferralRisk(o, o.lastDeferredWeek === s.week ? 0 : 1) : 0;
-  const cls = `card order ${o.status === 'ready' ? 'ready' : ''} ${o.status === 'done' ? 'done' : ''}`;
+  const cls = `card order ${o.status === 'ready' && !held ? 'ready' : ''} ${o.status === 'done' ? 'done' : ''} ${o.status === 'ready' && held ? 'held' : ''}`;
   return (
     <button
       class={cls}
@@ -158,8 +159,15 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
           {o.result.summary ? ` · ${o.result.summary}` : ''}
         </p>
       )}
-      {o.repair && o.status === 'pending' && s.cash >= ECON.freezeBelow && (
-        <span class="label">Safety-critical: a known defect is still in service. It can be approved even through a cash freeze.</span>
+      {o.repair && o.status !== 'done' && o.status !== 'cancelled' && (
+        <span class="label">
+          {o.repair.via === 'inspection'
+            ? asset?.kind === 'plane'
+              ? 'Not airworthy until it’s repaired: ground it, or it flies with a known defect (a near-miss on the safety grade). '
+              : 'Not safe until it’s repaired: red-tag it, or it stays in service with a known defect (a near-miss on the safety grade). '
+            : ''}
+          {o.status === 'pending' ? 'Safety-critical: it can be approved even through a cash freeze.' : ''}
+        </span>
       )}
       {s.cash < ECON.freezeBelow && o.status === 'pending' && (
         <p class="fault" style={{ margin: 0 }}>
@@ -177,20 +185,20 @@ function Origin({ s, o }: { s: IslandState; o: Order }) {
   if (o.repair) {
     const r = o.repair;
     const d = r.defect;
-    const rule = defectRule(d.puzzle, d.role);
+    // what happened, as the review told it (older saves: rebuilt from the rule)
+    const happened = r.incident ?? incidentText(defectRule(d.puzzle, d.role, d.orderKind), d.severity, asset?.name ?? 'the asset');
     return (
       <div class="card col" style={{ gap: 6, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${r.via === 'incident' ? C.rust : C.palm}` }}>
         <span class="label">{r.via === 'incident' ? 'Failed in service' : 'Caught by an inspection'}</span>
         <span>
           {r.via === 'incident' ? (
             <>
-              {rule.incident}
-              {on}, traced to {tracedTo(d)}.
+              {happened}. Traced to {tracedTo(d)}.
             </>
           ) : (
             <>
-              {r.foundBy}'s {r.foundIn} found {r.problem}
-              {on}, left by {tracedTo(d)}.
+              {r.foundBy}'s {r.foundIn}
+              {on} found {r.problem}, left by {tracedTo(d)}.
             </>
           )}
         </span>
@@ -225,7 +233,12 @@ function Origin({ s, o }: { s: IslandState; o: Order }) {
         <span>
           <b>{by} reports:</b> {reportSaid(o)}.
         </span>
-        {rep.again && <span>It came back: the fix from week {rep.again} didn't hold.</span>}
+        {rep.again && (
+          <span>
+            It came back: the {o.role === 'fin' ? 'correction' : 'fix'} from week {rep.again} didn't {o.role === 'fin' ? 'stick' : 'hold'}.
+            {rep.owed ? ` It cost ${usd(rep.owed)} while it only looked fixed; that's charged when this week resolves.` : ''}
+          </span>
+        )}
         {open && (
           <span class="fault" style={{ fontWeight: 700 }}>
             {rep.effect === 'cap'

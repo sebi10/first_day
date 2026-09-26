@@ -45,6 +45,14 @@ export interface PuzzleParams {
   tools: string[];
   reducedMotion: boolean;
   context?: PuzzleContext;
+  /**
+   * Blind sign-off (a real job at tier 2+): no verdict while you work or when
+   * you finish. Wrong moves are accepted silently (still scored), no ✓/✗,
+   * no hint of the right answer, no end-of-job reveal. What real instruments
+   * show stays: a gauge needle, a voltage, a tester's 120/0, a UV glow, a part
+   * that won't come off.
+   */
+  blind?: boolean;
 }
 
 export interface PuzzleResult {
