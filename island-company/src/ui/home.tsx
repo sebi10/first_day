@@ -11,6 +11,7 @@ import { Board, Review } from './board';
 import { Desk } from './desk';
 import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
+import { unreadBoard } from './crewboard';
 import { Island } from './island';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
@@ -440,7 +441,7 @@ function Dock({
         ? { label: `Next: ${readyList[0].title} ▸`, go: () => onPlay(readyList[0]) }
         : null;
   const waiting = ROLES.filter((x) => !s.turns[x]?.ended && x !== r).map((x) => s.players[x]?.name ?? ROLE_LABEL[x]);
-  const reviewBadge = s.story && !s.story.chosen ? 1 : 0;
+  const reviewBadge = (s.story && !s.story.chosen ? 1 : 0) + unreadBoard(s, ctl.ref, r);
   const end = async () => {
     setConfirm(false);
     const ok = await ctl.dispatch({ t: 'endTurn', role: r });

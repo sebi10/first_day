@@ -114,6 +114,18 @@ export interface ReportLine {
   text: string;
 }
 
+/** A message on the crew board: persistent, shared by every device on the island. */
+export interface BoardPost {
+  id: number;
+  role: Role;
+  /** author's name when posted */
+  name: string;
+  text: string;
+  at: number;
+  week: number;
+  pinned?: boolean;
+}
+
 export interface WeekReport {
   week: number;
   tier: number;
@@ -234,6 +246,9 @@ export interface IslandState {
   ntfy?: string;
   /** safety calls for this week: assetId → role that grounded / red-tagged it */
   tags?: Record<string, Role>;
+  /** the crew board: messages and pinned notes (latest 150 plus every pin) */
+  board?: BoardPost[];
+  boardNextId?: number;
   /** the crew project that builds the next tier: one job per trade */
   project?: { tier: number; title: string; orders: Partial<Record<Role, string>> } | null;
 }
@@ -272,6 +287,9 @@ export type Action =
   | { t: 'story'; key: string; role: Role }
   | { t: 'tag'; role: Role; assetId: string; on: boolean; week?: number }
   | { t: 'squawk'; role: Role; assetId: string; kind: string; week?: number }
+  | { t: 'post'; role: Role; text: string }
+  | { t: 'pin'; role: Role; id: number; on: boolean }
+  | { t: 'unpost'; role: Role; id: number }
   | { t: 'cosmetic'; role: Role; id: string }
   | { t: 'practice'; role: Role; puzzle: PuzzleId; tier: number; score: number }
   | { t: 'resolve'; week: number };

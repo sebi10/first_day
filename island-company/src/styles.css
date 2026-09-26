@@ -1104,3 +1104,57 @@ code,
   outline: 3px solid var(--sea);
   outline-offset: 2px;
 }
+
+/* crew board */
+.post {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.post.pinned {
+  background: var(--sand);
+  border-radius: 14px;
+  padding: 10px;
+}
+.post.pinned::before {
+  content: '📌';
+  order: 3;
+  font-size: 14px;
+}
+.post-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.composer textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 160px;
+  resize: vertical;
+  border-radius: 14px;
+  border: 2px solid var(--sand-deep);
+  background: var(--white);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px; /* 16px keeps iOS from zooming on focus */
+  outline: none;
+}
+.composer textarea:focus {
+  border-color: var(--sea);
+}
+.linkish {
+  all: unset;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sea);
+}
+.linkish.fault {
+  color: var(--rust);
+}

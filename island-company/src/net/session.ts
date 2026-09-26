@@ -12,6 +12,8 @@ export type IslandRef = {
   role: Role;
   passAndPlay?: boolean;
   lastSeenFeed?: number;
+  /** newest crew-board message each seat on this device has seen (pass-and-play has three) */
+  lastSeenBoard?: Partial<Record<Role, number>>;
   lastSeenReview?: number;
 };
 

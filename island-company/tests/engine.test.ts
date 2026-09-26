@@ -390,3 +390,34 @@ describe('squawks: the trades write up what their assets need', () => {
     expect(apply(s, { t: 'squawk', role: 'mech', assetId: plane.id, kind: 'tires' }, NOW).error).toMatch(/One write-up/);
   });
 });
+
+describe('crew board', () => {
+  it('anyone on the crew can post, any time; posts persist in the island', () => {
+    let s = started();
+    s = apply(s, { t: 'endTurn', role: 'mech' }, NOW).s;
+    const r = apply(s, { t: 'post', role: 'mech', text: '  Twin needs a new tyre before Friday  ' }, NOW);
+    expect(r.error).toBeUndefined();
+    s = r.s;
+    expect(s.board).toHaveLength(1);
+    expect(s.board![0]).toMatchObject({ id: 1, role: 'mech', name: 'Ana', text: 'Twin needs a new tyre before Friday', week: 1 });
+    expect(apply(s, { t: 'post', role: 'fin', text: '   ' }, NOW).error).toMatch(/Write something/);
+    expect(apply(s, { t: 'post', role: 'fin', text: 'x'.repeat(900) }, NOW).s.board![1].text).toHaveLength(500);
+    // survives week resolution
+    s = apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
+    expect(s.board).toHaveLength(1);
+  });
+
+  it('pins stay, old messages roll off, only the author deletes', () => {
+    let s = started();
+    s = apply(s, { t: 'post', role: 'elec', text: 'House rules: no approvals over $1k without a heads-up' }, NOW).s;
+    s = apply(s, { t: 'pin', role: 'fin', id: 1, on: true }, NOW).s;
+    for (let i = 0; i < 160; i++) s = apply(s, { t: 'post', role: 'mech', text: `msg ${i}` }, NOW).s;
+    expect(s.board!.filter((x) => !x.pinned)).toHaveLength(150);
+    expect(s.board!.find((x) => x.id === 1)?.pinned).toBe(true);
+    expect(apply(s, { t: 'unpost', role: 'mech', id: 1 }, NOW).error).toMatch(/author/);
+    s = apply(s, { t: 'unpost', role: 'elec', id: 1 }, NOW).s;
+    expect(s.board!.some((x) => x.id === 1)).toBe(false);
+    for (let i = 0; i < 5; i++) s = apply(s, { t: 'pin', role: 'fin', id: s.board![i].id, on: true }, NOW).s;
+    expect(apply(s, { t: 'pin', role: 'fin', id: s.board![6].id, on: true }, NOW).error).toMatch(/Up to 5/);
+  });
+});

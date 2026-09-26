@@ -95,6 +95,10 @@ function notifyAfter(before: IslandState, after: IslandState, a: Action) {
     const who = after.players[a.role]?.name ?? ROLE_LABEL[a.role];
     if (waiting.length) void ntfy(topic, after.name, `${who} ended their turn. Waiting on ${waiting.join(' and ')}.`);
   }
+  if (a.t === 'post') {
+    const who = after.players[a.role]?.name ?? ROLE_LABEL[a.role];
+    void ntfy(topic, `${who} on the ${after.name} crew board`, a.text.trim().slice(0, 180));
+  }
   if (a.t === 'counter') {
     const o = after.orders.find((x) => x.id === a.orderId);
     if (o) void ntfy(topic, after.name, `${after.players[o.role]?.name ?? ROLE_LABEL[o.role]}: the analyst offered a cheaper fix on ${o.title}.`);

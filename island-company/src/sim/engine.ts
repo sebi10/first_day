@@ -461,6 +461,38 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       feed(s, a.role, 'info', `${who} wrote up ${o.title} on ${asset.name}${o.status === 'pending' ? ` (${usd(o.cost)}, waiting on the analyst)` : ''}.`, now);
       return { s };
     }
+    case 'post': {
+      // the crew board is chat, not a move: any seat, any time, even after ending a turn
+      const p = s.players[a.role];
+      if (!p) return fail('Join first.');
+      const text = a.text.trim().slice(0, BOARD.maxLength);
+      if (!text) return fail('Write something first.');
+      const id = s.boardNextId ?? 1;
+      s.boardNextId = id + 1;
+      (s.board ??= []).push({ id, role: a.role, name: p.name, text, at: now, week: s.week });
+      const unpinned = s.board.filter((x) => !x.pinned);
+      if (unpinned.length > BOARD.keep) {
+        const drop = new Set(unpinned.slice(0, unpinned.length - BOARD.keep).map((x) => x.id));
+        s.board = s.board.filter((x) => !drop.has(x.id));
+      }
+      return { s };
+    }
+    case 'pin': {
+      if (!s.players[a.role]) return fail('Join first.');
+      const post = s.board?.find((x) => x.id === a.id);
+      if (!post) return fail('That message is gone.');
+      if (a.on && !post.pinned && s.board!.filter((x) => x.pinned).length >= BOARD.maxPins) return fail(`Up to ${BOARD.maxPins} pinned notes. Unpin one first.`);
+      if (a.on) post.pinned = true;
+      else delete post.pinned;
+      return { s };
+    }
+    case 'unpost': {
+      const post = s.board?.find((x) => x.id === a.id);
+      if (!post) return fail('That message is gone.');
+      if (post.role !== a.role) return fail('Only the author can delete a message.');
+      s.board = s.board!.filter((x) => x.id !== a.id);
+      return { s };
+    }
     case 'practice': {
       const p = s.players[a.role];
       if (!p) return fail('Join first.');
@@ -479,6 +511,9 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
     }
   }
 }
+
+/** Crew board limits: long enough for a plan, small enough for one Firestore document. */
+export const BOARD = { maxLength: 500, keep: 150, maxPins: 5 };
 
 /** Jobs a trade may write up on an asset: real work on something it looks after (not paperwork). */
 export function squawkable(role: Role, asset: Asset) {

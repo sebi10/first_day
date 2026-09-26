@@ -11,6 +11,7 @@ import { nextTierProgress } from '../sim/progression';
 import { ROLES, type Grade, type IslandState, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
 import { Btn, Icon, Seg, TierDots, usd } from './kit';
+import { CrewBoard } from './crewboard';
 import { CrewProject } from './home';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
 import { shareWeek } from './share';
@@ -55,6 +56,7 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
       )}
 
       {s.story && !s.story.chosen && <StoryCard ctl={ctl} />}
+      <CrewBoard ctl={ctl} />
       <CrewProject ctl={ctl} />
 
       {next && (
