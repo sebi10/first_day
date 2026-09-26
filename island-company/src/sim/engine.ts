@@ -467,9 +467,13 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       if (!p) return fail('Join first.');
       const text = a.text.trim().slice(0, BOARD.maxLength);
       if (!text) return fail('Write something first.');
+      if (a.to !== undefined) {
+        if (a.to === a.role) return fail("That's you.");
+        if (!s.players[a.to]) return fail('Nobody holds that seat yet.');
+      }
       const id = s.boardNextId ?? 1;
       s.boardNextId = id + 1;
-      (s.board ??= []).push({ id, role: a.role, name: p.name, text, at: now, week: s.week });
+      (s.board ??= []).push({ id, role: a.role, name: p.name, text, at: now, week: s.week, ...(a.to ? { to: a.to } : {}) });
       const unpinned = s.board.filter((x) => !x.pinned);
       if (unpinned.length > BOARD.keep) {
         const drop = new Set(unpinned.slice(0, unpinned.length - BOARD.keep).map((x) => x.id));
@@ -481,6 +485,7 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       if (!s.players[a.role]) return fail('Join first.');
       const post = s.board?.find((x) => x.id === a.id);
       if (!post) return fail('That message is gone.');
+      if (post.to) return fail('Direct messages cannot be pinned.');
       if (a.on && !post.pinned && s.board!.filter((x) => x.pinned).length >= BOARD.maxPins) return fail(`Up to ${BOARD.maxPins} pinned notes. Unpin one first.`);
       if (a.on) post.pinned = true;
       else delete post.pinned;

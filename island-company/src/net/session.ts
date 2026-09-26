@@ -14,6 +14,8 @@ export type IslandRef = {
   lastSeenFeed?: number;
   /** newest crew-board message each seat on this device has seen (pass-and-play has three) */
   lastSeenBoard?: Partial<Record<Role, number>>;
+  /** newest DM seen per thread, keyed 'me>other' */
+  lastSeenDm?: Record<string, number>;
   lastSeenReview?: number;
 };
 

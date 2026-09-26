@@ -124,6 +124,8 @@ export interface BoardPost {
   at: number;
   week: number;
   pinned?: boolean;
+  /** a direct message: only this seat and the author see it in the game */
+  to?: Role;
 }
 
 export interface WeekReport {
@@ -287,7 +289,7 @@ export type Action =
   | { t: 'story'; key: string; role: Role }
   | { t: 'tag'; role: Role; assetId: string; on: boolean; week?: number }
   | { t: 'squawk'; role: Role; assetId: string; kind: string; week?: number }
-  | { t: 'post'; role: Role; text: string }
+  | { t: 'post'; role: Role; text: string; to?: Role }
   | { t: 'pin'; role: Role; id: number; on: boolean }
   | { t: 'unpost'; role: Role; id: number }
   | { t: 'cosmetic'; role: Role; id: string }

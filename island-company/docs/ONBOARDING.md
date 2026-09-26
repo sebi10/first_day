@@ -47,7 +47,7 @@ Once a week you can try another trade's job that has already waited a week (*Len
 - **Board → Weekly challenge:** the same puzzle and seed for all three this week. Try each other's trades and compare. No XP; bragging only.
 - **Streaks:** every third B+ week in a row brings a story card. Two of three votes decide it.
 - **Grade A** pays a bonus, and the analyst chooses what to do with it: reserve, capex, or +150 XP each (unspent, it goes to reserve).
-- **Crew board** (top of the Board tab): a message board that stays. Post plans, heads-ups ("don't approve the alternator, I'll squawk it"), trash talk; pin up to 5 notes like house rules. The Board tab shows a badge for messages you haven't read, and ntfy pings the crew if you've set it up.
+- **Crew board** (top of the Board tab): a message board that stays. Post plans, heads-ups ("don't approve the alternator, I'll squawk it"), trash talk; pin up to 5 notes like house rules. The **✉ tabs** are direct messages with one crewmate (only you two see them in the game). The Board tab shows a badge for messages you haven't read, and ntfy pings the crew if you've set it up.
 - **Crew projects:** qualifying for the next tier (tier 2: 4 full-crew B+ weeks) opens one job per trade. The tier arrives when all three are done, and your average score sets how healthy the new buildings start. Nobody can do your part for you.
 - **Cash trouble:** under $2,000 only safety-critical work gets approved. Two weeks below zero puts the island in receivership, with one bridge loan to climb out.
 

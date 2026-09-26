@@ -99,7 +99,9 @@ function notifyAfter(before: IslandState, after: IslandState, a: Action) {
   }
   if (a.t === 'post') {
     const who = after.players[a.role]?.name ?? ROLE_LABEL[a.role];
-    void ntfy(topic, `${who} on the ${after.name} crew board`, a.text.trim().slice(0, 180));
+    // the ntfy topic is shared by the crew: a DM push names who it's for, never what it says
+    if (a.to) void ntfy(topic, after.name, `${who} sent ${after.players[a.to]?.name ?? ROLE_LABEL[a.to]} a direct message.`);
+    else void ntfy(topic, `${who} on the ${after.name} crew board`, a.text.trim().slice(0, 180));
   }
   if (a.t === 'counter') {
     const o = after.orders.find((x) => x.id === a.orderId);

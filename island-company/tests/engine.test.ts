@@ -421,3 +421,17 @@ describe('crew board', () => {
     expect(apply(s, { t: 'pin', role: 'fin', id: s.board![6].id, on: true }, NOW).error).toMatch(/Up to 5/);
   });
 });
+
+describe('direct messages', () => {
+  it('a DM goes to one crewmate; you cannot DM yourself, an empty seat, or pin a DM', () => {
+    let s = started();
+    const r = apply(s, { t: 'post', role: 'mech', text: 'psst, approve my alternator?', to: 'fin' }, NOW);
+    expect(r.error).toBeUndefined();
+    s = r.s;
+    expect(s.board![0]).toMatchObject({ role: 'mech', to: 'fin', text: 'psst, approve my alternator?' });
+    expect(apply(s, { t: 'post', role: 'mech', text: 'hi me', to: 'mech' }, NOW).error).toMatch(/you/);
+    expect(apply(s, { t: 'pin', role: 'fin', id: s.board![0].id, on: true }, NOW).error).toMatch(/cannot be pinned/);
+    const lonely = createIsland({ id: 'l', name: 'L', now: NOW, tz: 'Europe/Paris', creator: { uid: 'a', name: 'Ana', role: 'mech' } });
+    expect(apply(lonely, { t: 'post', role: 'mech', text: 'anyone?', to: 'elec' }, NOW).error).toMatch(/Nobody holds/);
+  });
+});
