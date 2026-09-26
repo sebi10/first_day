@@ -92,7 +92,7 @@ const LIGHTS = ['Pendant light', 'Hall light', 'Porch light'];
  * the hangar or the office). Same fault physics, the room's own devices and the
  * way that crewmate would describe it.
  */
-const PLACES: Record<string, { receps: string[]; jboxes: string[]; lights: string[]; symptoms: Partial<Record<FaultKind, string[]>> }> = {
+const PLACES: Record<string, { receps: string[]; jboxes: string[]; lights: string[]; symptoms: Partial<Record<FaultKind, string[]>>; /** the device the complaint is about: always the last on the run, so always past the fault */ last?: string }> = {
   shop: {
     receps: ['Compressor outlet', 'Workbench outlet', 'Charger outlet', 'Parts-washer outlet', 'Drill-press outlet', 'Door-side outlet', 'Tug outlet', 'Crib outlet'],
     jboxes: ['Hangar J-box', 'Conduit pull box', 'Wall J-box'],
@@ -102,6 +102,19 @@ const PLACES: Record<string, { receps: string[]; jboxes: string[]; lights: strin
       openNeutral: ['Dead outlets in the hangar, but the pen tester beeps.'],
       looseHot: ['The compressor cuts out every time it starts.', 'The battery charger drops out under load.'],
       looseNeutral: ['The compressor cuts out every time it starts.', 'The bench lights dim when the charger kicks on.'],
+    },
+  },
+  // the hangar's 28 V DC ground power supply plugs in at the end of a 120 V branch circuit
+  hangar: {
+    receps: ['Door-side outlet', 'Workbench outlet', 'Tug charger outlet', 'Crib outlet', 'Parts-washer outlet', 'Bay outlet', 'Fan outlet', 'Bench-grinder outlet'],
+    jboxes: ['Hangar J-box', 'Conduit pull box', 'Wall J-box'],
+    lights: ['Bay light', 'Bench light', 'Crib light'],
+    last: '28 V supply outlet',
+    symptoms: {
+      openHot: ['The 28 V ground power supply is dead: no lights on it. Breaker is on.'],
+      openNeutral: ['The 28 V ground power supply is dead, but the pen tester beeps at its outlet.'],
+      looseHot: ['The 28 V ground power drops out whenever the avionics load it up.', 'The 28 V supply cuts out when the bench grinder starts.'],
+      looseNeutral: ['The 28 V ground power drops out whenever the avionics load it up.', 'The bay lights dim and the 28 V supply cuts out under load.'],
     },
   },
   office: {
@@ -146,6 +159,8 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [],
     leg: (mwbc ? (i + legStart) % 2 : 0) as 0 | 1,
     switchedOff: false,
   }));
+  // the complaint's own device ends the run (a receptacle, whatever was drawn there)
+  if (place?.last) items[n - 1] = { ...items[n - 1], name: place.last, kind: 'recep' };
 
   // the fault sits past at least one healthy item; past the anomaly by one more;
   // on an MWBC both legs must show symptoms past the break

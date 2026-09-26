@@ -40,12 +40,23 @@ const CATALOG: { name: string; group: VLine['group']; unit: string; lo: number; 
   { name: 'Water', group: 'Ops', unit: 'k gal', lo: 60, hi: 140 },
 ];
 
+/**
+ * The mechanic's report that ground power starts never reach the charter
+ * invoices: the carts' power, wear and time are budgeted net of the fee billed
+ * on, and with nothing billed the whole cost lands here. A price driver (the
+ * same starts, none recovered), which the analyst finds and bills from now on.
+ */
+const GPU_LINE: (typeof CATALOG)[number] = { name: 'Ground power (net)', group: 'Ops', unit: 'starts', lo: 500, hi: 1000 };
+
 const r10 = (v: number) => Math.round(v / 10) * 10;
 
-export function generateVariance(seed: number, tier: number, _tools: string[] = [], leak = 500): VarianceModel {
+/** `job` 'gpu': the ledger carries the unbilled ground power line, and it is one of the drivers. */
+export function generateVariance(seed: number, tier: number, _tools: string[] = [], leak = 500, job?: string): VarianceModel {
   const r = rng(seed);
   const rows = tier <= 0 ? 4 : tier <= 3 ? 6 : tier === 4 ? 7 : 8;
   const pool = r.shuffle([...CATALOG]).slice(0, rows);
+  const gpu = job === 'gpu';
+  if (gpu) pool[0] = GPU_LINE;
   const lines: VLine[] = pool.map((c) => {
     const budget = r10(r.range(c.lo, c.hi));
     const unitPrice = r.range(2, 12);
@@ -70,6 +81,7 @@ export function generateVariance(seed: number, tier: number, _tools: string[] = 
   const bySize = lines.map((_, i) => i).sort((a, b) => lines[b].budget - lines[a].budget);
   const material = r.shuffle(bySize.slice(0, Math.max(k, Math.ceil(lines.length * 0.6))));
   const drivers = material.slice(0, k);
+  if (gpu && !drivers.includes(0)) drivers[0] = 0;
   const cand = [...drivers, ...r.shuffle(bySize.filter((i) => !drivers.includes(i)))];
   const weights = drivers.map(() => r.range(0.8, 1.4));
   const wsum = weights.reduce((a, b) => a + b, 0);
@@ -79,7 +91,7 @@ export function generateVariance(seed: number, tier: number, _tools: string[] = 
     L.actual = L.budget + over;
     L.kind = 'driver';
     // volume vs price: half the drivers are volume (more units), half price (same units)
-    const volume = r.chance(0.5);
+    const volume = r.chance(0.5) && !(gpu && i === 0);
     L.unitsA = volume ? Math.round(L.unitsB * (L.actual / L.budget)) : L.unitsB;
     L.last = r10(L.budget * r.range(0.95, 1.03));
   });
@@ -137,7 +149,7 @@ export const variance: PuzzleDef = {
   term: 'Variance: actual minus budget. Material, unfavourable lines explain the miss.',
   seconds: (tier) => 60 + tier * 10,
   mount(host, p) {
-    const m = generateVariance(p.seed, p.tier, p.tools, p.context?.leak ?? 500);
+    const m = generateVariance(p.seed, p.tier, p.tools, p.context?.leak ?? 500, p.context?.job);
     const grouped = p.tools.includes('driverTree');
     const canSort = p.tools.includes('pivot');
     let sortByActual = false;

@@ -3,7 +3,7 @@ import type { PuzzleId } from '../puzzles/types';
 import { aircraftOf, type Aircraft } from '../sim/aircraft';
 import { ECON, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { forecastContext, listPrice } from '../sim/engine';
-import { flightsAvailable, flightsPerPlane, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
+import { cartOn, flightsAvailable, flightsPerPlane, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
 import type { Asset, IslandState, Order, Role } from '../sim/types';
@@ -32,7 +32,8 @@ export function blocks(s: IslandState): Block[] {
   for (const o of openReports(s)) {
     const rep = o.report!;
     if (rep.by === o.role || !s.players[rep.by]) continue;
-    out.push({ from: o.role, to: rep.by, text: `${reportSaid(o)}${rep.effect === 'cap' ? ` (${capWords(rep.by)})` : ` (−\u2060$${rep.amount.toLocaleString('en-US')}/wk)`}` });
+    const effect = rep.effect === 'cap' ? ` (${capWords(rep.by)})` : rep.effect === 'gse' ? ' (a GPU cart tagged out)' : ` (−\u2060$${rep.amount.toLocaleString('en-US')}/wk)`;
+    out.push({ from: o.role, to: rep.by, text: `${reportSaid(o)}${effect}` });
   }
   return out;
 }
@@ -123,6 +124,9 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   if (o.puzzle === 'forecast') Object.assign(context, forecastContext(s));
   // paperwork on a plane: the island's own airplane (twin / cargo / float), its records as they are
   if (asset?.kind === 'plane' && READS_AIRCRAFT.has(o.puzzle)) context.aircraft = islandAircraft(s.seed, asset);
+  // a ground power start runs off the cart hooked up to that plane, as charged as it is
+  const cart = o.puzzle === 'gpu' ? cartOn(s, o.assetId) : undefined;
+  if (cart) context.cart = { name: cart.name, charge: cart.charge };
   return {
     puzzle: o.puzzle,
     seed: hashSeed(o.seed, role),

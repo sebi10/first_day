@@ -2,6 +2,8 @@
 // /lab.html?p=torque&tier=3&seed=1&tools=clickWrench,gaugeDamper
 //   &blind=1  blind sign-off (no verdict while you work)   &job=prop  the scenario a work order picks
 //   &asset=Cargo%20C-7  which plane (paperwork puzzles build that airplane's records from it)
+//   &charge=25  the ground power cart's charge (%): a low cart sags under the start
+//   &job=boom / &job=van  the hydraulic bench's crewmate vehicles; &job=gpuCable (wire-up), hangar (meter), gpu (variance)
 import type { PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
 import { fx } from './ui/feedback';
 import '@fontsource-variable/manrope';
@@ -48,6 +50,7 @@ const context = {
   leak: 540,
   assetName: q.get('asset') ?? 'Twin N-12',
   job,
+  ...(q.has('charge') ? { cart: { name: 'GPU cart 1', charge: Number(q.get('charge')) } } : {}),
 };
 
 const inst = def.mount(

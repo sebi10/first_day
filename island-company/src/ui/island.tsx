@@ -7,11 +7,12 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
-import { houseBlocker, houseRentable, planeCapacity, powered } from '../sim/econ';
+import { cableReport, gseCarts, houseBlocker, houseRentable, planeCapacity, powered } from '../sim/econ';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
 import { Cottage, GenHouse, Hangar, Lodge, Office, Pole, POLE_H, Ribbon, SMOKE_AT, Substation, Villa, WINDOWS, winPath, type Fault, type Win } from './island/buildings';
 import { FlyingPlane, Plane, type PlaneModel } from './island/craft';
+import { CART_HOME, CART_OUTLET, cartBeside, cartLight, GpuCart, receptacle } from './island/gse';
 import {
   APRON_PROPS, ApronLights, ApronProps, BeachBar, Bench, Boardwalk, Confetti, Dock, Festoon, Fireworks, FishingBoats, Fountain, GardenBeds, Lamp, Lighthouse, Market, NewFlags,
   Observatory, Statue, Bunting, buntingBulbs, YachtAt, YachtLights,
@@ -159,12 +160,15 @@ export function Island({
   s,
   focus,
   onTap,
+  onCart,
   reduceMotion,
   phase: phaseProp,
 }: {
   s: IslandState;
   focus: Role | null;
   onTap?: () => void;
+  /** a ground power cart was tapped: open its sheet */
+  onCart?: (id: string) => void;
   reduceMotion: boolean;
   phase?: Phase;
 }) {
@@ -279,6 +283,36 @@ export function Island({
       badges.push([x - 30, y - 12]);
     }
   }
+  // ---- ground power carts: on the charger by the hangar, or beside the plane they're hooked up to
+  const carts = gseCarts(s);
+  const cartLamps: [number, number, string][] = [];
+  carts.forEach((c, i) => {
+    const plane = c.hookedTo ? planes.find((p) => p.id === c.hookedTo) : undefined;
+    const ps = plane ? spotOf(plane.id) : null;
+    const at: Pt = plane && ps ? cartBeside(plane.model, [ps.x, ps.y]) : CART_HOME[i % CART_HOME.length];
+    const plug: Pt | null = plane && ps ? receptacle(plane.model, [ps.x, ps.y]) : c.charging ? CART_OUTLET[i % CART_OUTLET.length] : null;
+    const tagged = !!cableReport(s, c.id);
+    const where = plane ? `hooked up to ${plane.name}` : c.charging ? 'on charge' : 'parked';
+    items.push({
+      y: at[1],
+      el: (
+        <GpuCart
+          key={c.id}
+          cart={c}
+          at={at}
+          plug={plug}
+          tagged={tagged}
+          label={`${c.name}: ${where}, ${Math.round(c.charge)}% charge${tagged ? ', tagged out' : ''}. Open ground power`}
+          onTap={onCart ? () => onCart(c.id) : undefined}
+        />
+      ),
+    });
+    // a bubble may sit on a cart (it's small), but prefers not to
+    keep.push({ owner: c.id, r: [at[0] - 12, at[1] - 14, at[0] + 12, at[1] + 3], w: 0.3 });
+    cartLamps.push([at[0] + 3.6, at[1] - 11.2, cartLight(c.charge)]);
+    // the charger outlet on the hangar wall, while something is plugged into it
+    if (plug && !plane) items.push({ y: HANGAR[1] + 0.5, el: <path key={`outlet${c.id}`} d={`M${plug[0] - 2.5} ${plug[1] - 3}h5v5h-5z`} fill="#dfe4e6" stroke="#3b464b" stroke-width=".7" /> });
+  });
   flat.push(<ApronProps key="apron" />);
   // props and the floodlight masts are cheap to cover: a bubble may sit on them
   APRON_PROPS.forEach((r) => keep.push({ r, w: 0.3 }));
@@ -488,7 +522,7 @@ export function Island({
       ref={svgRef}
       class={`island-svg${still ? ' still' : ''}${s.weather !== 'clear' ? ' windy' : ''}`}
       viewBox={`0 0 ${W} ${H}`}
-      role="img"
+      role={onCart ? 'group' : 'img'}
       aria-label={describe(s, pw, rentable.length, dev)}
       onClick={onTap}
     >
@@ -549,6 +583,8 @@ export function Island({
             {s.tier >= 5 && pw.on && <RunwayLights night glowOnly />}
             {festoon && <Festoon lit />}
             {has('yacht') && !storm && <YachtLights />}
+            {/* the ground power carts' charge lights */}
+            {cartLamps.length > 0 && cartLamps.map(([x, y, c], i) => <circle key={`cl${i}`} cx={x} cy={y} r={1.8} fill={c} />)}
             {/* the grid is up: a green lamp on the substation's cabinet */}
             {grid && !pw.gridDown && <circle cx={at('g1')[0] + 11} cy={at('g1')[1] - 17} r={2.2} fill="#7dff9a" />}
             {/* navigation lights on the night flight */}
@@ -767,6 +803,9 @@ function describe(s: IslandState, pw: ReturnType<typeof powered>, open: number, 
     `${open} of ${houses.length} houses open${closed.length ? ': ' + closed.join(', ') : ''}`,
     !pw.on ? 'no power on the island' : pw.gridDown ? 'grid down, generator carrying the load' : 'grid up',
     s.cash < 2000 ? 'cash alarm' : '',
+    gseCarts(s)
+      .map((c) => `${c.name} ${c.hookedTo ? `hooked up to ${s.assets.find((a) => a.id === c.hookedTo)?.name ?? 'a plane'}` : c.charging ? 'on charge' : 'parked'}, ${Math.round(c.charge)}%`)
+      .join(', '),
     s.weather !== 'clear' ? s.weather : '',
     building,
     dev.justBuilt ? `tier ${dev.justBuilt} just arrived` : '',

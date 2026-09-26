@@ -1569,3 +1569,16 @@ code,
   display: inline-grid;
   place-items: center;
 }
+
+/* ground power card rows: one tap target per cart */
+.gse-row {
+  min-height: 44px;
+  padding: 6px 0;
+}
+.gse-row + .gse-row {
+  border-top: 1px solid rgba(31, 42, 48, 0.07);
+}
+/* ground power carts on the island: a button inside the map */
+.gse-cart { cursor: pointer; outline: none; }
+.gse-cart .hit { stroke: transparent; stroke-width: 2.4; }
+.gse-cart:focus-visible .hit { stroke: var(--sea, #2e7c93); }

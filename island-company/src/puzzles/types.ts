@@ -47,6 +47,11 @@ export interface PuzzleContext {
    * and alterations. Paperwork puzzles use it as-is; without it they build one from the seed.
    */
   aircraft?: Aircraft;
+  /**
+   * ground power start: the cart hooked up to the plane (the island's GSE state).
+   * `charge` 0..100: a low cart's output sags under the start load.
+   */
+  cart?: { name: string; charge: number };
 }
 
 export interface PuzzleParams {

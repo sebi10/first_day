@@ -1,15 +1,16 @@
 // Mechanic hangar / electrician cottages: assets, work orders, covering.
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
-import { houseBlocker, orderCost, orderTier, planeCapacity, powered } from '../sim/econ';
+import { gseForStart, houseBlocker, orderCost, orderTier, planeCapacity, powered } from '../sim/econ';
 import { squawkable } from '../sim/engine';
 import type { Asset, Order, Role } from '../sim/types';
+import { GroundPowerCard } from './gse';
 import { Btn, Health, Icon, Sheet, TierDots, usd } from './kit';
 import { OrderCard, OrderDetail } from './orders';
 import { capNow, openOrders } from './select';
 import type { Ctl } from './useIsland';
 
-export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec'; onPlay(o: Order, cover?: boolean): void }) {
+export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' | 'elec'; onPlay(o: Order, cover?: boolean): void; /** open the ground power sheet (on one cart) */ onGse?(cart: string | null): void }) {
   const { s } = ctl;
   const [sel, setSel] = useState<Order | null>(null);
   const [writeUp, setWriteUp] = useState<Asset | null>(null);
@@ -23,8 +24,9 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
   const capped = gridCapped || !!cap?.full;
 
   // a repair, a redo or a crewmate's report opens its story first (why it exists), with a Start button
+  // a ground power start with no charged cart hooked up opens its card first: it says what's missing
   const open = (o: Order) => {
-    if (o.status === 'ready' && !turn?.ended && !capped && !hasOrigin(o)) onPlay(o);
+    if (o.status === 'ready' && !turn?.ended && !capped && !hasOrigin(o) && !gseForStart(s, o).blocker) onPlay(o);
     else setSel(o);
   };
 
@@ -88,6 +90,8 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
               );
             })}
       </div>
+
+      <GroundPowerCard ctl={ctl} role={role} onOpen={(id) => onGse?.(id)} />
 
       <span class="label" style={{ padding: '0 4px' }}>
         {canWrite ? 'Tap an asset to write up what it needs (1 squawk a week). The analyst decides if it’s worth the money.' : s.squawked?.[role] === s.week ? 'Squawk written up this week.' : ''}
@@ -153,7 +157,19 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
                 {turn?.ended ? 'Your turn is over; this carries to next week.' : gridCapped ? 'Hangar tools offline until the grid is back.' : cap?.text}
               </p>
             )}
-            {sel.status === 'ready' && sel.role === role && !turn?.ended && !capped && (
+            {sel.kind === 'gpustart' && sel.status === 'ready' && gseForStart(s, sel).blocker && (
+              <Btn
+                kind="soft"
+                block
+                onClick={() => {
+                  setSel(null);
+                  onGse?.(gseForStart(s, sel).cart?.id ?? null);
+                }}
+              >
+                <Icon name="bolt" size={18} /> Ground power carts ▸
+              </Btn>
+            )}
+            {sel.status === 'ready' && sel.role === role && !turn?.ended && !capped && !gseForStart(s, sel).blocker && (
               <Btn
                 block
                 onClick={() => {

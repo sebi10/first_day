@@ -70,6 +70,7 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 - The week resolves at 20:00 in the creator's time zone, or as soon as all three have ended their turn. Whichever phone notices first resolves it, inside a Firestore transaction, so it happens exactly once. There's no server code to run.
 - A missed turn runs on autopilot at 50%. Autopilot weeks never lose progress, but they don't count toward unlocks, because nobody wins alone.
 - Each new tier is a **crew project**: one real job per trade, and the tier opens when all three are done. See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full crew briefing.
+- The mechanic runs the **ground power carts** (one, two from tier 3): charge them on the hangar charger, hook one up to a plane before a ground power start, inspect the cables. Tap a cart on the island or the *Ground power* card. A low cart sags under the start; a worn cable is tagged out for the electrician, or quietly damages a plane's receptacle.
 - Resolution is deterministic: the three turns plus a seeded incident roll. The seed is shown on the board review, so any week can be replayed.
 
 ## Puzzles (17: seven for the mechanic, five each for the electrician and the analyst, all modelled on the real job)
@@ -81,8 +82,8 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 | Engine teardown (order, failed part, rebuild) | Wire-up (strip, loop, land hot/neutral/ground) | Cash forecast (draw 4 weeks, scored vs outcome) |
 | Weight and balance (CG envelope) | Multimeter diagnosis (open neutral, MWBC) | Bank reconciliation (timing items, transpositions) |
 | Safety wire (tightening direction, twists/inch) | Conduit bending (offsets, saddles, 360° rule) | Three-way match (PO / receipt / invoice) |
-| Hydraulic servicing (discharge the accumulator, placard fluid to FULL, nitrogen precharge, bleed) | | |
-| Ground power start (cart set to the placard, plug seated, volts checked; turbine ITT from tier 4) | | |
+| Hydraulic servicing (discharge the accumulator, placard fluid to FULL, nitrogen precharge, bleed; the crew's bucket truck boom and company van on the same bench) | | |
+| Ground power start (cart set to the placard, plug seated, volts checked; turbine ITT from tier 4; the island's cart, as charged as it is) | | |
 
 Difficulty comes from the order's tier (1–5), which climbs as the island grows. It never depends on your level. Levels unlock **tools** that change how a puzzle plays (for example the click-type wrench, non-aqueous developer, clamp meter and driver tree): convenience or raw readings to interpret, never the answer. From tier 3 the teaching aids are gone, so real trade knowledge is what separates the three of you.
 
@@ -96,6 +97,8 @@ npm run balance      # paper sim: 10 scripted teams x 26 weeks x 30 seeds
 npm run typecheck
 npm run build        # dist/ with an offline service worker
 open http://localhost:5173/lab.html?p=torque&tier=3&seed=1   # puzzle lab (&blind=1: as a real job, no verdict)
+open "http://localhost:5173/lab.html?p=hydraulics&tier=2&job=boom"   # &job=van, wireup &job=gpuCable, meter &job=hangar, variance &job=gpu; gpu &charge=30
+open "http://localhost:5173/islandlab.html?w=358&only=gse-zoom"      # the island in fixed scenes (gse, gse-zoom, gse-night …)
 node scripts/e2e.mjs shots/          # scripted playtest (phone); add `desktop` for 1280x820
 ```
 

@@ -25,8 +25,23 @@
 // the pedal held down it pumps straight through the brake. Either way the bleed
 // empties the reservoir and can leave the accumulator charged, so afterwards you
 // pump the brakes down again and recheck the level before sign-off.
+//
+// Two crewmates' vehicles use the same bench (PuzzleContext.job):
+// - 'boom', the electrician's bucket truck: its boom creeps down because oil
+//   escapes at the lift cylinder's load side. Lower the boom onto its rest
+//   first (the raised boom's extended cylinder holds oil out of the tank, so
+//   the level only reads true stowed, and a load-side fitting must never be
+//   opened with the boom up), find the fresh, wet leak (a thin film on a
+//   cylinder rod is normal; an old dry weep upstream of the holding valve can't
+//   let the boom down), replace that seal, then top up with the oil on the
+//   truck's decal: ISO 32 anti-wear hydraulic oil, not aviation 5606.
+// - 'van', the company van: a soft pedal is air in the brake lines. Bleed it at
+//   the wheel with the pedal (bleeder open, press, close), keep the master
+//   cylinder from running dry, then fill to MAX with DOT 3/4 brake fluid, a
+//   glycol. Mineral oil (5606, ATF) swells a DOT system's rubber seals, and
+//   silicone DOT 5 doesn't mix with it.
 import { hashSeed, rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, fitLabel, label, loop, markInput, pointer, roundRect, settle, shade, stage } from './kit';
+import { C, FONT, backdrop, clamp, ease, fitLabel, label, lerp, loop, markInput, pointer, roundRect, settle, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 // ---------------------------------------------------------------------------
@@ -37,7 +52,10 @@ import { result, type PuzzleDef, type PuzzleResult } from './types';
 // fluid don't belong in a 5606 system either.
 // ---------------------------------------------------------------------------
 
-export type FluidId = 'mil5606' | 'mil83282' | 'skydrol' | 'dot3' | 'turbine' | 'veg';
+export type FluidId = 'mil5606' | 'mil83282' | 'skydrol' | 'dot3' | 'turbine' | 'veg' | 'aw32' | 'aw46' | 'dot4' | 'dot5' | 'atf';
+
+/** Which system is on the bench: the aircraft's brakes (5606), the bucket truck's boom (AW oil), the van's brakes (DOT glycol). */
+export type HydSystem = 'aircraft' | 'boom' | 'van';
 
 export type Fluid = {
   id: FluidId;
@@ -48,7 +66,7 @@ export type Fluid = {
   plain: string;
   /** the fluid's dye colour */
   color: string;
-  /** safe with Buna-N seals / miscible with 5606 */
+  /** safe with Buna-N seals / miscible with 5606 (the aircraft system; the vehicles: SYSTEMS) */
   compatible: boolean;
   /** what it does to a 5606 system */
   harm: string;
@@ -69,7 +87,66 @@ export const FLUIDS: Record<FluidId, Fluid> = {
   dot3: { id: 'dot3', spec: 'DOT 3 · FMVSS 116', name: 'DOT 3', plain: 'car brake fluid', color: '#D6B66E', compatible: false, harm: 'Glycol brake fluid won’t mix with 5606' },
   turbine: { id: 'turbine', spec: 'MIL-PRF-23699', name: 'Turbine oil', plain: 'jet engine oil', color: '#C68A2C', compatible: false, harm: 'Ester engine oil swells Buna-N seals' },
   veg: { id: 'veg', spec: 'MIL-H-7644', name: 'MIL-H-7644', plain: 'blue · vegetable base', color: '#3E6DB3', compatible: false, harm: 'Vegetable-base fluid gums up a 5606 system' },
+  // the vehicles' fluids (never on an aircraft's shelf)
+  aw32: { id: 'aw32', spec: 'ISO VG 32 AW', name: 'AW 32 oil', plain: 'amber · anti-wear', color: '#D9B44A', compatible: false, harm: 'Not an aircraft hydraulic fluid' },
+  aw46: { id: 'aw46', spec: 'ISO VG 46 AW', name: 'AW 46 oil', plain: 'amber · heavier grade', color: '#C79A34', compatible: false, harm: 'Not an aircraft hydraulic fluid' },
+  dot4: { id: 'dot4', spec: 'DOT 4 · FMVSS 116', name: 'DOT 4', plain: 'brake fluid · glycol', color: '#E2CB84', compatible: false, harm: 'Glycol brake fluid won’t mix with 5606' },
+  dot5: { id: 'dot5', spec: 'DOT 5 · SILICONE', name: 'DOT 5', plain: 'purple · silicone', color: '#8E5BB0', compatible: false, harm: 'Silicone brake fluid doesn’t belong in a 5606 system' },
+  atf: { id: 'atf', spec: 'ATF · MULTI-VEHICLE', name: 'ATF', plain: 'red · gearbox oil', color: '#C8323C', compatible: false, harm: 'Transmission fluid isn’t hydraulic fluid' },
 };
+
+/**
+ * What each system takes. `fits`: safe in it (the seals, and it mixes); a fluid
+ * that fits but isn't the placarded one is a smaller fault (`off`, with its
+ * penalty and the note). Anything else contaminates it (`harm` says how).
+ */
+export const SYSTEMS: Record<HydSystem, { fits: FluidId[]; harm: Partial<Record<FluidId, string>>; off: Partial<Record<FluidId, { pen: number; note: string }>> }> = {
+  aircraft: {
+    fits: ['mil5606', 'mil83282'],
+    harm: {},
+    off: { mil83282: { pen: 0.12, note: '83282 not on this placard' } },
+  },
+  // mineral-oil hydraulics on Buna-N seals: any petroleum or synthetic-hydrocarbon oil mixes and
+  // the seals take it, but only the decal's grade is right (5606 is far thinner: more slip, more creep)
+  boom: {
+    fits: ['aw32', 'aw46', 'mil5606', 'mil83282', 'atf'],
+    harm: {
+      skydrol: 'Phosphate ester destroys the truck’s Buna-N seals',
+      dot3: 'Glycol brake fluid won’t mix with mineral hydraulic oil',
+      dot4: 'Glycol brake fluid won’t mix with mineral hydraulic oil',
+      dot5: 'Silicone brake fluid doesn’t belong in a hydraulic system',
+      turbine: 'Ester engine oil swells the truck’s Buna-N seals',
+      veg: 'Vegetable-base fluid gums up a mineral-oil system',
+    },
+    off: {
+      mil5606: { pen: 0.2, note: '5606 is far thinner than the decal’s ISO 32 oil' },
+      mil83282: { pen: 0.12, note: '83282 is not the oil on the decal' },
+      aw46: { pen: 0.12, note: 'AW 46 is not the decal’s grade' },
+      atf: { pen: 0.15, note: 'ATF is not the oil on the decal' },
+    },
+  },
+  // glycol brake fluid on EPDM seals: DOT 3 and 4 mix; mineral oil swells EPDM, silicone won't mix
+  van: {
+    fits: ['dot3', 'dot4'],
+    harm: {
+      mil5606: 'Mineral hydraulic fluid swells the rubber seals in a DOT brake system',
+      mil83282: 'Hydrocarbon hydraulic fluid swells the rubber seals in a DOT brake system',
+      atf: 'ATF is mineral oil: it swells the rubber seals in a DOT brake system',
+      aw32: 'Mineral hydraulic oil swells the rubber seals in a DOT brake system',
+      aw46: 'Mineral hydraulic oil swells the rubber seals in a DOT brake system',
+      dot5: 'Silicone DOT 5 won’t mix with glycol DOT 3 or 4',
+      skydrol: 'Phosphate ester doesn’t belong in a DOT brake system',
+      turbine: 'Engine oil swells the rubber seals in a DOT brake system',
+      veg: 'Vegetable-base fluid doesn’t belong in a DOT brake system',
+    },
+    off: { dot3: { pen: 0.12, note: 'DOT 3 where the cap says DOT 4 only' } },
+  },
+};
+
+/** Safe in this system (right seals, it mixes)? */
+export const fits = (m: Pick<HydModel, 'system'>, f: FluidId) => SYSTEMS[m.system].fits.includes(f);
+/** What a fluid that doesn't fit does to this system. */
+export const harmOf = (m: Pick<HydModel, 'system'>, f: FluidId) => (m.system === 'aircraft' ? FLUIDS[f].harm : (SYSTEMS[m.system].harm[f] ?? 'Not this system'));
 
 /** The second line printed on a can from tier 3. From tier 4 the fire-resistant fluids read alike: only the spec tells them apart. */
 export function canKind(id: FluidId, tier: number): string {
@@ -86,8 +163,29 @@ export function canKind(id: FluidId, tier: number): string {
       return 'Turbine engine oil';
     case 'veg':
       return 'Hydraulic fluid · vegetable base';
+    case 'aw32':
+    case 'aw46':
+      return 'Hydraulic oil · anti-wear, petroleum';
+    case 'dot4':
+      return 'Brake fluid · glycol ether';
+    case 'dot5':
+      return 'Brake fluid · silicone';
+    case 'atf':
+      return 'Automatic transmission fluid';
   }
 }
+
+/** Where the bucket truck's lift circuit can leak: the base port fitting, the rigid tube from the holding valve, the rod gland, the hose into the holding valve. */
+export type LeakSpot = 'port' | 'tube' | 'gland' | 'hose';
+export const LEAK_SPOTS: LeakSpot[] = ['gland', 'tube', 'port', 'hose'];
+export const SPOT_NAME: Record<LeakSpot, string> = {
+  port: 'Base port O-ring',
+  tube: 'Rigid tube from the holding valve',
+  gland: 'Rod gland seal',
+  hose: 'Hose into the holding valve',
+};
+/** only a leak on the cylinder's load side (below the holding valve) lets a raised boom settle */
+export const LOAD_SIDE: LeakSpot[] = ['port', 'tube'];
 
 // ---------------------------------------------------------------------------
 // Model. Fluid volumes are in sight-glass heights (0 = bottom of the glass,
@@ -109,6 +207,24 @@ export type Precharge = {
 export type HydModel = {
   tier: number;
   teach: boolean;
+  /** the aircraft's brakes, the bucket truck's boom, the van's brakes */
+  system: HydSystem;
+  /** the fluid already in it (the colour in the glass) */
+  native: FluidId;
+  /** the level marks, [top, bottom]: FULL / ADD, or a car reservoir's MAX / MIN */
+  marks: [string, string];
+  /** a pressure gauge on the system (the van has none) */
+  gauge: boolean;
+  /** the placard's squawk line from tier 3 (none on an aircraft with nothing to bleed) */
+  squawk: string | null;
+  /**
+   * boom: where the lift circuit leaks (always on the load side), the spots
+   * that look oily without leaking (tier 3+), and how fast the raised boom
+   * loses oil there (glass heights per second)
+   */
+  leak: { at: LeakSpot; decoys: LeakSpot[]; rate: number } | null;
+  /** boom: the lift cylinder's holding pressure while the boom is up, psi */
+  holdPsi: number;
   /** fluids the servicing placard approves (5606 always, 83282 when listed) */
   approved: FluidId[];
   shelf: FluidId[];
@@ -170,12 +286,20 @@ export function prechargeAt(ref: number, refTemp: number, temp: number, unit: 'F
   return (ref * absTemp(temp, unit)) / absTemp(refTemp, unit);
 }
 
-/** Hydraulic pressure with `vf` of fluid in an accumulator charged to `p0` (Boyle; zero once it is empty). */
+/**
+ * Hydraulic pressure with `vf` of fluid in an accumulator charged to `p0`
+ * (Boyle; zero once it is empty). The bucket truck: the boom's weight on the
+ * lift cylinder while it is up (a little less as it settles), zero on its rest.
+ */
 export function hydPressure(m: HydModel, p0: number, vf: number): number {
+  if (m.system === 'boom') return vf > 1e-6 ? m.holdPsi * (0.86 + 0.14 * Math.min(1, vf / (m.vf0 || 1))) : 0;
+  if (m.system === 'van') return 0;
   return vf > 1e-6 ? (p0 * m.accVol) / (m.accVol - vf) : 0;
 }
 
-export function generateHydraulics(seed: number, tier: number, _tools: string[] = []): HydModel {
+/** `job` picks a crewmate's vehicle ('boom', 'van'); anything else is the aircraft's brakes. */
+export function generateHydraulics(seed: number, tier: number, _tools: string[] = [], job?: string): HydModel {
+  if (job === 'boom' || job === 'van') return generateVehicle(seed, tier, job);
   const t = clamp(Math.round(tier), 0, 5);
   const r = rng(hashSeed('hydraulics', seed, t));
   const teach = t <= 2;
@@ -239,6 +363,13 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
   return {
     tier: t,
     teach,
+    system: 'aircraft',
+    native: 'mil5606',
+    marks: ['FULL', 'ADD'],
+    gauge: true,
+    squawk: bleed ? 'SQUAWK: LH BRAKE SOFT, SPONGY' : null,
+    leak: null,
+    holdPsi: 0,
     approved,
     shelf,
     full,
@@ -259,6 +390,101 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
     bleed,
     placardFluid,
     placardStyle,
+  };
+}
+
+/**
+ * A crewmate's vehicle on the same bench. The bucket truck: the raised boom's
+ * cylinder holds `vf0` of oil out of the tank (lowering it returns that, as
+ * pumping the brakes empties an accumulator), and the leak loses oil while the
+ * boom is up. The van: nothing stored; the bleed runs off the pedal and the
+ * master cylinder's own reservoir.
+ */
+function generateVehicle(seed: number, tier: number, system: 'boom' | 'van'): HydModel {
+  const t = clamp(Math.round(tier), 0, 5);
+  const r = rng(hashSeed('hydraulics', system, seed, t));
+  const teach = t <= 2;
+  const full = 0.72;
+  const tol = [0.07, 0.06, 0.05, 0.045, 0.04, 0.035][t];
+  const common = {
+    tier: t,
+    teach,
+    system,
+    add: 0.36,
+    overflow: 1.04,
+    tol,
+    full,
+    accVol: 0.26,
+    maxPour: 0.09,
+    funnelLag: [0.1, 0.18, 0.25, 0.32, 0.36, 0.4][t],
+    precharge: null,
+    heat: 0,
+    placardStyle: 'prf' as PlacardStyle,
+  };
+  if (system === 'boom') {
+    let shelf: FluidId[];
+    if (t <= 1) shelf = ['aw32', 'mil5606', 'dot4'];
+    else if (t === 2) shelf = ['aw32', 'mil5606', 'dot4', 'skydrol'];
+    else shelf = ['aw32', 'aw46', 'mil5606', r.pick<FluidId>(['skydrol', 'dot4', 'atf'])];
+    if (t > 0) r.shuffle(shelf);
+    const at = r.pick<LeakSpot>(LOAD_SIDE);
+    // from tier 3 the other spots look oily too: the rod's normal film, an old dry weep upstream
+    const decoys = t >= 3 ? LEAK_SPOTS.filter((x) => x !== at && x !== (at === 'port' ? 'tube' : 'port')) : [];
+    // the boom stopped part way up: its cylinder holds this much oil out of the tank
+    const vf0 = Math.round(r.range(0.14, 0.2) * 1000) / 1000;
+    const trueLevel = full - r.range(0.16, 0.24);
+    return {
+      ...common,
+      native: 'aw32',
+      marks: ['FULL', 'ADD'],
+      gauge: true,
+      squawk: 'SQUAWK: BOOM CREEPS DOWN, OIL AT THE LIFT CYL.',
+      leak: { at, decoys, rate: 0.0012 },
+      holdPsi: r.pick([1450, 1600, 1750]),
+      approved: ['aw32'],
+      shelf,
+      outlet: 0.06,
+      level0: trueLevel - vf0,
+      sysPsi: 2000,
+      p0: 0,
+      vf0,
+      // one press of the lowering lever lets the boom down a sixth of the way
+      strokeVol: vf0 / 6,
+      bleed: null,
+      placardFluid: 'ISO VG 32 AW HYDRAULIC OIL',
+    };
+  }
+  // the van: DOT 4 on the cap from tier 3 half the time (then DOT 3 is the near miss), else DOT 3 or 4
+  const dot4only = t >= 3 && r.chance(0.5);
+  let shelf: FluidId[];
+  if (t <= 1) shelf = ['dot4', 'mil5606', 'atf'];
+  else if (t === 2) shelf = ['dot4', 'mil5606', 'atf', 'dot5'];
+  // a DOT-4-only cap puts DOT 3 on the shelf as the near miss
+  else shelf = dot4only ? ['dot3', 'dot4', 'mil5606', r.pick<FluidId>(['dot5', 'atf'])] : ['dot4', 'mil5606', 'dot5', 'atf'];
+  if (t > 0) r.shuffle(shelf);
+  const air = t <= 1 ? [3, 2, 1] : t === 2 ? [3, 2, 2, 1] : t === 3 ? [4, 3, 2, 1, 1] : [4, 3, 3, 2, 1, 1];
+  if (t >= 4 && r.chance(0.5)) air.splice(r.int(1, 3), 0, 2);
+  if (t >= 5) air.push(0, 1);
+  return {
+    ...common,
+    native: 'dot4',
+    marks: ['MAX', 'MIN'],
+    gauge: false,
+    squawk: 'SQUAWK: BRAKE PEDAL SOFT, SINKS',
+    leak: null,
+    holdPsi: 0,
+    approved: dot4only ? ['dot4'] : ['dot3', 'dot4'],
+    shelf,
+    // below this the master cylinder draws air instead of fluid
+    outlet: 0.12,
+    level0: full - r.range(0.12, 0.2),
+    sysPsi: 0,
+    p0: 0,
+    vf0: 0,
+    strokeVol: 0,
+    // each press through the open bleeder pushes a slug out of the master cylinder
+    bleed: { air, slugVol: 0.05, pumpVol: 0.05 },
+    placardFluid: dot4only ? 'DOT 4 ONLY' : 'DOT 3 OR DOT 4',
   };
 }
 
@@ -328,8 +554,29 @@ function flush(m: HydModel, s: HydState, dv: number, air: boolean, zero: boolean
   return { kind: 'flush', dv, bubbles, air, weak, zero };
 }
 
-/** One press of the brake pedal (power brakes: it only meters accumulator pressure). */
+/**
+ * One press of the brake pedal (power brakes: it only meters accumulator
+ * pressure), or of the bucket truck's lowering lever (the boom comes down a
+ * step and its oil goes back to the tank). The van's pedal works a master
+ * cylinder: with the bleeder open it pushes a slug out of the reservoir, and a
+ * reservoir run down to the outlet lets the master cylinder draw air.
+ */
 export function pedalStroke(m: HydModel, s: HydState): Flow {
+  if (m.system === 'van') {
+    if (!m.bleed || !s.bleederOpen) return { kind: 'idle' };
+    const want = m.bleed.slugVol;
+    if (s.dry && s.res > m.outlet + want) s.dry = false;
+    const take = Math.min(want, Math.max(0, s.res - m.outlet));
+    s.res -= take;
+    let air = false;
+    if (take < want - 1e-6) {
+      air = true;
+      s.airQ.unshift(...(s.dry ? [2] : [3, 2, 2]));
+      if (!s.dry) s.ranDry++;
+      s.dry = true;
+    }
+    return flush(m, s, take, air, false);
+  }
   if (s.vf <= 1e-6) return { kind: 'idle' };
   if (m.bleed && s.bleederOpen) {
     const dv = Math.min(s.vf, m.bleed.slugVol);
@@ -402,6 +649,12 @@ export type HydRun = {
   bleederOpen: boolean;
   /** tier 0: incompatible cans picked (blocked) */
   wrongPicks: number;
+  /** boom: the leaking seal was replaced */
+  leakFixed: boolean;
+  /** boom: seals replaced where nothing leaked */
+  wrongFix: number;
+  /** boom: the lift circuit was opened with the boom up (it dropped) */
+  underLoad: boolean;
 };
 
 export function emptyRun(m: HydModel): HydRun {
@@ -422,6 +675,9 @@ export function emptyRun(m: HydModel): HydRun {
     ranDry: 0,
     bleederOpen: false,
     wrongPicks: 0,
+    leakFixed: false,
+    wrongFix: 0,
+    underLoad: false,
   };
 }
 
@@ -459,14 +715,17 @@ export function bleedCredit(m: HydModel, r: HydRun): number {
   return clamp(c, 0, 1);
 }
 
-export function weights(tier: number) {
-  if (tier <= 2) return { level: 0.55, depress: 0.25, cap: 0.2, pre: 0, bleed: 0 };
-  if (tier === 3) return { level: 0.38, depress: 0.16, cap: 0.14, pre: 0.32, bleed: 0 };
-  return { level: 0.28, depress: 0.12, cap: 0.1, pre: 0.25, bleed: 0.25 };
+export function weights(tier: number, system: HydSystem = 'aircraft') {
+  // the truck: the leak fixed (the squawk), then the service; the van: the bleed (the squawk), then the service
+  if (system === 'boom') return { level: 0.35, depress: 0.15, cap: 0.1, pre: 0, bleed: 0, fix: 0.4 };
+  if (system === 'van') return { level: 0.3, depress: 0, cap: 0.15, pre: 0, bleed: 0.55, fix: 0 };
+  if (tier <= 2) return { level: 0.55, depress: 0.25, cap: 0.2, pre: 0, bleed: 0, fix: 0 };
+  if (tier === 3) return { level: 0.38, depress: 0.16, cap: 0.14, pre: 0.32, bleed: 0, fix: 0 };
+  return { level: 0.28, depress: 0.12, cap: 0.1, pre: 0.25, bleed: 0.25, fix: 0 };
 }
 
 export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summary: string; notes: string[] } {
-  const w = weights(m.tier);
+  const w = weights(m.tier, m.system);
   const total = Object.values(r.poured).reduce((a, b) => a + (b ?? 0), 0);
   const serviced = total > 0.005;
   const lc = levelCredit(m, r.level);
@@ -475,10 +734,14 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
   const cap = r.capOn && serviced ? 1 : 0;
   const pc = prechargeCredit(m, r.precharge);
   const bc = bleedCredit(m, r);
-  let s = w.level * lc + w.depress * depress + w.cap * cap + w.pre * pc + w.bleed * bc;
+  let s = w.level * lc + w.depress * depress + w.cap * cap + w.pre * pc + w.bleed * bc + w.fix * (r.leakFixed ? 1 : 0);
 
-  const unapproved = (r.poured.mil83282 ?? 0) > 0.005 && !m.approved.includes('mil83282');
-  if (unapproved) s -= 0.12;
+  // a fluid that is safe in the system but not the placarded one (83282 unplacarded, 5606 in the truck, DOT 3 on a DOT-4-only cap)
+  const offs = (Object.keys(r.poured) as FluidId[]).filter((f) => (r.poured[f] ?? 0) > 0.005 && fits(m, f) && !m.approved.includes(f) && SYSTEMS[m.system].off[f]);
+  const unapproved = offs.length > 0;
+  for (const f of offs) s -= SYSTEMS[m.system].off[f]!.pen;
+  // the boom: a seal replaced where nothing leaked, and the boom let down by opening its circuit
+  s -= 0.08 * r.wrongFix;
   if (r.shopAir) s -= 0.2;
   if (r.n2UnderPressure && m.precharge) s -= 0.08;
   s -= Math.min(0.18, 0.06 * r.wrongPicks);
@@ -489,7 +752,12 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
   const notBled = unbled(m, r);
   // and a reservoir nowhere near FULL is not serviced, however well the rest went
   const levelOut = lc === 0;
-  if (pcOut || notBled || levelOut) s = Math.min(s, 0.55);
+  // the squawk: a boom that still creeps is not fixed, however well it was topped up
+  const stillLeaks = !!m.leak && !r.leakFixed;
+  // the van's only brake bleeder left open: the pedal goes to the floor on the road
+  const vanOpen = m.system === 'van' && r.bleederOpen;
+  if (pcOut || notBled || levelOut || stillLeaks || vanOpen) s = Math.min(s, 0.55);
+  if (r.underLoad) s = Math.min(s, 0.3);
   if (r.airFrac > 0.05) s = Math.min(s, 0.5);
   if (r.oxygen) s = Math.min(s, 0.2);
   if (r.contaminated) s = Math.min(s, 0.3);
@@ -499,7 +767,9 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
   const faults: [number, string][] = [];
   const goods: string[] = [];
   const fault = (sev: number, text: string) => faults.push([sev, text]);
-  if (r.contaminated) fault(100, `${FLUIDS[r.contaminated].name} in a 5606 system: contaminated`);
+  const sysName = m.system === 'van' ? 'the van’s DOT brake system' : m.system === 'boom' ? 'the truck’s hydraulic oil' : 'a 5606 system';
+  if (r.contaminated) fault(100, `${FLUIDS[r.contaminated].name} in ${sysName}: contaminated`);
+  if (r.underLoad) fault(95, 'lift circuit opened with the boom up: it dropped');
   if (r.oxygen) fault(100, 'oxygen in the accumulator: fire hazard');
   const live = !r.contaminated && !r.oxygen;
   const err = r.level - m.full;
@@ -513,6 +783,11 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
       if (pc === 1) goods.push(`precharge ${p} psi`);
       else fault(pcOut ? 80 : 40, `precharge ${p} psi, wanted ${Math.round(m.precharge.target)}${pcOut ? ' (out of limits)' : ''}`);
     }
+    if (m.leak) {
+      if (r.leakFixed) goods.push('leak fixed');
+      else fault(85, 'boom still creeps: the leak isn’t fixed');
+      if (r.wrongFix) fault(35, `${r.wrongFix} good seal${r.wrongFix > 1 ? 's' : ''} replaced`);
+    }
     if (m.bleed) {
       if (r.bleedStrokes === 0) fault(80, 'brake not bled');
       else if (r.airLeft > 0) fault(notBled ? 80 : 45, 'air left in the brake');
@@ -524,7 +799,7 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
   }
   if (r.airFrac > 0.05) fault(90, 'moist air in the accumulator');
   if (r.shopAir) fault(50, 'shop air is not nitrogen');
-  if (unapproved) fault(40, '83282 not on this placard');
+  if (unapproved) for (const f of offs) fault(40, SYSTEMS[m.system].off[f]!.note);
   if (r.n2UnderPressure && m.precharge) fault(30, 'precharge worked under pressure');
   if (r.wrongPicks) fault(20, `${r.wrongPicks} wrong can`);
   const notes = [...faults.sort((a, b) => b[0] - a[0]).map((f) => f[1]), ...goods];
@@ -535,7 +810,7 @@ export function scoreHydraulics(m: HydModel, r: HydRun): { score: number; summar
 // Puzzle
 // ---------------------------------------------------------------------------
 
-type Scene = 'res' | 'acc' | 'brake';
+type Scene = 'res' | 'acc' | 'brake' | 'cyl';
 type Gas = 'n2' | 'air' | 'o2';
 type R = { x: number; y: number; w: number; h: number };
 type Grip = { kind: 'pedal' | 'pump' | 'syringe' | 'charge' | 'vent' } | { kind: 'can'; x0: number; y0: number; t0: number; base: number; moved: boolean };
@@ -546,7 +821,7 @@ const GASES: { id: Gas; name: string; sub: string; body: string; shoulder: strin
   { id: 'o2', name: 'OXYGEN', sub: 'O₂ · 1,850 psi', body: '#3f7d4e', shoulder: '#2f5f3b' },
 ];
 const LABEL_TINTS = ['#e9dfc8', '#d7e0e3', '#e6d0a6', '#dde3d6'];
-const SCENE_NAME: Record<Scene, string> = { res: 'Reservoir', acc: 'Accum.', brake: 'Brake' };
+const SCENE_NAME: Record<Scene, string> = { res: 'Reservoir', acc: 'Accum.', brake: 'Brake', cyl: 'Cylinder' };
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 const inR = (x: number, y: number, r: R, pad = 0) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
@@ -561,7 +836,7 @@ export const hydraulics: PuzzleDef = {
   term: 'Accumulator: nitrogen-charged tank that stores hydraulic pressure. Discharge it before checking fluid.',
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 12,
   mount(host, p) {
-    const m = generateHydraulics(p.seed, p.tier, p.tools);
+    const m = generateHydraulics(p.seed, p.tier, p.tools, p.context?.job);
     const blind = !!p.blind;
     // the step banner ticks itself off (a verdict on the level): blind, it is a static work card
     const tracker = m.teach && !blind;
@@ -570,10 +845,15 @@ export const hydraulics: PuzzleDef = {
     const st = stage(host.el);
     const { ctx } = st;
     const scenes: Scene[] = ['res'];
+    if (m.leak) scenes.push('cyl');
     if (m.precharge) scenes.push('acc');
     if (m.bleed) scenes.push('brake');
     let scene: Scene = 'res';
     const aircraft = p.context?.assetName ?? 'Light twin';
+    const boom = m.system === 'boom';
+    const van = m.system === 'van';
+    /** the placard's first line: whose system this is */
+    const whose = boom ? 'BUCKET TRUCK · HYDRAULIC OIL' : van ? 'COMPANY VAN · BRAKE FLUID' : `${aircraft.toUpperCase()} · HYDRAULIC SERVICE`;
 
     // --- physical state ---
     // reservoir level, accumulator fluid, gas charge, bleeder and brake-line air
@@ -604,6 +884,14 @@ export const hydraulics: PuzzleDef = {
     let oxygen = false;
     let contaminated: FluidId | null = null;
     let wrongPicks = 0;
+    // the bucket truck's lift circuit
+    let leakFixed = false;
+    let wrongFix = 0;
+    let underLoad = false;
+    let pickSpot: LeakSpot | null = null;
+    const fixedAt = new Map<LeakSpot, number>(); // spot → when its new seal went in
+    let lost = 0; // oil on the ground under the leak
+    let dropT = -9; // the boom came down hard
     let finished = false;
     let flourishT = -1;
     let clock = 0;
@@ -635,28 +923,46 @@ export const hydraulics: PuzzleDef = {
       return Math.sin((clock - t0) * 60) * 5 * (1 - (clock - t0) / 0.35);
     };
     const say = (text: string, alert = false) => (toast = { text, t: clock, alert });
-    const approvedName = m.approved.length > 1 ? '5606 or 83282' : 'MIL-PRF-5606';
+    const approvedName = van ? (m.approved.length > 1 ? 'DOT 3 or 4' : 'DOT 4') : boom ? 'AW 32 oil' : m.approved.length > 1 ? '5606 or 83282' : 'MIL-PRF-5606';
     const levelOk = () => Math.abs(sys.res + sys.vf - m.full) <= m.tol;
 
     // --- teaching steps (tiers 0-2) ---
-    const steps = () => [
-      { text: 'Pump the brakes to 0 psi', done: sys.vf <= 0 },
-      { text: 'Take the filler cap off', done: !capOn || (levelOk() && sys.vf <= 0) },
-      {
-        text: sys.vf <= 0 && sys.res > m.full + m.tol ? 'Too full: syringe it down to FULL' : `Pour ${approvedName} up to FULL`,
-        done: levelOk() && sys.vf <= 0,
-      },
-      { text: 'Refit the filler cap', done: levelOk() && sys.vf <= 0 && capOn },
-      { text: 'Sign off', done: false },
-    ];
+    type StepId = 'discharge' | 'fix' | 'bleed' | 'close' | 'capOff' | 'pour' | 'capOn' | 'sign';
+    const bled = () => !!m.bleed && sys.bleedStrokes > 0 && sys.airQ.reduce((a, b) => a + b, 0) === 0;
+    const steps = (): { id: StepId; text: string; done: boolean }[] => {
+      const topped = levelOk() && sys.vf <= 0;
+      const pour = {
+        id: 'pour' as const,
+        text: sys.vf <= 0 && sys.res > m.full + m.tol ? `Too full: syringe it down to ${m.marks[0]}` : `Pour ${approvedName} up to ${m.marks[0]}`,
+        done: topped,
+      };
+      if (van)
+        return [
+          { id: 'bleed', text: 'Brake tab: bleed until no bubbles, never below MIN', done: bled() },
+          { id: 'close', text: 'Close the bleeder', done: bled() && !sys.bleederOpen },
+          { id: 'pour', text: `Cap off, top up with ${approvedName} to MAX`, done: bled() && !sys.bleederOpen && topped },
+          { id: 'capOn', text: 'Refit the reservoir cap', done: bled() && !sys.bleederOpen && topped && capOn },
+          { id: 'sign', text: 'Sign off', done: false },
+        ];
+      return [
+        { id: 'discharge', text: boom ? 'Lower the boom onto its rest' : 'Pump the brakes to 0 psi', done: sys.vf <= 0 },
+        ...(boom ? [{ id: 'fix' as const, text: 'Cylinder tab: replace the leaking seal', done: leakFixed }] : []),
+        { id: 'capOff', text: 'Take the filler cap off', done: !capOn || topped },
+        pour,
+        { id: 'capOn', text: 'Refit the filler cap', done: topped && capOn },
+        { id: 'sign', text: 'Sign off', done: false },
+      ];
+    };
     const curStep = () => steps().findIndex((s) => !s.done);
+    /** the current teaching step's id (tier 0 rings the control for it) */
+    const curId = () => steps()[Math.max(0, curStep())]?.id;
 
     const status = () => {
       let s: string;
       if (tracker) {
         const k = curStep();
-        s = `Step ${k + 1}/5 · ${steps()[k].text}`;
-      } else s = `Hyd ${fmt(hydPsi())} psi`;
+        s = `Step ${k + 1}/${steps().length} · ${steps()[k].text}`;
+      } else s = van ? 'Company van · brakes' : boom ? `Lift cyl ${fmt(hydPsi())} psi` : `Hyd ${fmt(hydPsi())} psi`;
       if (s !== lastStatus) {
         lastStatus = s;
         host.status(s);
@@ -669,9 +975,10 @@ export const hydraulics: PuzzleDef = {
       const w = st.w;
       const h = st.h;
       const pad = 12;
-      const extra = m.teach ? 1 : 1 + (m.precharge ? 1 : 0) + (m.bleed ? 1 : 0);
+      const extra = m.teach ? 1 : 1 + (m.precharge ? 1 : 0) + (m.squawk ? 1 : 0);
       const headH = Math.max(88, 46 + 17 * extra);
-      const head: R = { x: pad, y: 8, w: w - pad * 2 - 100, h: headH };
+      // the van has no pressure gauge: its placard takes the whole width
+      const head: R = { x: pad, y: 8, w: w - pad * 2 - (m.gauge ? 100 : 0), h: headH };
       const gauge = { cx: w - pad - 46, cy: 8 + headH / 2, r: 40 };
       const bar: R = { x: pad, y: h - 58, w: w - pad * 2, h: 48 };
       const top = head.y + head.h + 10;
@@ -759,6 +1066,53 @@ export const hydraulics: PuzzleDef = {
       return { glass, wheel, cal, bleeder, wrench, jar, pedalR, pumpR };
     };
 
+    /**
+     * The bucket truck's lift circuit, side on: the boom from its heel pin on
+     * the turntable post, out to the left; the lift cylinder from its base pin
+     * up to the boom; the holding valve on the barrel with a rigid tube down to
+     * the base port and the hose in from the control valve; the boom rest (a
+     * post with a cradle) under where the stowed boom lies.
+     */
+    const cylGeo = (g: G) => {
+      const x0 = g.pad;
+      const x1 = g.w - g.pad;
+      const top = g.work.y;
+      const bottom = g.bar.y - 10;
+      const H = bottom - top;
+      const deck = bottom - 58;
+      // the turntable's heel pin up on its pedestal at the back of the bed
+      const heel = { x: x1 - 34, y: deck - clamp(H * 0.5, 150, 320) };
+      const L1 = Math.min((x1 - x0) * 0.62, 260);
+      const base = { x: heel.x - Math.min((x1 - x0) * 0.28, 110), y: deck - 4 };
+      const at = (k: number) => {
+        const ang = lerp(0.1, 0.6, k);
+        const dir = { x: -Math.cos(ang), y: -Math.sin(ang) };
+        return { dir, pin: { x: heel.x + dir.x * L1, y: heel.y + dir.y * L1 } };
+      };
+      const k = m.vf0 > 0 ? clamp(sys.vf / m.vf0, 0, 1) : 0;
+      const { dir, pin } = at(k);
+      const stowLen = Math.hypot(at(0).pin.x - base.x, at(0).pin.y - base.y);
+      const len = Math.hypot(pin.x - base.x, pin.y - base.y);
+      const u = { x: (pin.x - base.x) / len, y: (pin.y - base.y) / len };
+      // the side of the barrel away from the boom, where the holding valve is mounted
+      const n = { x: -u.y, y: u.x };
+      const barrel = stowLen - 16;
+      const along = (d: number, off = 0) => ({ x: base.x + u.x * d + n.x * off, y: base.y + u.y * d + n.y * off });
+      const block = along(barrel * 0.66, 15);
+      const spots: Record<LeakSpot, { x: number; y: number }> = {
+        port: along(22, 11),
+        tube: along(barrel * 0.36, 15),
+        gland: along(barrel, 0),
+        hose: { x: block.x + n.x * 22, y: block.y + n.y * 22 },
+      };
+      // the stowed boom lies on its rest here, a post on the cab roof
+      const restAt = { x: heel.x + at(0).dir.x * (L1 + 70), y: heel.y + at(0).dir.y * (L1 + 70) };
+      const cab: R = { x: x0 + 4, y: deck - Math.min(120, (deck - restAt.y) * 0.55), w: Math.min(104, (x1 - x0) * 0.3), h: 0 };
+      cab.h = deck - cab.y;
+      const button: R = { x: x1 - 176, y: bottom - 46, w: 176, h: 44 };
+      return { x0, x1, top, bottom, deck, heel, pin, base, dir, u, n, len, barrel, block, spots, restAt, cab, button, along };
+    };
+
     const barButtons = (g: G) => {
       const sign: R = scenes.length === 1 ? { x: g.w / 2 - 100, y: g.bar.y, w: 200, h: g.bar.h } : { x: g.bar.x + g.bar.w - 104, y: g.bar.y, w: 104, h: g.bar.h };
       const tabs: { scene: Scene; r: R }[] = [];
@@ -773,7 +1127,7 @@ export const hydraulics: PuzzleDef = {
     function pick(i: number) {
       if (held === i) return;
       const f = m.shelf[i];
-      if (m.tier === 0 && !FLUIDS[f].compatible) {
+      if (m.tier === 0 && !fits(m, f)) {
         // the tutorial stops you before the can is even open
         wrongPicks++;
         shake(`can${i}`);
@@ -785,8 +1139,9 @@ export const hydraulics: PuzzleDef = {
       tilt = 0;
       host.fx.tap();
       if (m.teach && !blind) {
-        if (!FLUIDS[f].compatible) say(`${FLUIDS[f].name}: ${FLUIDS[f].plain}. Not this system!`, true);
-        else if (!m.approved.includes(f)) say('83282: only if the placard lists it', true);
+        if (!fits(m, f)) say(`${FLUIDS[f].name}: ${FLUIDS[f].plain}. Not this system!`, true);
+        else if (!m.approved.includes(f))
+          say(boom ? `${FLUIDS[f].name}: not the oil on the decal` : van ? `${FLUIDS[f].name}: the cap says ${m.placardFluid.split(' · ')[0]}` : '83282: only if the placard lists it', true);
       }
     }
 
@@ -868,6 +1223,9 @@ export const hydraulics: PuzzleDef = {
       ranDry: sys.ranDry,
       bleederOpen: sys.bleederOpen,
       wrongPicks,
+      leakFixed,
+      wrongFix,
+      underLoad,
     });
     const makeResult = (): PuzzleResult => {
       const s = scoreHydraulics(m, run());
@@ -879,6 +1237,8 @@ export const hydraulics: PuzzleDef = {
         spilled: +spilled.toFixed(3),
         // what went wrong, for the hidden defect it leaves (DEFECT_RULES 'hydraulics:fluid')
         ...(contaminated ? { defect: 'fluid' } : {}),
+        system: m.system,
+        ...(m.leak ? { leakFixed, underLoad, wrongFix } : {}),
       });
     };
     function finishWith(ms?: number) {
@@ -917,7 +1277,8 @@ export const hydraulics: PuzzleDef = {
       }
       if (scene === 'res') {
         const rg = resGeo(g);
-        if (inR(x, y, rg.pedalR, 10)) return pressPedal();
+        // the aircraft's brake pedal, or the truck's lowering lever (the van's pedal is at the wheel)
+        if (!van && inR(x, y, rg.pedalR, 10)) return pressPedal();
         // the can in hand (drag to tilt, tap to put back)
         if (held >= 0 && inR(x, y, rg.canBox, 8)) return { kind: 'can', x0: x, y0: y, t0: performance.now(), base: tilt, moved: false };
         // filler cap: on the neck, or resting on the tank
@@ -999,10 +1360,31 @@ export const hydraulics: PuzzleDef = {
             return null;
           }
         }
+      } else if (scene === 'cyl') {
+        const cg = cylGeo(g);
+        if (pickSpot && inR(x, y, cg.button, 4)) {
+          replaceSeal(pickSpot);
+          return null;
+        }
+        let best: LeakSpot | null = null;
+        let bd = 30;
+        for (const k of LEAK_SPOTS) {
+          const d = Math.hypot(x - cg.spots[k].x, y - cg.spots[k].y);
+          if (d < bd) {
+            bd = d;
+            best = k;
+          }
+        }
+        if (best) {
+          pickSpot = pickSpot === best ? null : best;
+          host.fx.tap();
+        }
+        return null;
       } else if (scene === 'brake') {
         const bg = brakeGeo(g);
         if (inR(x, y, bg.pedalR, 8)) return pressPedal();
-        if (inR(x, y, bg.pumpR, 6)) {
+        // the van's brake is bled off its own pedal: no hand pump
+        if (!van && inR(x, y, bg.pumpR, 6)) {
           if (pump < 0.5) pumpArmed = true;
           pumpPress = true;
           return { kind: 'pump' };
@@ -1015,6 +1397,41 @@ export const hydraulics: PuzzleDef = {
       }
       return null;
     }
+    /**
+     * The bucket truck: a new seal (or tube, or hose) where the mechanic picked.
+     * Opened with the boom up, the load-side oil blows out and the boom comes
+     * down on its own weight. The world shows that; only an open job says why.
+     */
+    function replaceSeal(spot: LeakSpot) {
+      if (finished || fixedAt.has(spot)) return;
+      if (sys.vf > 1e-6) {
+        if (m.tier === 0) {
+          // the tutorial stops you before the fitting is cracked
+          shake('cyl');
+          nope();
+          say('Lower the boom onto its rest first', true);
+          return;
+        }
+        underLoad = true;
+        lost += sys.vf;
+        sys.vf = 0;
+        dropT = clock;
+        host.fx.thunk();
+        if (!blind) {
+          host.fx.fault();
+          say('The boom dropped: never open the lift circuit with it up', true);
+        }
+      }
+      fixedAt.set(spot, clock);
+      // the opened line's oil drains out before the new part goes in
+      sys.res = Math.max(0, sys.res - 0.015);
+      if (m.leak && spot === m.leak.at) leakFixed = true;
+      else wrongFix++;
+      host.fx.snap();
+      pickSpot = null;
+      status();
+    }
+
     function pressPedal(): Grip {
       if (pedal < 0.5) pedalArmed = true;
       pedalPress = true;
@@ -1110,7 +1527,7 @@ export const hydraulics: PuzzleDef = {
         sys.res += d;
         poured[funnelFluid] = (poured[funnelFluid] ?? 0) + d;
         if (sys.vf > 1e-6) sys.underPressure += d;
-        if (!FLUIDS[funnelFluid].compatible && (poured[funnelFluid] ?? 0) > 0.002) contaminate(funnelFluid);
+        if (!fits(m, funnelFluid) && (poured[funnelFluid] ?? 0) > 0.002) contaminate(funnelFluid);
       }
       if (holding('syringe') && !capOn) sys.res = Math.max(0, sys.res - 0.06 * dt);
       if (sys.res > m.overflow) {
@@ -1126,6 +1543,13 @@ export const hydraulics: PuzzleDef = {
           say('At FULL');
         }
         fullDing = ok;
+      }
+
+      // the bucket truck: while the boom is up, the leak lets it settle and the oil goes on the ground
+      if (m.leak && !leakFixed && sys.vf > 1e-6) {
+        const d = Math.min(sys.vf, m.leak.rate * dt);
+        sys.vf -= d;
+        lost += d;
       }
 
       // nitrogen
@@ -1175,9 +1599,10 @@ export const hydraulics: PuzzleDef = {
       const g = geo();
       backdrop(ctx, g.w, g.h);
       drawPlacard(g);
-      drawHydGauge(g);
+      if (m.gauge) drawHydGauge(g);
       if (scene === 'res') drawResScene(g);
       else if (scene === 'acc') drawAccScene(g);
+      else if (scene === 'cyl') drawCylScene(g);
       else drawBrakeScene(g);
       drawBar(g);
       if (toast && clock - toast.t < 2.2 && (blind || (!contaminated && !oxygen))) {
@@ -1208,7 +1633,7 @@ export const hydraulics: PuzzleDef = {
         ctx.fillStyle = C.rust;
         ctx.fill();
         label(ctx, contaminated ? 'CONTAMINATED' : 'STOP: OXYGEN', g.w / 2, g.h * 0.36 + 32, { size: 20, weight: 900, color: C.white });
-        const why = contaminated ? FLUIDS[contaminated].harm : 'Oxygen with hydraulic oil can explode';
+        const why = contaminated ? harmOf(m, contaminated) : 'Oxygen with hydraulic oil can explode';
         fitLabel(ctx, why, g.w / 2, g.h * 0.36 + 62, g.w - 80, { size: 13, weight: 700, color: C.white });
         fitLabel(ctx, contaminated ? 'Drain, flush, replace the seals.' : 'Charge accumulators with dry nitrogen only.', g.w / 2, g.h * 0.36 + 82, g.w - 80, {
           size: 12,
@@ -1242,28 +1667,36 @@ export const hydraulics: PuzzleDef = {
       }
       const x = r.x + 12;
       const mw = r.w - 22;
-      fitLabel(ctx, `${aircraft.toUpperCase()} · HYDRAULIC SERVICE`, x, r.y + 15, mw, { size: 9.5, weight: 800, color: C.inkSoft, align: 'left' });
-      fitLabel(ctx, `FLUID  ${m.placardFluid}`, x, r.y + 33, mw, { size: 13, weight: 900, color: C.ink, align: 'left' });
+      fitLabel(ctx, whose, x, r.y + 15, mw, { size: 9.5, weight: 800, color: C.inkSoft, align: 'left' });
+      fitLabel(ctx, `${boom ? 'OIL' : 'FLUID'}  ${m.placardFluid}`, x, r.y + 33, mw, { size: 13, weight: 900, color: C.ink, align: 'left' });
       let y = r.y + 52;
       if (m.teach) {
-        const txt = m.approved.length > 1 ? 'Either red fluid is fine · never Skydrol (purple)' : 'Red mineral-base fluid · never Skydrol (purple)';
+        const txt = boom
+          ? 'Amber anti-wear oil · not aviation 5606'
+          : van
+            ? 'Glycol brake fluid · never 5606 or ATF (mineral)'
+            : m.approved.length > 1
+              ? 'Either red fluid is fine · never Skydrol (purple)'
+              : 'Red mineral-base fluid · never Skydrol (purple)';
         roundRect(ctx, x - 4, y - 9, mw + 6, 20, 10);
         ctx.fillStyle = C.sea;
         ctx.fill();
         fitLabel(ctx, txt, x + 4, y + 1, mw - 8, { size: 10.5, weight: 800, color: C.white, align: 'left' });
         y += 19;
-        fitLabel(ctx, 'SERVICE DEPRESSURIZED · FILL TO FULL', x, y + 2, mw, { size: 10, weight: 800, color: C.ink, align: 'left' });
+        const cond = boom ? 'CHECK WITH THE BOOM STOWED · FILL TO FULL' : van ? 'FROM A SEALED CONTAINER · FILL TO MAX' : 'SERVICE DEPRESSURIZED · FILL TO FULL';
+        fitLabel(ctx, cond, x, y + 2, mw, { size: 10, weight: 800, color: C.ink, align: 'left' });
       } else {
         // the condition the FULL mark is read at, as real placards state it (not a hint:
         // you still have to know how to discharge it and why the glass reads low)
-        fitLabel(ctx, 'FILL TO FULL · HYD PRESS 0, ACCUM DISCHARGED', x, y, mw, { size: 10.5, weight: 800, color: C.ink, align: 'left' });
+        const cond = boom ? 'CHECK LEVEL WITH BOOM STOWED · FILL TO FULL' : van ? 'CLEAN CAP BEFORE REMOVING · FILL TO MAX' : 'FILL TO FULL · HYD PRESS 0, ACCUM DISCHARGED';
+        fitLabel(ctx, cond, x, y, mw, { size: 10.5, weight: 800, color: C.ink, align: 'left' });
         y += 17;
         if (m.precharge) {
           const pc = m.precharge;
           fitLabel(ctx, `ACCUMULATOR N₂ ${fmt(pc.ref)} PSI @ ${pc.refTemp}°${pc.unit}`, x, y, mw, { size: 10.5, weight: 800, color: C.ink, align: 'left' });
           y += 17;
         }
-        if (m.bleed) fitLabel(ctx, 'SQUAWK: LH BRAKE SOFT, SPONGY', x, y, mw, { size: 10.5, weight: 900, color: C.rust, align: 'left' });
+        if (m.squawk) fitLabel(ctx, m.squawk, x, y, mw, { size: 10.5, weight: 900, color: C.rust, align: 'left' });
       }
     }
 
@@ -1312,7 +1745,7 @@ export const hydraulics: PuzzleDef = {
     function drawHydGauge(g: G) {
       const { cx, cy, r } = g.gauge;
       dial(cx, cy, r, hydShown, 2000, { major: 500, minor: 100 });
-      label(ctx, 'HYD PSI', cx, cy - r * 0.4, { size: 8.5, weight: 900, color: C.inkSoft });
+      label(ctx, boom ? 'LIFT PSI' : 'HYD PSI', cx, cy - r * 0.4, { size: 8.5, weight: 900, color: C.inkSoft });
       label(ctx, fmt(hydShown), cx, cy + r * 0.62, { size: 12, weight: 900, color: C.ink });
       if (clock - zeroT < 0.5 && !blind) {
         ctx.strokeStyle = C.palm;
@@ -1394,8 +1827,8 @@ export const hydraulics: PuzzleDef = {
         ctx.setLineDash([]);
       }
       for (const [lv, name] of [
-        [m.full, 'FULL'],
-        [m.add, 'ADD'],
+        [m.full, m.marks[0]],
+        [m.add, m.marks[1]],
       ] as const) {
         const y = glassY(r, lv);
         ctx.strokeStyle = C.ink;
@@ -1409,7 +1842,7 @@ export const hydraulics: PuzzleDef = {
       }
     }
 
-    const fluidColor = () => FLUIDS.mil5606.color;
+    const fluidColor = () => FLUIDS[m.native].color;
 
     function drawResScene(g: G) {
       const rg = resGeo(g);
@@ -1425,19 +1858,21 @@ export const hydraulics: PuzzleDef = {
       ctx.moveTo(tank.x + 26, tank.y + tank.h - 2);
       ctx.lineTo(tank.x + 26, wk.y + wk.h + 4);
       ctx.stroke();
-      // return line from the brake valve
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(tank.x + tank.w - 4, rg.pedalR.y + 4);
-      ctx.lineTo(rg.pedalR.x, rg.pedalR.y + 4);
-      ctx.stroke();
+      // return line from the brake valve (the truck: from the boom's control valve); the van's is under the hood
+      if (!van) {
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(tank.x + tank.w - 4, rg.pedalR.y + 4);
+        ctx.lineTo(rg.pedalR.x, rg.pedalR.y + 4);
+        ctx.stroke();
+      }
       ctx.lineCap = 'butt';
 
-      // tank
+      // tank (the van's is the master cylinder's translucent plastic reservoir)
       const tg = ctx.createLinearGradient(tank.x, 0, tank.x + tank.w, 0);
-      tg.addColorStop(0, '#8e999e');
-      tg.addColorStop(0.35, '#e3e7e9');
-      tg.addColorStop(1, '#87939a');
+      tg.addColorStop(0, van ? '#c9c6b8' : '#8e999e');
+      tg.addColorStop(0.35, van ? '#f4f1e6' : '#e3e7e9');
+      tg.addColorStop(1, van ? '#bdb9aa' : '#87939a');
       roundRect(ctx, tank.x, tank.y, tank.w, tank.h, 16);
       ctx.fillStyle = tg;
       ctx.fill();
@@ -1456,7 +1891,7 @@ export const hydraulics: PuzzleDef = {
       marks(glass, 'right');
       if (m.teach && !blind && sys.vf > 0) {
         label(ctx, 'reads low', tank.x - 6, glassY(glass, sys.res), { size: 10.5, weight: 800, color: C.sea, align: 'right' });
-        label(ctx, 'under pressure', tank.x - 6, glassY(glass, sys.res) + 13, { size: 10.5, weight: 800, color: C.sea, align: 'right' });
+        label(ctx, boom ? 'boom raised' : 'under pressure', tank.x - 6, glassY(glass, sys.res) + 13, { size: 10.5, weight: 800, color: C.sea, align: 'right' });
       }
       if (m.tier <= 1 && !blind && sys.vf <= 0 && levelOk()) label(ctx, '✓', glass.x - 14, glassY(glass, m.full), { size: 16, weight: 900, color: C.palm });
 
@@ -1508,8 +1943,8 @@ export const hydraulics: PuzzleDef = {
         ctx.stroke();
       }
       if (m.tier === 0) {
-        const k = curStep();
-        if (k === 1 || k === 3) pulse(nk.x + nk.w / 2, nk.y - 7, 26);
+        const k = curId();
+        if (k === 'capOff' || k === 'capOn' || (k === 'pour' && capOn)) pulse(nk.x + nk.w / 2, nk.y - 7, 26);
       }
       // spill trail
       if (spilled > 0.001) {
@@ -1522,9 +1957,10 @@ export const hydraulics: PuzzleDef = {
         ctx.globalAlpha = 1;
       }
 
-      // pedal
-      drawPedal(rg.pedalR);
-      if (m.tier === 0 && curStep() === 0) pulse(rg.pedalR.x + rg.pedalR.w / 2, rg.pedalR.y + rg.pedalR.h * 0.62, 40);
+      // the brake pedal, or the truck's lowering lever (the van's pedal is at the wheel)
+      if (boom) drawLever(rg.pedalR);
+      else if (!van) drawPedal(rg.pedalR);
+      if (m.tier === 0 && curId() === 'discharge') pulse(rg.pedalR.x + rg.pedalR.w / 2, rg.pedalR.y + rg.pedalR.h * 0.62, 40);
 
       // syringe (draws off an overfill)
       drawSyringe(rg.syringe);
@@ -1585,8 +2021,13 @@ export const hydraulics: PuzzleDef = {
       ctx.globalAlpha = 1;
     }
 
-    /** blind: the procedure as printed on the work card (step 3 never turns into "Too full") */
-    const card = () => ['Pump the brakes to 0 psi', 'Take the filler cap off', `Pour ${approvedName} up to FULL`, 'Refit the filler cap', 'Sign off'];
+    /** blind: the procedure as printed on the work card (the pour step never turns into "Too full") */
+    const card = () =>
+      van
+        ? ['Brake tab: bleed until no bubbles, never below MIN', 'Close the bleeder', `Cap off, top up with ${approvedName} to MAX`, 'Refit the reservoir cap', 'Sign off']
+        : boom
+          ? ['Lower the boom onto its rest', 'Cylinder tab: replace the leaking seal', 'Take the filler cap off', `Pour ${approvedName} up to FULL`, 'Refit the filler cap', 'Sign off']
+          : ['Pump the brakes to 0 psi', 'Take the filler cap off', `Pour ${approvedName} up to FULL`, 'Refit the filler cap', 'Sign off'];
     function drawBanner(r: R) {
       // blind: nothing ticks itself off; the card steps through the procedure on its own
       const st = tracker ? steps() : card().map((text) => ({ text, done: false }));
@@ -1595,15 +2036,17 @@ export const hydraulics: PuzzleDef = {
       roundRect(ctx, r.x, r.y, r.w, r.h, r.h / 2);
       ctx.fillStyle = 'rgba(46,124,147,.12)';
       ctx.fill();
-      for (let i = 0; i < 5; i++) {
-        const cx = r.x + 16 + i * 17;
+      const gap = st.length > 5 ? 15 : 17;
+      for (let i = 0; i < st.length; i++) {
+        const cx = r.x + 16 + i * gap;
         ctx.fillStyle = st[i].done ? C.palm : i === k ? C.sea : 'rgba(31,42,48,.18)';
         ctx.beginPath();
         ctx.arc(cx, r.y + r.h / 2, 6.5, 0, Math.PI * 2);
         ctx.fill();
         label(ctx, st[i].done ? '✓' : String(i + 1), cx, r.y + r.h / 2 + 0.5, { size: 8.5, weight: 900, color: C.white });
       }
-      fitLabel(ctx, st[k].text, r.x + 104, r.y + r.h / 2 + 0.5, r.w - 112, { size: 12.5, weight: 800, color: C.seaDeep, align: 'left' });
+      const tx = r.x + 16 + (st.length - 1) * gap + 14;
+      fitLabel(ctx, st[k].text, tx, r.y + r.h / 2 + 0.5, r.w - (tx - r.x) - 8, { size: 12.5, weight: 800, color: C.seaDeep, align: 'left' });
     }
 
     function drawPedal(r: R) {
@@ -1641,6 +2084,275 @@ export const hydraulics: PuzzleDef = {
         ctx.stroke();
       }
       if (pedal === 0 && !finished) label(ctx, 'press', r.x + r.w / 2, py + r.h * 0.18, { size: 11, weight: 800, color: C.paper });
+    }
+
+    /** the bucket truck's boom control at the tank: one lever, pushed to let the boom down */
+    function drawLever(r: R) {
+      label(ctx, 'LOWER BOOM', r.x + r.w / 2, r.y - 14, { size: 10, weight: 900, color: C.inkSoft });
+      const bx = r.x + 8;
+      const by = r.y + r.h * 0.66;
+      // the control valve body with its ports
+      roundRect(ctx, bx, by, r.w - 16, r.h * 0.26, 6);
+      const vg = ctx.createLinearGradient(bx, 0, bx + r.w - 16, 0);
+      vg.addColorStop(0, '#6f7c82');
+      vg.addColorStop(0.4, '#c9d0d3');
+      vg.addColorStop(1, '#66737a');
+      ctx.fillStyle = vg;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(31,42,48,.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // the handle pivots on the valve spool and tips toward you as it is pushed
+      const pv = { x: r.x + r.w / 2, y: by + 2 };
+      const th = -Math.PI / 2 - ease.inOutCubic(pedal) * 0.5;
+      const L = r.h * 0.58;
+      const kx = pv.x + Math.cos(th) * L;
+      const ky = pv.y + Math.sin(th) * L;
+      ctx.strokeStyle = '#3b464b';
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pv.x, pv.y);
+      ctx.lineTo(kx, ky);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.fillStyle = C.ink;
+      ctx.beginPath();
+      ctx.arc(pv.x, pv.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = C.rust;
+      ctx.beginPath();
+      ctx.arc(kx, ky, 11, 0, Math.PI * 2);
+      ctx.fill();
+      if (pedal === 0 && !finished) label(ctx, 'press', r.x + r.w / 2, by + r.h * 0.13, { size: 11, weight: 800, color: C.paper });
+    }
+
+    /** the bucket truck's lift circuit, side on (cylGeo), with what the oil shows */
+    function drawCylScene(g: G) {
+      const cg = cylGeo(g);
+      const { deck, heel, pin, base, dir, u, barrel, block, spots, restAt } = cg;
+      const oil = FLUIDS.aw32.color;
+      const up = sys.vf > 1e-6;
+      const dropping = clock - dropT < 0.5;
+      const jolt = dropping && !p.reducedMotion ? Math.sin((clock - dropT) * 60) * 3 * (1 - (clock - dropT) / 0.5) : 0;
+      ctx.save();
+      ctx.translate(0, jolt);
+      // the truck bed and the turntable post
+      ctx.fillStyle = '#8e999e';
+      ctx.fillRect(cg.x0, deck, cg.x1 - cg.x0, 12);
+      ctx.fillStyle = 'rgba(31,42,48,.18)';
+      for (let x = cg.x0 + 6; x < cg.x1; x += 14) ctx.fillRect(x, deck + 3, 6, 2);
+      ctx.fillStyle = '#e8e2cf';
+      ctx.fillRect(heel.x - 14, heel.y, 28, deck - heel.y);
+      ctx.strokeStyle = 'rgba(31,42,48,.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(heel.x - 14, heel.y, 28, deck - heel.y);
+      // the cab, and the boom rest on its roof: a post and a cradle under where the stowed boom lies
+      const cab = cg.cab;
+      roundRect(ctx, cab.x, cab.y, cab.w, cab.h, 10);
+      ctx.fillStyle = '#e8e2cf';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(31,42,48,.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      roundRect(ctx, cab.x + 10, cab.y + 12, cab.w * 0.55, Math.min(40, cab.h * 0.35), 6);
+      ctx.fillStyle = '#9fc7d6';
+      ctx.fill();
+      ctx.fillStyle = C.elec;
+      ctx.fillRect(cab.x, cab.y + cab.h * 0.62, cab.w, 6);
+      ctx.fillStyle = '#56646b';
+      ctx.fillRect(restAt.x - 4, restAt.y + 10, 8, Math.max(0, cab.y - restAt.y - 10));
+      ctx.beginPath();
+      ctx.moveTo(restAt.x - 14, restAt.y + 2);
+      ctx.lineTo(restAt.x, restAt.y + 14);
+      ctx.lineTo(restAt.x + 14, restAt.y + 2);
+      ctx.strokeStyle = '#56646b';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      label(ctx, 'BOOM REST', restAt.x + 8, restAt.y + 22, { size: 9, weight: 900, color: C.inkSoft, align: 'left' });
+      // the boom, out to the left and off the bench
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = 'rgba(31,42,48,.5)';
+      ctx.lineWidth = 22;
+      ctx.beginPath();
+      ctx.moveTo(heel.x + 6 * -dir.x, heel.y + 6 * -dir.y);
+      ctx.lineTo(heel.x + dir.x * 600, heel.y + dir.y * 600);
+      ctx.stroke();
+      ctx.strokeStyle = '#efe8d4';
+      ctx.lineWidth = 19;
+      ctx.stroke();
+      ctx.strokeStyle = C.elec;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(heel.x + dir.x * 40, heel.y + dir.y * 40 + 3);
+      ctx.lineTo(heel.x + dir.x * 600, heel.y + dir.y * 600 + 3);
+      ctx.stroke();
+      // the lift cylinder: barrel from the base pin, chrome rod out to the boom
+      const gl = spots.gland;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#dfe4e6';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(gl.x, gl.y);
+      ctx.lineTo(pin.x, pin.y);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(31,42,48,.55)';
+      ctx.lineWidth = 20;
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.lineTo(gl.x, gl.y);
+      ctx.stroke();
+      ctx.strokeStyle = '#8e999e';
+      ctx.lineWidth = 17;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.35)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(base.x - u.y * 4, base.y + u.x * 4);
+      ctx.lineTo(gl.x - u.y * 4, gl.y + u.x * 4);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      // the holding valve on the barrel, the rigid tube down to the base port, the hose in from the control valve
+      const hoseEnd = spots.hose;
+      ctx.strokeStyle = '#23292c';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(hoseEnd.x, hoseEnd.y);
+      ctx.quadraticCurveTo(hoseEnd.x + 40, hoseEnd.y + 10, heel.x - 16, deck - 6);
+      ctx.stroke();
+      ctx.strokeStyle = '#b9c1c4';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(block.x, block.y);
+      ctx.lineTo(spots.tube.x, spots.tube.y);
+      ctx.lineTo(spots.port.x, spots.port.y);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.save();
+      ctx.translate(block.x, block.y);
+      ctx.rotate(Math.atan2(u.y, u.x));
+      roundRect(ctx, -13, -8, 26, 16, 3);
+      ctx.fillStyle = '#b8903f';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(31,42,48,.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+      // pins
+      for (const q of [heel, pin, base]) {
+        ctx.fillStyle = '#3b464b';
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      label(ctx, 'LIFT CYLINDER', base.x + u.x * barrel * 0.5 - 50, base.y + u.y * barrel * 0.5, { size: 9, weight: 900, color: C.inkSoft, align: 'right' });
+      label(ctx, 'HOLDING VALVE', block.x + 12, block.y - 27, { size: 9, weight: 900, color: C.inkSoft, align: 'left' });
+
+      // what the oil shows. The leak: wet and glistening, dripping while the boom's weight is on it.
+      // From tier 3: the rod's normal thin film, and an old dry weep upstream of the holding valve
+      if (m.leak) {
+        const lk = spots[m.leak.at];
+        const fresh = fixedAt.has(m.leak.at);
+        if (!fresh) {
+          ctx.fillStyle = oil;
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.ellipse(lk.x, lk.y + 5, 8, 11, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = 'rgba(255,255,255,.8)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(lk.x - 2, lk.y + 2, 4, -2.4, -1.2);
+          ctx.stroke();
+          if (up && !leakFixed) {
+            for (let i = 0; i < 3; i++) {
+              const fall = Math.max(10, deck - lk.y - 14);
+              const q = ((clock * 1.1 + i / 3) % 1) * fall;
+              ctx.fillStyle = oil;
+              ctx.beginPath();
+              ctx.ellipse(lk.x, lk.y + 14 + q, 2, 3, 0, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+          if (m.teach && !blind) label(ctx, 'fresh oil', lk.x - 12, lk.y + 20, { size: 10.5, weight: 800, color: C.seaDeep, align: 'right' });
+        }
+        // the puddle on the bed grows with what the leak has lost
+        if (lost > 0.001) {
+          ctx.fillStyle = shade(oil, -0.2);
+          ctx.globalAlpha = 0.75;
+          ctx.beginPath();
+          ctx.ellipse(lk.x, deck + 1, Math.min(60, 6 + lost * 260), Math.min(6, 2 + lost * 30), 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        for (const d of m.leak.decoys) {
+          const q = spots[d];
+          if (fixedAt.has(d)) continue;
+          if (d === 'gland') {
+            // the normal film a rod carries out of its wiper: shiny, not a drip
+            ctx.strokeStyle = shade(oil, 0.2);
+            ctx.globalAlpha = 0.55;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(q.x + u.x * 4, q.y + u.y * 4);
+            ctx.lineTo(q.x + u.x * 30, q.y + u.y * 30);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          } else {
+            // an old weep, dry and caked with dust
+            ctx.fillStyle = '#6b5a3a';
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.ellipse(q.x + 2, q.y + 3, 9, 6, 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = 'rgba(214,196,160,.8)';
+            for (let i = 0; i < 5; i++) ctx.fillRect(q.x - 5 + ((i * 7) % 11), q.y + ((i * 5) % 7), 1.6, 1.6);
+          }
+        }
+      }
+      // a part the mechanic replaced: clean and new
+      for (const [k] of fixedAt) {
+        const q = spots[k];
+        ctx.strokeStyle = '#1f2a30';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,.85)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 7, -2.6, -1.4);
+        ctx.stroke();
+      }
+      // the tap targets: every place the circuit could leak
+      for (const k of LEAK_SPOTS) {
+        const q = spots[k];
+        const on = pickSpot === k;
+        ctx.strokeStyle = on ? C.sea : 'rgba(31,42,48,.35)';
+        ctx.lineWidth = on ? 3 : 1.2;
+        ctx.setLineDash(on ? [] : [3, 3]);
+        ctx.beginPath();
+        ctx.arc(q.x + shakeX('cyl'), q.y, on ? 16 : 13, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (m.tier === 0 && curId() === 'fix' && m.leak && !pickSpot) pulse(spots[m.leak.at].x, spots[m.leak.at].y, 22);
+      ctx.restore();
+      // the chosen spot and the job on it
+      const b = cg.button;
+      const hint = pickSpot ? SPOT_NAME[pickSpot] : m.teach ? 'Tap the spot that is leaking' : 'Tap a fitting or seal';
+      fitLabel(ctx, hint, cg.x0 + 2, b.y + b.h / 2, b.x - cg.x0 - 10, { size: 12.5, weight: 800, color: pickSpot ? C.ink : C.inkSoft, align: 'left' });
+      if (pickSpot) {
+        const done = fixedAt.has(pickSpot);
+        roundRect(ctx, b.x, b.y, b.w, b.h, b.h / 2);
+        ctx.fillStyle = done ? 'rgba(31,42,48,.2)' : C.sea;
+        ctx.fill();
+        label(ctx, done ? 'New part fitted' : 'Replace it', b.x + b.w / 2, b.y + b.h / 2, { size: 14, weight: 800, color: C.white });
+        if (m.tier === 0 && !done) pulse(b.x + b.w / 2, b.y + b.h / 2, 48);
+      }
     }
 
     function drawHandPump(r: R) {
@@ -1849,7 +2561,7 @@ export const hydraulics: PuzzleDef = {
         ctx.translate(r.x + shakeX(`can${i}`), r.y + r.h - 2);
         drawCan(m.shelf[i], i, r.w, r.h - 8);
         ctx.restore();
-        if (m.tier === 0 && curStep() === 2 && held < 0 && m.approved.includes(m.shelf[i])) pulse(r.x + r.w / 2, r.y + r.h / 2, 30);
+        if (m.tier === 0 && curId() === 'pour' && held < 0 && m.approved.includes(m.shelf[i])) pulse(r.x + r.w / 2, r.y + r.h / 2, 30);
       });
     }
 
@@ -2105,7 +2817,7 @@ export const hydraulics: PuzzleDef = {
       const bg = brakeGeo(g);
       // reservoir glass (same reservoir, seen from the wheel well)
       const gl = bg.glass;
-      label(ctx, 'RESERVOIR', gl.x - 4, gl.y - 14, { size: 9.5, weight: 900, color: C.inkSoft, align: 'left' });
+      label(ctx, van ? 'MASTER CYL.' : 'RESERVOIR', gl.x - 4, gl.y - 14, { size: 9.5, weight: 900, color: C.inkSoft, align: 'left' });
       roundRect(ctx, gl.x - 5, gl.y - 6, gl.w + 10, gl.h + 12, 9);
       ctx.fillStyle = '#34444c';
       ctx.fill();
@@ -2273,7 +2985,8 @@ export const hydraulics: PuzzleDef = {
       label(ctx, 'tap the wrench', lx, ly + 16, { size: 10, weight: 700, color: C.inkSoft, align: 'center' });
 
       drawPedal(bg.pedalR);
-      drawHandPump(bg.pumpR);
+      if (!van) drawHandPump(bg.pumpR);
+      if (m.tier === 0 && curId() === 'bleed') pulse(bg.pedalR.x + bg.pedalR.w / 2, bg.pedalR.y + bg.pedalR.h * 0.62, 40);
     }
 
     function drawBar(g: G) {
@@ -2300,7 +3013,7 @@ export const hydraulics: PuzzleDef = {
       ctx.fillStyle = C.sea;
       ctx.fill();
       label(ctx, 'Sign off', s.x + s.w / 2, s.y + s.h / 2, { size: 15, weight: 800, color: C.white });
-      if (m.tier === 0 && curStep() === 4) pulse(s.x + s.w / 2, s.y + s.h / 2, 60);
+      if (m.tier === 0 && curId() === 'sign') pulse(s.x + s.w / 2, s.y + s.h / 2, 60);
     }
 
     return {

@@ -2,7 +2,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   FLUIDS,
+  LOAD_SIDE,
   PLACARD_NAMES,
+  SYSTEMS,
+  fits,
+  harmOf,
+  type FluidId,
   PRECHARGE_LIMIT,
   absTemp,
   accCapacity,
@@ -399,5 +404,153 @@ describe('hydraulics power brakes', () => {
     expect(g.kind === 'flush' && g.air).toBe(false);
     expect(s.dry).toBe(false);
     expect(s.ranDry).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A crewmate's vehicle on the same bench: the electrician's bucket truck (a
+// boom that creeps down) and the company van (a soft brake pedal).
+
+/** a clean vehicle job: the leak fixed with the boom stowed, the brake bled firm, the placarded fluid to the top mark, cap on */
+function cleanVehicle(m: HydModel, over: Partial<HydRun> = {}): HydRun {
+  return {
+    ...emptyRun(m),
+    poured: { [m.approved[m.approved.length - 1]]: 0.2 },
+    level: m.full,
+    vf: 0,
+    leakFixed: !!m.leak,
+    bleedStrokes: m.bleed ? m.bleed.air.length + 1 : 0,
+    airLeft: 0,
+    ...over,
+  };
+}
+
+describe('hydraulics: the bucket truck boom', () => {
+  it('its own system: AW 32 on the decal, 5606 on the shelf as the trap, a load-side leak, the boom raised as found', () => {
+    for (const t of tiers)
+      for (const s of seeds) {
+        const m = generateHydraulics(s, t, [], 'boom');
+        expect(m).toMatchObject({ system: 'boom', native: 'aw32', approved: ['aw32'], gauge: true, bleed: null, precharge: null });
+        expect(m.shelf).toContain('aw32');
+        expect(m.shelf).toContain('mil5606');
+        expect(new Set(m.shelf).size).toBe(m.shelf.length);
+        expect(LOAD_SIDE).toContain(m.leak!.at);
+        // decoys (tier 3+) are never on the load side: an old weep upstream of the holding valve, the rod's normal film
+        expect(m.leak!.decoys.every((d) => !LOAD_SIDE.includes(d))).toBe(true);
+        expect(m.leak!.decoys.length).toBe(t >= 3 ? 2 : 0);
+        expect(m.vf0).toBeGreaterThan(0.1);
+        expect(m.placardFluid).toMatch(/ISO VG 32 AW/);
+      }
+    expect(generateHydraulics(3, 2, [], 'boom')).toEqual(generateHydraulics(3, 2, [], 'boom'));
+    // the aircraft's brakes are unchanged by the new benches
+    expect(generateHydraulics(3, 2).system).toBe('aircraft');
+  });
+
+  it('what fits a mineral-oil system: 5606 mixes (a thin oil, a big deviation); brake fluid and Skydrol contaminate it', () => {
+    const m = generateHydraulics(1, 3, [], 'boom');
+    expect(fits(m, 'aw32') && fits(m, 'mil5606') && fits(m, 'aw46')).toBe(true);
+    for (const f of ['dot4', 'dot3', 'skydrol'] as FluidId[]) {
+      expect(fits(m, f), f).toBe(false);
+      expect(harmOf(m, f).length).toBeGreaterThan(10);
+    }
+    const thin = scoreHydraulics(m, cleanVehicle(m, { poured: { aw32: 0.1, mil5606: 0.1 } }));
+    expect(thin.score).toBeCloseTo(1 - SYSTEMS.boom.off.mil5606!.pen);
+    expect(thin.notes).toContain('5606 is far thinner than the decal’s ISO 32 oil');
+    const glycol = scoreHydraulics(m, cleanVehicle(m, { poured: { aw32: 0.1, dot4: 0.05 }, contaminated: 'dot4' }));
+    expect(glycol.score).toBeLessThanOrEqual(0.3);
+    expect(glycol.summary).toMatch(/DOT 4 in the truck’s hydraulic oil: contaminated/);
+  });
+
+  it('the squawk is the leak: topped up perfectly but the boom still creeps is not a pass; opened with the boom up is a hazard', () => {
+    const m = generateHydraulics(2, 2, [], 'boom');
+    expect(scoreHydraulics(m, cleanVehicle(m)).score).toBe(1);
+    const leaks = scoreHydraulics(m, cleanVehicle(m, { leakFixed: false }));
+    expect(leaks.score).toBeLessThan(PASS);
+    expect(leaks.summary).toMatch(/boom still creeps/);
+    const dropped = scoreHydraulics(m, cleanVehicle(m, { underLoad: true }));
+    expect(dropped.score).toBeLessThanOrEqual(0.3);
+    expect(dropped.summary).toMatch(/opened with the boom up/);
+    // a good seal replaced where nothing leaked costs a little
+    expect(scoreHydraulics(m, cleanVehicle(m, { wrongFix: 1 })).score).toBeCloseTo(0.92);
+    // topped up with the boom up: overfull once it is lowered
+    const up = scoreHydraulics(m, cleanVehicle(m, { underPressure: 0.1 }));
+    expect(up.score).toBeLessThan(scoreHydraulics(m, cleanVehicle(m)).score);
+  });
+
+  it('the lever lets the boom down a step at a time, its oil back into the tank; the lift pressure holds until it rests', () => {
+    const m = generateHydraulics(4, 2, [], 'boom');
+    const s = initState(m);
+    const up = hydPressure(m, s.p0, s.vf);
+    expect(up).toBeGreaterThan(1000);
+    const before = s.res + s.vf;
+    let n = 0;
+    while (s.vf > 0 && n < 20) {
+      pedalStroke(m, s);
+      n++;
+    }
+    expect(n).toBe(6);
+    expect(s.res).toBeCloseTo(before);
+    expect(hydPressure(m, s.p0, s.vf)).toBe(0);
+    // raised, the glass reads low: only stowed does it show what the tank holds
+    expect(m.level0).toBeLessThan(m.level0 + m.vf0);
+  });
+});
+
+describe('hydraulics: the company van brakes', () => {
+  it('its own system: DOT brake fluid on the cap, 5606 and ATF on the shelf as traps, air to bleed at every tier, no gauge', () => {
+    for (const t of tiers)
+      for (const s of seeds) {
+        const m = generateHydraulics(s, t, [], 'van');
+        expect(m).toMatchObject({ system: 'van', native: 'dot4', gauge: false, leak: null, vf0: 0, marks: ['MAX', 'MIN'] });
+        expect(m.approved).toContain('dot4');
+        expect(m.shelf).toContain('dot4');
+        expect(m.shelf).toContain('mil5606');
+        expect(new Set(m.shelf).size).toBe(m.shelf.length);
+        expect(m.bleed!.air.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+        expect(m.placardFluid).toMatch(/^DOT (3 OR DOT 4|4 ONLY)$/);
+      }
+    // DOT 4 only on some caps from tier 3: then DOT 3 is the near miss on the shelf
+    const only = seeds.map((s) => generateHydraulics(s, 3, [], 'van')).find((m) => m.approved.length === 1)!;
+    expect(only.shelf).toContain('dot3');
+  });
+
+  it('mineral fluid swells a DOT system’s seals; silicone DOT 5 does not mix; DOT 3 on a DOT-4-only cap is a deviation', () => {
+    const m = generateHydraulics(1, 2, [], 'van');
+    for (const f of ['mil5606', 'atf', 'dot5'] as FluidId[]) expect(fits(m, f), f).toBe(false);
+    expect(harmOf(m, 'mil5606')).toMatch(/swells the rubber seals in a DOT brake system/);
+    expect(harmOf(m, 'dot5')).toMatch(/won’t mix with glycol/);
+    const bad = scoreHydraulics(m, cleanVehicle(m, { contaminated: 'mil5606', poured: { mil5606: 0.1 } }));
+    expect(bad.score).toBeLessThanOrEqual(0.3);
+    expect(bad.summary).toMatch(/MIL-PRF-5606 in the van’s DOT brake system: contaminated/);
+    const only = seeds.map((s) => generateHydraulics(s, 3, [], 'van')).find((x) => x.approved.length === 1)!;
+    const d3 = scoreHydraulics(only, cleanVehicle(only, { poured: { dot3: 0.1 } }));
+    expect(d3.score).toBeCloseTo(1 - 0.12);
+    expect(d3.notes).toContain('DOT 3 where the cap says DOT 4 only');
+  });
+
+  it('the soft pedal is the squawk: not bled is not a pass; bled firm and topped to MAX is clean', () => {
+    const m = generateHydraulics(2, 2, [], 'van');
+    expect(scoreHydraulics(m, cleanVehicle(m)).score).toBe(1);
+    expect(scoreHydraulics(m, cleanVehicle(m, { bleedStrokes: 0, airLeft: 6 })).score).toBeLessThan(PASS);
+    expect(scoreHydraulics(m, cleanVehicle(m, { bleederOpen: true })).score).toBeLessThan(PASS);
+  });
+
+  it('the pedal pushes a slug out of the master cylinder through the open bleeder; run it down and it draws air', () => {
+    const m = generateHydraulics(3, 1, [], 'van');
+    const s = initState(m);
+    // bleeder closed: a closed system, the pedal moves nothing out
+    expect(pedalStroke(m, s).kind).toBe('idle');
+    s.bleederOpen = true;
+    const r0 = s.res;
+    const f = pedalStroke(m, s);
+    expect(f).toMatchObject({ kind: 'flush', air: false });
+    expect(s.res).toBeCloseTo(r0 - m.bleed!.slugVol);
+    expect(s.bleedStrokes).toBe(1);
+    // keep pumping without topping up: the reservoir reaches the outlet and air goes into the lines
+    let air = false;
+    for (let i = 0; i < 20 && !air; i++) air = (pedalStroke(m, s) as { air?: boolean }).air === true;
+    expect(air).toBe(true);
+    expect(s.ranDry).toBe(1);
+    expect(s.airQ.length).toBeGreaterThan(0);
   });
 });

@@ -53,14 +53,42 @@ export interface ReportInfo {
   key: string;
   /** who raised it (the trade that suffers while it is open) */
   by: Role;
-  /** cap: the reporter works at reduced capacity; leak: cash lost every resolved week */
-  effect: 'cap' | 'leak';
+  /**
+   * cap: the reporter works at reduced capacity; leak: cash lost every resolved
+   * week; gse: a ground power cart is tagged out (no GPU starts on it) until fixed
+   */
+  effect: 'cap' | 'leak' | 'gse';
   /** leak: USD lost per resolved week while open (0 for a cap) */
   amount: number;
   /** a fix that didn't hold: the week of the fix that failed */
   again?: number;
   /** leak that came back: what it cost while it only looked fixed (charged with the next resolved week) */
   owed?: number;
+  /** effect 'gse': the ground power cart it is about (GseCart.id) */
+  cart?: string;
+}
+
+/** What a look at a ground power cart's cable and plug shows (GSE bands in data.ts). */
+export type CableBand = 'good' | 'cracked' | 'pitted';
+
+/**
+ * A ground power cart (GPU): a battery cart the mechanic charges in the hangar,
+ * tows to a plane and hooks up for a start. It is on its charger or powering a
+ * plane, never both. Its cable wear is hidden: only an inspection shows it.
+ */
+export interface GseCart {
+  id: string;
+  name: string;
+  /** state of charge, 0..100 */
+  charge: number;
+  /** cable and plug wear, 0..100 (hidden; an inspection shows its band) */
+  wear: number;
+  /** the plane it is hooked up to, or null */
+  hookedTo: string | null;
+  /** plugged in on the hangar charger */
+  charging: boolean;
+  /** the last look at the cable: the mechanic's inspection, or the electrician's re-termination (`fixed`) */
+  inspected?: { week: number; band: CableBand; by: string; fixed?: boolean } | null;
 }
 
 /**
@@ -239,7 +267,7 @@ export interface WeekReport {
   nearMisses: number;
   cashStart: number;
   cashEnd: number;
-  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number; loan?: number; /** open 'leak' reports */ reports?: number };
+  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number; loan?: number; /** open 'leak' reports */ reports?: number; /** charging the ground power carts */ power?: number };
   housesBooked: number;
   housesRentable: number;
   partsDelivered: number;
@@ -352,10 +380,15 @@ export interface IslandState {
   project?: { tier: number; title: string; orders: Partial<Record<Role, string>> } | null;
   /** hidden defects from signed-off jobs (never shown until found or surfaced; resolved ones are removed) */
   defects?: Defect[];
+  /** ground power carts (older islands: none stored yet, read through gseCarts() for the default) */
+  gse?: GseCart[];
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */
-export const WEEK_BOUND = ['complete', 'approve', 'defer', 'counter', 'acceptCounter', 'rejectCounter', 'buyList', 'endTurn', 'tag', 'squawk'] as const;
+export const WEEK_BOUND = ['complete', 'approve', 'defer', 'counter', 'acceptCounter', 'rejectCounter', 'buyList', 'endTurn', 'tag', 'squawk', 'gse'] as const;
+
+/** What the mechanic can do with a ground power cart. */
+export type GseOp = 'charge' | 'unplug' | 'hook' | 'unhook' | 'inspect';
 
 export type Action =
   | { t: 'join'; uid: string; name: string; role: Role; reclaim?: boolean; key?: string; /** replace an absent player (explicit, confirmed in the UI) */ takeover?: boolean }
@@ -388,6 +421,8 @@ export type Action =
   | { t: 'story'; key: string; role: Role }
   | { t: 'tag'; role: Role; assetId: string; on: boolean; week?: number }
   | { t: 'squawk'; role: Role; assetId: string; kind: string; week?: number }
+  /** a ground power cart: on the charger, off it, hooked up to a plane (`assetId`), unhooked, or its cable inspected */
+  | { t: 'gse'; role: Role; cart: string; op: GseOp; assetId?: string; week?: number }
   | { t: 'post'; role: Role; text: string; to?: Role }
   | { t: 'pin'; role: Role; id: number; on: boolean }
   | { t: 'unpost'; role: Role; id: number }

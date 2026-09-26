@@ -321,6 +321,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               {usd(r.costs.refunds)}
               {r.costs.loan ? ` · loan ${usd(r.costs.loan)}` : ''}
               {r.costs.reports ? ` · open reports ${usd(r.costs.reports)}` : ''}
+              {r.costs.power ? ` · GPU charging ${usd(r.costs.power)}` : ''}
             </span>
             <span class="label num">Incident roll seed {r.seed} — every outcome is replayable.</span>
           </div>

@@ -4,11 +4,13 @@
 import {
   CATALOG,
   CATALOG_BY_KIND,
+  CABLE_BAND,
   DEFECT,
   defectRule,
   defectVariant,
   ECON,
   FIN_TASKS,
+  GSE,
   incidentText,
   inspects,
   INSPECTS,
@@ -24,7 +26,10 @@ import {
   type ReportDef,
 } from './data';
 import {
+  cableBand,
+  cableReport,
   capOf,
+  cartOn,
   charterLoad,
   clamp,
   isTagged,
@@ -39,6 +44,8 @@ import {
   openReports,
   reportCap,
   grid,
+  gseCarts,
+  gseForStart,
   houseBlocker,
   houseRentable,
   houses,
@@ -64,6 +71,7 @@ import {
   type Asset,
   type Defect,
   type FeedEvent,
+  type GseCart,
   type Grade,
   type Incident,
   type IslandState,
@@ -135,6 +143,7 @@ export function createIsland(o: {
     updatedAt: o.now,
   };
   addTierAssets(s, 1, 0);
+  s.gse = gseCarts(s);
   s.players[o.creator.role] = newPlayer(o.creator.uid, o.creator.name, o.creator.role, 0);
   s.players[o.creator.role]!.seatKey = seatKey(s, o.creator.role, o.creator.uid);
   feed(s, 'all', 'info', `${o.name} founded. Three seats, one island.`, o.now);
@@ -199,11 +208,15 @@ function finishProjectIfDone(s: IslandState, now: number) {
   const parts = ROLES.map((r) => s.orders.find((o) => o.id === p.orders[r]));
   if (!parts.every((o) => o?.status === 'done')) return;
   const quality = parts.reduce((n, o) => n + (o!.result?.score ?? 0), 0) / parts.length;
+  // a new tier can bring a ground power cart with it (the second one at tier 3)
+  const had = new Set(gseCarts(s).map((c) => c.id));
   s.tier = p.tier;
   s.stats.tierReachedWeek[p.tier] = s.week;
   addTierAssets(s, p.tier, s.week, Math.round(60 + 30 * quality));
   s.project = null;
   feed(s, 'all', 'good', `Tier ${p.tier} unlocked: ${tierDef(p.tier).name}! Built together at ${Math.round(quality * 100)}% quality.`, now);
+  s.gse = gseCarts(s);
+  for (const c of s.gse) if (!had.has(c.id)) feed(s, 'mech', 'good', `${c.name} arrived for the hangar: on the charger, full.`, now);
 }
 
 function addTierAssets(s: IslandState, tier: number, week: number, health = 80) {
@@ -489,6 +502,8 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       feed(s, a.role, 'info', `${who} wrote up ${o.title} on ${asset.name}${o.status === 'pending' ? ` (${usd(o.cost)}, waiting on the analyst)` : ''}.`, now);
       return { s };
     }
+    case 'gse':
+      return gseMove(s, prev, a, now);
     case 'post': {
       // the crew board is chat, not a move: any seat, any time, even after ending a turn
       const p = s.players[a.role];
@@ -577,6 +592,11 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   if (turn.ended) return fail('Your turn is over for this week.');
   const player = s.players[a.role];
   if (!player) return fail('Join first.');
+  // a ground power start needs a charged cart hooked up to that plane (lending a hand too: it's the same cart)
+  const gpu = gseForStart(s, o);
+  if (gpu.blocker) return fail(`${gpu.blocker}.`);
+  // the start happened whatever came of it: the cart gave up its charge and its cable some wear
+  const cableBefore = gpu.cart ? useCart(s, gpu.cart, o, a.data) : 0;
 
   // Lend a hand: anyone may try another trade's job once a week, at expert
   // difficulty. Real trade knowledge is the gate: no tools come with you, and
@@ -690,8 +710,168 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   // hidden consequences: a passed inspection finds what an earlier job left; this job may leave something
   if (asset && INSPECTS[o.kind] && a.score >= DEFECT.detectAt) detectDefects(s, o, asset, player.name, now);
   if (defectable(o)) rollDefect(s, o, a.role, player.name, a.score, defectVariant(o.puzzle, a.data));
+  // a start through pitted plug pins can arc into the plane's receptacle, however well it was done
+  if (gpu.cart && asset) cableArc(s, o, asset, a.role, player.name, cableBefore);
+  // avionics work on ground power: the radio is checked on a steady bus, not a sagging battery
+  if (o.kind === 'avionics' && asset && !covered) {
+    const c = cartOn(s, asset.id);
+    if (c && c.charge >= GSE.minStart && !cableReport(s, c.id)) {
+      asset.health = clamp(asset.health + GSE.avionicsBonus, 0, 100);
+      c.charge = Math.max(0, c.charge - GSE.avionicsDrain);
+    }
+  }
   if (o.repair) spawnRedo(s, o, now);
   return { s };
+}
+
+// ---------------------------------------------------------------------------
+// Ground power carts
+
+/** The island's carts, stored (an older island gets its default the first time a move touches them). */
+function ensureGse(s: IslandState): GseCart[] {
+  s.gse = gseCarts(s);
+  return s.gse;
+}
+
+/** The mechanic's moves with a cart: charger on/off, hook up / unhook, inspect the cable. */
+function gseMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'gse' }>, now: number): ApplyResult {
+  const fail = (error: string): ApplyResult => ({ s: prev, error });
+  if (a.role !== 'mech') return fail('The ground power carts are the mechanic’s to move.');
+  if (s.week < 1) return fail('The week has not started yet.');
+  if (s.turns.mech?.ended) return fail('Your turn is over for this week.');
+  const carts = ensureGse(s);
+  const c = carts.find((x) => x.id === a.cart);
+  if (!c) return fail('No such cart.');
+  const who = s.players.mech?.name ?? ROLE_LABEL.mech;
+  const planeOf = (id: string | null | undefined) => s.assets.find((x) => x.id === id && x.kind === 'plane');
+  switch (a.op) {
+    case 'charge': {
+      if (c.charging) return { s: prev };
+      const from = planeOf(c.hookedTo);
+      c.hookedTo = null;
+      c.charging = true;
+      feed(s, 'mech', 'info', `${who} ${from ? `unhooked ${c.name} from ${from.name} and plugged it in` : `plugged ${c.name} in`} on the hangar charger.`, now);
+      return { s };
+    }
+    case 'unplug': {
+      if (!c.charging) return { s: prev };
+      c.charging = false;
+      feed(s, 'mech', 'info', `${who} unplugged ${c.name} from the charger.`, now);
+      return { s };
+    }
+    case 'hook': {
+      const p = planeOf(a.assetId);
+      if (!p) return fail('Pick a plane to hook it up to.');
+      if (c.hookedTo === p.id) return { s: prev };
+      const other = carts.find((x) => x.id !== c.id && x.hookedTo === p.id);
+      if (other) return fail(`${other.name} is already hooked up to ${p.name}.`);
+      const rep = cableReport(s, c.id);
+      if (rep) return fail(`${c.name} is tagged out: its cable is cracked at the plug. ${s.players[rep.role]?.name ?? ROLE_LABEL[rep.role]} has to fix it first.`);
+      // off the charger (you can't tow it plugged in), and onto the plane's external power receptacle
+      const was = c.charging ? ' off the charger' : c.hookedTo ? ` from ${planeOf(c.hookedTo)?.name ?? 'the other plane'}` : '';
+      c.charging = false;
+      c.hookedTo = p.id;
+      feed(s, 'mech', 'info', `${who} towed ${c.name}${was} and hooked it up to ${p.name} (${Math.round(c.charge)}% charge).`, now);
+      return { s };
+    }
+    case 'unhook': {
+      const p = planeOf(c.hookedTo);
+      if (!c.hookedTo) return { s: prev };
+      c.hookedTo = null;
+      feed(s, 'mech', 'info', `${who} unhooked ${c.name}${p ? ` from ${p.name}` : ''} and parked it.`, now);
+      return { s };
+    }
+    case 'inspect': {
+      if (c.inspected?.week === s.week && !c.inspected.fixed) return fail(`${c.name}'s cable was already inspected this week.`);
+      const band = cableBand(c.wear);
+      c.inspected = { week: s.week, band, by: who };
+      feed(s, 'mech', band === 'good' ? 'info' : 'bad', `${who} inspected ${c.name}'s cable: ${CABLE_BAND[band]}.`, now);
+      // a cracked cable is tagged out and written up for the electrician on the spot
+      if (band !== 'good' && !cableReport(s, c.id)) openCableReport(s, c, now);
+      return { s };
+    }
+  }
+}
+
+/**
+ * A start on a cart: it gives up charge (a turbine takes more), and its cable
+ * some wear (more if the plug went in or came out live). Returns the wear it
+ * had before. The puzzle says which airframe it started (`data.ac`); without
+ * that (autopilot, the paper sim) the order's tier does, as in the puzzle.
+ */
+function useCart(_s: IslandState, c: GseCart, o: Order, data?: Record<string, unknown>) {
+  const before = c.wear;
+  const errors = Array.isArray(data?.errors) ? (data!.errors as unknown[]) : [];
+  const arced = data?.defect === 'arc' || errors.includes('arcIn') || errors.includes('arcOut');
+  const turbine = typeof data?.ac === 'string' ? data.ac === 'turbine' : o.tier >= 4;
+  c.charge = Math.max(0, c.charge - (turbine ? GSE.drain.turbine : GSE.drain.piston));
+  c.wear = Math.min(100, c.wear + GSE.wear + (arced ? GSE.arcWear : 0));
+  return before;
+}
+
+/**
+ * A start through pitted, burnt plug pins can arc into the plane's external
+ * power receptacle. Nothing shows at the time: the receptacle's pins are
+ * pitted, and it surfaces later as the 'gpu:arc' incident (a burnt receptacle,
+ * or a melted plug), traced to the start on the worn cable. Seeded from the order.
+ */
+function cableArc(s: IslandState, o: Order, asset: Asset, by: Role, name: string, wear: number) {
+  if (wear < GSE.pitted) return;
+  // one defect per sign-off: a start that already left one (a live plug) has done its damage
+  if ((s.defects ?? []).some((d) => d.assetId === asset.id && d.week === s.week && d.title === o.title && d.puzzle === 'gpu')) return;
+  const r = rng(hashSeed(o.seed, 'cable', s.week));
+  if (!r.chance((wear - GSE.arcFrom) / GSE.arcSpan)) return;
+  const severity: 1 | 2 = wear >= GSE.arcSevere ? 2 : 1;
+  (s.defects ??= []).push({
+    id: `d${s.nextId++}`,
+    orderKind: o.kind,
+    job: jobOf(o),
+    log: 'ground power start on a worn cart cable',
+    puzzle: 'gpu',
+    variant: 'arc',
+    title: o.title,
+    assetId: asset.id,
+    role: 'mech',
+    by,
+    name,
+    week: s.week,
+    dueWeek: s.week + r.int(DEFECT.dueMin, DEFECT.dueMax[severity - 1]),
+    severity,
+    cost: o.redo?.cost ?? o.cost,
+    tier: o.tier,
+    gain: o.gain,
+    // the start itself was fine: replacing the receptacle closes it
+    redo: false,
+  });
+}
+
+/** The electrician's card for a cart's cracked cable: the cart is tagged out until it's fixed. */
+function openCableReport(s: IslandState, c: GseCart, now: number, again?: number) {
+  const def = REPORT_BY_KEY.gpuCable;
+  if (!def) return;
+  openReport(s, def, now, again, c.id);
+}
+
+/** Resolve: carts on the charger charge if the hangar has power (a small electricity bill); the rest self-discharge. */
+function chargeCarts(s: IslandState, on: boolean, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void) {
+  let cost = 0;
+  for (const c of ensureGse(s)) {
+    if (!c.charging) {
+      c.charge = Math.max(0, c.charge - GSE.idleDrain);
+      continue;
+    }
+    const gain = Math.min(GSE.chargePerWeek, 100 - c.charge);
+    if (gain <= 0) continue;
+    if (!on) {
+      line('mech', 'bad', `No hangar power: ${c.name} sat on a dead charger (${Math.round(c.charge)}%).`);
+      continue;
+    }
+    const bill = Math.round(gain * GSE.powerPerPoint);
+    c.charge = Math.round(c.charge + gain);
+    cost += bill;
+    line('mech', 'info', `${c.name} charged to ${c.charge}% on the hangar charger (${usd(bill)} of power).`);
+  }
+  return cost;
 }
 
 // ---------------------------------------------------------------------------
@@ -869,8 +1049,8 @@ const blindXpFloor = (tier: number) => orderXp(tier, workCredit(0), false);
 // ---------------------------------------------------------------------------
 // Cross-trade reports
 
-/** Open a report: the fixer's card (ready, no approval; the small cost is paid now). */
-function openReport(s: IslandState, def: ReportDef, now: number, again?: number) {
+/** Open a report: the fixer's card (ready, no approval; the small cost is paid now). `cart`: the ground power cart it tags out. */
+function openReport(s: IslandState, def: ReportDef, now: number, again?: number, cart?: string) {
   const amount = def.effect === 'leak' ? round10((def.amount ?? 0) * (1 + REPORT.leakPerTier * (s.tier - 1))) : 0;
   const tier = def.fixer === 'fin' ? finTier(s) : clamp(1 + Math.floor(s.tier / 2), 1, 5);
   // a leak that came back was never really stopped: the weeks it only looked fixed are owed too
@@ -889,8 +1069,11 @@ function openReport(s: IslandState, def: ReportDef, now: number, again?: number)
     // the analyst's puzzle scales its numbers to what's at stake
     ...(def.fixer === 'fin' ? { leak: amount } : {}),
     ...(def.job ? { job: def.job } : {}),
-    report: { key: def.key, by: def.by, effect: def.effect, amount, ...(again ? { again } : {}), ...(owed ? { owed } : {}) },
+    report: { key: def.key, by: def.by, effect: def.effect, amount, ...(again ? { again } : {}), ...(owed ? { owed } : {}), ...(cart ? { cart } : {}) },
   });
+  const c = cart ? s.gse?.find((x) => x.id === cart) : undefined;
+  // a cable fix that didn't hold: the plug end is burnt again
+  if (c && again) c.wear = Math.max(c.wear, GSE.autoReport - 5);
   if (o.cost > 0) {
     s.cash -= o.cost;
     o.approvedWeek = s.week;
@@ -904,8 +1087,8 @@ function openReport(s: IslandState, def: ReportDef, now: number, again?: number)
     def.fixer,
     'bad',
     again
-      ? `${who}: ${def.back}. The ${fix.replace('%w', String(again))}.${owed ? ` It cost ${usd(owed)} while it looked fixed.` : ''} ${fixer}, it's back on your list.`
-      : `${who} reports: ${def.said}. ${fixer}, it's yours.`,
+      ? `${who}: ${def.back}${c ? ` (${c.name})` : ''}. The ${fix.replace('%w', String(again))}.${owed ? ` It cost ${usd(owed)} while it looked fixed.` : ''} ${fixer}, it's back on your list.`
+      : `${who} reports: ${def.said}${c ? ` (${c.name}, tagged out)` : ''}. ${fixer}, it's yours.`,
     now,
   );
   return o;
@@ -933,11 +1116,23 @@ function closeReport(s: IslandState, o: Order, by: Role, name: string, q: number
       tier: o.tier,
       gain: 0,
       redo: false,
-      report: { key: rep.key, by: rep.by, effect: rep.effect, amount: rep.amount },
+      report: { key: rep.key, by: rep.by, effect: rep.effect, amount: rep.amount, ...(rep.cart ? { cart: rep.cart } : {}) },
     });
   }
+  // a new plug on a cut-back cable: the wear goes with the old end (what's left is the fix's own quality)
+  const cart = rep.cart ? s.gse?.find((x) => x.id === rep.cart) : undefined;
+  if (cart) {
+    cart.wear = q >= DEFECT.clean ? 0 : Math.round(clamp((DEFECT.clean - q) * 120, 0, GSE.pitted));
+    cart.inspected = { week: s.week, band: 'good', by: name, fixed: true };
+  }
   const who = s.players[rep.by]?.name ?? ROLE_LABEL[rep.by];
-  feed(s, o.role, 'info', `${name} closed out ${who}'s report: ${o.title}.${rep.effect === 'cap' ? ` ${who} is back to full speed.` : ''}`, now);
+  feed(
+    s,
+    o.role,
+    'info',
+    `${name} closed out ${who}'s report: ${o.title}.${rep.effect === 'cap' ? ` ${who} is back to full speed.` : cart ? ` ${cart.name} is back in service.` : ''}`,
+    now,
+  );
 }
 
 /** Week open: fixes that didn't hold come back, then maybe a new report (from week 3). */
@@ -948,8 +1143,14 @@ function generateReports(s: IslandState, now: number) {
     s.defects = s.defects!.filter((d) => !due.includes(d));
     for (const d of due) {
       const def = REPORT_BY_KEY[d.report!.key];
-      if (def) openReport(s, def, now, d.week);
+      if (def) openReport(s, def, now, d.week, d.report!.cart);
     }
+  }
+  // a cable this far gone can't be missed: the mechanic tags the cart out and writes it up
+  for (const c of s.gse ?? []) {
+    if (c.wear < GSE.autoReport || cableReport(s, c.id)) continue;
+    if ((s.defects ?? []).some((d) => d.report?.cart === c.id)) continue;
+    openCableReport(s, c, now);
   }
   if (W < REPORT.fromWeek) return;
   const r = rng(hashSeed(s.seed, 'report', W));
@@ -960,7 +1161,7 @@ function generateReports(s: IslandState, now: number) {
   if (open.length + coming.length >= REPORT.maxOpen) return;
   // never two for the same fixer
   const busy = new Set<Role>([...open.map((o) => o.role), ...coming.map((d) => d.role)]);
-  const cands = REPORTS.filter((d) => !busy.has(d.fixer) && !!s.players[d.by] && !!s.players[d.fixer] && s.tier >= (d.minTier ?? 1));
+  const cands = REPORTS.filter((d) => !d.auto && !busy.has(d.fixer) && !!s.players[d.by] && !!s.players[d.fixer] && s.tier >= (d.minTier ?? 1));
   if (!cands.length) return;
   openReport(s, r.pick(cands), now);
 }
@@ -1197,13 +1398,22 @@ function autoRun(s: IslandState, role: Role) {
   const ready = s.orders
     .filter((o) => o.role === role && o.status === 'ready' && o.kind !== 'project') // crew projects wait for the crew
     .sort((a, b) => urgency(s, b) - urgency(s, a));
-  // two jobs at 50%, plus a quick patch on a crewmate's cap report (it won't hold; a leak waits for a person)
-  const report = ready.find((o) => o.kind === 'report' && o.report?.effect === 'cap');
-  const jobs = [...ready.filter((o) => o.kind !== 'report').slice(0, 2), ...(report ? [report] : [])];
+  // two jobs at 50%, plus a quick patch on a crewmate's cap report or a tagged-out cart's cable (it won't hold; a leak waits for a person).
+  // A ground power start needs a charged cart: autopilot tows one over, and puts it back on the charger after
+  const report = ready.find((o) => o.kind === 'report' && (o.report?.effect === 'cap' || o.report?.effect === 'gse'));
+  const jobs = [...ready.filter((o) => o.kind !== 'report' && (o.kind !== 'gpustart' || !!autoCart(s, o, false))).slice(0, 2), ...(report ? [report] : [])];
   for (const o of jobs) {
+    const cart = o.kind === 'gpustart' ? autoCart(s, o, true) : null;
+    const wear = cart ? useCart(s, cart, o) : 0;
     o.status = 'done';
     o.result = { score: 0.5, perfect: false, credit: 0.5, by: role, week: s.week, auto: true };
     const asset = assetOf(s, o);
+    if (cart && asset) {
+      // the manual is kept, but a worn cable is a worn cable
+      cableArc(s, o, asset, role, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, wear);
+      cart.hookedTo = null;
+      cart.charging = true;
+    }
     if (asset) {
       asset.health = clamp(asset.health + o.gain * 0.5, 0, 100);
       asset.touchedWeek = s.week;
@@ -1213,6 +1423,26 @@ function autoRun(s: IslandState, role: Role) {
     // a repair still needs its redo
     if (o.repair) spawnRedo(s, o, s.updatedAt);
   }
+}
+
+/**
+ * Autopilot's cart for a start: the one already hooked up to that plane if it
+ * is charged and in service, else the best-charged free one. `take` tows it
+ * over (off the charger; a flat one on that plane goes back on the charger).
+ */
+function autoCart(s: IslandState, o: Order, take: boolean): GseCart | null {
+  const ok = (c: GseCart) => c.charge >= GSE.minStart && !cableReport(s, c.id);
+  const carts = take ? ensureGse(s) : gseCarts(s);
+  const on = carts.find((c) => c.hookedTo === o.assetId);
+  const pick = on && ok(on) ? on : (carts.filter((c) => ok(c) && !c.hookedTo).sort((a, b) => b.charge - a.charge)[0] ?? null);
+  if (!pick || !take) return pick;
+  if (on && on !== pick) {
+    on.hookedTo = null;
+    on.charging = true;
+  }
+  pick.charging = false;
+  pick.hookedTo = o.assetId;
+  return pick;
 }
 
 const GRADE_VALUE: Record<Grade, number> = { A: 4, B: 3, C: 2, D: 1 };
@@ -1307,6 +1537,8 @@ export function resolveWeek(s: IslandState, now: number) {
   const pw = powered(s);
   const g = grid(s);
   if (pw.gridDown) line('elec', 'bad', `Grid down (reliability ${Math.round(g?.health ?? 0)}): ${pw.genOK ? 'generator carried the houses' : 'houses dark, hangar tools offline'}.`);
+  // the ground power carts charge in the hangar while it has power (grid up, or the generator carrying)
+  const powerCost = chargeCarts(s, pw.on, line);
 
   // 5. houses + guests
   const hs = houses(s);
@@ -1524,6 +1756,9 @@ export function resolveWeek(s: IslandState, now: number) {
         `${o.title}: ${usd(rep.amount)} lost this week${owed ? `, plus ${usd(owed)} for the weeks it only looked fixed` : ''} (${rep.again ? 'back' : 'reported'} week ${o.createdWeek}).`,
       );
       delete rep.owed;
+    } else if (rep.effect === 'gse') {
+      const c = s.gse?.find((x) => x.id === rep.cart);
+      line(o.role, 'bad', `${o.title}: still open, so ${c?.name ?? 'the GPU cart'} stayed tagged out (no ground power starts on it).`);
     } else {
       const lim = rep.by === 'fin' ? REPORT.capFin : REPORT.capOps;
       line(o.role, 'bad', `${o.title}: still open, so ${who} was held to ${lim} ${rep.by === 'fin' ? 'desk task' + (lim > 1 ? 's' : '') : 'jobs'}.`);
@@ -1540,7 +1775,7 @@ export function resolveWeek(s: IslandState, now: number) {
   if (grossIncidents) line('fin', 'info', `Claims ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
   const cashStart = s.openCash;
   const loanPay = s.loan ? Math.min(s.loan.left, s.loan.weekly) : 0;
-  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - reportLeak - netIncidents - loanPay);
+  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - reportLeak - netIncidents - loanPay - powerCost);
   if (s.loan) {
     s.loan.left -= loanPay;
     if (s.loan.left <= 0) {
@@ -1662,7 +1897,7 @@ export function resolveWeek(s: IslandState, now: number) {
     nearMisses,
     cashStart,
     cashEnd: s.cash,
-    costs: { fixed, insurance: premium, leak: leakCost, incidents: netIncidents, refunds: Math.round(refunds), loan: loanPay || undefined, reports: reportLeak || undefined },
+    costs: { fixed, insurance: premium, leak: leakCost, incidents: netIncidents, refunds: Math.round(refunds), loan: loanPay || undefined, reports: reportLeak || undefined, power: powerCost || undefined },
     housesBooked: booked.length,
     housesRentable: rentable.length,
     partsDelivered: delivered,

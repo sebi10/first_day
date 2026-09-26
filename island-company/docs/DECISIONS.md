@@ -105,19 +105,20 @@ Owner direction: *"If we mess something up we shouldn't see an immediate sign th
 - The repair goes to the analyst as a pending card at 0.6× the original's cost. It counts as safety-critical, so it can be approved through a cash freeze, and deferring it rolls deferral risk like any job. It restores a little health, plus half of what an incident took.
 - Finishing the repair spawns the **redo**: "<original title> (redo)", ready, cost 0 (already paid), approved in the trade's name, restoring half the original's gain (the botched sign-off already landed part of it; at 1× a caught defect ended up health-positive). If the same job is already open on that asset, that order becomes the redo, so there's never a second copy. A botched repair or redo can leave a defect again, so the chain continues.
 
-**Cross-trade reports** (`REPORTS`: 14 rows; all three trades report and fix; a branch that adds a puzzle adds its rows).
+**Cross-trade reports** (`REPORTS`: 14 rows at first, 19 since the ground power update; all three trades report and fix; a branch that adds a puzzle adds its rows).
 
 | Reporter → fixer | Report | Puzzle | Effect |
 | --- | --- | --- | --- |
-| Mechanic → electrician | Hangar work lights are dead · Hangar compressor keeps tripping its breaker · Aircraft battery charger keeps tripping the hangar GFCI | trace (hangar wall) · meter (hangar circuit) · meter | cap |
-| Mechanic → analyst | Parts vendor is billing list price, not our contract price · Avgas went up $1.20/gal and charter prices never moved | invoice · variance | leak |
+| Mechanic → electrician | Hangar work lights are dead · Hangar compressor keeps tripping its breaker · Aircraft battery charger keeps tripping the hangar GFCI · Hangar 28 V ground power receptacle keeps going dead | trace (hangar wall) · meter (hangar circuit) · meter · meter (the 28 V supply's circuit) | cap |
+| Mechanic → electrician | GPU cart cable insulation is cracked at the plug (raised by wear, never at random) | wire-up (a new GPU plug) | that cart tagged out |
+| Mechanic → analyst | Parts vendor is billing list price, not our contract price · Avgas went up $1.20/gal and charter prices never moved · GPU starts never make it onto the charter invoices | invoice · variance · variance (ground power line) | leak |
 | Mechanic → analyst | Parts vendor put us on credit hold | reconcile | cap |
-| Electrician → mechanic | Generator radiator fan bearing is screaming (tier 3+) · Trencher drive belt snapped · Work truck ladder rack is cracked at the welds | teardown (fan) · teardown (trencher) · crack (welds) | cap |
+| Electrician → mechanic | Generator radiator fan bearing is screaming (tier 3+) · Trencher drive belt snapped · Work truck ladder rack is cracked at the welds · Bucket truck boom creeps down: hydraulic leak at the lift cylinder | teardown (fan) · teardown (trencher) · crack (welds) · hydraulics (bucket truck) | cap |
 | Electrician → analyst | Utility autopay is drafting more than the bills · Supply house auto-ship keeps billing wire we cancelled · Copper jumped 20%: fixed-price house jobs are underwater | reconcile · invoice · variance | leak |
 | Analyst → electrician | Office outlets go dead and come back when the printer runs | meter (office circuit) | cap |
-| Analyst → mechanic | Company van wheel is wobbling: lug nuts loose | torque | leak |
+| Analyst → mechanic | Company van wheel is wobbling: lug nuts loose · Company van brake pedal is soft | torque · hydraulics (van) | leak |
 
-- Changed from the spec's list after review: leaks are causes that really recur (list price, auto-ship, autopay), not one-off double bills. "Office circuit trips when the printer and kettle run" is an overload (a dedicated circuit, not a meter job), so it's now the loose-connection version. It's the generator's *radiator* fan. "Van brakes feel soft" is hydraulic, so it's a wobbling wheel the torque puzzle really fixes. The hydraulics and ground power puzzles have landed, but they model aircraft only (a light twin's power brakes, a single on a GPU cart), so the van's soft brakes, the bucket-truck boom and a GPU-cart report wait for a vehicle scenario in those puzzles. The hangar-door row played a residential 3-way switch and was dropped.
+- Changed from the spec's list after review: leaks are causes that really recur (list price, auto-ship, autopay), not one-off double bills. "Office circuit trips when the printer and kettle run" is an overload (a dedicated circuit, not a meter job), so it's now the loose-connection version. It's the generator's *radiator* fan. "Van brakes feel soft" is hydraulic, so it was a wobbling wheel the torque puzzle really fixes; the soft pedal itself arrived with the hydraulic bench's vehicle scenarios (see *Ground power carts* below), and the wobbling wheel stays. The hangar-door row played a residential 3-way switch and was dropped.
 - From week 3, a 30% chance each week of a new report. At most 2 are open, counting fixes that are about to come back, and never two for one fixer.
 - A report is a ready card for the fixer: a small cost paid at once, no approval. Tapping it (like a repair or a redo) opens the story first, then *Start*.
 - **cap:** the reporter gets 2 jobs per turn, or 1 desk task for the analyst ("No shop air: 2 jobs max until Mia fixes it"). When it's used up, the dock says *End turn · limit reached* and ready cards dim. **leak:** cash every resolved week, a review line and `costs.reports`.
@@ -215,6 +216,86 @@ Three more branches merged on top: the new island art (`island.tsx`, `ui/island/
 - `launchFor` hands a paperwork puzzle on a plane the island's own airplane: `context.aircraft = aircraftOf(seed, asset.id, asset.model)`. It is derived from the seed, never stored in the island doc, and built once per island and plane (`islandAircraft`). Other jobs don't build it. An airplane given without a plant never gets an IPC "part no exist" case. The logbook puzzle plants its case on that airplane's identity.
 - The paperwork puzzles are HTML, so `tests/blind.test.ts` mounts them on a small DOM (`tests/minidom.ts`) and clicks through the same way with and without `blind`.
 - Balance is unchanged by the merge. The paper sim does not play puzzles, and the standard and robust runs match the numbers above.
+
+## Ground power carts, and cross-trade reports for hydraulics and ground power
+
+Owner direction, the A&P: *"ground power carts have to be interactive for the mechanic"*; the crew: *"cross-dependency reports from random things using all 3 jobs"* (his example: *"this light doesn't work in my shop"*, and the electrician fixes it), everyone integral but nobody gridlocked, and still no immediate sign when something was done wrong.
+
+**The carts** (`s.gse`, optional in the doc). GPU cart 1 comes with the island (second-hand: some wear on its cable already), GPU cart 2 with tier 3. Each has a charge (0–100), a hidden cable wear (0–100), a plane it is hooked up to *or* a place on the hangar charger (never both), and the last look at its cable. An island saved before carts existed reads the default (both on the charger, full) through `gseCarts()`; its first cart move or resolve stores it. Nothing derivable is stored.
+
+**The mechanic's moves** (action `gse`, week-stamped in `WEEK_BOUND`: charging costs money, a hooked cart gates the week's starts, and an inspection can write up a report):
+
+| Move | What it does |
+| --- | --- |
+| Plug in to charge | Off a plane if it was on one, onto the hangar charger |
+| Unplug | Parked |
+| Hook up to *plane* | Towed off the charger and plugged into that plane's external power receptacle. One cart per plane; a tagged-out cart can't be hooked up |
+| Unhook | Parked beside the plane |
+| Inspect the cable | Shows its band, once a week per cart: *cable and plug in good shape* (under 40), *insulation cracked near the plug* (40–69), *plug pins pitted and burnt* (70+). Cracked or pitted is tagged out and written up for the electrician on the spot |
+
+Only the mechanic moves them. The other seats see the same card read-only.
+
+**A start needs a cart.** A *Ground power start* job needs a cart hooked up to that plane, in service, with 30% or more (`gseForStart`). Until then its card says *Hook a charged cart up to Cargo C-7 first* and the engine refuses the start (lending a hand too: it's the same cart). The app never launches a puzzle that can't count: it says what's missing and opens the carts. A start takes 25% of the charge (45% for a turbine: the puzzle reports which airframe it was) and adds 7 wear, 15 more when the plug went in or came out live.
+
+**The puzzle gets the cart as it was left** (`context.cart`). A run-down battery rests a little below its setting and sags much further under the start load, because its internal resistance climbs as it runs down. On a 14 V start at 30% the cart's meter falls to about 11 V while cranking, against 13.4 V on a full cart. Its LED bar shows two amber lights, and it cranks a little weaker (a turbine runs a little hotter on it). Nothing is called out: the meter is the instrument.
+
+**Charging.** When the week resolves, a cart on the charger gains up to 60% if the hangar has power (grid up, or the generator carrying), at $0.50 of electricity per point ($30 for 60%), shown in the review's costs as *GPU charging*. With no hangar power the review says the cart sat on a dead charger. A cart off the charger self-discharges 4% a week. The bots and autopilot tow a charged cart over for each start and put it back on the charger after.
+
+**Wear is hidden until inspected, and shows up later.**
+- At 85 the damage can't be missed: the report opens at the next week open without an inspection.
+- A start through pitted pins can arc into the plane's external power receptacle: (wear − 60) / 60, so 17% at 70, 42% at 85, 67% at 100, seeded from the order. Nothing shows at sign-off. It is a hidden defect on the plane that surfaces 1–4 weeks later through the existing `gpu:arc` row (a burnt receptacle; from 90 wear the severe kind, a melted plug), traced to *"the ground power start on a worn cart cable Seb signed off in week 12"*. The repair replaces the receptacle; there is no redo, because the start itself was fine. A 100-hr inspection finds it first.
+- The electrician's fix: *GPU cart cable insulation is cracked at the plug* (effect `gse`: that cart is tagged out, no starts on it) is a wire-up job (`gpuCable`). Cut the cable back past the crack and fit a new 28 V DC plug: red to the + pin, black to the − pin, and the small lead to the short interlock pin, which lets the aircraft's external power relay close only once the plug is fully home. Each conductor is stripped to its barrel's depth and clamped, with no hook. From tier 3 the plug face shows only its moulded + and −. The fix resets the wear (to 0 for a clean job, (0.85 − score) × 120 otherwise). A fix that doesn't hold comes back in 1–2 weeks with the plug end burnt again.
+
+**Avionics work on ground power.** A com radio swap on a plane with a charged cart hooked up gets +2 health for 5% of the charge: the radio is checked on a steady bus, not a sagging battery.
+
+**On the island.** Each cart is drawn on the apron in the island's style: a small yellow cart with its charge light (green from 60%, amber from 30%, red below), a cable to the charger outlet on the hangar wall while it charges, beside the plane with a cable to its receptacle when hooked up (on the dock for the floatplane), a red tag when tagged out, and its light over the night grade. Tapping a cart opens the ground power sheet: `role=button`, keyboard focusable (SVG takes a lower-case `tabindex`), a 44 × 44 map-unit hit area (47 px zoomed to the mechanic's zone on a phone). The ops panel's *Ground power* card shows the same thing; its rows are 44 px targets. Island-lab scenes: `gse`, `gse-zoom` (a tagged-out cart, one hooked to the twin on jacks), `gse-night`. Node budget: the beaten scene is 1365 nodes (1339 before; the limit is 1500).
+
+### Five more cross-trade reports (19 rows)
+
+| Reporter → fixer | Report | Physical cause → fix | Puzzle (job) | Effect |
+| --- | --- | --- | --- | --- |
+| Mechanic → electrician | Hangar 28 V ground power receptacle keeps going dead | The hangar's 28 V DC maintenance supply plugs into a 120 V branch circuit. An open or loose connection upstream of its outlet kills it, or drops it out under load. The electrician meters the run; the supply's outlet is always the last device on it | meter (`hangar`) | cap |
+| Mechanic → electrician | GPU cart cable insulation is cracked at the plug | Raised by wear, never drawn at random (see above) | wire-up (`gpuCable`) | `gse`: cart tagged out |
+| Mechanic → analyst | GPU starts never make it onto the charter invoices | The ground power fee is a pass-through the billing never picks up, so the carts' cost lands in *Ground power (net)*, a price driver in the variance review, and gets billed from then on | variance (`gpu`) | leak $150 |
+| Electrician → mechanic | Bucket truck boom creeps down: hydraulic leak at the lift cylinder | Oil escaping on the lift cylinder's load side (the base port O-ring, or the rigid tube from the holding valve) lets the raised boom settle. Lower it onto its rest first: a load-side fitting is never opened with the boom up, and an extended cylinder holds oil out of the tank. Replace the seal that leaks, then top up with the decal's ISO 32 AW oil, boom stowed | hydraulics (`boom`) | cap |
+| Analyst → mechanic | Company van brake pedal is soft | Air in the brake lines: bleed at the wheel off the pedal (bleeder open, press, close), keeping the master cylinder above MIN, then fill to MAX with DOT 3/4 brake fluid, a glycol. Mineral 5606 or ATF swells a DOT system's rubber seals; silicone DOT 5 doesn't mix | hydraulics (`van`) | leak $150 |
+
+In the new set all three trades report (mechanic 3, electrician 1, analyst 1) and all three fix (mechanic 2, electrician 2, analyst 1). *Company van wheel is wobbling* stays, as the torque job it is.
+
+**The hydraulic bench's vehicles** (`generateHydraulics(…, job)`: the aircraft's brakes are unchanged):
+
+| | Bucket truck (`boom`) | Company van (`van`) |
+| --- | --- | --- |
+| Placard | ISO VG 32 AW hydraulic oil, level checked with the boom stowed | DOT 3 or DOT 4 (from tier 3, sometimes DOT 4 only), from a sealed container, fill to MAX |
+| On the shelf | AW 32; 5606 (it mixes, but is far thinner than the decal's oil: −0.2); DOT 4 or Skydrol (contaminate it); AW 46 from tier 3 (not the decal's grade) | DOT 4; 5606 and ATF (mineral: they swell the seals); DOT 5 (silicone: won't mix); DOT 3 on a DOT-4-only cap |
+| The job | The *lower boom* lever lets it down a step at a time, its oil back into the tank, and the lift gauge falls to 0 on the rest. While it's up, the leak lets it settle and the oil goes on the bed. The *Cylinder* tab: tap the fitting or seal that leaks and replace it. Opened with the boom up, it drops (capped at 0.3). From tier 3, the rod's normal oil film and an old dry weep upstream of the holding valve look oily too | No gauge and no accumulator. The *Brake* tab: bleeder open, press the pedal, a slug goes down the hose (bubbles until it's clear). Run the reservoir below MIN and the master cylinder draws air again |
+| Must be right for a pass | The leak fixed | Bled firm, bleeder closed |
+| Blind hides | The *boom dropped* call-out and its fault sound, *fresh oil*, the ticking step card, the CONTAMINATED card | *dry!*, fault sounds on air, the CONTAMINATED card |
+| Blind keeps (the world) | The boom's thud onto its rest, the drips and the puddle, the wet fitting, the lift gauge | The bubbles in the hose, a soft pedal, the level in the master cylinder |
+
+`tests/blind.test.ts` plays both blind and not: opening the lift circuit under load, and running the van's master cylinder dry. The GPU plug, the hangar circuit and the GPU billing line live in the wire-up, meter and variance puzzles, whose blind handling is generic.
+
+### Balance
+
+The standard run (`npm run balance`, 26 weeks × 30 seeds) is unchanged at the medians:
+
+| Team | Wk → T2 / T3 / T4 / T5 | Min cash | Weeks < $0 | Defect incidents / wk | Revenue / wk |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | 8 / 11 / 16 / **21** | $5,889 | **0** | 0.118 | $9,210 |
+| All average | 7 / 10 / 16 / **21** | $6,554 | **0** | 0.079 | $9,970 |
+| All good | 5 / 8 / 16 / 21 | $6,735 | 0 | 0.009 | $11,908 |
+| Every solo / absent team | stays at tier 1 | | | | |
+
+Robustness (`npm run balance -- robust`, 360 games per team), against the base commit run the same day:
+
+| Team | Wk → T5 (4 crews) | Miss T5 by wk 26 | Weeks < $0 |
+| --- | --- | --- | --- |
+| Three friends | 22 / 23 / 23 / 22 (before: 22 / 23 / 22 / 23) | 57 (before: 60) | 3 (before: 4) |
+| All average | 21 / 22 / 22 / 22 (before: 22 / 22 / 22 / 22) | 19 (before: 21) | 4 (before: 4) |
+
+The negative weeks are the same late tier-4 grid-and-generator collapses described above. The carts barely move the sim: about 1.4 starts per season, because *Ground power start* is a low-weight job. Raising its queue weight to 7 doubled the starts but cut three friends' minimum cash to $2,402, so it stays at 4. The random draw of reports now has 18 rows to pick from (the cable report is never drawn), at the same rate.
+
+**Knobs:** `GSE` in `data.ts`: `minStart` (30), `drain` (25 / 45), `wear` / `arcWear` (7 / 15), `chargePerWeek` (60), `powerPerPoint` (0.5), the bands (40 / 70), `autoReport` (85), the arc curve (`arcFrom` 60, `arcSpan` 60).
 
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 

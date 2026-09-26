@@ -6,6 +6,7 @@ import { render } from 'preact';
 import '@fontsource-variable/manrope';
 import './styles.css';
 import { MODELS, TIERS, ECON } from './sim/data';
+import { gseCarts } from './sim/econ';
 import { apply, createIsland } from './sim/engine';
 import { developmentOf } from './sim/growth';
 import type { IslandState, Order, Role, Weather, WeekReport } from './sim/types';
@@ -42,6 +43,11 @@ function played(s: IslandState, weeks: number, o: { bplus?: number; perfect?: nu
   // inspections were kept up along the way (the 'lapsed' scene breaks one on purpose)
   for (const a of s.assets) if (a.kind === 'house') a.inspectionUntil = s.week + 6;
   s.history = Array.from({ length: Math.min(3, weeks) }, (_, i) => ({ week: weeks - 2 + i, tier: s.tier, grade: o.grade ?? 'B', revenue: Math.round(budget * (o.strength ?? 0.85)), budget }) as unknown as WeekReport);
+}
+
+/** ground power: cart 1 hooked up to the cargo plane, cart 2 low on the hangar charger */
+function gse(s: IslandState) {
+  s.gse = gseCarts(s).map((c, i) => (i === 0 ? { ...c, hookedTo: 'p2', charging: false, charge: 70 } : { ...c, charging: true, charge: 20 }));
 }
 
 function order(s: IslandState, role: Role, done: boolean): string {
@@ -98,6 +104,27 @@ const SCN: Scn[] = [
     tweak: (s) => played(s, 20, { bplus: 16, perfect: 3, strength: 1.1 }),
   },
   { id: 'weathered', note: 'Tier 3, every asset around 58 health: weathered paint, still open', tier: 3, phase: 'day', tweak: (s) => s.assets.forEach((a) => (a.health = 58)) },
+  {
+    id: 'gse',
+    note: 'Tier 3 ground power: GPU cart 1 hooked up to Cargo C-7 (70%), GPU cart 2 on the hangar charger (20%, red light)',
+    tier: 3,
+    phase: 'day',
+    tweak: (s) => gse(s),
+  },
+  {
+    id: 'gse-zoom',
+    note: 'The same, zoomed to the mechanic: cart 2 tagged out (its cable report open), cart 1 hooked to the Twin on jacks',
+    tier: 3,
+    phase: 'day',
+    focus: 'mech',
+    tweak: (s) => {
+      gse(s);
+      s.assets.find((a) => a.id === 'p1')!.health = 30;
+      s.gse![0].hookedTo = 'p1';
+      s.orders.push({ id: 'lab-cable', role: 'elec', kind: 'report', assetId: null, title: 'GPU cart cable insulation is cracked at the plug', puzzle: 'wireup', tier: 2, cost: 40, parts: 0, gain: 0, createdWeek: s.week, deferrals: 0, lastDeferredWeek: null, status: 'ready', seed: 3, report: { key: 'gpuCable', by: 'mech', effect: 'gse', amount: 0, cart: 'gpu2' } } as Order);
+    },
+  },
+  { id: 'gse-night', note: 'Tier 5 at night: both carts on the charger, their lights over the dark', tier: 5, phase: 'night' },
   {
     id: 'beaten',
     note: 'Beat the game: tier 5 at night, 8 straight A weeks, the crew statue, observatory, bunting',

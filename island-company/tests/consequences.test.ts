@@ -6,7 +6,7 @@ import { simulate, TEAMS } from '../src/sim/bots';
 import { generateCrack } from '../src/puzzles/crack';
 import { generateTeardown } from '../src/puzzles/teardown';
 import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
-import { defectChance, defectSeverity, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
+import { defectChance, defectSeverity, gseCarts, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
 import type { Defect, IslandState, Order, ReportInfo, Role } from '../src/sim/types';
@@ -642,6 +642,12 @@ describe('paper sim with consequences', () => {
   });
 });
 
+/** a ground power start needs a charged cart hooked up to its plane */
+function hookCart(s: IslandState, planeId: string) {
+  s.gse = gseCarts(s).map((c) => (c.id === 'gpu1' ? { ...c, hookedTo: planeId, charging: false } : c));
+  return s;
+}
+
 describe('hidden defects from hydraulic servicing and ground power starts', () => {
   it('both jobs have their own [write-up, failure] rows, and what went wrong picks the row', () => {
     for (const key of ['hydraulics', 'hydraulics:fluid', 'gpu', 'gpu:arc', 'gpu:hot']) {
@@ -673,7 +679,7 @@ describe('hidden defects from hydraulic servicing and ground power starts', () =
   });
 
   it('a hot start fails in service as burnt turbine blades, is repaired through the hot section, then the start is done again', () => {
-    const s = atWeek(4);
+    const s = hookCart(atWeek(4), 'p1');
     const o = addOrder(s, { role: 'mech', kind: 'gpustart', puzzle: 'gpu', assetId: 'p1', tier: 4, cost: 120, gain: 8, title: 'Ground power start: weak battery' });
     let r = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0, perfect: false, data: { errors: [], faults: ['hotStart'], defect: 'hot' } }, NOW).s;
     const d = r.defects!.find((x) => x.orderKind === 'gpustart')!;
@@ -692,7 +698,7 @@ describe('hidden defects from hydraulic servicing and ground power starts', () =
   });
 
   it('a plug pulled live leaves arced receptacle pins; a start with no report of what went wrong leaves the default', () => {
-    const s = atWeek(4);
+    const s = hookCart(atWeek(4), 'p1');
     const arc = addOrder(s, { role: 'mech', kind: 'gpustart', puzzle: 'gpu', assetId: 'p1', tier: 2, cost: 120, gain: 8 });
     const a = apply(s, { t: 'complete', role: 'mech', orderId: arc.id, score: 0, perfect: false, data: { errors: ['arcOut'], defect: 'arc' } }, NOW).s;
     expect(a.defects![0].variant).toBe('arc');
