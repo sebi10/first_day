@@ -61,11 +61,17 @@ export type RecModel = {
   suggest: [number, number][];
   /** score lost per wrong pairing */
   penalty: number;
+  /** tiers 0–2 teach: bin captions, "why" after a wrong move, the Δ readout, the ÷9 hint */
+  teach: boolean;
+  /** tier 3+: a misfiled item is posted anyway (the rec stays out of balance), like real life */
+  strict: boolean;
 };
 
 export type RecState = {
   cleared: boolean[];
   how: (RecBin | 'pair' | null)[];
+  /** filed in the wrong bin (strict tiers): cleared, but wrong */
+  botched: boolean[];
   itemDone: boolean[];
   /** Σ timing items posted against the bank balance */
   bankAdj: number;
@@ -94,42 +100,56 @@ const MONTH = 'Sep';
 const CUTOFF = 30;
 const MINUS = '−';
 
-// 0 = tutorial. Line counts: 4, 6, 8, 11, 12, 14.
+// 0 = tutorial. Line counts: 4, 6, 8, 12, 14, 15.
+// From tier 3 the statement speaks bank (ACH / CHK / POS / DD codes) and nothing is labelled:
+// sorting timing from adjusting items, and spotting the traps, is month-end knowledge.
 const PLAN: RecKind[][] = [
   ['pair', 'debit', 'transit'],
   ['pair', 'pair', 'debit', 'outstanding'],
-  ['pair', 'pair', 'transpose', 'fee', 'transit'],
-  ['pair', 'split', 'transpose', 'fee', 'debit', 'outstanding'],
-  ['split', 'transpose', 'dupe', 'fee', 'outstanding', 'transit'],
-  ['net', 'fx', 'transpose', 'dupe', 'interest', 'outstanding', 'transit'],
+  ['pair', 'pair', 'transpose', 'debit', 'transit'],
+  ['pair', 'split', 'transpose', 'fee', 'debit', 'outstanding', 'transit'],
+  ['pair', 'split', 'transpose', 'dupe', 'interest', 'outstanding', 'transit'],
+  ['pair', 'net', 'fx', 'transpose', 'dupe', 'outstanding', 'transit'],
 ];
 
-type Flavour = { bank: string; book: string; lo: number; hi: number; sign: 1 | -1; round?: boolean };
+/** bank = friendly descriptor (teaching tiers), code = what a real statement prints */
+type Flavour = { bank: string; code: string; book: string; lo: number; hi: number; sign: 1 | -1; round?: boolean };
 
 // Bank descriptors are terse; the books say what it was for. Matching them is the job.
 const PAIRS: Flavour[] = [
-  { bank: 'Fuel dock', book: 'Avgas — fuel dock', lo: 160, hi: 620, sign: -1 },
-  { bank: 'Guest deposit', book: 'Deposit — Cottage {c}', lo: 150, hi: 600, sign: 1, round: true },
-  { bank: 'Stripe — Cottage {c}', book: 'Cottage {c} booking', lo: 220, hi: 980, sign: 1, round: true },
-  { bank: 'Palm Air cargo', book: 'Cargo flight — parts', lo: 90, hi: 420, sign: -1 },
-  { bank: 'Reef Laundry', book: 'Linen service', lo: 60, hi: 260, sign: -1 },
-  { bank: 'Cheque {q}', book: 'Chq {q} — Glass Co', lo: 90, hi: 540, sign: -1 },
-  { bank: 'Charter — N-12', book: 'Charter income N-12', lo: 420, hi: 1500, sign: 1, round: true },
+  { bank: 'Fuel dock', code: 'POS FUEL DOCK', book: 'Avgas — fuel dock', lo: 160, hi: 620, sign: -1 },
+  { bank: 'Guest deposit', code: 'DEPOSIT', book: 'Deposit — Cottage {c}', lo: 150, hi: 600, sign: 1, round: true },
+  { bank: 'Stripe — Cottage {c}', code: 'STRIPE TRANSFER', book: 'Cottage {c} booking', lo: 220, hi: 980, sign: 1, round: true },
+  { bank: 'Palm Air cargo', code: 'ACH PALM AIR', book: 'Cargo flight — parts', lo: 90, hi: 420, sign: -1 },
+  { bank: 'Reef Laundry', code: 'POS REEF LNDRY', book: 'Linen service', lo: 60, hi: 260, sign: -1 },
+  { bank: 'Cheque {q}', code: 'CHK {q}', book: 'Chq {q} — Glass Co', lo: 90, hi: 540, sign: -1 },
+  { bank: 'Charter — N-12', code: 'DEP CHARTER N12', book: 'Charter income N-12', lo: 420, hi: 1500, sign: 1, round: true },
 ];
-const TRANSPOSE: { bank: string; book: string; sign: 1 | -1 }[] = [
-  { bank: 'Harbor Supply', book: 'Harbor Supply parts', sign: -1 },
-  { bank: 'Hangar rent', book: 'Hangar rent — Sep', sign: -1 },
-  { bank: 'Charter — N-7', book: 'Charter income N-7', sign: 1 },
-  { bank: 'Aero Parts Co', book: 'Parts — Aero Parts', sign: -1 },
+const TRANSPOSE: { bank: string; code: string; book: string; payee: string; sign: 1 | -1 }[] = [
+  { bank: 'Harbor Supply', code: 'ACH HARBOR SUP', book: 'Harbor Supply parts', payee: 'Harbor Sup.', sign: -1 },
+  { bank: 'Hangar rent', code: 'ACH HANGAR RENT', book: 'Hangar rent — Sep', payee: 'Hangar Co', sign: -1 },
+  { bank: 'Charter — N-7', code: 'DEP CHARTER N7', book: 'Charter income N-7', payee: '', sign: 1 },
+  { bank: 'Aero Parts Co', code: 'ACH AERO PARTS', book: 'Parts — Aero Parts', payee: 'Aero Parts', sign: -1 },
 ];
 const DUPES = [
-  { bank: 'Coral Electric', book: 'Coral Elec. — wiring' },
-  { bank: 'Island Hardware', book: 'Paint — Island Hdw' },
-  { bank: 'Sun Propane', book: 'Sun Propane refill' },
+  { bank: 'Coral Electric', code: 'ACH CORAL ELEC', book: 'Coral Elec. — wiring' },
+  { bank: 'Island Hardware', code: 'ACH ISLAND HDW', book: 'Paint — Island Hdw' },
+  { bank: 'Sun Propane', code: 'ACH SUN PROPANE', book: 'Sun Propane refill' },
 ];
-const FEES = ['Account fee', 'Wire fee', 'Card terminal fee'];
-const DEBITS = ['Island Power autopay', 'Insurance autopay', 'Bounced guest cheque'];
+const FEES = [
+  ['Account fee', 'SVC CHG'],
+  ['Wire fee', 'WIRE FEE'],
+  ['Card terminal fee', 'MERCH FEE'],
+];
+const DEBITS = [
+  ['Island Power autopay', 'DD ISLAND POWER'],
+  ['Insurance autopay', 'DD HULL INSUR'],
+  ['Bounced guest cheque', 'RTN ITEM NSF'],
+];
 const PAYEES = ['Plumber', 'Pool co.', 'Carpenter'];
+
+/** cheque number printed in a descriptor, if it is one */
+const chequeNo = (text: string) => /\b(?:CHK|Cheque|Chq)\s*(\d{3,5})/i.exec(text)?.[1] ?? null;
 
 export const r2 = (v: number) => Math.round(v * 100) / 100;
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
@@ -241,8 +261,11 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
   }
   const flexEach = flexOthers ? Math.max(24, rest / flexOthers) : 0;
 
+  const coded = t >= 3;
   const pairPool = r.shuffle([...PAIRS]);
-  const trPool = r.shuffle([...TRANSPOSE]);
+  // the cheque decoy (tier 4+) needs a payment to shadow
+  const trPool = r.shuffle(TRANSPOSE.filter((f) => t < 4 || f.sign < 0));
+  let shadow: { amount: number; day: number; payee: string } | null = null;
   const addItem = (kind: RecKind) => {
     items.push({ kind, bank: [], book: [] });
     return items.length - 1;
@@ -264,7 +287,7 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
         const q = chq++;
         const v = roll(f.lo, f.hi, f.round) * f.sign;
         const d = r.int(3, 27);
-        addLine(it, 'bank', fill(f.bank, c, q), d, v);
+        addLine(it, 'bank', fill(coded ? f.code : f.bank, c, q), d, v);
         addLine(it, 'book', fill(f.book, c, q), d - r.int(0, 2), v);
         break;
       }
@@ -278,9 +301,10 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
         }
         take(truth);
         take(typo);
-        const d = r.int(3, 27);
-        addLine(it, 'bank', f.bank, d, truth * f.sign);
+        const d = r.int(3, 22);
+        addLine(it, 'bank', coded ? f.code : f.bank, d, truth * f.sign);
         addLine(it, 'book', f.book, d - r.int(0, 2), typo * f.sign);
+        if (f.sign < 0) shadow = { amount: truth, day: d, payee: f.payee };
         break;
       }
       case 'split':
@@ -290,13 +314,13 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
         const fees = kind === 'net' ? netFees : [0, 0, 0];
         const payout = unique(sum(gross) - sum(fees));
         const d = r.int(8, 24);
-        addLine(it, 'bank', 'Stripe payout (3)', d, payout);
+        addLine(it, 'bank', coded ? 'STRIPE TRANSFER' : 'Stripe payout (3)', d, payout);
         gross.forEach((g, i) => addLine(it, 'book', `Cottage ${cottage()} booking`, d - 3 + i, g));
         break;
       }
       case 'fx': {
         const d = r.int(6, 26);
-        addLine(it, 'bank', 'Wire in — EUR guest', d, unique(fxBank));
+        addLine(it, 'bank', 'WIRE IN SEPA', d, unique(fxBank));
         addLine(it, 'book', `Cottage ${cottage()} — €${money(eur, { dollar: false, cents: false })}`, d - 2, unique(fxBook));
         break;
       }
@@ -304,19 +328,19 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
         const f = r.pick(DUPES);
         const v = -unique(flexEach);
         const d = r.int(4, 22);
-        addLine(it, 'bank', f.bank, d, v);
-        addLine(it, 'bank', f.bank, d + r.int(1, 3), v);
+        addLine(it, 'bank', coded ? f.code : f.bank, d, v);
+        addLine(it, 'bank', coded ? f.code : f.bank, d + r.int(1, 3), v);
         addLine(it, 'book', f.book, d, v);
         break;
       }
       case 'fee':
-        addLine(it, 'bank', r.pick(FEES), CUTOFF, -unique(feeAmt));
+        addLine(it, 'bank', r.pick(FEES)[coded ? 1 : 0], CUTOFF, -unique(feeAmt));
         break;
       case 'interest':
-        addLine(it, 'bank', 'Interest', CUTOFF, unique(intAmt));
+        addLine(it, 'bank', coded ? 'INT CR' : 'Interest', CUTOFF, unique(intAmt));
         break;
       case 'debit':
-        addLine(it, 'bank', r.pick(DEBITS), r.int(2, 28), -unique(flexEach));
+        addLine(it, 'bank', r.pick(DEBITS)[coded ? 1 : 0], r.int(2, 28), -unique(flexEach));
         break;
       case 'transit': {
         // tier 4+: same amount as one of the payout's bookings — only the date gives it away
@@ -325,7 +349,12 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
         break;
       }
       case 'outstanding':
-        addLine(it, 'book', `Chq ${chq++} — ${r.pick(PAYEES)}`, r.int(25, 29), -roll(80, 640));
+        // tier 4+: a cheque to the same vendor for the very same amount as an ACH debit. Written after
+        // that debit cleared, so it cannot be it — an analyst checks payment method and date.
+        if (t >= 4 && shadow) {
+          const sh: { amount: number; day: number; payee: string } = shadow;
+          addLine(it, 'book', `Chq ${chq++} — ${sh.payee}`, Math.max(sh.day + 3, r.int(24, 29)), -sh.amount);
+        } else addLine(it, 'book', `Chq ${chq++} — ${r.pick(PAYEES)}`, r.int(25, 29), -roll(80, 640));
         break;
     }
   }
@@ -347,9 +376,11 @@ export function generateReconcile(seed: number, tier: number, tools: string[] = 
     bankOrder: order('bank'),
     bookOrder: order('book'),
     money: 0,
-    nineHint: t === 2 || t === 3,
+    nineHint: t <= 2 && has('transpose'),
     suggest: [],
-    penalty: t === 0 ? 0.03 : 0.06,
+    penalty: t === 0 ? 0.03 : t <= 2 ? 0.06 : 0.1,
+    teach: t <= 2,
+    strict: t >= 3,
   };
   m.money = r2(sum(items.map((it) => Math.abs(bookEffect(m, it)))));
   if (t === 0 || tools.includes('autoMatch')) m.suggest = exactMatches(m);
@@ -376,15 +407,19 @@ function bookEffect(m: RecModel, it: RecItem): number {
   }
 }
 
-/** Unique exact-amount 1:1 matches — what bank-feed auto-match would tick. */
+/**
+ * What bank-feed auto-match ticks: unique exact amount, cheque numbers agree (a cheque only
+ * matches the same cheque), and the book entry is not dated after the bank cleared it.
+ */
 export function exactMatches(m: RecModel): [number, number][] {
   const out: [number, number][] = [];
   const bank = m.lines.filter((l) => l.side === 'bank');
   const book = m.lines.filter((l) => l.side === 'book');
+  const rule = (b: RecLine, k: RecLine) =>
+    Math.abs(k.amount - b.amount) < 0.005 && chequeNo(b.text) === chequeNo(k.text) && k.day <= b.day;
   for (const b of bank) {
-    const same = (l: RecLine) => Math.abs(l.amount - b.amount) < 0.005;
-    const k = book.filter(same);
-    if (k.length === 1 && bank.filter(same).length === 1) out.push([b.id, k[0].id]);
+    const k = book.filter((l) => rule(b, l));
+    if (k.length === 1 && bank.filter((o) => rule(o, k[0])).length === 1) out.push([b.id, k[0].id]);
   }
   return out;
 }
@@ -393,6 +428,7 @@ export function newRecState(m: RecModel): RecState {
   return {
     cleared: m.lines.map(() => false),
     how: m.lines.map(() => null),
+    botched: m.lines.map(() => false),
     itemDone: m.items.map(() => false),
     bankAdj: 0,
     bookAdj: 0,
@@ -472,18 +508,22 @@ export function applyRec(m: RecModel, s: RecState, act: RecAction): RecOutcome {
   if (act.t === 'bin') {
     const L = m.lines[act.line];
     if (!L || s.cleared[L.id]) return none('ignored');
-    if (binFor(m, s, L.id) !== act.bin) {
+    const right = binFor(m, s, L.id) === act.bin;
+    if (!right) {
       s.wrong++;
-      return none('wrong', targetFor(m, s, L.id));
+      if (!m.strict) return none('wrong', targetFor(m, s, L.id));
     }
+    // strict tiers post a misfiled item anyway: the entry is made, the rec stays out of balance
     s.cleared[L.id] = true;
     s.how[L.id] = act.bin;
+    s.botched[L.id] = !right;
     const it = m.items[L.item];
     const bankAdj = act.bin === 'timing' ? L.amount : 0;
     const bookAdj = act.bin === 'adjust' ? L.amount : 0;
     s.bankAdj = r2(s.bankAdj + bankAdj);
     s.bookAdj = r2(s.bookAdj + bookAdj);
-    const done = [...it.bank, ...it.book].every((id) => s.cleared[id]);
+    if (!right) return { result: 'wrong', cleared: [L.id], item: L.item, done: false, bankAdj, bookAdj, note: '' };
+    const done = [...it.bank, ...it.book].every((id) => s.cleared[id] && !s.botched[id]);
     if (done) s.itemDone[L.item] = true;
     return {
       result: 'ok',
@@ -516,7 +556,7 @@ export function applyRec(m: RecModel, s: RecState, act: RecAction): RecOutcome {
   let done = false;
   if (it.kind === 'split' || it.kind === 'net') {
     tick(b.id);
-    if (it.book.every((id) => s.cleared[id])) {
+    if (it.book.every((id) => s.how[id] === 'pair')) {
       tick(a.id);
       done = true;
       bookAdj = r2(a.amount - sum(it.book.map((id) => m.lines[id].amount)));
@@ -525,7 +565,7 @@ export function applyRec(m: RecModel, s: RecState, act: RecAction): RecOutcome {
     tick(a.id);
     tick(b.id);
     bookAdj = r2(a.amount - b.amount); // 0 for a clean pair; the correcting entry otherwise
-    done = [...it.bank, ...it.book].every((id) => s.cleared[id]);
+    done = [...it.bank, ...it.book].every((id) => s.cleared[id] && !s.botched[id]);
   }
   if (done) s.itemDone[a.item] = true;
   s.bookAdj = r2(s.bookAdj + bookAdj);
@@ -543,9 +583,22 @@ export function recProgress(m: RecModel, s: RecState): number {
   return m.items.reduce((acc, it, i) => {
     if (s.itemDone[i]) return acc + 1;
     const ids = [...it.bank, ...it.book];
+    if (ids.some((id) => s.botched[id])) return acc;
     const c = ids.filter((id) => s.cleared[id]).length;
     return acc + (ids.length > 2 ? (0.8 * c) / ids.length : 0);
   }, 0);
+}
+
+/** Is there still a correct move on the board? (false = finished, cleanly or not) */
+export function movesLeft(m: RecModel, s: RecState): boolean {
+  return m.lines.some((L) => {
+    if (s.cleared[L.id]) return false;
+    if (binFor(m, s, L.id)) return true;
+    const it = m.items[L.item];
+    if (!['pair', 'transpose', 'fx', 'split', 'net', 'dupe'].includes(it.kind)) return false;
+    if (it.book.some((id) => s.botched[id]) && (it.kind === 'split' || it.kind === 'net')) return false;
+    return (L.side === 'bank' ? it.book : it.bank).some((o) => !s.cleared[o]);
+  });
 }
 
 export function scoreReconcile(m: RecModel, s: RecState): number {
@@ -587,7 +640,8 @@ export function summarizeReconcile(m: RecModel, s: RecState): string {
   const found = s.itemDone.filter(Boolean).length;
   const w = s.wrong ? `${s.wrong} wrong pair${s.wrong > 1 ? 's' : ''}` : 'no wrong pairs';
   if (found === m.items.length) return `Reconciled to $0.00, ${money(m.money, { cents: false })} found, ${w}`;
-  return `Difference ${money(Math.abs(recDiff(m, s)))} left, ${found}/${m.items.length} items, ${w}`;
+  const left = movesLeft(m, s) ? 'left' : 'unexplained';
+  return `Difference ${money(Math.abs(recDiff(m, s)))} ${left}, ${found}/${m.items.length} items, ${w}`;
 }
 
 function recResult(m: RecModel, s: RecState): PuzzleResult {
@@ -700,6 +754,7 @@ export const reconcile: PuzzleDef = {
     const st = stage(host.el);
     const { ctx } = st;
     const still = p.reducedMotion;
+    const showDelta = m.teach || p.tools.includes('autoMatch');
     const suggestNo = new Map<number, number>();
     m.suggest.forEach(([a, b], i) => {
       suggestNo.set(a, i + 1);
@@ -729,6 +784,10 @@ export const reconcile: PuzzleDef = {
     let binCount = { timing: 0, adjust: 0 };
     let binSum = { timing: 0, adjust: 0 };
 
+    // what the worksheet shows: the four kinds of reconciling item, as posted so far
+    const posted = { transit: 0, uncleared: 0, bookIn: 0, bookOut: 0 };
+    const rowFlash = { transit: -1, uncleared: -1, bookIn: -1, bookOut: -1 };
+
     const lay = () => {
       const w = st.w;
       const h = st.h;
@@ -736,39 +795,51 @@ export const reconcile: PuzzleDef = {
       const cw = Math.min(w - pad * 2, 520);
       const x0 = (w - cw) / 2;
       const gap = 8;
-      const colW = (cw - gap) / 2;
-      const rb = Math.ceil(m.bankOrder.length / 2);
-      const rk = Math.ceil(m.bookOrder.length / 2);
-      const headH = clamp(h * 0.11, 62, 84);
+      const nb = m.bankOrder.length;
+      const nk = m.bookOrder.length;
+      const compact = clamp(h * 0.11, 62, 84);
+      const toastH = 34;
       const binH = clamp(h * 0.095, 58, 72);
       const labH = 22;
       const binsY = h - pad - binH;
-      const room = binsY - 14 - (pad + headH + 34) - labH * 2 - 10;
-      const rowH = clamp(room / (rb + rk), 52, 70);
+      const room = binsY - 14 - (pad + compact + toastH) - labH * 2 - 12;
+      // short statements read as a real list (one column); long ones fold into two
+      const cols = room / (nb + nk) >= 54 ? 1 : 2;
+      const rb = Math.ceil(nb / cols);
+      const rk = Math.ceil(nk / cols);
+      const rowH = clamp(room / (rb + rk), 52, cols === 1 ? 62 : 70);
       const chipH = rowH - 7;
+      const colW = (cw - gap * (cols - 1)) / cols;
       const bookY = binsY - 14 - rk * rowH;
       const bankY = bookY - labH - 12 - rb * rowH;
       const chip: Rect[] = [];
-      m.bankOrder.forEach((id, i) => {
-        chip[id] = { x: x0 + (i % 2) * (colW + gap), y: bankY + Math.floor(i / 2) * rowH, w: colW, h: chipH };
-      });
-      m.bookOrder.forEach((id, i) => {
-        chip[id] = { x: x0 + (i % 2) * (colW + gap), y: bookY + Math.floor(i / 2) * rowH, w: colW, h: chipH };
-      });
-      const head: Rect = { x: x0, y: pad, w: cw, h: headH };
+      const place = (order: number[], y0: number) =>
+        order.forEach((id, i) => {
+          chip[id] = { x: x0 + (i % cols) * (colW + gap), y: y0 + Math.floor(i / cols) * rowH, w: colW, h: chipH };
+        });
+      place(m.bankOrder, bankY);
+      place(m.bookOrder, bookY);
       const bankLab = bankY - labH / 2 - 3;
+      // with room to spare the header becomes the actual rec worksheet
+      const topRoom = bankLab - labH / 2 - toastH - pad;
+      const sheet = topRoom >= 150;
+      const headH = sheet ? Math.min(topRoom, 170) : compact;
+      const headY = sheet ? pad + (topRoom - headH) * 0.55 : pad;
+      const head: Rect = { x: x0, y: headY, w: cw, h: headH };
+      const binW = (cw - gap) / 2;
       return {
         w,
         h,
         x0,
         cw,
         head,
+        sheet,
         bankLab,
         bookLab: bookY - labH / 2 - 3,
         toastY: (head.y + head.h + bankLab - labH / 2) / 2,
         chip,
-        timing: { x: x0, y: binsY, w: colW, h: binH } as Rect,
-        adjust: { x: x0 + colW + gap, y: binsY, w: colW, h: binH } as Rect,
+        timing: { x: x0, y: binsY, w: binW, h: binH } as Rect,
+        adjust: { x: x0 + binW + gap, y: binsY, w: binW, h: binH } as Rect,
       };
     };
     type Lay = ReturnType<typeof lay>;
@@ -798,7 +869,17 @@ export const reconcile: PuzzleDef = {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      toast = { str: res.perfect ? 'Adjusted bank = adjusted books' : res.summary, t0: performance.now(), color: C.palmDark, hold: true };
+      const balanced = Math.abs(recDiff(m, s)) < 0.005;
+      toast = {
+        str: res.perfect
+          ? 'Adjusted bank = adjusted books'
+          : balanced
+            ? 'Reconciled to $0.00'
+            : `Out of balance by ${money(Math.abs(recDiff(m, s)))}`,
+        t0: performance.now(),
+        color: balanced ? C.palmDark : C.rust,
+        hold: true,
+      };
       doneTimer = setTimeout(() => {
         doneTimer = null;
         host.done(res);
@@ -818,28 +899,42 @@ export const reconcile: PuzzleDef = {
         flash(`l${dragged}`, C.rust);
         if (a.t === 'pair') flash(`l${a.b}`, C.rust);
         else flash(`b${a.bin}`, C.rust);
+        // teaching tiers say why; from tier 3 a misfile is simply posted and the rec won't balance
         const why =
           a.t === 'pair'
             ? m.lines[a.a].side === m.lines[a.b].side
               ? 'Same side'
               : 'Not the same transaction'
-            : m.tier <= 2
+            : m.teach
               ? binFor(m, s, a.line) === null
                 ? 'This one has a match on the other side'
                 : a.bin === 'timing'
                   ? 'Only the bank has it: book an adjustment'
                   : 'Only your books have it: a timing difference'
-              : a.bin === 'timing'
-                ? 'Not a timing difference'
-                : 'Not an adjusting item';
+              : 'Misfiled — the rec won’t balance';
         toast = { str: why, t0: now, color: C.rust };
-        if (m.tier === 0 || m.tier === 1) hint = { ...out.hint, until: now + 1400 };
+        if (m.tier <= 1) hint = { ...out.hint, until: now + 1400 };
+        if (a.t === 'bin' && out.cleared.length) {
+          // committed misfile: it still lands in the bin and moves that balance
+          pulses.set(a.line, now);
+          binCount = { ...binCount, [a.bin]: binCount[a.bin] + 1 };
+          binSum = { ...binSum, [a.bin]: r2(binSum[a.bin] + m.lines[a.line].amount) };
+          if (Math.abs(out.bankAdj) >= 0.005) floats.push({ str: money(out.bankAdj, { sign: true, dollar: false }), col: 0, t0: now });
+          if (Math.abs(out.bookAdj) >= 0.005) floats.push({ str: money(out.bookAdj, { sign: true, dollar: false }), col: 1, t0: now });
+          const k = a.bin === 'timing' ? (out.bankAdj > 0 ? 'transit' : 'uncleared') : out.bookAdj > 0 ? 'bookIn' : 'bookOut';
+          posted[k] = r2(posted[k] + Math.abs(m.lines[a.line].amount));
+          rowFlash[k] = now;
+          if (!movesLeft(m, s)) {
+            finish();
+            return out;
+          }
+        }
         status();
         return out;
       }
       // correct
       host.fx.snap();
-      if (toast?.hold) toast = null;
+      if (toast?.hold || toast?.color === C.rust) toast = null;
       const it = m.items[out.item];
       for (const id of out.cleared) {
         pulses.set(id, now);
@@ -861,10 +956,18 @@ export const reconcile: PuzzleDef = {
         binSum = { ...binSum, adjust: r2(binSum.adjust + out.bookAdj) };
         flash('badjust', C.palm);
       }
+      const post = (k: keyof typeof posted, v: number) => {
+        posted[k] = r2(posted[k] + Math.abs(v));
+        rowFlash[k] = now;
+      };
+      if (out.bankAdj >= 0.005) post('transit', out.bankAdj);
+      if (out.bankAdj <= -0.005) post('uncleared', out.bankAdj);
+      if (out.bookAdj >= 0.005) post('bookIn', out.bookAdj);
+      if (out.bookAdj <= -0.005) post('bookOut', out.bookAdj);
       if (Math.abs(out.bankAdj) >= 0.005) floats.push({ str: money(out.bankAdj, { sign: true, dollar: false }), col: 0, t0: now });
       if (Math.abs(out.bookAdj) >= 0.005) floats.push({ str: money(out.bookAdj, { sign: true, dollar: false }), col: 1, t0: now });
       if (out.note) toast = { str: out.note, t0: now, color: C.ink };
-      if (it && out.done && s.itemDone.every(Boolean)) finish();
+      if (it && !movesLeft(m, s)) finish();
       else status();
       return out;
     };
@@ -986,6 +1089,10 @@ export const reconcile: PuzzleDef = {
       roundRect(ctx, x, y, w, h, 14);
       ctx.fill();
       ctx.restore();
+      if (g.sheet) {
+        drawSheet(g, now);
+        return;
+      }
       // ledger ruling
       ctx.strokeStyle = shade(C.fin, 0.55);
       ctx.lineWidth = 1;
@@ -1042,6 +1149,80 @@ export const reconcile: PuzzleDef = {
       sub(0, `stmt ${money(m.bankEnd)}`);
       sub(1, `book ${money(m.bookEnd)}`);
       while (floats.length && now - floats[0].t0 > 1300) floats.shift();
+    }
+
+    /** The rec worksheet an analyst fills in: both balances walked to their adjusted figure. */
+    function drawSheet(g: Lay, now: number) {
+      const { x, y, w, h } = g.head;
+      const half = w / 2;
+      const ip = 14;
+      const rows = [y + 22, y + 44, y + 66];
+      const ruleY = y + 79;
+      const adjY = y + 95;
+      const bandH = 38;
+      const bandY = y + h - bandH - 8;
+      ctx.strokeStyle = shade(C.sand, -0.15);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + half, y + 10);
+      ctx.lineTo(x + half, adjY + 10);
+      ctx.stroke();
+      type Key = keyof typeof posted;
+      const col = (cx: number, head: string, base: number, lines: [string, Key][], adjLabel: string, adj: number) => {
+        const l = cx + ip;
+        const r = cx + half - ip;
+        // ledger ruling under each line
+        ctx.strokeStyle = shade(C.fin, 0.6);
+        for (const ry of rows) {
+          ctx.beginPath();
+          ctx.moveTo(l, ry + 10.5);
+          ctx.lineTo(r, ry + 10.5);
+          ctx.stroke();
+        }
+        text(ctx, head, l, rows[0], { size: 11.5, weight: 700, color: C.inkSoft });
+        tnum(ctx, money(base, { dollar: false }), r, rows[0], { size: 12.5, weight: 700, align: 'right' });
+        lines.forEach(([lab, k], i) => {
+          const ry = rows[i + 1];
+          const age = now - rowFlash[k];
+          if (rowFlash[k] > 0 && age < 900) {
+            ctx.globalAlpha = 1 - age / 900;
+            ctx.fillStyle = shade(C.sea, 0.75);
+            roundRect(ctx, l - 6, ry - 10, r - l + 12, 20, 6);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+          text(ctx, lab, l, ry, { size: 11.5, weight: 650, color: C.inkSoft });
+          const v = posted[k];
+          tnum(ctx, v ? money(v, { dollar: false }) : '—', r, ry, { size: 12.5, weight: 700, color: v ? C.ink : C.inkSoft, align: 'right' });
+        });
+        ctx.strokeStyle = C.ink;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(r - 78, ruleY);
+        ctx.lineTo(r, ruleY);
+        ctx.stroke();
+        text(ctx, adjLabel, l, adjY, { size: 12, weight: 800, color: C.ink });
+        tnum(ctx, money(adj, { dollar: false }), r, adjY, { size: 13.5, weight: 800, align: 'right' });
+      };
+      col(x, 'Statement', m.bankEnd, [['+ In transit', 'transit'], ['− Uncleared', 'uncleared']], 'Adj. bank', shownBank);
+      col(x + half, 'Cash book', m.bookEnd, [['+ Entries in', 'bookIn'], ['− Entries out', 'bookOut']], 'Adj. books', shownBook);
+      // difference band
+      const diff = recDiff(m, s);
+      const ok = Math.abs(diff) < 0.005;
+      ctx.fillStyle = ok ? shade(C.palm, 0.82) : shade(C.rust, 0.9);
+      roundRect(ctx, x + 8, bandY, w - 16, bandH, 10);
+      ctx.fill();
+      const my = bandY + bandH / 2;
+      text(ctx, 'Difference', x + 8 + ip, my, { size: 12, weight: 800, color: ok ? C.palmDark : C.ink });
+      const cents = Math.round(Math.abs(diff) * 100);
+      const note = ok ? 'reconciled ✓' : m.nineHint && cents % 900 === 0 ? '÷ 9 → swapped digits?' : '';
+      if (note) text(ctx, note, x + w / 2, my, { size: 11, weight: 800, color: ok ? C.palm : C.sea, align: 'center' });
+      tnum(ctx, ok ? '$0.00' : money(r2(shownBank - shownBook), { sign: true }), x + w - 8 - ip, my, {
+        size: 18,
+        weight: 800,
+        color: ok ? C.palmDark : C.rust,
+        align: 'right',
+      });
     }
 
     function drawToast(g: Lay, now: number) {
@@ -1117,7 +1298,7 @@ export const reconcile: PuzzleDef = {
       const badge = !done ? suggestNo.get(id) : undefined;
       const ty = r.h * 0.31;
       const by = r.h * 0.72;
-      text(ctx, L.text, 13, ty, { size: 12, weight: 650, color: C.ink, max: r.w - 20 - (done && s.how[id] !== 'pair' ? 44 : badge || done ? 20 : 0) });
+      text(ctx, L.text, 13, ty, { size: 12, weight: 650, color: C.ink, max: r.w - 20 - (done && s.how[id] !== 'pair' ? (s.botched[id] ? 58 : 46) : badge || done ? 20 : 0) });
       // bottom row: date or what is left to tick on a payout
       const split = (it.kind === 'split' || it.kind === 'net') && bank && !done;
       const ticked = split ? it.book.filter((k) => s.cleared[k]) : [];
@@ -1144,11 +1325,14 @@ export const reconcile: PuzzleDef = {
           ctx.fill();
           text(ctx, tagOf.get(L.item) ?? '✓', r.w - 13, 12.5, { size: 10, weight: 800, color: C.white, align: 'center' });
         } else {
-          const word = how === 'timing' ? 'timing' : 'adjust';
-          ctx.fillStyle = how === 'timing' ? C.seaLight : shade(C.fin, -0.25);
-          roundRect(ctx, r.w - 48, 4, 42, 16, 8);
+          const bad = s.botched[id];
+          const word = (bad ? '✕ ' : '') + (how === 'timing' ? 'timing' : 'adjust');
+          ctx.font = `800 9.5px ${FONT}`;
+          const pw = ctx.measureText(word).width + 12;
+          ctx.fillStyle = bad ? C.rust : how === 'timing' ? C.seaLight : shade(C.fin, -0.25);
+          roundRect(ctx, r.w - 6 - pw, 4, pw, 16, 8);
           ctx.fill();
-          text(ctx, word, r.w - 27, 12.5, { size: 9.5, weight: 800, color: C.white, align: 'center' });
+          text(ctx, word, r.w - 6 - pw / 2, 12.5, { size: 9.5, weight: 800, color: C.white, align: 'center' });
         }
       }
       if (split && ticked.length) {
@@ -1213,7 +1397,13 @@ export const reconcile: PuzzleDef = {
         } else flashes.delete(`b${bin}`);
       }
       const title = bin === 'timing' ? 'Timing' : 'Adjust';
-      const sub = bin === 'timing' ? 'in transit · uncleared chq' : 'fees · interest · errors';
+      const sub = m.teach
+        ? bin === 'timing'
+          ? 'in transit · uncleared chq'
+          : 'fees · interest · errors'
+        : bin === 'timing'
+          ? 'outstanding items'
+          : 'journal entries';
       text(ctx, binCount[bin] ? `${title} · ${binCount[bin]}` : title, r.x + 14, r.y + r.h * 0.33, {
         size: 15,
         weight: 800,
@@ -1287,7 +1477,7 @@ export const reconcile: PuzzleDef = {
         const r = g.chip[drag.id];
         drawChip(drag.id, { ...r, x: drag.x - drag.gx, y: drag.y - drag.gy }, now, { lifted: true });
         // live difference against the hovered line: the analyst's scratch calculation
-        if (hover?.kind === 'chip') {
+        if (hover?.kind === 'chip' && showDelta) {
           const a = m.lines[drag.id].amount;
           const b = m.lines[hover.id].amount;
           const d = r2(Math.abs(a - b));

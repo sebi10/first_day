@@ -388,6 +388,16 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
     }
     case 'story':
       return story(s, prev, a.key, now);
+    case 'practice': {
+      const p = s.players[a.role];
+      if (!p) return fail('Join first.');
+      const key = `${a.puzzle}:${a.tier}`;
+      if (!s.challenge || s.challenge.week !== s.week) s.challenge = { week: s.week, scores: {} };
+      const row = (s.challenge.scores[key] ??= {});
+      row[a.role] = Math.max(row[a.role] ?? 0, clamp(a.score, 0, 1));
+      p.best = { ...(p.best ?? {}), [a.puzzle]: Math.max(p.best?.[a.puzzle] ?? 0, clamp(a.score, 0, 1)) };
+      return { s };
+    }
     case 'resolve': {
       if (a.week !== s.week) return { s: prev }; // someone else already resolved it
       if (!canResolve(s, now)) return fail('Not time yet.');
@@ -412,29 +422,38 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   const player = s.players[a.role];
   if (!player) return fail('Join first.');
 
+  // Lend a hand: anyone may try another trade's job once a week (mentors twice).
+  // Real trade knowledge is the gate: no tools come with you, and a botched
+  // attempt (<40%) damages the asset and leaves the job open for its owner.
   let covered = false;
   if (o.role !== a.role) {
-    if (!a.cover) return fail('Not your order.');
-    const owner = s.players[o.role];
-    const mentor = isMentor(player);
-    if (!mentor && (owner?.missedStreak ?? 0) < 2) return fail('Covering opens after 2 missed turns.');
-    if ((s.coversUsed[a.role] ?? 0) >= 1) return fail('One cover per week.');
-    const extra = mentor ? 0 : o.cost;
-    if (s.cash - extra < 0) return fail('Not enough cash to cover.');
-    s.cash -= extra;
+    if (!a.cover) return fail('Not your trade. Use Lend a hand.');
+    const allowance = isMentor(player) ? 2 : 1;
+    if ((s.coversUsed[a.role] ?? 0) >= allowance) return fail(allowance === 1 ? 'You already lent a hand this week.' : 'Two assists per week, even for a mentor.');
     s.coversUsed[a.role] = (s.coversUsed[a.role] ?? 0) + 1;
     player.covers += 1;
     covered = true;
+    if (a.score < 0.4) {
+      const asset = assetOf(s, o);
+      if (asset) {
+        asset.health = clamp(asset.health - 6, 0, 100);
+        asset.touchedWeek = s.week;
+      }
+      turn.done += 1;
+      feed(s, o.role, 'bad', `${player.name} tried ${o.title}${asset ? ` on ${asset.name}` : ''} outside their trade: ${Math.round(a.score * 100)}%, botched${asset ? ` (${asset.name} −6)` : ''}. Still open.`, now);
+      return { s };
+    }
   }
   if (a.role === 'mech' && !covered && powered(s).gridDown && turn.done >= 1)
     return fail('Grid down: hangar tools offline, 1 order max.');
 
-  const cr = credit(a.score, player.perfects);
+  const cr = covered ? credit(a.score, 0) : credit(a.score, player.perfects);
   o.status = 'done';
   o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, summary: a.summary };
   turn.done += 1;
-  if (a.perfect && player.perfects < 15) player.perfects += 1;
-  gainXp(s, a.role, orderXp(o.tier, cr, a.perfect));
+  if (a.perfect && !covered && player.perfects < 15) player.perfects += 1;
+  player.best = { ...(player.best ?? {}), [o.puzzle]: Math.max(player.best?.[o.puzzle] ?? 0, clamp(a.score, 0, 1)) };
+  gainXp(s, a.role, Math.round(orderXp(o.tier, cr, a.perfect) * (covered ? 0.5 : 1)));
 
   const asset = assetOf(s, o);
   if (asset) {
@@ -459,7 +478,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   } else if (o.role === 'fin') {
     feed(s, 'fin', 'good', `${o.title}: found ${usd((o.leak ?? 0) * a.score)}.`, now);
   } else {
-    const by = covered ? `${player.name} (covering)` : player.name;
+    const by = covered ? `${player.name} (lending a hand)` : player.name;
     feed(s, o.role, a.perfect ? 'good' : 'info', `${by} finished ${o.title}${asset ? ` on ${asset.name}` : ''}${a.perfect ? ' — perfect' : ''}.`, now);
   }
   return { s };
@@ -903,6 +922,11 @@ export function resolveWeek(s: IslandState, now: number) {
     st.streakBPlus += 1;
   } else st.streakBPlus = 0;
   if (perfectWeek && fullTeam) st.perfectWeeks += 1;
+  st.aStreak = grade === 'A' && fullTeam ? (st.aStreak ?? 0) + 1 : 0;
+  if (s.tier === 5 && (st.aStreak ?? 0) >= 8 && !s.creditsWeek) {
+    s.creditsWeek = W;
+    line('all', 'good', 'Eight straight A weeks at the Resort. You beat Island Company!');
+  }
   st.recentIncidents = [...st.recentIncidents, incidents.length].slice(-4);
   st.negCashStreak = s.cash < 0 ? st.negCashStreak + 1 : 0;
   if (s.receivership > 0) {

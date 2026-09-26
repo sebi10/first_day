@@ -187,7 +187,7 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'wire', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
   { kind: 'oil', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
   // Electrician — houses
-  { kind: 'trip', role: 'elec', title: 'Trace a tripping breaker', puzzle: 'trace', tier: 1, cost: 120, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(95, 4) },
+  { kind: 'trip', role: 'elec', title: 'Trace dead outlets', puzzle: 'trace', tier: 1, cost: 120, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(95, 4) },
   { kind: 'gfci', role: 'elec', title: 'GFCI in wet rooms', puzzle: 'wireup', tier: 1, cost: 210, parts: 0, gain: 10, targets: ['cottage', 'villa', 'lodge'], weight: below(92, 3) },
   { kind: 'switch3', role: 'elec', title: 'Rewire a 3-way switch', puzzle: 'wireup', tier: 2, cost: 290, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(88, 2) },
   {

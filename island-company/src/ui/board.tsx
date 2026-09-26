@@ -1,11 +1,17 @@
 // Board tab: last review, next-tier checklist, story cards, history, feed.
 // Plus the Review overlay shown once after each resolution.
+import { useState } from 'preact/hooks';
+import { PUZZLES } from '../puzzles';
+import type { PuzzleId } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
+import { hashSeed } from '../sim/rng';
+import { toolsFor } from '../sim/progression';
 import { tierDef } from '../sim/econ';
 import { nextTierProgress } from '../sim/progression';
-import { ROLES, type Grade, type IslandState, type WeekReport } from '../sim/types';
+import { ROLES, type Grade, type IslandState, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
-import { Btn, Icon, usd } from './kit';
+import { Btn, Icon, Seg, TierDots, usd } from './kit';
+import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
 import { shareWeek } from './share';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
@@ -63,7 +69,16 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
           <span class="label">Autopilot weeks don't count: nobody wins alone.</span>
         </div>
       )}
-      {!next && <div class="card">Resort tier reached. Endgame: hold an A for 8 weeks straight.</div>}
+      {!next && (
+        <div class="card col" style={{ gap: 4 }}>
+          <h3>Endgame</h3>
+          <span class="num">
+            {s.creditsWeek ? `Beaten in week ${s.creditsWeek}. ` : ''}A-grade streak {Math.min(8, s.stats.aStreak ?? 0)}/8
+          </span>
+        </div>
+      )}
+
+      <Challenge ctl={ctl} />
 
       {s.history.length > 1 && <History s={s} />}
 
@@ -176,6 +191,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
                 Cash {usd(r.cashStart)} → {usd(r.cashEnd)}
               </span>
               {r.tierUp && <span class="chip palm">Tier {r.tierUp} unlocked: {tierDef(r.tierUp).name}!</span>}
+              {s.creditsWeek === r.week && <span class="chip palm">You beat Island Company!</span>}
             </div>
           </div>
           <div class="numbers">
@@ -191,6 +207,18 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               </div>
             ))}
           </div>
+          {s.creditsWeek === r.week && (
+            <div class="card col center" style={{ gap: 8, borderTop: `6px solid ${C.palm}` }}>
+              <h2>Credits</h2>
+              <span class="muted">Eight straight A weeks at the Resort, after {s.stats.totalWeeks} weeks together.</span>
+              {ROLES.map((role) => (
+                <b key={role}>
+                  {s.players[role]?.name} · {ROLE_LABEL[role]}
+                </b>
+              ))}
+              <span class="label">The island keeps running. Chase the next streak.</span>
+            </div>
+          )}
           <div class="card col" style={{ gap: 6 }}>
             <h3>What moved it</h3>
             {[...bad, ...rest].slice(0, 9).map((l, i) => (
@@ -237,6 +265,93 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Weekly crew challenge: every puzzle, same seed for all three this week. No XP: bragging only. */
+function Challenge({ ctl }: { ctl: Ctl }) {
+  const { s, role } = ctl;
+  const [group, setGroup] = useState<Role>(role ?? 'mech');
+  const [tier, setTier] = useState(Math.min(5, Math.max(1, s.tier + 1)));
+  const [play, setPlay] = useState<{ launch: PuzzleLaunch; id: PuzzleId } | null>(null);
+  if (!role || s.week < 1) return null;
+  const scores = s.challenge?.week === s.week ? s.challenge.scores : {};
+  const defs = Object.values(PUZZLES).filter((d) => d.role === group);
+  const me = s.players[role]!;
+  return (
+    <div class="card col" style={{ gap: 10 }}>
+      <div class="row spread">
+        <h3>Weekly challenge</h3>
+        <span class="label">same seed for all three · no XP</span>
+      </div>
+      <span class="label">Try any job, even the other roles'. Teach each other.</span>
+      <Seg<Role> value={group} onChange={setGroup} options={ROLES.map((r) => ({ v: r, label: ROLE_LABEL[r] }))} />
+      <div class="row spread">
+        <span class="label">Difficulty</span>
+        <span class="row" style={{ gap: 6 }}>
+          {[1, 2, 3, 4, 5].map((t) => (
+            <button
+              key={t}
+              class={`chip ${t === tier ? 'ink' : ''}`}
+              style={{ border: 0, minWidth: 36, minHeight: 32, justifyContent: 'center' }}
+              onClick={() => setTier(t)}
+              aria-pressed={t === tier}
+            >
+              T{t}
+            </button>
+          ))}
+        </span>
+      </div>
+      {defs.map((d) => {
+        const row = scores[`${d.id}:${tier}`] ?? {};
+        const best = me.best?.[d.id];
+        return (
+          <div class="row" key={d.id} style={{ gap: 10 }}>
+            <span class="col grow" style={{ gap: 2 }}>
+              <b style={{ fontSize: 15 }}>{d.title}</b>
+              <span class="row wrap" style={{ gap: 8 }}>
+                {ROLES.map((r) => (
+                  <span key={r} class="label num" style={{ color: row[r] !== undefined ? C.ink : undefined }}>
+                    <i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, background: ROLE_TINT[r], marginRight: 4 }} />
+                    {row[r] !== undefined ? Math.round(row[r]! * 100) : '—'}
+                  </span>
+                ))}
+                {best !== undefined && <span class="label">· your best {Math.round(best * 100)}</span>}
+              </span>
+            </span>
+            <Btn
+              small
+              kind="soft"
+              onClick={() =>
+                setPlay({
+                  id: d.id,
+                  launch: {
+                    puzzle: d.id,
+                    seed: hashSeed(s.seed, 'challenge', s.week, d.id, tier),
+                    tier,
+                    tools: d.role === role ? toolsFor(role, me.xp) : [],
+                    title: `Challenge · ${d.title}`,
+                    subtitle: `week ${s.week}`,
+                  },
+                })
+              }
+            >
+              Play
+            </Btn>
+          </div>
+        );
+      })}
+      <span class="label">
+        <TierDots tier={tier} /> Scores reset each week. Your own jobs count toward personal bests too.
+      </span>
+      {play && (
+        <PuzzleHost
+          launch={play.launch}
+          onResult={(r) => void ctl.dispatch({ t: 'practice', role, puzzle: play.id, tier, score: r.score })}
+          onClose={() => setPlay(null)}
+        />
+      )}
     </div>
   );
 }

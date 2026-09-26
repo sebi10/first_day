@@ -86,6 +86,8 @@ export interface Player {
   /** week the player's tier-1 difficulty grace ends */
   graceUntil: number;
   covers: number; // lifetime covers
+  /** personal best score per puzzle (0..1), any tier, from jobs or the weekly challenge */
+  best?: Partial<Record<PuzzleId, number>>;
 }
 
 export interface TurnState {
@@ -205,7 +207,13 @@ export interface IslandState {
     recentIncidents: number[];
     totalWeeks: number;
     tierReachedWeek: Record<number, number>;
+    /** consecutive full-team A weeks (endgame: 8 at the Resort) */
+    aStreak?: number;
   };
+  /** week the crew beat the game (8 straight A weeks at tier 5) */
+  creditsWeek?: number;
+  /** weekly crew challenge: same seed for everyone, bragging rights only */
+  challenge?: { week: number; scores: Record<string, Partial<Record<Role, number>>> };
   receivership: number;
   pendingBonus: number | null;
   story: StoryCard | null;
@@ -246,4 +254,5 @@ export type Action =
   | { t: 'allocateBonus'; choice: 'reserve' | 'capex' | 'split' }
   | { t: 'story'; key: string }
   | { t: 'cosmetic'; role: Role; id: string }
+  | { t: 'practice'; role: Role; puzzle: PuzzleId; tier: number; score: number }
   | { t: 'resolve'; week: number };

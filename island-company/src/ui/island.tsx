@@ -1,7 +1,7 @@
 // The island is the progress bar. Painterly low-poly SVG, readable with no
 // text: rust tags = faults, dim windows = no power, empty runway = grounded.
 import { useMemo } from 'preact/hooks';
-import { COSMETICS } from '../sim/data';
+import { COSMETICS, TIERS } from '../sim/data';
 import { houseRentable, planeCapacity, powered } from '../sim/econ';
 import type { Asset, IslandState, Role } from '../sim/types';
 import { C } from './theme';
@@ -193,6 +193,48 @@ export function Island({
         <polygon points="48,195 72,228 98,236 86,206 60,188" fill={C.palm} opacity=".7" />
         <polygon points="150,232 200,242 226,258 170,262 140,250" fill="#5d9a68" opacity=".65" />
         <polygon points="340,190 362,168 366,196 350,214" fill="#5d9a68" opacity=".6" />
+
+        {/* footpaths: apron → office → cottages, and down to the beach */}
+        <g stroke="#fbf5e9" stroke-width="5" fill="none" stroke-linecap="round" opacity=".55">
+          <path d="M200 150 C 220 150, 236 136, 262 118" />
+          <path d="M214 160 C 240 168, 262 172, 300 176" />
+          <path d="M194 170 C 190 200, 206 230, 238 236" />
+          <path d="M150 158 C 140 190, 120 214, 96 238" />
+        </g>
+        {/* beach life: rocks, umbrellas, a towel */}
+        <g>
+          <ellipse cx={352} cy={228} rx={7} ry={4} fill="#9aa5a9" />
+          <ellipse cx={360} cy={232} rx={4} ry={3} fill="#b8c0c2" />
+          <ellipse cx={58} cy={120} rx={6} ry={3.5} fill="#9aa5a9" />
+          <g transform="translate(262 252)">
+            <line x1={0} y1={0} x2={0} y2={-12} stroke={C.ink} stroke-width="1" />
+            <path d="M-9 -11 Q0 -19 9 -11 Z" fill={C.fin} />
+            <rect x={4} y={-2} width={9} height={4} rx={1} fill={C.elec} />
+          </g>
+          <g transform="translate(150 250)">
+            <line x1={0} y1={0} x2={0} y2={-12} stroke={C.ink} stroke-width="1" />
+            <path d="M-9 -11 Q0 -19 9 -11 Z" fill={C.mech} />
+          </g>
+        </g>
+        {/* plots for what the next tiers will build: the island is the progress bar */}
+        <g fill="none" stroke={C.ink} stroke-width="1" stroke-dasharray="3 3" opacity=".28">
+          {TIERS.filter((t) => t.n > s.tier).flatMap((t) =>
+            t.adds
+              .filter((a) => POS[a.id] && a.id !== 'p3')
+              .map((a) => {
+                const [x, y] = POS[a.id];
+                const big = a.model === 'villa' || a.model === 'lodge';
+                return (
+                  <g key={a.id}>
+                    <rect x={x - (big ? 18 : 14)} y={y - (big ? 16 : 12)} width={big ? 36 : 28} height={big ? 26 : 22} rx={3} />
+                    <text x={x} y={y + 2} text-anchor="middle" font-size="7" font-weight="800" fill={C.ink} stroke="none">
+                      T{t.n}
+                    </text>
+                  </g>
+                );
+              }),
+          )}
+        </g>
 
         {/* runway + apron */}
         <g transform="translate(140 92) rotate(-14)">

@@ -54,7 +54,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
 
   const onPlay = (o: Order, cover = false) => {
     fx.tap();
-    setPlay({ launch: launchFor(s, o, role), order: o, cover });
+    setPlay({ launch: launchFor(s, o, role, cover), order: o, cover });
   };
   const onResult = (o: Order, cover: boolean) => (r: PuzzleResult) => {
     void dispatch({ t: 'complete', role, orderId: o.id, score: r.score, perfect: r.perfect, summary: r.summary, data: r.data, cover });

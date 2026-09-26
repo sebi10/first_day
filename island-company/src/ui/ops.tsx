@@ -140,24 +140,35 @@ export function OpsPanel({ ctl, role, onPlay }: { ctl: Ctl; role: 'mech' | 'elec
   );
 }
 
-/** Two missed turns in a row: teammates may cover one order each at double cost. */
+/** Lend a hand: one try per week at another trade's job. Real know-how is the gate. */
 export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPlay(o: Order, cover?: boolean): void }) {
   const { s } = ctl;
   const me = s.players[role];
-  if (!me || s.week < 1 || s.turns[role]?.ended || (s.coversUsed[role] ?? 0) >= 1) return null;
-  const mentor = isMentor(me);
-  const targets = (['mech', 'elec', 'fin'] as Role[]).filter((r) => r !== role && ((s.players[r]?.missedStreak ?? 0) >= 2 || mentor));
-  const orders = s.orders.filter((o) => targets.includes(o.role) && o.status === 'ready');
+  if (!me || s.week < 1 || s.turns[role]?.ended) return null;
+  const allowance = isMentor(me) ? 2 : 1;
+  const used = s.coversUsed[role] ?? 0;
+  const orders = s.orders.filter((o) => o.role !== role && o.status === 'ready');
   if (!orders.length) return null;
   return (
     <div class="card col" style={{ gap: 8 }}>
-      <h3>Cover for a teammate</h3>
+      <div class="row spread">
+        <h3>Lend a hand</h3>
+        <span class="label num">
+          {Math.max(0, allowance - used)}/{allowance} left this week
+        </span>
+      </div>
       <span class="label">
-        {mentor ? 'Mentor badge: one order per week at normal cost.' : `${targets.map((r) => s.players[r]?.name ?? ROLE_LABEL[r]).join(', ')} missed 2 turns. One order, double cost.`}
+        Try another trade's job. Your tools stay home, and under 40% botches it: the asset takes −6 and the job stays open for its owner. Only do it if you actually know how.
       </span>
-      {orders.slice(0, 3).map((o) => (
-        <OrderCard key={o.id} s={s} o={o} onOpen={() => onPlay(o, true)} />
-      ))}
+      {used < allowance &&
+        orders
+          .sort((a, b) => b.deferrals - a.deferrals || b.tier - a.tier)
+          .slice(0, 3)
+          .map((o) => (
+            <OrderCard key={o.id} s={s} o={o} onOpen={() => onPlay(o, true)} />
+          ))}
+      {used >= allowance && <span class="muted">You already lent a hand this week.</span>}
+      <span class="label">{ROLE_LABEL[role]}s can't take tools across trades. Mentors (level 30) get 2 tries.</span>
     </div>
   );
 }

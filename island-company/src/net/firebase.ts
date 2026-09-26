@@ -52,8 +52,15 @@ function boot() {
     if (!cfg) throw new Error('Firebase is not configured.');
     const [{ initializeApp }, auth, fs] = await Promise.all([import('firebase/app'), import('firebase/auth'), import('firebase/firestore')]);
     const app = initializeApp(cfg);
-    const db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) });
+    const emulator = import.meta.env.VITE_FB_EMULATOR; // e.g. "localhost" for local testing
+    const db = fs.initializeFirestore(app, {
+      localCache: emulator ? fs.memoryLocalCache() : fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }),
+    });
     const a = auth.getAuth(app);
+    if (emulator) {
+      fs.connectFirestoreEmulator(db, emulator, 8080);
+      auth.connectAuthEmulator(a, `http://${emulator}:9099`, { disableWarnings: true });
+    }
     await auth.setPersistence(a, auth.indexedDBLocalPersistence).catch(() => {});
     const user = a.currentUser ?? (await auth.signInAnonymously(a)).user;
     return { app, db, uid: user.uid, fs };

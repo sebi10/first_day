@@ -5,6 +5,7 @@ import { firebaseStore } from '../net/firebase';
 import { deleteLocal } from '../net/local';
 import { onlineAvailable, sessions } from '../net/session';
 import { PP_UID } from '../net/store';
+import { PUZZLES } from '../puzzles';
 import { COSMETICS, ROLE_LABEL, ROLE_LONG, TOOLS } from '../sim/data';
 import { levelProgress } from '../sim/progression';
 import { ROLES, type Role } from '../sim/types';
@@ -80,6 +81,26 @@ export function Me({ ctl, onLeave }: { ctl: Ctl; onLeave(): void }) {
             </div>
           );
         })}
+      </div>
+
+      <div class="card col" style={{ gap: 6 }}>
+        <h3>Personal bests</h3>
+        {Object.values(PUZZLES)
+          .filter((d) => d.role === role || me.best?.[d.id] !== undefined)
+          .map((d) => {
+            const b = me.best?.[d.id];
+            return (
+              <div class="row spread" key={d.id}>
+                <span>
+                  {d.title} {d.role !== role && <span class="label">· {ROLE_LABEL[d.role]}</span>}
+                </span>
+                <b class="num" style={{ color: b !== undefined && b >= 0.95 ? C.palm : undefined }}>
+                  {b === undefined ? '—' : `${Math.round(b * 100)}${b >= 0.95 ? ' ★' : ''}`}
+                </b>
+              </div>
+            );
+          })}
+        <span class="label">No leaderboard inside the island: compete on skill in the weekly challenge (Board).</span>
       </div>
 
       <div class="card col" style={{ gap: 8 }}>

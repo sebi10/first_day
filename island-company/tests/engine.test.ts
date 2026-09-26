@@ -148,12 +148,20 @@ describe('orders and puzzles', () => {
     expect(s.players.elec!.perfects).toBe(1);
   });
 
-  it('cannot do another role’s order without the cover rule', () => {
-    const s = started();
-    const o = s.orders.find((x) => x.role === 'mech' && x.status === 'ready');
-    if (!o) return;
-    expect(apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: false }, NOW).error).toBeTruthy();
-    expect(apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: false, cover: true }, NOW).error).toMatch(/2 missed/);
+  it('lend a hand: one try per week at another trade; a botch damages and stays open', () => {
+    let s = started();
+    const o = s.orders.find((x) => x.role === 'mech' && x.status === 'ready')!;
+    expect(o).toBeTruthy();
+    expect(apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: false }, NOW).error).toMatch(/Lend a hand/);
+    const asset = s.assets.find((a) => a.id === o.assetId)!;
+    const h = asset.health;
+    s = apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 0.25, perfect: false, cover: true }, NOW).s;
+    expect(s.orders.find((x) => x.id === o.id)!.status).toBe('ready');
+    expect(s.assets.find((a) => a.id === o.assetId)!.health).toBeCloseTo(h - 6);
+    expect(apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: false, cover: true }, NOW).error).toMatch(/already/);
+    // the owner can still do it
+    s = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0.9, perfect: false }, NOW).s;
+    expect(s.orders.find((x) => x.id === o.id)!.status).toBe('done');
   });
 
   it('auction result adds parts in transit and costs cash', () => {

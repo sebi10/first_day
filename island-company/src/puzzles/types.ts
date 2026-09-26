@@ -33,6 +33,8 @@ export interface PuzzleContext {
   leak?: number;
   /** free-form label, e.g. the asset name the order targets ("Twin N-12") */
   assetName?: string;
+  /** the work-order kind that launched it (e.g. "alternator", "cylinder") so a puzzle can pick the real procedure */
+  job?: string;
 }
 
 export interface PuzzleParams {

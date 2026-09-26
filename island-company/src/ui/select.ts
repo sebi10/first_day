@@ -49,13 +49,13 @@ function statusRank(o: Order) {
   return { countered: 0, ready: 1, waiting_part: 2, pending: 3, approved: 3, done: 5, cancelled: 6 }[o.status];
 }
 
-export function launchFor(s: IslandState, o: Order, role: Role): PuzzleLaunch {
+export function launchFor(s: IslandState, o: Order, role: Role, assist = false): PuzzleLaunch {
   const p = s.players[role];
-  const grace = p && s.week <= p.graceUntil;
+  const grace = !assist && p && s.week <= p.graceUntil;
   const asset = s.assets.find((a) => a.id === o.assetId);
   const tier = grace ? 1 : o.tier;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
-  const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak };
+  const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.kind };
   if (o.kind === 'auction') {
     const { low, high } = ECON.partMarket;
     const f = 1 + 0.1 * (s.tier - 1);
@@ -67,9 +67,9 @@ export function launchFor(s: IslandState, o: Order, role: Role): PuzzleLaunch {
     puzzle: o.puzzle,
     seed: hashSeed(o.seed, role),
     tier,
-    tools: p ? toolsFor(role, p.xp) : [],
-    title: o.title,
-    subtitle: asset?.name ?? (grace ? 'new-crew difficulty' : undefined),
+    tools: p && !assist ? toolsFor(role, p.xp) : [],
+    title: assist ? `Lending a hand · ${o.title}` : o.title,
+    subtitle: asset?.name ?? (grace ? 'new-crew difficulty' : assist ? 'outside your trade' : undefined),
     context,
     reward,
   };

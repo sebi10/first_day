@@ -175,8 +175,11 @@ function NewIsland({ open, onClose, playerName }: { open: boolean; onClose(): vo
   );
 }
 
-function JoinIsland({ open, onClose, playerName, initial }: { open: boolean; onClose(): void; playerName: string; initial?: string }) {
+function JoinIsland({ open, onClose, playerName: nameProp, initial }: { open: boolean; onClose(): void; playerName: string; initial?: string }) {
   const [code, setCode] = useState(initial ?? '');
+  const [localName, setLocalName] = useState(nameProp);
+  useEffect(() => setLocalName(nameProp), [nameProp]);
+  const playerName = localName.trim();
   const [found, setFound] = useState<IslandState | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [seatKey, setSeatKey] = useState('');
@@ -250,6 +253,22 @@ function JoinIsland({ open, onClose, playerName, initial }: { open: boolean; onC
         )}
         {found && (
           <>
+            {!nameProp && (
+              <div class="field">
+                <span class="label">Your name</span>
+                <input
+                  type="text"
+                  value={localName}
+                  maxLength={20}
+                  placeholder="e.g. Seb"
+                  onInput={(e) => {
+                    const v = (e.target as HTMLInputElement).value;
+                    setLocalName(v);
+                    sessions.setName(v.trim());
+                  }}
+                />
+              </div>
+            )}
             <span class="label">Pick your seat. A taken seat can be linked to this device with its owner's seat code (e.g. your phone ↔ your computer).</span>
             <div class="col" style={{ gap: 8 }}>
               {ROLES.map((r) => {
@@ -286,7 +305,7 @@ function JoinIsland({ open, onClose, playerName, initial }: { open: boolean; onC
             )}
             <Btn
               block
-              disabled={!role || busy || !uid || (seatState(role) === 'taken' && seatKey.length !== 6)}
+              disabled={!role || busy || !uid || !playerName || (seatState(role) === 'taken' && seatKey.length !== 6)}
               onClick={async () => {
                 if (!role || !uid) return;
                 setBusy(true);
