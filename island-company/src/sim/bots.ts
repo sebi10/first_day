@@ -133,7 +133,7 @@ export type SimWeek = {
   houses: string;
 };
 
-export function simulate(team: Team, weeks: number, seed: number) {
+export function simulate(team: Team, weeks: number, seed: number, trace?: (s: IslandState) => void) {
   let now = Date.UTC(2026, 8, 1, 12);
   let s = createIsland({ id: `sim-${seed}`, name: 'Sim Island', now, tz: 'Europe/Paris', seed: hashSeed('sim', seed), creator: { uid: 'u-mech', name: 'M', role: 'mech' } });
   s = step(s, { t: 'join', uid: 'u-elec', name: 'E', role: 'elec' }, now);
@@ -160,6 +160,7 @@ export function simulate(team: Team, weeks: number, seed: number) {
       s = step(s, { t: 'resolve', week }, now);
     } else now += 86400_000;
     const h = s.history[s.history.length - 1];
+    trace?.(s);
     minCash = Math.min(minCash, h.cashEnd);
     out.push({
       week: h.week,

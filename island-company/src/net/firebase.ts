@@ -152,16 +152,20 @@ async function flush(id: string) {
   flushing = true;
   try {
     let box = readOutbox(id);
+    const dropped: string[] = [];
     while (box.length) {
       try {
         const r = await transact(id, box[0]);
         if (r.state) publish(id, r.state);
+        if (r.error) dropped.push(r.error);
       } catch (e) {
         if (isNetworkError(e)) break;
+        dropped.push(String((e as Error)?.message ?? e));
       }
-      box = box.slice(1); // game-rule rejections are dropped: the island moved on
+      box = box.slice(1); // game-rule rejections are dropped (the island moved on), but the player hears about it
       writeOutbox(id, box);
     }
+    if (dropped.length) window.dispatchEvent(new CustomEvent('ic:dropped', { detail: { id, errors: dropped } }));
   } finally {
     flushing = false;
     emitStatus();
@@ -251,14 +255,8 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
     };
   },
   async dispatch(id, a) {
-    try {
-      const r = await transact(id, a);
-      if (r.error) return { error: r.error };
-      if (r.state) publish(id, r.state);
-      return {};
-    } catch (e) {
-      if (!isNetworkError(e)) return { error: String((e as Error)?.message ?? e) };
-      // offline: validate locally, queue, show the result optimistically
+    // offline: validate locally, queue, show the result optimistically
+    const queue = () => {
       const base = cached(id);
       if (!base) return { error: 'Offline and no local copy yet.' };
       const r = apply(base, a, Date.now());
@@ -267,6 +265,17 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
       publish(id, r.s);
       emitStatus();
       return {};
+    };
+    // known offline: don't wait seconds for a transaction to time out
+    if (!navigator.onLine) return queue();
+    try {
+      const r = await transact(id, a);
+      if (r.error) return { error: r.error };
+      if (r.state) publish(id, r.state);
+      return {};
+    } catch (e) {
+      if (!isNetworkError(e)) return { error: String((e as Error)?.message ?? e) };
+      return queue();
     }
   },
   status(cb) {

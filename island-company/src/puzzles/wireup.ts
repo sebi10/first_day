@@ -5,7 +5,7 @@
 // on a GFCI the source goes on LINE. Tiers 0–2 label every terminal; from
 // tier 3 you get only the screw colours, like a real device.
 import { rng } from '../sim/rng';
-import { C, backdrop, clamp, label, loop, pointer, roundRect, stage } from './kit';
+import { C, backdrop, clamp, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 type Term = { id: string; label: string; color: 'brass' | 'silver' | 'green' | 'dark' | 'nut'; x: number; y: number; multi?: boolean; stamp?: string };
@@ -483,7 +483,7 @@ export const wireup: PuzzleDef = {
         flash = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 900 : 500);
+      settle(host, res, res.perfect ? 900 : 500);
     }
 
     return {

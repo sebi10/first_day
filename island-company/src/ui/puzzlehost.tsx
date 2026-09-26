@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PUZZLES } from '../puzzles';
 import { PASS, type PuzzleContext, type PuzzleId, type PuzzleInstance, type PuzzleResult } from '../puzzles/types';
+import { REWORK_BELOW, workCredit } from '../sim/econ';
 import { fx } from './feedback';
 import { Btn, Icon, TierDots } from './kit';
 import { settings } from './settings';
@@ -26,6 +27,8 @@ export type PuzzleLaunch = {
   expert?: boolean;
   /** seat playing it: "seen this puzzle" is per seat, so pass-and-play works */
   seat?: string;
+  /** an owner's trade job: under 40% it isn't signed off and stays open */
+  rework?: boolean;
 };
 
 const SEEN = 'ic.seen.';
@@ -61,6 +64,13 @@ export function PuzzleHost({
   const [left, setLeft] = useState(1);
   const elapsed = useRef(0);
   const finished = useRef(false);
+  /** a solved puzzle's result, locked in while its finish animation plays */
+  const held = useRef<PuzzleResult | null>(null);
+  // time-up, hand-in or backgrounding: a locked-in result wins over a re-score
+  const settleNow = () => {
+    if (held.current) finish(held.current);
+    else if (inst.current) finish(inst.current.timeUp());
+  };
 
   const finish = (r: PuzzleResult) => {
     if (finished.current) return;
@@ -97,7 +107,12 @@ export function PuzzleHost({
       {
         el,
         fx: hostFx,
-        done: (r) => finish(r),
+        done: (r) => finish(held.current ?? r),
+        hold: (r, ms) => {
+          if (finished.current || held.current) return;
+          held.current = r;
+          setTimeout(() => finish(r), ms);
+        },
         status: setStatus,
         paused: () => (pausedRef.current && startedRef.current) || !!howtoRef.current || finished.current,
       },
@@ -121,13 +136,13 @@ export function PuzzleHost({
     const tick = (now: number) => {
       const dt = now - last;
       last = now;
-      if (startedRef.current && !pausedRef.current && !howtoRef.current && !finished.current) {
+      if (startedRef.current && !pausedRef.current && !howtoRef.current && !finished.current && !held.current) {
         elapsed.current += dt;
         const l = Math.max(0, 1 - elapsed.current / total);
         setLeft(l);
         if (l <= 0 && inst.current) {
           fx.bad();
-          finish(inst.current.timeUp());
+          settleNow();
         }
       }
       raf = requestAnimationFrame(tick);
@@ -145,7 +160,7 @@ export function PuzzleHost({
       } else {
         const away = hiddenAt.current ? Date.now() - hiddenAt.current : 0;
         hiddenAt.current = null;
-        if (away > 10 * 60_000 && startedRef.current && inst.current && !finished.current) finish(inst.current.timeUp());
+        if (away > 10 * 60_000 && startedRef.current && inst.current && !finished.current) settleNow();
         pausedRef.current = !startedRef.current;
       }
     };
@@ -167,8 +182,17 @@ export function PuzzleHost({
     setConfirm(true);
   };
 
-  const verdict = res ? (res.perfect ? 'Perfect' : res.score >= PASS ? 'Pass' : 'Partial') : '';
-  const credit = res ? Math.round(Math.min(1, res.score / PASS) * 100) : 0;
+  const botched = !!res && !!launch.expert && res.score < PASS;
+  const reworked = !!res && !!launch.rework && res.score < REWORK_BELOW;
+  const verdict = res ? (res.perfect ? 'Perfect' : res.score >= PASS ? 'Pass' : botched ? 'Botched' : reworked ? 'Rework' : 'Partial') : '';
+  const credit = res ? Math.round(workCredit(res.score) * 100) : 0;
+  const creditLine = botched
+    ? 'Under 60% outside your trade: the asset takes −6 and the job stays open for its owner'
+    : reworked
+      ? 'Under 40%: not signed off. The job stays open with a fresh fault'
+      : credit >= 100
+        ? 'Full work credit'
+        : `${credit}% work credit`;
   const shaking = oops && performance.now() - oops < 400;
 
   return (
@@ -243,7 +267,7 @@ export function PuzzleHost({
                   <Btn kind="ghost" block onClick={() => setConfirm(false)}>
                     Keep working
                   </Btn>
-                  <Btn kind="ink" block onClick={() => inst.current && finish(inst.current.timeUp())}>
+                  <Btn kind="ink" block onClick={settleNow}>
                     Hand in now
                   </Btn>
                 </div>
@@ -263,9 +287,9 @@ export function PuzzleHost({
                   </div>
                 </div>
                 <div class="label">
-                  {credit >= 100 ? 'Full order credit' : `${credit}% order credit`}
+                  {creditLine}
                   {res.perfect ? ' · perfect: +1% bonus, and it holds a week longer' : ''}
-                  {launch.reward ? ` · ${launch.reward}` : ''}
+                  {launch.reward && !botched && !reworked ? ` · ${launch.reward}` : ''}
                 </div>
                 <Btn block onClick={onClose}>
                   Continue

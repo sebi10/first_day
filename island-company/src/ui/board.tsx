@@ -271,6 +271,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
             <span class="label num">
               Fixed {usd(r.costs.fixed)} · insurance {usd(r.costs.insurance)} · leakage {usd(r.costs.leak)} · incidents {usd(r.costs.incidents)} · refunds{' '}
               {usd(r.costs.refunds)}
+              {r.costs.loan ? ` · loan ${usd(r.costs.loan)}` : ''}
             </span>
             <span class="label num">Incident roll seed {r.seed} — every outcome is replayable.</span>
           </div>

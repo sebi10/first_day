@@ -126,7 +126,7 @@ export interface WeekReport {
   nearMisses: number;
   cashStart: number;
   cashEnd: number;
-  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number };
+  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number; loan?: number };
   housesBooked: number;
   housesRentable: number;
   partsDelivered: number;
@@ -217,6 +217,8 @@ export interface IslandState {
   /** weekly crew challenge: same seed for everyone, bragging rights only */
   challenge?: { week: number; scores: Record<string, Partial<Record<Role, number>>> };
   receivership: number;
+  /** receiver's bridge loan: taken once on entering receivership, repaid weekly */
+  loan?: { left: number; weekly: number } | null;
   pendingBonus: number | null;
   story: StoryCard | null;
   modifiers: Modifier[];
@@ -232,8 +234,11 @@ export interface IslandState {
   project?: { tier: number; title: string; orders: Partial<Record<Role, string>> } | null;
 }
 
+/** moves that belong to one week: stamped at dispatch, stale ones are rejected */
+export const WEEK_BOUND = ['complete', 'approve', 'defer', 'counter', 'acceptCounter', 'rejectCounter', 'buyList', 'endTurn', 'tag'] as const;
+
 export type Action =
-  | { t: 'join'; uid: string; name: string; role: Role; reclaim?: boolean; key?: string }
+  | { t: 'join'; uid: string; name: string; role: Role; reclaim?: boolean; key?: string; /** replace an absent player (explicit, confirmed in the UI) */ takeover?: boolean }
   | { t: 'rename'; role: Role; name: string }
   | { t: 'week0Done'; role: Role }
   | {
@@ -245,21 +250,23 @@ export type Action =
       summary?: string;
       data?: Record<string, unknown>;
       cover?: boolean;
+      /** the week this move was made in; a move queued offline across a deadline is rejected */
+      week?: number;
     }
-  | { t: 'approve'; orderId: string }
-  | { t: 'defer'; orderId: string; reason: 'cash' | 'priority' }
-  | { t: 'counter'; orderId: string }
-  | { t: 'acceptCounter'; orderId: string }
-  | { t: 'rejectCounter'; orderId: string }
+  | { t: 'approve'; orderId: string; week?: number }
+  | { t: 'defer'; orderId: string; reason: 'cash' | 'priority'; week?: number }
+  | { t: 'counter'; orderId: string; week?: number }
+  | { t: 'acceptCounter'; orderId: string; week?: number }
+  | { t: 'rejectCounter'; orderId: string; week?: number }
   | { t: 'setRates'; nightly: number; charter: number }
   | { t: 'setBudget'; role: OpsRole; amount: number }
   | { t: 'setInsurance'; tier: Insurance }
   | { t: 'setNtfy'; topic: string }
-  | { t: 'buyList' }
-  | { t: 'endTurn'; role: Role }
+  | { t: 'buyList'; week?: number }
+  | { t: 'endTurn'; role: Role; week?: number }
   | { t: 'allocateBonus'; choice: 'reserve' | 'capex' | 'split' }
   | { t: 'story'; key: string; role: Role }
-  | { t: 'tag'; role: Role; assetId: string; on: boolean }
+  | { t: 'tag'; role: Role; assetId: string; on: boolean; week?: number }
   | { t: 'cosmetic'; role: Role; id: string }
   | { t: 'practice'; role: Role; puzzle: PuzzleId; tier: number; score: number }
   | { t: 'resolve'; week: number };

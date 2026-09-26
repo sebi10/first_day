@@ -130,8 +130,24 @@ export function orderCost(kind: string, tier: number) {
   return round10(c.cost * (1 + 0.2 * (tier - c.tier)));
 }
 
+/** A pass (60%) signs off an inspection, same as the puzzles' PASS. */
+export const SIGNOFF = 0.6;
+
+/** Below this an owner's job fails its own check and stays open (rework). */
+export const REWORK_BELOW = 0.4;
+
+/** Work credit keeps rising with skill: a bare pass (60%) earns 81%, a clean job 105%. */
+export function workCredit(score: number) {
+  return 0.45 + 0.6 * Math.min(1, Math.max(0, score));
+}
+
 export function credit(score: number, perfects: number) {
-  return Math.min(1, score / 0.6) * (1 + Math.min(15, perfects) / 100);
+  return workCredit(score) * (1 + Math.min(15, perfects) / 100);
+}
+
+/** Does a result this low send an owner's job back for rework? (Trade jobs on an asset, not crew projects.) */
+export function isRework(o: { role: string; kind: string; assetId: string | null }, score: number) {
+  return o.role !== 'fin' && o.kind !== 'project' && o.assetId !== null && score < REWORK_BELOW;
 }
 
 export function urgency(s: IslandState, o: Order) {

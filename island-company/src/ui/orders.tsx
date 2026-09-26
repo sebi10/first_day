@@ -1,6 +1,7 @@
 // Work-order cards: the universal container (same radius, shadow, grammar).
 import { ECON, ROLE_LABEL } from '../sim/data';
 import { deferralRisk, expectedDeferralCost } from '../sim/econ';
+import { isEmergency } from '../sim/engine';
 import type { IslandState, Order, Role } from '../sim/types';
 import { Icon, TierDots, usd } from './kit';
 import { ROLE_TINT } from './theme';
@@ -105,7 +106,11 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
           {o.result.summary ? ` · ${o.result.summary}` : ''}
         </p>
       )}
-      {s.cash < ECON.freezeBelow && o.status === 'pending' && <p class="fault" style={{ margin: 0 }}>Cash under $2,000: approvals are frozen.</p>}
+      {s.cash < ECON.freezeBelow && o.status === 'pending' && (
+        <p class="fault" style={{ margin: 0 }}>
+          Cash under $2,000: {isEmergency(s, o) ? 'safety-critical, so it can still be approved.' : 'frozen until cash recovers.'}
+        </p>
+      )}
     </div>
   );
 }

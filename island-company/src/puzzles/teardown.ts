@@ -4,7 +4,7 @@
 // Tiers 0–2 number the removal order and tag the failed part; from tier 3 you
 // need to know the procedure, and the failed part only shows when inspected.
 import { rng } from '../sim/rng';
-import { C, backdrop, clamp, label, loop, pointer, roundRect, shade, stage } from './kit';
+import { C, backdrop, clamp, label, loop, pointer, roundRect, shade, stage, settle } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export type Part = {
@@ -411,7 +411,7 @@ export const teardown: PuzzleDef = {
         flourish = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 900 : 400);
+      settle(host, res, res.perfect ? 900 : 400);
     }
 
     return {

@@ -62,6 +62,8 @@ export interface PuzzleHost {
   fx: Fx;
   /** call exactly once when the attempt is complete */
   done(result: PuzzleResult): void;
+  /** lock in a result now (the clock stops) and deliver it after a short finish animation */
+  hold?(result: PuzzleResult, ms: number): void;
   /** short status line shown by the host, e.g. "Bolt 3 of 6" */
   status(text: string): void;
   /** true while the help overlay is open or the app is backgrounded */

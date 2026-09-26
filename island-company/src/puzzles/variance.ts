@@ -4,7 +4,7 @@
 // real month-end review: materiality, price vs volume, equal-and-opposite
 // reclasses, and tiny lines with scary percentages.
 import { rng } from '../sim/rng';
-import { C, clamp } from './kit';
+import { C, clamp, settle } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export type VLine = {
@@ -264,7 +264,7 @@ export const variance: PuzzleDef = {
       });
       if (res.perfect) host.fx.flourish();
       else host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 900 : 400);
+      settle(host, res, res.perfect ? 900 : 400);
     }
 
     render();

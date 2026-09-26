@@ -33,6 +33,8 @@ export const ECON = {
   flightWear: 1,
   houseWear: 2,
   houseInspectionWeeks: 8,
+  /** a kit shipped by boat when no plane could carry it */
+  boatKit: 350,
   planeInspectionFlights: 12,
   nearMissPerFlight: 0.1,
   outageChance: 0.25,

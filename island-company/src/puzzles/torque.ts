@@ -1,7 +1,7 @@
 // Mechanic · Torque sequence. Tap a bolt, then turn the dial with one thumb
 // to bring it into the green band. Overshoot is permanent (like a real bolt).
 import { rng } from '../sim/rng';
-import { C, backdrop, clamp, ease, label, loop, pointer, shade, stage } from './kit';
+import { C, backdrop, clamp, ease, label, loop, pointer, settle, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export type TorqueModel = {
@@ -146,7 +146,7 @@ export const torque: PuzzleDef = {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 900 : 350);
+      settle(host, res, res.perfect ? 900 : 350);
     };
 
     const selectBolt = (i: number) => {

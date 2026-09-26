@@ -3,7 +3,7 @@
 // leaves on the tightening (clockwise) side, twist each span to the right
 // twists-per-inch, then twist a short pigtail and bend it back so it can't snag.
 import { hashSeed, rng, type Rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, label, lerp, loop, pointer, roundRect, shade, stage } from './kit';
+import { C, FONT, backdrop, clamp, ease, label, lerp, loop, pointer, roundRect, settle, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 // ---------------------------------------------------------------------------
@@ -476,7 +476,7 @@ export const safetywire: PuzzleDef = {
         host.fx.flourish();
       } else host.fx.good();
       host.status(summarize(m, run));
-      setTimeout(() => host.done(res), res.perfect ? 800 : 350);
+      settle(host, res, res.perfect ? 800 : 350);
     };
 
     const dataOf = () => ({ wrongWay: run.wrongWay, snaps: run.snaps, twists: run.twists.slice(), pigtail: run.pigtail });

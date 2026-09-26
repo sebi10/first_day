@@ -3,7 +3,7 @@
 // it as the clock runs. Tiers 0–2 print a fair-value marker; from tier 3 you
 // get three comparable sales instead and value the kit yourself.
 import { rng } from '../sim/rng';
-import { C, backdrop, clamp, label, loop, pointer, roundRect, stage } from './kit';
+import { C, backdrop, clamp, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 type Bot = { name: string; value: number; delay: number };
@@ -344,7 +344,7 @@ export const auction: PuzzleDef = {
       finished = true;
       const res = outcomeResult();
       if (res.perfect) host.fx.flourish();
-      setTimeout(() => host.done(res), res.perfect ? 800 : 300);
+      settle(host, res, res.perfect ? 800 : 300);
     }
 
     return {

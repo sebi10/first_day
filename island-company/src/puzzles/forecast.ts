@@ -2,7 +2,7 @@
 // finger. Tiers 0–2 draw a dotted run-rate guide; from tier 3 you only get the
 // history and the desk notes (pending approvals, season, storms) and build the
 // forecast yourself, like a real 13-week cash view in miniature.
-import { C, backdrop, clamp, label, loop, pointer, roundRect, stage } from './kit';
+import { C, backdrop, clamp, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 export type ForecastModel = {
@@ -245,7 +245,7 @@ export const forecast: PuzzleDef = {
       const res = makeResult();
       if (res.perfect) host.fx.flourish();
       else host.fx.good();
-      setTimeout(() => host.done(res), 1100);
+      settle(host, res, 1100);
     }
 
     function makeResult(): PuzzleResult {

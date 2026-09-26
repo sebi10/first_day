@@ -5,7 +5,7 @@
 // 3 you size the breaker to the wire (14→15 A, 12→20 A, 10→30 A, 8→40 A,
 // 6→50 A) and do the load math yourself; from tier 4 loads come in watts.
 import { rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, fitLabel, label, loop, pointer, roundRect, stage } from './kit';
+import { C, FONT, backdrop, clamp, fitLabel, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export const AMPACITY: Record<number, number> = { 14: 15, 12: 20, 10: 30, 8: 40, 6: 50 };
@@ -388,7 +388,7 @@ export const panel: PuzzleDef = {
       setTimeout(() => {
         res.perfect ? host.fx.flourish() : host.fx.good();
       }, 250);
-      setTimeout(() => host.done(res), res.perfect ? 1000 : 600);
+      settle(host, res, res.perfect ? 1000 : 600);
     }
 
     return {

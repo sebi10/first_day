@@ -4,7 +4,7 @@ import { sessions, storeFor, type IslandRef } from '../net/session';
 import type { SyncStatus } from '../net/store';
 import { ROLE_LABEL } from '../sim/data';
 import { canResolve, seatOf } from '../sim/engine';
-import { ROLES, type Action, type IslandState, type Role } from '../sim/types';
+import { ROLES, WEEK_BOUND, type Action, type IslandState, type Role } from '../sim/types';
 import { fx } from './feedback';
 import { toast, useNow } from './kit';
 
@@ -27,6 +27,17 @@ export function useIsland(ref: IslandRef) {
 
   useEffect(() => store.subscribe(ref.id, setS), [ref.id, ref.mode]);
   useEffect(() => store.status(setSync), [ref.mode]);
+  // offline moves the server refused once back online (usually: the week closed first)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; errors: string[] }>).detail;
+      if (d.id !== ref.id || !d.errors.length) return;
+      toast(d.errors.length === 1 ? `Didn't sync: ${d.errors[0]}` : `${d.errors.length} offline moves didn't sync: ${d.errors[0]}`);
+      fx.bad();
+    };
+    window.addEventListener('ic:dropped', on);
+    return () => window.removeEventListener('ic:dropped', on);
+  }, [ref.id]);
   useEffect(() => {
     store
       .uid()
@@ -41,6 +52,8 @@ export function useIsland(ref: IslandRef) {
 
   const dispatch = async (a: Action): Promise<boolean> => {
     const before = latest.current;
+    // stamp the week so a move queued offline can't land in the next one
+    if (before && (WEEK_BOUND as readonly string[]).includes(a.t) && (a as { week?: number }).week == null) a = { ...a, week: before.week } as Action;
     const r = await store.dispatch(ref.id, a);
     if (r.error) {
       if (a.t !== 'resolve') {

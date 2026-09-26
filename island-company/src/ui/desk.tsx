@@ -36,7 +36,8 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           </span>
           <span class="chip num">Fixed −{usd(tierDef(s.tier).fixed)}</span>
         </div>
-        {s.cash < ECON.freezeBelow && <span class="fault">Under $2,000: every approval is frozen.</span>}
+        {s.cash < ECON.freezeBelow && <span class="fault">Under $2,000: frozen except safety-critical work (assets under 60, inspections).</span>}
+        {s.loan && <span class="label">Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week</span>}
         {s.receivership > 0 && <span class="fault">Receivership · {s.receivership} wk: rates capped, spend over $800 blocked, grade capped at C.</span>}
       </div>
 

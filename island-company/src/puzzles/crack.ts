@@ -6,7 +6,7 @@
 // and make decoys dimmer; from tier 3 decoys look just as bright and you read
 // shape, origin and bleed-out yourself.
 import { rng } from '../sim/rng';
-import { C, clamp, dist, label, loop, pointer, roundRect, stage } from './kit';
+import { C, clamp, dist, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 type P = { x: number; y: number }; // normalised 0..1
@@ -407,7 +407,7 @@ export const crack: PuzzleDef = {
       const res = makeResult();
       if (res.perfect) host.fx.flourish();
       else host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 1000 : 700);
+      settle(host, res, res.perfect ? 1000 : 700);
     }
 
     return {

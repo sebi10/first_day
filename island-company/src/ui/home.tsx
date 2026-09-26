@@ -27,21 +27,25 @@ type Tab = 'island' | 'board' | 'me';
 export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
   const { s, uid, role, sync, dispatch } = useIsland(islandRef);
   const [tab, setTab] = useState<Tab>('island');
-  const [play, setPlay] = useState<{ launch: PuzzleLaunch; order: Order; cover: boolean } | null>(null);
+  const [play, setPlay] = useState<{ launch: PuzzleLaunch; order: Order; cover: boolean; week: number } | null>(null);
   const [review, setReview] = useState<WeekReport | null>(null);
   const [handoff, setHandoff] = useState<Role | null>(null);
   const reduce = settings.get().reduceMotion;
 
-  // auto-open the newest board review once
+  // auto-open the newest board review once, but never on top of a running puzzle
   const lastWeek = s?.history[s.history.length - 1]?.week ?? 0;
   useEffect(() => {
-    if (!s || !lastWeek) return;
+    if (!s || !lastWeek || play) return;
     const seen = sessions.ref(islandRef.id)?.lastSeenReview ?? 0;
     if (lastWeek > seen) {
       setReview(s.history[s.history.length - 1]);
       fx.pulse();
     }
-  }, [lastWeek]);
+  }, [lastWeek, !!play]);
+  // the deadline passed mid-puzzle: say so now, not after the player hands in
+  useEffect(() => {
+    if (play && s && s.week !== play.week) toast(`Week ${play.week} just closed and autopilot filed this job. This run won't count.`);
+  }, [s?.week]);
 
   if (s === undefined) return <Loading text="Loading island…" />;
   if (s === null) return <Loading text="Island not found." back />;
@@ -54,10 +58,10 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
 
   const onPlay = (o: Order, cover = false) => {
     fx.tap();
-    setPlay({ launch: launchFor(s, o, role, cover), order: o, cover });
+    setPlay({ launch: launchFor(s, o, role, cover), order: o, cover, week: s.week });
   };
-  const onResult = (o: Order, cover: boolean) => (r: PuzzleResult) => {
-    void dispatch({ t: 'complete', role, orderId: o.id, score: r.score, perfect: r.perfect, summary: r.summary, data: r.data, cover });
+  const onResult = (o: Order, cover: boolean, week: number) => (r: PuzzleResult) => {
+    void dispatch({ t: 'complete', role, orderId: o.id, score: r.score, perfect: r.perfect, summary: r.summary, data: r.data, cover, week });
   };
 
   const switchSeat = (r: Role) => {
@@ -79,7 +83,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
       {play && (
         <PuzzleHost
           launch={{ ...play.launch, seat: role }}
-          onResult={onResult(play.order, play.cover)}
+          onResult={onResult(play.order, play.cover, play.week)}
           onClose={() => setPlay(null)}
           onCancel={() => setPlay(null)}
         />

@@ -1,6 +1,7 @@
 // Shared canvas plumbing for puzzles: DPR-correct stage, rAF loop, pointer
 // capture, and a few drawing helpers. Keeps every puzzle at one-frame feedback.
 import { C, FONT } from '../ui/theme';
+import type { PuzzleResult } from './types';
 
 export { C, FONT };
 
@@ -159,6 +160,12 @@ export function fitLabel(
   let s = str;
   while (s.length > 1 && ctx.measureText(s).width > maxW) s = s.slice(0, -2) + '…';
   label(ctx, s, x, y, { ...o, size });
+}
+
+/** Finish with a short celebration: the result is locked in now, so the clock can't overwrite it. */
+export function settle(host: { done(r: PuzzleResult): void; hold?(r: PuzzleResult, ms: number): void }, res: PuzzleResult, ms: number) {
+  if (host.hold) host.hold(res, ms);
+  else setTimeout(() => host.done(res), ms);
 }
 
 /** Painterly backdrop: soft vertical gradient in sand, used behind every puzzle */

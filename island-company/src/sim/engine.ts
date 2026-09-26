@@ -7,6 +7,8 @@ import {
   charterLoad,
   clamp,
   isTagged,
+  isRework,
+  SIGNOFF,
   credit,
   deferralRisk,
   grid,
@@ -257,6 +259,9 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
   const s = structuredClone(prev);
   s.updatedAt = now;
   const fail = (error: string): ApplyResult => ({ s: prev, error });
+  // a move made in an earlier week (queued offline, or a puzzle still open at the deadline)
+  if (a.t !== 'resolve' && 'week' in a && typeof a.week === 'number' && a.week !== s.week)
+    return fail(`Week ${a.week} closed before that synced; autopilot covered what was left. You're in week ${s.week} now.`);
 
   switch (a.t) {
     case 'join': {
@@ -274,6 +279,8 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
         if (cur.seatKey && a.key?.toLowerCase() !== cur.seatKey) return fail('That seat code does not match.');
         cur.devices = [...new Set([...(cur.devices ?? []), a.uid])].slice(-4);
         feed(s, a.role, 'info', `${cur.name} linked another device.`, now);
+      } else if (cur && !a.takeover) {
+        return fail(`${cur.name} already holds this seat. Ask them for the seat code to link this device.`);
       } else if (cur) {
         const inherited = Math.round(cur.xp * 0.6);
         s.players[a.role] = { ...newPlayer(a.uid, a.name, a.role, inherited, s.week + 2), week0Done: false };
@@ -312,9 +319,10 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
     case 'approve': {
       const o = s.orders.find((x) => x.id === a.orderId);
       if (!o || o.status !== 'pending') return fail('That card is no longer waiting.');
-      if (s.cash < ECON.freezeBelow) return fail(`Cash under ${usd(ECON.freezeBelow)}: approvals are frozen.`);
+      const urgent = isEmergency(s, o);
+      if (s.cash < ECON.freezeBelow && !urgent) return fail(`Cash under ${usd(ECON.freezeBelow)}: only safety-critical work can be approved.`);
       if (s.cash - o.cost < 0) return fail('Not enough cash.');
-      if (s.receivership > 0 && o.cost > 800) return fail('Receivership: the receiver blocks spend over $800.');
+      if (s.receivership > 0 && o.cost > 800 && !urgent) return fail('Receivership: the receiver blocks spend over $800 except safety-critical work.');
       markApproved(s, o, false);
       gainXp(s, 'fin', 10);
       feed(s, 'fin', 'good', `Approved ${o.title} (${usd(o.cost)}).`, now);
@@ -345,7 +353,7 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
     case 'acceptCounter': {
       const o = s.orders.find((x) => x.id === a.orderId);
       if (!o || o.status !== 'countered' || !o.counter) return fail('No counter-offer waiting.');
-      if (s.cash < ECON.freezeBelow || s.cash - o.counter.cost < 0) return fail('Cash is frozen right now.');
+      if ((s.cash < ECON.freezeBelow && !isEmergency(s, o)) || s.cash - o.counter.cost < 0) return fail('Cash is frozen right now.');
       o.cost = o.counter.cost;
       o.gain = o.counter.gain;
       o.title = `${o.title} (patch)`;
@@ -454,6 +462,13 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
   }
 }
 
+/** Safety-critical work stays approvable through a cash freeze: an asset under 60, or an inspection sign-off. */
+export function isEmergency(s: IslandState, o: Order) {
+  if (o.kind === 'inspect100' || o.kind === 'codeprep') return true;
+  const a = s.assets.find((x) => x.id === o.assetId);
+  return !!a && a.health < 60;
+}
+
 /** petty-cash ceiling for auto-approvals: at most one week's fixed cost per role */
 export const budgetCap = (s: IslandState) => Math.min(3000, tierDef(s.tier).fixed);
 
@@ -499,6 +514,16 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   if (a.role === 'mech' && !covered && powered(s).gridDown && turn.done >= 1)
     return fail('Grid down: hangar tools offline, 1 order max.');
 
+  // Rework: a job that fails its own check isn't signed off. It stays open
+  // with a fresh fault (new seed), so the retry is a new job, not a replay.
+  if (!covered && isRework(o, a.score)) {
+    o.seed = hashSeed(o.seed, `rework${s.week}`);
+    turn.done += 1;
+    const asset = assetOf(s, o);
+    feed(s, o.role, 'bad', `${player.name}: ${o.title}${asset ? ` on ${asset.name}` : ''} didn't pass its check (${Math.round(a.score * 100)}%). Rework: still open.`, now);
+    return { s };
+  }
+
   const cr = covered ? credit(a.score, 0) : credit(a.score, player.perfects);
   o.status = 'done';
   o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, summary: a.summary };
@@ -512,8 +537,9 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     asset.health = clamp(asset.health + o.gain * cr, 0, 100);
     // a perfect job holds: that asset skips next week's decay too
     asset.touchedWeek = Math.max(asset.touchedWeek, s.week + (a.perfect && !covered ? 1 : 0));
-    if (o.kind === 'inspect100' && cr >= 1) asset.sinceInspection = 0;
-    if (o.kind === 'codeprep' && cr >= 1) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
+    // sign-off is pass/fail: a pass renews the inspection whatever the credit
+    if (o.kind === 'inspect100' && a.score >= SIGNOFF) asset.sinceInspection = 0;
+    if (o.kind === 'codeprep' && a.score >= SIGNOFF) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
   }
 
   if (o.kind === 'project') {
@@ -633,12 +659,16 @@ function openWeek(s: IslandState, now: number) {
   feed(s, 'all', s.weather === 'clear' ? 'info' : 'bad', `Week ${W} opens. ${wx}.`, now);
 }
 
+const kitOf = (kind: string) => CATALOG.find((c) => c.kind === kind)?.parts ?? 0;
+
 function generateOpsOrders(s: IslandState, r: Rng) {
   const W = s.week;
   for (const role of OPS) {
     const openOrders = s.orders.filter((o) => o.role === role && open(o));
+    // jobs stuck waiting for a kit don't count: the trade always has something it can do by hand
+    const workable = openOrders.filter((o) => o.status !== 'waiting_part');
     const target = s.tier >= 3 ? 5 : 4;
-    let openCount = openOrders.length;
+    let openCount = workable.length;
     let slots = Math.max(0, Math.min(3, target - openCount));
     const cands: { kind: string; asset: Asset; w: number }[] = [];
     for (const asset of s.assets) {
@@ -651,8 +681,11 @@ function generateOpsOrders(s: IslandState, r: Rng) {
     }
     // an asset in critical shape with nothing open on it always gets a job (the grid can't wait behind paperwork)
     for (const asset of s.assets) {
-      if (asset.health >= 45 || openOrders.some((o) => o.assetId === asset.id)) continue;
-      const fix = cands.filter((c) => c.asset.id === asset.id && c.w < 100).sort((a, b) => b.w - a.w)[0];
+      if (asset.health >= 45 || workable.some((o) => o.assetId === asset.id)) continue;
+      // prefer a fix that needs no kit when parts are stuck
+      const fix = cands
+        .filter((c) => c.asset.id === asset.id && c.w < 100)
+        .sort((a, b) => kitOf(a.kind) - kitOf(b.kind) || b.w - a.w)[0];
       if (fix) fix.w = 100;
     }
     // must-do orders (inspections, critical repairs) jump the queue, capped at 8 open per role
@@ -840,7 +873,13 @@ export function resolveWeek(s: IslandState, now: number) {
   s.parts.inTransit -= delivered;
   s.parts.stock += delivered;
   if (delivered) line('mech', 'good', `${delivered} parts kit${delivered > 1 ? 's' : ''} delivered.`);
-  if (s.parts.inTransit > 0 && carry === 0) line('mech', 'bad', `${s.parts.inTransit} kit(s) stuck on the mainland: no ${hasCargo(s) ? 'cargo' : 'guest'} flights.`);
+  if (s.parts.inTransit > 0 && carry === 0) {
+    // nothing flew: a mainland boat brings the most urgent kit, at a price
+    s.parts.inTransit -= 1;
+    s.parts.stock += 1;
+    s.cash -= ECON.boatKit;
+    line('mech', 'bad', `No ${hasCargo(s) ? 'cargo' : 'guest'} flights carried parts: a mainland boat brought 1 kit (${usd(ECON.boatKit)}).`);
+  }
   const waiting = s.orders.filter((o) => o.status === 'waiting_part').sort((a, b) => urgency(s, b) - urgency(s, a));
   for (const o of waiting) {
     if (s.parts.stock >= o.parts) {
@@ -900,7 +939,7 @@ export function resolveWeek(s: IslandState, now: number) {
   }
   for (const h of hs) {
     if (isTagged(s, h.id)) continue; // red-tagged = de-energised: no fire
-    if (h.health < 30 && r.chance(ECON.fireChance)) {
+    if (W >= 3 && h.health < 30 && r.chance(ECON.fireChance)) {
       const cost = 1500 + 500 * s.tier;
       incidents.push({ kind: 'fire', role: 'elec', assetId: h.id, title: `Electrical fire at ${h.name}`, cost });
       h.health -= 15;
@@ -925,6 +964,7 @@ export function resolveWeek(s: IslandState, now: number) {
 
   // 7. deferral risk: orders carried from an earlier week roll now
   for (const o of s.orders) {
+    if (W < 3) break; // week-0 promise: nothing can fail until week 3
     if (!open(o) || o.role === 'fin' || o.gain === 0 || o.deferrals < 1 || (o.lastDeferredWeek ?? W) >= W) continue;
     if (o.assetId && isTagged(s, o.assetId)) continue; // out of service: it can't fail in service
     if (o.status === 'waiting_part') continue; // approved and waiting on logistics: not a deferral
@@ -981,7 +1021,8 @@ export function resolveWeek(s: IslandState, now: number) {
   if (s.weather === 'storm') line('elec', 'bad', `Storm damage: houses −${6 * shield}, grid −${8 * shield}.`);
   // weather claims: roof, dock and hangar-door damage that no maintenance prevents (this is what insurance is for)
   let weatherCost = 0;
-  if (s.weather === 'storm' && r.chance(0.6)) weatherCost = Math.round((1500 + 1000 * Math.max(0, s.tier - 2)) * shield);
+  if (W < 3) weatherCost = 0;
+  else if (s.weather === 'storm' && r.chance(0.6)) weatherCost = Math.round((1500 + 1000 * Math.max(0, s.tier - 2)) * shield);
   else if (s.weather === 'wind' && s.tier >= 2 && r.chance(0.15)) weatherCost = 600 + 200 * s.tier;
 
   // 10. analyst money hunts: close / bank rec / invoice match recover a hidden leak
@@ -1005,7 +1046,15 @@ export function resolveWeek(s: IslandState, now: number) {
   if (weatherCost) line('all', 'bad', `${s.weather === 'storm' ? 'Storm' : 'Wind'} claim: ${usd(weatherCost)} of roof and dock damage.`);
   if (grossIncidents) line('fin', 'info', `Claims ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
   const cashStart = s.openCash;
-  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - netIncidents);
+  const loanPay = s.loan ? Math.min(s.loan.left, s.loan.weekly) : 0;
+  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - netIncidents - loanPay);
+  if (s.loan) {
+    s.loan.left -= loanPay;
+    if (s.loan.left <= 0) {
+      s.loan = null;
+      line('fin', 'good', 'Bridge loan repaid in full.');
+    }
+  }
 
   // 12. forecasts
   for (const f of s.forecasts) {
@@ -1059,11 +1108,23 @@ export function resolveWeek(s: IslandState, now: number) {
   } else if (st.negCashStreak >= 2) {
     s.receivership = 3;
     line('fin', 'bad', 'Cash below zero 2 weeks running: the island enters receivership (3 weeks).');
+    if (!s.loan) {
+      // the receiver's bridge loan: clears the deficit plus two weeks of running costs, repaid at 15% over 10 weeks
+      const amount = Math.round((Math.max(0, -s.cash) + 2 * fixed + 3000) / 100) * 100;
+      s.cash += amount;
+      s.loan = { left: Math.round(amount * 1.15), weekly: Math.round((amount * 1.15) / 10) };
+      line('fin', 'info', `The receiver advanced a ${usd(amount)} bridge loan: ${usd(s.loan.weekly)}/week for 10 weeks.`);
+    }
   }
 
   // 15. XP for the grade, A bonus
   const gradeXp = grade === 'A' ? 100 : grade === 'B' ? 50 : 0;
   if (gradeXp) for (const role of ROLES) gainXp(s, role, gradeXp);
+  if (s.pendingBonus) {
+    // nobody allocated last week's bonus: bank it rather than lose it
+    s.cash += s.pendingBonus;
+    line('fin', 'info', `Unallocated A-grade bonus: ${usd(s.pendingBonus)} went to reserve.`);
+  }
   s.pendingBonus = grade === 'A' ? Math.round(ECON.aGradeBonus * revenue) : null;
 
   // 16. tier up: qualifying opens a crew project; the tier arrives when all three finish their part
@@ -1103,7 +1164,7 @@ export function resolveWeek(s: IslandState, now: number) {
     nearMisses,
     cashStart,
     cashEnd: s.cash,
-    costs: { fixed, insurance: premium, leak: leakCost, incidents: netIncidents, refunds: Math.round(refunds) },
+    costs: { fixed, insurance: premium, leak: leakCost, incidents: netIncidents, refunds: Math.round(refunds), loan: loanPay || undefined },
     housesBooked: booked.length,
     housesRentable: rentable.length,
     partsDelivered: delivered,

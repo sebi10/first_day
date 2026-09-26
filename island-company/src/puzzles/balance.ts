@@ -3,7 +3,7 @@
 // weight is under max and the CG (total moment / total weight) sits inside the
 // envelope. Moment = weight × arm, exactly like the paper load sheet.
 import { hashSeed, rng, type Rng } from '../sim/rng';
-import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, shade, stage } from './kit';
+import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, settle, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 // ---------------------------------------------------------------------------
@@ -516,7 +516,7 @@ export const balance: PuzzleDef = {
         flourishT = performance.now();
         host.fx.flourish();
       } else host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 800 : 350);
+      settle(host, res, res.perfect ? 800 : 350);
     };
     const dataOf = () => {
       const e = evaluateLoad(m, place);

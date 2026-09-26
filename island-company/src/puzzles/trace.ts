@@ -5,7 +5,7 @@
 // the last live outlet). Tiers 0–2 show which devices are live; from tier 3
 // you test them yourself (fewest tests wins: half-split the run).
 import { rng } from '../sim/rng';
-import { C, backdrop, clamp, label, loop, pointer, roundRect, stage } from './kit';
+import { C, backdrop, clamp, label, loop, pointer, roundRect, stage, settle } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 type P = { x: number; y: number }; // normalised
@@ -413,7 +413,7 @@ export const trace: PuzzleDef = {
       finished = true;
       const res = makeResult();
       res.perfect ? host.fx.flourish() : host.fx.good();
-      setTimeout(() => host.done(res), res.perfect ? 1000 : 600);
+      settle(host, res, res.perfect ? 1000 : 600);
     }
 
     return {

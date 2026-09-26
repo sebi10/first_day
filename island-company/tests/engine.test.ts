@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { ECON } from '../src/sim/data';
-import { expectedDeferralCost, deferralRisk, planeCapacity } from '../src/sim/econ';
+import { credit, expectedDeferralCost, deferralRisk, planeCapacity } from '../src/sim/econ';
 import { apply, canResolve, createIsland } from '../src/sim/engine';
 import { nextDeadline } from '../src/sim/time';
 import type { IslandState, Role } from '../src/sim/types';
@@ -41,8 +41,10 @@ describe('island lifecycle', () => {
     s = apply(s, { t: 'join', uid: 'a2', name: 'Ana', role: 'mech', reclaim: true, key: s.players.mech!.seatKey }, NOW).s;
     expect(s.players.mech!.devices).toContain('a2');
     expect(s.players.mech!.xp).toBe(1000);
-    s = apply(s, { t: 'join', uid: 'z', name: 'Zed', role: 'mech' }, NOW).s;
-    expect(s.players.mech!.xp).toBe(600); // replacement inherits 60%
+    // two phones racing for the same open seat: the second is told, never silently swapped in
+    expect(apply(s, { t: 'join', uid: 'z', name: 'Zed', role: 'mech' }, NOW).error).toMatch(/seat code/);
+    s = apply(s, { t: 'join', uid: 'z', name: 'Zed', role: 'mech', takeover: true }, NOW).s;
+    expect(s.players.mech!.xp).toBe(600); // an explicit replacement inherits 60%
   });
 
   it('is deterministic: same actions, same result', () => {
@@ -116,7 +118,33 @@ describe('approvals, counters, freeze', () => {
     let s = started();
     s.cash = 1500;
     const o = s.orders.find((x) => x.status === 'pending')!;
-    expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toMatch(/frozen/);
+    const a = s.assets.find((x) => x.id === o.assetId);
+    if (a) a.health = 80;
+    o.kind = 'repair';
+    expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toMatch(/safety-critical/);
+    // safety-critical work (asset under 60) can still be approved if cash covers it
+    if (a) {
+      a.health = 50;
+      o.cost = 400;
+      expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toBeUndefined();
+    }
+  });
+
+  it('receivership comes with one bridge loan, repaid weekly', () => {
+    let s = started();
+    s.cash = -3000;
+    s.stats.negCashStreak = 1;
+    s = apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
+    expect(s.receivership).toBeGreaterThan(0);
+    expect(s.loan?.left).toBeGreaterThan(0);
+    expect(s.cash).toBeGreaterThan(0);
+  });
+
+  it('a move stamped for a closed week is rejected, not applied to the next', () => {
+    let s = started();
+    s = apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
+    expect(apply(s, { t: 'endTurn', role: 'mech', week: s.week - 1 }, NOW).error).toMatch(/closed/);
+    expect(apply(s, { t: 'endTurn', role: 'mech', week: s.week }, NOW).error).toBeUndefined();
   });
 
   it('parts are capped at 6 (stock + in transit)', () => {
@@ -316,5 +344,30 @@ describe('crew projects', () => {
     expect(s.project).toBeNull();
     const cargo = s.assets.find((a) => a.model === 'cargo')!;
     expect(cargo.health).toBe(Math.round(60 + 30 * 0.9));
+  });
+});
+
+describe('skill keeps paying above a pass', () => {
+  it('credit rises all the way to a clean job', () => {
+    expect(credit(0.6, 0)).toBeCloseTo(0.81);
+    expect(credit(0.9, 0)).toBeGreaterThan(credit(0.7, 0));
+    expect(credit(1, 0)).toBeCloseTo(1.05);
+  });
+
+  it('an owner under 40% is sent back for rework with a fresh fault', () => {
+    const s = started();
+    const o = s.orders.find((x) => x.role === 'mech' && x.status === 'ready' && x.assetId)!;
+    const hp = s.assets.find((a) => a.id === o.assetId)!.health;
+    const r = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0.3, perfect: false }, NOW);
+    expect(r.error).toBeUndefined();
+    const o2 = r.s.orders.find((x) => x.id === o.id)!;
+    expect(o2.status).toBe('ready');
+    expect(o2.seed).not.toBe(o.seed);
+    expect(r.s.assets.find((a) => a.id === o.assetId)!.health).toBe(hp);
+    // a 90% job restores more than a 65% one
+    const hi = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0.9, perfect: false }, NOW).s;
+    const lo = apply(s, { t: 'complete', role: 'mech', orderId: o.id, score: 0.65, perfect: false }, NOW).s;
+    const h = (x: IslandState) => x.assets.find((a) => a.id === o.assetId)!.health;
+    if (o.gain > 0 && hp < 90) expect(h(hi)).toBeGreaterThan(h(lo));
   });
 });

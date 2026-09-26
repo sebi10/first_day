@@ -1,7 +1,7 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
 import { ECON, MODELS, ROLE_LABEL } from '../sim/data';
 import { forecastContext, listPrice } from '../sim/engine';
-import { flightsAvailable, flightsPerPlane, houses, housesRentable, planes, powered } from '../sim/econ';
+import { flightsAvailable, flightsPerPlane, houses, housesRentable, isRework, planes, powered } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
 import type { IslandState, Order, Role } from '../sim/types';
@@ -25,7 +25,7 @@ export function blocks(s: IslandState): Block[] {
   if (cargo && cargo.health < 40 && s.parts.inTransit > 0) out.push({ from: 'mech', to: 'elec', text: 'cargo plane grounded: parts stuck' });
   if (powered(s).gridDown) out.push({ from: 'elec', to: 'mech', text: 'grid down: hangar tools offline' });
   if (houses(s).length && housesRentable(s) === 0) out.push({ from: 'elec', to: 'fin', text: 'no rentable houses: no revenue' });
-  if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: all orders frozen' });
+  if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
   return out;
 }
 
@@ -77,6 +77,7 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
     subtitle: asset?.name ?? (grace ? 'new-crew difficulty' : assist ? 'outside your trade' : undefined),
     context,
     reward,
+    rework: !assist && isRework(o, 0),
   };
 }
 
