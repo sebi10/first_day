@@ -249,7 +249,7 @@ h3 {
   border-radius: 20px;
   overflow: hidden;
   box-shadow: var(--shadow);
-  background: var(--sea);
+  background: #1766b8;
   aspect-ratio: 4 / 3;
 }
 .island-wrap svg {
@@ -274,21 +274,57 @@ h3 {
   pointer-events: none;
 }
 
+/* Island motion: transform and opacity only. Every animated element is an
+   inner <g> with no transform attribute of its own; it pivots on its local
+   origin (0 0), which the outer <g transform> puts where it should be. */
+.island-svg [class] {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.bub-scale {
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
 @keyframes sway {
   0%,
   100% {
-    transform: rotate(-2deg);
+    transform: rotate(-3deg);
   }
   50% {
-    transform: rotate(3deg);
+    transform: rotate(4deg);
+  }
+}
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
   }
 }
 @keyframes drift {
   from {
-    transform: translateX(-14px);
+    transform: translateX(-10px);
   }
   to {
-    transform: translateX(14px);
+    transform: translateX(10px);
+  }
+}
+@keyframes surf {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.12;
+  }
+}
+@keyframes fall {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(18px);
   }
 }
 @keyframes flicker {
@@ -297,69 +333,279 @@ h3 {
     opacity: 1;
   }
   45% {
-    opacity: 0.35;
+    opacity: 0.25;
   }
   50% {
     opacity: 0.9;
   }
   55% {
-    opacity: 0.4;
+    opacity: 0.3;
+  }
+}
+@keyframes spark {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.55;
+  }
+  60% {
+    opacity: 0.95;
+  }
+  75% {
+    opacity: 0.6;
+  }
+}
+@keyframes puff {
+  0% {
+    transform: translateY(4px) scale(0.7);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-16px) scale(1.25);
+    opacity: 0;
+  }
+}
+@keyframes puffw {
+  0% {
+    transform: translate(2px, 4px) scale(0.7);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(-9px, -14px) scale(1.25);
+    opacity: 0;
+  }
+}
+@keyframes spout {
+  0%,
+  55%,
+  100% {
+    transform: scale(0.3, 0.1);
+    opacity: 0;
+  }
+  65% {
+    transform: scale(1, 1);
+    opacity: 1;
+  }
+  85% {
+    transform: scale(1.1, 1.05);
+    opacity: 0;
+  }
+}
+@keyframes leap {
+  0%,
+  100% {
+    transform: translate(0, 4px) rotate(8deg);
+  }
+  50% {
+    transform: translate(3px, -5px) rotate(-6deg);
+  }
+}
+@keyframes flag {
+  0%,
+  100% {
+    transform: scaleX(1) skewY(0deg);
+  }
+  50% {
+    transform: scaleX(0.88) skewY(4deg);
+  }
+}
+@keyframes sock {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(8deg);
+  }
+}
+@keyframes beam {
+  0% {
+    transform: rotate(110deg);
+    opacity: 1;
+  }
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    transform: rotate(470deg);
+    opacity: 1;
+  }
+}
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+@keyframes cloud {
+  from {
+    transform: translateX(-8px);
+  }
+  to {
+    transform: translateX(8px);
+  }
+}
+@keyframes gulls {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(40px, -10px);
   }
 }
 @keyframes flyby {
   0% {
-    transform: translate(-60px, 70px) rotate(-18deg);
+    transform: translate(-80px, 520px) rotate(-26deg);
     opacity: 0;
   }
-  8% {
-    opacity: 1;
-  }
-  92% {
+  6%,
+  94% {
     opacity: 1;
   }
   100% {
-    transform: translate(470px, -40px) rotate(-18deg);
+    transform: translate(880px, 60px) rotate(-26deg);
     opacity: 0;
+  }
+}
+@keyframes walk-a {
+  0%,
+  6% {
+    transform: translate(478px, 312px);
+  }
+  18% {
+    transform: translate(506px, 304px);
+  }
+  30% {
+    transform: translate(552px, 298px);
+  }
+  44%,
+  56% {
+    transform: translate(598px, 298px);
+  }
+  70% {
+    transform: translate(552px, 298px);
+  }
+  82% {
+    transform: translate(506px, 304px);
+  }
+  94%,
+  100% {
+    transform: translate(478px, 312px);
+  }
+}
+@keyframes walk-b {
+  0%,
+  8% {
+    transform: translate(438px, 350px);
+  }
+  22% {
+    transform: translate(452px, 382px);
+  }
+  34% {
+    transform: translate(440px, 414px);
+  }
+  50%,
+  60% {
+    transform: translate(430px, 452px);
+  }
+  74% {
+    transform: translate(440px, 414px);
+  }
+  84% {
+    transform: translate(452px, 382px);
+  }
+  94%,
+  100% {
+    transform: translate(438px, 350px);
   }
 }
 @keyframes streak {
   from {
-    transform: translateX(-120px);
+    transform: translateX(-140px);
     opacity: 0;
   }
   30% {
-    opacity: 0.7;
+    opacity: 0.75;
   }
   to {
-    transform: translateX(460px);
+    transform: translateX(880px);
     opacity: 0;
   }
 }
 @keyframes rain {
   from {
-    transform: translateY(-40px);
+    transform: translateY(0);
   }
   to {
-    transform: translateY(320px);
+    transform: translateY(150px);
   }
 }
-@keyframes pulse {
+@keyframes flash {
+  0%,
+  90%,
+  93%,
+  100% {
+    opacity: 0;
+  }
+  91% {
+    opacity: 0.35;
+  }
+  94% {
+    opacity: 0.18;
+  }
+}
+@keyframes bolt {
+  0%,
+  90%,
+  92.5%,
+  93.5%,
+  96%,
+  100% {
+    opacity: 0;
+  }
+  91% {
+    opacity: 1;
+  }
+  94.5% {
+    opacity: 0.8;
+  }
+}
+@keyframes gust {
+  0% {
+    transform: translateX(-50px);
+    opacity: 0;
+  }
+  20%,
+  80% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(60px);
+    opacity: 0;
+  }
+}
+@keyframes flutter {
   0%,
   100% {
-    transform: scale(1);
+    transform: translateY(0);
   }
   50% {
-    transform: scale(1.12);
-  }
-}
-@keyframes rise {
-  from {
-    transform: translateY(0);
-    opacity: 0.6;
-  }
-  to {
-    transform: translateY(-26px);
-    opacity: 0;
+    transform: translateY(1.5px);
   }
 }
 @keyframes pop-in {
@@ -393,25 +639,94 @@ h3 {
 
 .sway {
   animation: sway 5s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
+}
+.windy .sway {
+  animation-duration: 1.7s;
+}
+.bob {
+  animation: bob 1.8s ease-in-out infinite;
 }
 .drift {
-  animation: drift 7s ease-in-out infinite alternate;
+  animation: drift 9s ease-in-out infinite alternate;
+}
+.surf {
+  animation: surf 4.5s ease-in-out infinite;
+}
+.fall {
+  animation: fall 0.6s linear infinite;
 }
 .flicker {
   animation: flicker 1.6s steps(1) infinite;
 }
+.puff {
+  animation: puff 2.4s ease-out infinite;
+}
+.spark {
+  animation: spark 0.9s steps(1) infinite;
+}
+.puff-w {
+  animation: puffw 2.4s ease-out infinite;
+}
+.puff-late {
+  animation-delay: -1.2s;
+}
+.spout {
+  animation: spout 5s ease-out infinite;
+}
+.leap {
+  animation: leap 3.2s ease-in-out infinite;
+}
+.flag {
+  animation: flag 1.6s ease-in-out infinite;
+}
+.sock {
+  animation: sock 2.2s ease-in-out infinite;
+}
+.windy .sock {
+  animation-duration: 0.9s;
+}
+.beam {
+  animation: beam 7s linear infinite;
+}
+.twinkle {
+  animation: twinkle 2.6s ease-in-out infinite;
+}
+.cloud {
+  animation: cloud 14s ease-in-out infinite alternate;
+}
+.gulls {
+  animation: gulls 11s ease-in-out infinite alternate;
+}
 .flyby {
-  animation: flyby 14s linear infinite;
+  animation: flyby 16s linear infinite;
 }
-.pulse {
-  animation: pulse 1.6s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: center;
+.walk-a {
+  animation: walk-a 26s linear infinite;
 }
-.smoke {
-  animation: rise 2.4s ease-out infinite;
+.walk-b {
+  animation: walk-b 21s linear infinite;
+}
+.streak {
+  animation: streak 4s linear infinite;
+}
+.rain {
+  animation: rain 0.8s linear infinite;
+}
+.gust {
+  animation: gust 3.4s ease-in-out infinite;
+}
+.flash {
+  animation: flash 9s linear infinite;
+}
+.bolt {
+  animation: bolt 9s linear infinite;
+}
+.flutter,
+.confetti {
+  animation: flutter 2s ease-in-out infinite;
+}
+.spray {
+  animation: twinkle 1.2s ease-in-out infinite;
 }
 /* ambient island motion pauses when idle, covered or off-screen */
 .still,
