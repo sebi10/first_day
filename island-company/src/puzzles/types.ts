@@ -16,7 +16,9 @@ export type PuzzleId =
   | 'meter'
   | 'conduit'
   | 'reconcile'
-  | 'invoice';
+  | 'invoice'
+  // mechanic wave 3
+  | 'gpu';
 
 export type PuzzleRole = 'mech' | 'elec' | 'fin';
 
