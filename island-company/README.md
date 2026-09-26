@@ -72,15 +72,17 @@ Install the [ntfy](https://ntfy.sh) app, subscribe to a topic, and save the same
 - Each new tier is a **crew project**: one real job per trade, and the tier opens when all three are done. See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full crew briefing.
 - Resolution is deterministic: the three turns plus a seeded incident roll. The seed is shown on the board review, so any week can be replayed.
 
-## Puzzles (15, five per role, all modelled on the real job)
+## Puzzles (17: seven for the mechanic, five each for the electrician and the analyst, all modelled on the real job)
 
 | Mechanic | Electrician | Analyst |
 | --- | --- | --- |
 | Torque sequence (star pattern, click band) | Circuit trace (breaker → outlet, find the fault) | Variance find (budget vs actual drivers) |
-| Crack hunt (UV dye-penetrant sweep) | Panel load (balance L1/L2, 240 V double-poles) | Parts auction (2 AI bidders, walk-away cap) |
+| Crack hunt (UV penetrant: one tap circles an indication, swab for bleed-back) | Panel load (balance L1/L2, 240 V double-poles) | Parts auction (2 AI bidders, walk-away cap) |
 | Engine teardown (order, failed part, rebuild) | Wire-up (strip, loop, land hot/neutral/ground) | Cash forecast (draw 4 weeks, scored vs outcome) |
 | Weight and balance (CG envelope) | Multimeter diagnosis (open neutral, MWBC) | Bank reconciliation (timing items, transpositions) |
 | Safety wire (tightening direction, twists/inch) | Conduit bending (offsets, saddles, 360° rule) | Three-way match (PO / receipt / invoice) |
+| Hydraulic servicing (discharge the accumulator, placard fluid to FULL, nitrogen precharge, bleed) | | |
+| Ground power start (cart set to the placard, plug seated, volts checked; turbine ITT from tier 4) | | |
 
 Difficulty comes from the order's tier (1–5), which climbs as the island grows. It never depends on your level. Levels unlock **tools** that change how a puzzle plays (for example the click-type wrench, non-aqueous developer, clamp meter and driver tree): convenience or raw readings to interpret, never the answer. From tier 3 the teaching aids are gone, so real trade knowledge is what separates the three of you.
 
@@ -98,7 +100,7 @@ node scripts/e2e.mjs shots/          # scripted playtest (phone); add `desktop` 
 | Path | What |
 | --- | --- |
 | `src/sim/` | Pure, deterministic engine: `engine.ts` (reducer + weekly resolution), `econ.ts` (demand curves, risk), `data.ts` (**every tunable number**), `bots.ts` (paper-sim players) |
-| `src/puzzles/` | 15 canvas puzzles, each a pure `generate/score` model plus a view |
+| `src/puzzles/` | 17 canvas puzzles, each a pure `generate/score` model plus a view |
 | `src/net/` | `local.ts` (this device), `firebase.ts` (Firestore single-doc transactions + offline outbox), `session.ts` |
 | `src/ui/` | Preact screens: island SVG, role panels, analyst desk, board review, week 0 |
 | `docs/DECISIONS.md` | Where and why this build departs from the original spec |

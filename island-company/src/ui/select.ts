@@ -84,7 +84,10 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   const blind = isBlind(s, o, role, assist);
   const reporter = o.report ? (s.players[o.report.by]?.name ?? ROLE_LABEL[o.report.by]) : null;
   const reward = asset ? `up to +${Math.round(o.gain * (1 + Math.min(15, p?.perfects ?? 0) / 100))} on ${asset.name}` : o.leak ? `up to ${`$${o.leak}`} recovered` : undefined;
-  // a repair or a report names the assembly / part / device it's about; otherwise the kind says it
+  // a repair or a report names the assembly / part / device it's about; otherwise the kind says it.
+  // job: the crack hunt picks the part by it (spar, wheel half, deck beam); the ground
+  // power start ('gpustart') runs a piston single through tier 3 and a turbine single
+  // from tier 4. assetName: the hydraulic servicing placard names the aircraft.
   const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.job ?? o.kind };
   if (o.kind === 'project' && o.puzzle === 'auction') {
     // floatplane deposit: same auction, bigger stakes

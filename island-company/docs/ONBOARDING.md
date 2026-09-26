@@ -23,7 +23,7 @@ Short on time? Anyone can try the whole game alone first with *New island → 1 
 | Your zone | Hangar, airstrip, 2 planes (1 at tier 1) | 4 cottages (2 at tier 1), the grid, later a generator | The office: cash, prices, approvals, parts |
 | Your number | Flights available | Houses rentable | Repairs approved |
 | If you slip | No flights → no guests, no parts | No power / closed houses → no revenue, hangar tools offline | Undecided cards become deferrals → incident risk for everyone |
-| Your jobs (puzzles) | Torque sequence, crack hunt (UV penetrant), engine teardown, weight and balance, safety wire | Circuit trace, panel load, wire-up, multimeter diagnosis, conduit bending | Variance find, parts auction, cash forecast, bank reconciliation, three-way match |
+| Your jobs (puzzles) | Torque sequence, crack hunt (UV penetrant, one tap circles an indication), engine teardown, weight and balance, safety wire, hydraulic servicing, ground power start | Circuit trace, panel load, wire-up, multimeter diagnosis, conduit bending | Variance find, parts auction, cash forecast, bank reconciliation, three-way match |
 
 Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hints are gone and your real-world know-how does the work.
 
