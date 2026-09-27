@@ -562,6 +562,14 @@ Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
 
 **Goodhart warning.** The board grade weights revenue at 40%, so an analyst can inflate it by pricing up. The rate cap (2× base) limits that, occupancy falls off a logistic curve, and empty houses cost the electrician's "houses booked" MVP line. If players start gaming the grade, lower the revenue weight in `resolveWeek`, or grade revenue *per rentable house* instead.
 
+## Deploy log
+
+**Sep 27, 04:32 UTC: island art + consequences + mechanic content + Phase B go live** (run #10, `a80202c`). Hosting and `firestore.rules` went out 4 s apart.
+- **Doc format now `v: 2`.** A live probe after the deploy confirmed the rules refuse a `v: 1` write (`permission-denied`, nothing written).
+- **Everyone must reopen the app.** An app opened before this deploy keeps the old engine until it reloads, and until then its moves are refused. Close it and open it again, twice if the first open still served the cached copy.
+- **Run #9 was blocked at `npm test`.** Two whole-season paper-sim tests took 5.1–5.5 s on GitHub's 2-core runner, over vitest's 5 s default, though they finish in under 5 s locally. Fix: the per-file `vi.setConfig({ testTimeout: 30000 })` that `tests/ipc.test.ts` already used, now also in chain, chaingse and gse, with no assertion changed. The full suite also passes at `--testTimeout=2500`, so no other test is near the limit.
+- **Not yet done:** a human playtest on real phones. Automated coverage is 461 tests, pass-and-play e2e on phone and desktop, a 4-device online e2e on the emulator, and replays of the live docs.
+
 ## Open questions for the three of you
 
 - **Deadline hour:** 20:00 creator time. If the three of you span time zones, change `resolveHour` in `createIsland`.
