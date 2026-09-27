@@ -2,12 +2,11 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ntfy } from '../net/notify';
 import { sessions, storeFor, type IslandRef } from '../net/session';
 import type { SyncStatus } from '../net/store';
-import { chainMove, openChain } from '../sim/chain';
-import { ROLE_LABEL } from '../sim/data';
 import { canResolve, seatOf } from '../sim/engine';
-import { ROLES, WEEK_BOUND, type Action, type IslandState, type Role } from '../sim/types';
+import { WEEK_BOUND, type Action, type IslandState, type Role } from '../sim/types';
 import { fx } from './feedback';
 import { toast, useNow } from './kit';
+import { pushes } from './select';
 
 export type Ctl = {
   s: IslandState;
@@ -88,35 +87,5 @@ export function useIsland(ref: IslandRef) {
 function notifyAfter(before: IslandState, after: IslandState, a: Action) {
   const topic = after.ntfy;
   if (!topic) return;
-  if (after.week > before.week && after.history.length) {
-    const h = after.history[after.history.length - 1];
-    const c = openChain(after);
-    const aog = c ? ` ${after.assets.find((x) => x.id === c.assetId)?.name ?? 'A plane'} AOG: ${chainMove(after, c).chip}.` : '';
-    void ntfy(topic, `${after.name}: week ${h.week} resolved`, `Grade ${h.grade}. Revenue $${h.revenue.toLocaleString('en-US')}, ${h.flightsFlown}/${h.flightsScheduled} flights, ${h.incidents.length} incidents.${aog}`);
-    return;
-  }
-  // the part chain moved on to someone else's move: tell them
-  const cb = openChain(before);
-  const ca = openChain(after);
-  if (ca && (!cb || cb.id !== ca.id || cb.step !== ca.step)) {
-    const m = chainMove(after, ca);
-    const plane = after.assets.find((x) => x.id === ca.assetId)?.name ?? 'A plane';
-    const who = m.who ? after.players[m.who]?.name ?? ROLE_LABEL[m.who] : null;
-    void ntfy(topic, `${after.name}: ${plane} AOG`, who ? `${plane} is grounded for ${ca.item}. ${who}, your move: ${m.text}.` : `${plane} is grounded for ${ca.item}: ${m.text}.`);
-  } else if (cb && !ca && after.chain?.step === 'done' && after.chain.story) void ntfy(topic, `${after.name}: back in service`, after.chain.story);
-  if (a.t === 'endTurn') {
-    const waiting = ROLES.filter((r) => !after.turns[r]?.ended).map((r) => after.players[r]?.name ?? ROLE_LABEL[r]);
-    const who = after.players[a.role]?.name ?? ROLE_LABEL[a.role];
-    if (waiting.length) void ntfy(topic, after.name, `${who} ended their turn. Waiting on ${waiting.join(' and ')}.`);
-  }
-  if (a.t === 'post') {
-    const who = after.players[a.role]?.name ?? ROLE_LABEL[a.role];
-    // the ntfy topic is shared by the crew: a DM push names who it's for, never what it says
-    if (a.to) void ntfy(topic, after.name, `${who} sent ${after.players[a.to]?.name ?? ROLE_LABEL[a.to]} a direct message.`);
-    else void ntfy(topic, `${who} on the ${after.name} crew board`, a.text.trim().slice(0, 180));
-  }
-  if (a.t === 'counter') {
-    const o = after.orders.find((x) => x.id === a.orderId);
-    if (o) void ntfy(topic, after.name, `${after.players[o.role]?.name ?? ROLE_LABEL[o.role]}: the analyst offered a cheaper fix on ${o.title}.`);
-  }
+  for (const p of pushes(before, after, a)) void ntfy(topic, p.title, p.body);
 }

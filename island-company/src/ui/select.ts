@@ -3,17 +3,18 @@ import type { PuzzleId } from '../puzzles/types';
 import { chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { ECON, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
-import { cartOn, flightsAvailable, flightsPerPlane, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
+import { cartOn, flightsAvailable, flightsPerPlane, gseCarts, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
-import type { IslandState, Order, Role } from '../sim/types';
+import { ROLES, type Action, type IslandState, type Order, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
 
-export type Block = { from: Role; to: Role; text: string };
+/** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
+export type Block = { from: Role; to: Role; text: string; kind?: CrossMove['kind'] };
 
 export function blocks(s: IslandState): Block[] {
   const out: Block[] = [];
-  const pending = s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week);
+  const pending = s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week && !o.chain);
   const byRole = (r: Role) => pending.filter((o) => o.role === r).length;
   for (const r of ['mech', 'elec'] as Role[])
     if (byRole(r)) out.push({ from: 'fin', to: r, text: `${byRole(r)} approval${byRole(r) > 1 ? 's' : ''} waiting` });
@@ -28,19 +29,98 @@ export function blocks(s: IslandState): Block[] {
   if (powered(s).gridDown) out.push({ from: 'elec', to: 'mech', text: 'grid down: hangar tools offline' });
   if (houses(s).length && housesRentable(s) === 0) out.push({ from: 'elec', to: 'fin', text: 'no rentable houses: no revenue' });
   if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
-  // the part chain: a grounded plane waits on whoever's move it is (the mechanic waits on the analyst's card)
+  // cross-trade moves: a crewmate's report and the part chain, counted the same way
+  for (const m of crossMoves(s)) out.push({ from: m.who, to: m.waits, text: m.text, kind: m.kind });
+  return out;
+}
+
+/**
+ * What one seat is waiting on another for across trades, in one list: an open
+ * cross-trade report (the fixer's move; the reporter waits) and the part chain
+ * (whoever's move it is; the seat that moves next waits: the analyst buys what
+ * the mechanic's lookup ordered, the mechanic installs what the analyst
+ * bought, and the plane earns nothing until it's on). The crew strip, the
+ * waiting / blocking cards, the end-turn check and the pushes all read this,
+ * so a report and a chain step count toward "whose move is it" the same way.
+ * `key` changes when the move does (a push goes out for a new one).
+ */
+export type CrossMove = { key: string; kind: 'report' | 'chain'; who: Role; waits: Role; text: string; /** "the hangar work lights are dead" / "Cargo C-7 AOG: brake linings" */ what: string; /** the move in a few words */ short: string };
+
+export function crossMoves(s: IslandState): CrossMove[] {
+  const out: CrossMove[] = [];
   const ch = openChain(s);
   if (ch) {
     const m = chainMove(s, ch);
     const asset = s.assets.find((a) => a.id === ch.assetId);
-    if (m.who === 'fin') out.push({ from: 'fin', to: 'mech', text: `${m.text} (${asset?.name ?? 'a plane'} is AOG)` });
+    const waits: Role | null = m.who === 'fin' ? 'mech' : m.who === 'mech' ? 'fin' : null;
+    // "look up the brake linings in the IPC (Cargo C-7 is AOG)", "approve the part (066-22500, $310; Cargo C-7 is AOG)"
+    const aog = `${asset?.name ?? 'a plane'} is AOG`;
+    const text = m.text.endsWith(')') ? `${m.text.slice(0, -1)}; ${aog})` : `${m.text} (${aog})`;
+    if (m.who && waits && s.players[m.who] && s.players[waits])
+      out.push({ key: `chain:${ch.id}:${ch.step}:${ch.stepId ?? ''}`, kind: 'chain', who: m.who, waits, text, what: `${asset?.name ?? 'A plane'} AOG: ${ch.item}`, short: m.short });
   }
-  // a crewmate's report: the fixer holds the reporter up until it's fixed
   for (const o of openReports(s)) {
     const rep = o.report!;
-    if (rep.by === o.role || !s.players[rep.by]) continue;
-    const effect = rep.effect === 'cap' ? ` (${capWords(rep.by)})` : rep.effect === 'gse' ? ' (a GPU cart tagged out)' : ` (−\u2060$${rep.amount.toLocaleString('en-US')}/wk)`;
-    out.push({ from: o.role, to: rep.by, text: `${reportSaid(o)}${effect}` });
+    if (rep.by === o.role || !s.players[rep.by] || !s.players[o.role]) continue;
+    const effect = rep.effect === 'cap' ? ` (${capWords(rep.by)})` : rep.effect === 'gse' ? ` (${gseCarts(s).find((c) => c.id === rep.cart)?.name ?? 'a GPU cart'} tagged out)` : ` (−\u2060$${rep.amount.toLocaleString('en-US')}/wk)`;
+    out.push({ key: `report:${o.id}`, kind: 'report', who: o.role, waits: rep.by, text: `${reportSaid(o)}${effect}`, what: reportSaid(o), short: 'fix the report' });
+  }
+  return out;
+}
+
+/** The cross-trade moves that are this seat's to make: a crewmate is waiting on each (the end-turn check names them). */
+export const owedBy = (s: IslandState, r: Role) => crossMoves(s).filter((m) => m.who === r);
+
+/**
+ * The crew's pushes (ntfy) for a move that just landed: a week resolved, a
+ * crewmate's report raised or closed out, the part chain moving on to someone's
+ * move, a turn ended, a board post, a counter-offer. Reports and chain steps are
+ * told the same way: whose move it is now, by name.
+ */
+export function pushes(before: IslandState, after: IslandState, a: Action): { title: string; body: string }[] {
+  const out: { title: string; body: string }[] = [];
+  const push = (title: string, body: string) => out.push({ title, body });
+  const name = (r: Role) => after.players[r]?.name ?? ROLE_LABEL[r];
+  // cross-trade moves (a crewmate's report, a part chain step) count the same way: a new one is someone's move
+  const was = crossMoves(before);
+  const had = new Set(was.map((m) => m.key));
+  const moves = crossMoves(after);
+  const fresh = moves.filter((m) => !had.has(m.key) && m.kind === 'report');
+  if (after.week > before.week && after.history.length) {
+    const h = after.history[after.history.length - 1];
+    const c = openChain(after);
+    const aog = c ? ` ${after.assets.find((x) => x.id === c.assetId)?.name ?? 'A plane'} AOG: ${chainMove(after, c).chip}.` : '';
+    const reps = fresh.map((m) => ` ${name(m.waits)} reports ${m.what}: ${name(m.who)}'s move.`).join('');
+    push(`${after.name}: week ${h.week} resolved`, `Grade ${h.grade}. Revenue $${h.revenue.toLocaleString('en-US')}, ${h.flightsFlown}/${h.flightsScheduled} flights, ${h.incidents.length} incidents.${aog}${reps}`);
+    return out;
+  }
+  // a report raised mid-week (a cart's cable written up at an inspection), or one closed out: tell the other trade
+  for (const m of fresh) push(`${after.name}: ${name(m.waits)} reports`, `${m.what.charAt(0).toUpperCase() + m.what.slice(1)}. ${name(m.who)}, your move.`);
+  const now = new Set(moves.map((m) => m.key));
+  // whoever signed the fix off (the third trade may have lent a hand)
+  const closer = (m: CrossMove) => name(a.t === 'complete' ? a.role : m.who);
+  for (const m of was) if (m.kind === 'report' && !now.has(m.key)) push(`${after.name}: report fixed`, `${closer(m)} closed out ${name(m.waits)}'s report: ${m.what}.`);
+  // the part chain moved on to someone else's move: tell them
+  const cb = openChain(before);
+  const ca = openChain(after);
+  if (ca && (!cb || cb.id !== ca.id || cb.step !== ca.step)) {
+    const m = chainMove(after, ca);
+    const plane = after.assets.find((x) => x.id === ca.assetId)?.name ?? 'A plane';
+    const who = m.who ? name(m.who) : null;
+    push(`${after.name}: ${plane} AOG`, who ? `${plane} is grounded for ${ca.item}. ${who}, your move: ${m.text}.` : `${plane} is grounded for ${ca.item}: ${m.text}.`);
+  } else if (cb && !ca && after.chain?.step === 'done' && after.chain.story) push(`${after.name}: back in service`, after.chain.story);
+  if (a.t === 'endTurn') {
+    const waiting = ROLES.filter((r) => !after.turns[r]?.ended).map(name);
+    if (waiting.length) push(after.name, `${name(a.role)} ended their turn. Waiting on ${waiting.join(' and ')}.`);
+  }
+  if (a.t === 'post') {
+    // the ntfy topic is shared by the crew: a DM push names who it's for, never what it says
+    if (a.to) push(after.name, `${name(a.role)} sent ${name(a.to)} a direct message.`);
+    else push(`${name(a.role)} on the ${after.name} crew board`, a.text.trim().slice(0, 180));
+  }
+  if (a.t === 'counter') {
+    const o = after.orders.find((x) => x.id === a.orderId);
+    if (o) push(after.name, `${name(o.role)}: the analyst offered a cheaper fix on ${o.title}.`);
   }
   return out;
 }

@@ -1,7 +1,7 @@
 // Mechanic hangar / electrician cottages: assets, work orders, covering.
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
-import { gseForStart, houseBlocker, isAog, orderCost, orderTier, planeCapacity, powered } from '../sim/econ';
+import { gseForStart, houseBlocker, isAog, orderCost, orderTier, planeCapacity, powered, startCart } from '../sim/econ';
 import { squawkable } from '../sim/engine';
 import type { Asset, Order, Role } from '../sim/types';
 import { GroundPowerCard } from './gse';
@@ -167,7 +167,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                 block
                 onClick={() => {
                   setSel(null);
-                  onGse?.(gseForStart(s, sel).cart?.id ?? null);
+                  onGse?.(gseForStart(s, sel).cart?.id ?? startCart(s, sel.assetId)?.id ?? null);
                 }}
               >
                 <Icon name="bolt" size={18} /> Ground power carts ▸

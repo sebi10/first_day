@@ -370,6 +370,80 @@ The negative weeks are the same late tier-4 grid-and-generator collapses describ
 
 **Knobs:** `GSE` in `data.ts`: `minStart` (30), `drain` (25 / 45), `wear` / `arcWear` (7 / 15), `chargePerWeek` (60), `powerPerPoint` (0.5), the bands (40 / 70), `autoReport` (85), the arc curve (`arcFrom` 60, `arcSpan` 60).
 
+## The part chain and the ground power carts together
+
+The two Phase B branches were built side by side and merged into `integrate`, the part chain first, then the carts. Both merges kept each feature whole. This is what changed to make them one system.
+
+### No deadlock between a grounded plane and a start
+
+- **A start never opens a chain, and no chain step needs a cart.** *Ground power start* has no IPC chapter in `CHAIN.kinds`. The lookup and the research are paperwork, the buy and engineering cards are money, and the install is the original job (tire and brake, prop, hydraulics, radio, alternator).
+- **A plane AOG for a part can still take a ground power start**, as an engine run on the ground. It doesn't put the plane back in service. Like any job on an out-of-service plane, it never rolls a deferral incident while it waits.
+- **A cart left on a plane that goes down isn't stuck there.** A cart can be hooked up to a plane that then goes AOG for a part (or gets grounded by a safety call). Hooking it up to another plane tows it straight over, as before. What changed is that everyone now picks the cart for a start the same way (`startCart` in `econ.ts`):
+  1. the cart already on that plane, if it's charged and in service;
+  2. else the best-charged free one (on the charger, or parked);
+  3. else one on a plane that isn't flying;
+  4. else one on another plane.
+
+  Autopilot and the paper-sim bots use it. Before, both only took a free cart, so an island whose only charged cart sat on a grounded plane never got its start from autopilot.
+- **The start's card says where that cart is:** *Hook a charged cart up to Float F-3 first: GPU cart 1 is on Cargo C-7, AOG for a part* (or *grounded this week*). *Ground power carts ▸* opens the sheet on that cart, and the carts card and sheet say *Hooked to Cargo C-7 (AOG)*.
+- **A cable report holds up starts, never the chain.** A tagged-out cart is the electrician's move, and only starts on that cart wait for it. `tests/chaingse.test.ts` runs a chain through to its install with the only cart tagged out, and then does the start after the fix.
+- **Autopilot and the bots check the charge when each start comes up**, not at the top of the turn. With two starts and one charge, the first goes, the second waits, and its slot goes to the next job. Before, autopilot could sign off the second start with no cart at all (it checked the charge before the first start drained it), and a bot lost the slot.
+
+### Whose move is it: reports and chain steps count the same way
+
+One list, `crossMoves()` in `ui/select.ts`, holds both kinds of cross-trade wait:
+
+| Move | Whose | Who waits |
+| --- | --- | --- |
+| A crewmate's report | the fixer | the reporter |
+| The chain's IPC lookup, logbook research, install | mechanic | analyst (nothing to buy, or no revenue from the plane, until it's done) |
+| The chain's part card, engineering fee | analyst | mechanic |
+| Engineering reviewing, the part in transit | nobody | |
+
+Every surface reads it:
+
+- **The crew strip** (*waiting on you* / *blocking you*). Before, the chain counted only when it was the analyst's move.
+- **The cards at the top of the island screen**: *Waiting on Mia: the GPU cart cable insulation is cracked at the plug (GPU cart 2 tagged out)*, *You're blocking Ravi: …*. The chain keeps its own banner with the stepper, so it isn't shown twice. Its part card no longer also counts as a plain *1 approval waiting*.
+- **The end-turn check** (new). *End turn* now asks first whenever a crewmate is waiting on this seat, and names them: *Seb is waiting on you: approve the part (066-22500, $310; Cargo C-7 is AOG).* Before, an analyst with no desk task left ended the turn without a word while the grounded plane's part sat on the desk. Reports and chain steps never roll an incident, so the "pick up deferral risk" line now only appears when other jobs are carried.
+- **The pings (ntfy).** The chain already pinged when it moved on to someone's move. A report now pings too:
+  - when it's raised mid-week, for example a cable written up at an inspection: *Seb reports: The GPU cart cable insulation is cracked at the plug. Mia, your move.*;
+  - inside the week-resolved ping when it opens with the week;
+  - when it's closed out.
+
+  The texts come from one pure function (`pushes()` in `ui/select.ts`), which `tests/chaingse.test.ts` checks. The Me tab's notification blurb lists them.
+
+### On the island
+
+- **A plane AOG for a part is drawn like one AOG from wear**: at its AOG spot, on jacks, with the mechanic and the wrench bubble. Before, it stayed on its stand as if it were flying. The island's screen-reader description says *AOG for a part*.
+- **A cart hooked to it follows it.** For the floatplane that's the dock's T-head. The cart now parks at the east end, and the mechanic stands between it and the parts kit. Before, the two overlapped; the carts branch never shot this position.
+- Island-lab scenes: `chain-aog` (the cargo plane down for brake linings, cart 1 still hooked up) and `chain-float` (zoomed to the mechanic: the floatplane down for its alternator, the cart on the dock). Node budget: the beaten scene is still 1365 nodes (limit 1500).
+
+### Balance: unchanged, no tuning
+
+The bots always put a cart back on the charger after a start, so no cart is ever stranded in the paper sim. The new rules only change what autopilot and the bots do with a stranded cart, or with a second start on one charge. Both runs are identical to the merged state before these changes: the full week-by-week histories match, seed for seed (three friends, all average and all good, 30 seeds, two crews each).
+
+Standard (26 weeks × 30 seeds, medians):
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk |
+| --- | --- | --- | --- | --- | --- |
+| All good | 5 / 8 / 16 / 21 | 98% | $6,735 | 0 | $11,714 |
+| All average | 7 / 11 / 16 / **22** | 91% | $6,554 | **0** | $9,553 |
+| **Three friends** | 8 / 11 / 16 / **22** | 87% | $1,247 | **0** | $9,079 |
+| Naive analyst | stays at tier 3 | 98% | $6,176 | 0 | |
+| Every solo / absent team | stays at tier 1 | | | | |
+
+Robust (`npm run balance -- robust`, 90 seeds × 4 crews per team):
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 23 / 24 / 24 / 23 | 22 / 29 / 25 / 18 | 1 / 1 / 1 / 2 | −$5,332 / −$8,092 / −$3,366 / −$3,781 |
+| All average | – / a / b / c | 22 / 22 / 22 / 22 | 15 / 16 / 13 / 8 | 0 / 0 / 0 / 0 | $5,856 / $4,354 / $5,812 / $4,353 |
+
+- **Against the chain alone:** three friends reached tier 5 in weeks 23/24/24/23 there too, with 21/28/24/20 misses and 2/1/1/2 weeks below $0.
+- **The three friends' $1,247 minimum** (seed 3) is week 26 of a tier-4 collapse: no rentable houses for two weeks, and no chain open. It's the same week in the merged state before these changes, so it's the known tier-4 knife-edge, reshuffled by the two merged branches' extra jobs.
+- **The targets hold:** tier 5 in week 22 for both target teams, no week below $0 in the standard run, and every solo or absent team stays at tier 1. So nothing was tuned.
+- **If the late dip shows up in play,** the first knobs are the ones each branch named: `CHAIN.chance` (0.3), and the new jobs' queue weights.
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
 Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; see that section for current numbers.

@@ -1,9 +1,9 @@
 // Scripted players for the paper sim (scripts/balance.ts) and tests.
 // They call the same reducer as real phones, so balance numbers are real.
 import { botChainData, islandAircraft, openChain } from './chain';
-import { ECON, GSE, TIERS } from './data';
+import { ECON, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
-import { cableReport, charterLoad, expectedDeferralCost, gseCarts, logistic, occupancy, urgency } from './econ';
+import { charterLoad, expectedDeferralCost, gseCarts, logistic, occupancy, startCart, urgency } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
 import { ROLES, type Action, type GseCart, type IslandState, type Order, type Role } from './types';
 
@@ -72,14 +72,8 @@ export function bestRates(s: IslandState) {
   return { nightly: bestN, charter: bestC };
 }
 
-/** The cart a bot would use for a start: the one on that plane if it's charged and in service, else the best-charged free one. */
-function botCart(s: IslandState, o: Order): GseCart | null {
-  const ok = (c: GseCart) => c.charge >= GSE.minStart && !cableReport(s, c.id);
-  const carts = gseCarts(s);
-  const on = carts.find((c) => c.hookedTo === o.assetId);
-  if (on && ok(on)) return on;
-  return carts.filter((c) => ok(c) && !c.hookedTo).sort((a, b) => b.charge - a.charge)[0] ?? null;
-}
+/** The cart a bot would use for a start: as the mechanic picks it (econ startCart). */
+const botCart = (s: IslandState, o: Order): GseCart | null => startCart(s, o.assetId);
 
 function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: number) {
   // the crew backs the analyst's story call (bots agree; people may not)
@@ -91,14 +85,13 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
   // a crewmate's report is a favour done on top of the usual jobs (people make time when a friend is stuck);
-  // repairs and redos are real jobs and take a slot. A ground power start with no charged cart to hand waits.
-  const reports = ready.filter((o) => o.kind === 'report');
-  const jobs = ready.filter((o) => o.kind !== 'report' && (o.kind !== 'gpustart' || !!botCart(s, o))).slice(0, bot.perTurn ?? 4);
-  const play = (o: (typeof ready)[number]) => {
-    // tow a charged cart over for a start (a flat or tagged-out one on that plane goes back on the charger first),
-    // and put it back on the charger after
+  // repairs and redos are real jobs and take a slot. A ground power start with no charged cart to hand when
+  // its turn comes (an earlier start may have used it up) waits, and the slot goes to the next job.
+  const play = (o: (typeof ready)[number]): boolean => {
+    // tow a charged cart over for a start (off the charger, or off a plane that isn't flying; a flat or
+    // tagged-out one on that plane goes back on the charger first), and put it back on the charger after
     const cart = o.kind === 'gpustart' ? botCart(s, o) : null;
-    if (o.kind === 'gpustart' && !cart) return;
+    if (o.kind === 'gpustart' && !cart) return false;
     if (cart && cart.hookedTo !== o.assetId) {
       const on = gseCarts(s).find((c) => c.hookedTo === o.assetId);
       if (on) s = step(s, { t: 'gse', role, cart: on.id, op: 'charge' }, now);
@@ -107,10 +100,13 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
     const sc = score(r, skill);
     s = step(s, { t: 'complete', role, orderId: o.id, score: sc, perfect: sc >= 0.95, data: chainData(s, o, skill, r) }, now);
     if (cart) s = step(s, { t: 'gse', role, cart: cart.id, op: 'charge' }, now);
+    return true;
   };
-  for (const o of [...reports, ...jobs]) play(o);
+  for (const o of ready) if (o.kind === 'report') play(o);
+  let jobs = 0;
+  for (const o of ready) if (o.kind !== 'report' && jobs < (bot.perTurn ?? 4) && play(o)) jobs++;
   // a job that found a part: the IPC lookup comes straight after it, if there's a slot left (the plane is down)
-  let extra = Math.max(1, (bot.perTurn ?? 4) - jobs.length);
+  let extra = Math.max(1, (bot.perTurn ?? 4) - jobs);
   for (let guard = 0; guard < 3 && extra > 0; guard++) {
     const c = openChain(s);
     const o = c?.stepId ? s.orders.find((x) => x.id === c.stepId && x.role === role && x.status === 'ready') : undefined;
@@ -177,6 +173,11 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
   return s;
 }
 
+/** One seat's turn as a bot plays it: the sim's week loop, and tests that start from an island they set up. */
+export function botTurn(s: IslandState, role: Role, bot: Bot, r: Rng, now: number) {
+  return role === 'fin' ? playFin(s, bot, r, now) : playOps(s, role, bot, r, now);
+}
+
 export type SimWeek = {
   week: number;
   tier: number;
@@ -213,9 +214,7 @@ export function simulate(team: Team, weeks: number, seed: number, trace?: (s: Is
       const missed = bot.absent || (bot.miss ? away.chance(bot.streak && awayLast[role] ? 0.5 : bot.miss) : false);
       awayLast[role] = !!missed;
       if (missed) continue;
-      const r = rng(hashSeed('bots', seed, salt, role, week));
-      if (role === 'fin') s = playFin(s, bot, r, now);
-      else s = playOps(s, role, bot, r, now);
+      s = botTurn(s, role, bot, rng(hashSeed('bots', seed, salt, role, week)), now);
       s = step(s, { t: 'endTurn', role }, now);
     }
     if (s.week === week) {

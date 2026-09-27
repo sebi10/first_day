@@ -126,6 +126,28 @@ const SCN: Scn[] = [
   },
   { id: 'gse-night', note: 'Tier 5 at night: both carts on the charger, their lights over the dark', tier: 5, phase: 'night' },
   {
+    id: 'chain-aog',
+    note: 'Tier 4: Cargo C-7 AOG for brake linings (the part chain, health 82), GPU cart 1 still hooked up to it at its AOG spot',
+    tier: 4,
+    phase: 'day',
+    tweak: (s) => {
+      gse(s);
+      s.chain = { id: 'lab-chain', orderId: 'lab-job', assetId: 'p2', title: 'Tire and brake', ata: '32-40', tag: 'lining', item: 'brake linings', how: 'damaged', by: 'Seb', week: s.week - 1, step: 'buy', returns: 0, rejects: 0, spent: 0, aogWeeks: 1 };
+    },
+  },
+  {
+    id: 'chain-float',
+    note: 'Zoomed to the mechanic: Float F-3 AOG for its alternator (the part chain), GPU cart 1 left hooked up to it on the dock head, the mechanic beside it',
+    tier: 4,
+    phase: 'day',
+    focus: 'mech',
+    tweak: (s) => {
+      gse(s);
+      s.gse![0].hookedTo = 'p3';
+      s.chain = { id: 'lab-chain', orderId: 'lab-job', assetId: 'p3', title: 'Replace alternator', ata: '24-30', tag: 'generator', item: 'alternator', how: 'gone', by: 'Seb', week: s.week - 1, step: 'lookup', returns: 0, rejects: 0, spent: 0, aogWeeks: 1 };
+    },
+  },
+  {
     id: 'beaten',
     note: 'Beat the game: tier 5 at night, 8 straight A weeks, the crew statue, observatory, bunting',
     tier: 5,

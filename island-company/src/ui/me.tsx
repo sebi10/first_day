@@ -138,8 +138,8 @@ export function Me({ ctl, onLeave }: { ctl: Ctl; onLeave(): void }) {
       <div class="card col" style={{ gap: 8 }}>
         <h3>Notifications</h3>
         <span class="label">
-          Free push via the ntfy app (iOS/Android/desktop): subscribe to the same topic on each device. Pings when someone ends a turn, when a week resolves, and
-          on counter-offers. Quiet hours 22:00–08:00.
+          Free push via the ntfy app (iOS/Android/desktop): subscribe to the same topic on each device. Pings when someone ends a turn, when a week resolves, when
+          a crewmate reports a problem or fixes one, when a grounded plane's part moves on to someone's move, and on counter-offers. Quiet hours 22:00–08:00.
         </span>
         <div class="row" style={{ gap: 8 }}>
           <div class="field grow">

@@ -19,9 +19,9 @@ export const CART_OUTLET: Pt[] = [
   [HANGAR[0] - 46, HANGAR[1] - 9],
 ];
 
-/** the cart beside a plane it is hooked to: by the nose, on the west side; on the dock's T-head for the floatplane */
+/** the cart beside a plane it is hooked to: by the nose, on the west side; on the dock's T-head for the floatplane (east end, clear of the mechanic working on it) */
 export function cartBeside(model: string, at: Pt): Pt {
-  if (model === 'float') return [DOCK.head[2] - 12, DOCK.head[1] + 8];
+  if (model === 'float') return [DOCK.head[2] - 9, DOCK.head[1] + 8];
   return [at[0] - 24, at[1] + 20];
 }
 /** the plane's external power receptacle: the fuselage's west side, forward of the wing */

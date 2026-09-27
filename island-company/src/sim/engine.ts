@@ -49,6 +49,7 @@ import {
   grid,
   gseCarts,
   gseForStart,
+  startCart,
   houseBlocker,
   houseRentable,
   houses,
@@ -1744,11 +1745,15 @@ function autoRun(s: IslandState, role: Role) {
     .filter((o) => o.role === role && o.status === 'ready' && o.kind !== 'project' && !(o.chain && o.chain.step !== 'job'))
     .sort((a, b) => urgency(s, b) - urgency(s, a));
   // two jobs at 50%, plus a quick patch on a crewmate's cap report or a tagged-out cart's cable (it won't hold; a leak waits for a person).
-  // A ground power start needs a charged cart: autopilot tows one over, and puts it back on the charger after
+  // A ground power start needs a charged cart when its turn comes (an earlier start may have used it up): autopilot
+  // tows one over (off the charger, or off a plane that isn't flying), and puts it back on the charger after. No cart, no start
   const report = ready.find((o) => o.kind === 'report' && (o.report?.effect === 'cap' || o.report?.effect === 'gse'));
-  const jobs = [...ready.filter((o) => o.kind !== 'report' && (o.kind !== 'gpustart' || !!autoCart(s, o, false))).slice(0, 2), ...(report ? [report] : [])];
-  for (const o of jobs) {
-    const cart = o.kind === 'gpustart' ? autoCart(s, o, true) : null;
+  let jobs = 0;
+  for (const o of [...ready.filter((x) => x.kind !== 'report'), ...(report ? [report] : [])]) {
+    if (o.kind !== 'report' && jobs >= 2) continue;
+    const cart = o.kind === 'gpustart' ? autoCart(s, o) : null;
+    if (o.kind === 'gpustart' && !cart) continue;
+    if (o.kind !== 'report') jobs++;
     const wear = cart ? useCart(s, cart, o) : 0;
     o.status = 'done';
     o.result = { score: 0.5, perfect: false, credit: 0.5, by: role, week: s.week, auto: true };
@@ -1773,23 +1778,24 @@ function autoRun(s: IslandState, role: Role) {
 }
 
 /**
- * Autopilot's cart for a start: the one already hooked up to that plane if it
- * is charged and in service, else the best-charged free one. `take` tows it
- * over (off the charger; a flat one on that plane goes back on the charger).
+ * Autopilot tows the cart for a start over (startCart: the one on that plane,
+ * else a free one, else one off a plane that isn't flying, like one AOG for a
+ * part): off the charger, and a flat or tagged-out one on that plane goes back
+ * on the charger. Null: no charged cart in service, so no start.
  */
-function autoCart(s: IslandState, o: Order, take: boolean): GseCart | null {
-  const ok = (c: GseCart) => c.charge >= GSE.minStart && !cableReport(s, c.id);
-  const carts = take ? ensureGse(s) : gseCarts(s);
-  const on = carts.find((c) => c.hookedTo === o.assetId);
-  const pick = on && ok(on) ? on : (carts.filter((c) => ok(c) && !c.hookedTo).sort((a, b) => b.charge - a.charge)[0] ?? null);
-  if (!pick || !take) return pick;
-  if (on && on !== pick) {
+function autoCart(s: IslandState, o: Order): GseCart | null {
+  const pick = startCart(s, o.assetId);
+  if (!pick) return null;
+  const carts = ensureGse(s);
+  const c = carts.find((x) => x.id === pick.id)!;
+  const on = carts.find((x) => x.hookedTo === o.assetId);
+  if (on && on !== c) {
     on.hookedTo = null;
     on.charging = true;
   }
-  pick.charging = false;
-  pick.hookedTo = o.assetId;
-  return pick;
+  c.charging = false;
+  c.hookedTo = o.assetId;
+  return c;
 }
 
 const GRADE_VALUE: Record<Grade, number> = { A: 4, B: 3, C: 2, D: 1 };

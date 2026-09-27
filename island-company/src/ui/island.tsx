@@ -7,7 +7,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
-import { cableReport, gseCarts, houseBlocker, houseRentable, planeCapacity, powered } from '../sim/econ';
+import { cableReport, gseCarts, houseBlocker, houseRentable, isAog, planeCapacity, powered } from '../sim/econ';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
 import { Cottage, GenHouse, Hangar, Lodge, Office, Pole, POLE_H, Ribbon, SMOKE_AT, Substation, Villa, WINDOWS, winPath, type Fault, type Win } from './island/buildings';
@@ -252,23 +252,25 @@ export function Island({
     bubbles.push({ key, x, y, k: bubbleK(bscale, o.small), dx: (o.dx ?? 0) * bscale, dy: (o.dy ?? 0) * bscale, icon, tone, small: o.small, owner: o.owner ?? key, fixed: o.fixed, count: o.count });
   const at = (id: string) => POS[id];
 
-  // ---- airfield: every plane has its own stand and its own AOG spot
-  const aog = planes.filter((p) => p.health < 40);
+  // ---- airfield: every plane has its own stand and its own AOG spot (worn out, or waiting on a part: the part chain)
+  const isDown = (p: Asset) => p.health < 40 || isAog(s, p.id);
+  const aog = planes.filter(isDown);
   items.push({ y: HANGAR[1], el: <At key="hangar" p={HANGAR}><Hangar tint={hangarColor} wear={wear} doorOpen={aog.some((p) => p.id === 'p1')} /></At> });
   foot('hangar', HANGAR, FOOT.hangar);
-  const spots = unclutter(planes.map((p) => ({ id: p.id, x: (p.health < 40 ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[0], y: (p.health < 40 ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[1] })));
+  const spots = unclutter(planes.map((p) => ({ id: p.id, x: (isDown(p) ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[0], y: (isDown(p) ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[1] })));
   const spotOf = (id: string) => spots.find((q) => q.id === id)!;
   const float = planes.find((p) => p.model === 'float');
   for (const p of planes) {
     const { x, y } = spotOf(p.id);
-    const down = p.health < 40;
+    const down = isDown(p);
     const g = tagged(p);
     const onWater = p.model === 'float';
     // the floatplane sits on the water, drawn with the dock below the y-sorted things
     if (!onWater) items.push({ y, el: <Plane key={p.id} model={p.model as PlaneModel} x={x} y={y} rot={PLANE_ROT[p.id] ?? 92} jacks={down} chocks={g} covered={storm && !down} mood={dev.care} /> });
     foot(p.id, [x, y], onWater ? FOOT.float : FOOT.plane);
     if (down) {
-      const mech: Pt = onWater ? [DOCK.head[2] - 22, DOCK.head[1] + 9] : [x + 22, y + 12];
+      // on the dock: between the parts kit and where a ground power cart parks for the floatplane
+      const mech: Pt = onWater ? [DOCK.head[2] - 27, DOCK.head[1] + 9] : [x + 22, y + 12];
       items.push({ y: mech[1], el: <Guy key={`mech${p.id}`} x={mech[0]} y={mech[1]} c={K.orange} /> });
       if (onWater) items.push({ y: DOCK.head[3], el: <path key="kit" d={`M${DOCK.head[2] - 40} ${DOCK.head[3] - 2}h9v-5h-9zM${DOCK.head[2] - 39} ${DOCK.head[3] - 7}v-2h7v2`} fill={K.red} stroke="#8a2a22" stroke-width=".8" /> });
       // the twin is on jacks just out of the hangar mouth: its bubble sits
@@ -533,7 +535,7 @@ export function Island({
         {flat}
         {float && (
           <g>
-            <Plane model="float" x={spotOf(float.id).x} y={spotOf(float.id).y} rot={PLANE_ROT.p3} mood={dev.care} size={PLANE_SIZE.p3} service={float.health < 40} />
+            <Plane model="float" x={spotOf(float.id).x} y={spotOf(float.id).y} rot={PLANE_ROT.p3} mood={dev.care} size={PLANE_SIZE.p3} service={isDown(float)} />
             {tagged(float) && <path d={`M${DOCK.head[2] - 4} ${DOCK.head[1] + 2}q-6 -8 -${DOCK.head[2] - 4 - spotOf(float.id).x - 6} -14`} stroke="#e8d8b0" stroke-width="1.6" fill="none" />}
             {newIds.has('p3') && <Ribbon x={spotOf(float.id).x} y={spotOf(float.id).y - 8} />}
             {newIds.has('p3') && <NewBadge x={spotOf(float.id).x + 34} y={spotOf(float.id).y - 4} scale={bscale} motion={motion} />}
@@ -792,7 +794,7 @@ function describe(s: IslandState, pw: ReturnType<typeof powered>, open: number, 
   const tierName = TIERS[s.tier - 1]?.name ?? '';
   const planes = s.assets.filter((a) => a.kind === 'plane');
   const houses = s.assets.filter((a) => a.kind === 'house');
-  const pl = planes.map((p) => `${p.name} ${p.health < 40 ? 'AOG' : s.tags?.[p.id] ? 'grounded' : p.health < 60 ? 'needs attention' : 'flying'}`);
+  const pl = planes.map((p) => `${p.name} ${p.health < 40 ? 'AOG' : isAog(s, p.id) ? 'AOG for a part' : s.tags?.[p.id] ? 'grounded' : p.health < 60 ? 'needs attention' : 'flying'}`);
   const closed = houses.filter((h) => !houseRentable(s, h)).map((h) => `${h.name} closed (${houseBlocker(s, h)})`);
   const c = dev.construction;
   const building = c && c.stage < 3 ? `construction under way for tier ${c.tier} ${TIERS[c.tier - 1]?.name ?? ''}: ${c.stage} of 3 parts done` : '';

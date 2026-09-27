@@ -72,6 +72,8 @@ Nothing tells you a P/N is wrong when you order it. A part that isn't effective 
 
 You get one chain at a time, with a breather after each. It never falls on the island's only guest plane: that one keeps its spares on the shelf.
 
+**A grounded plane and the carts.** A plane that's down for a part can still take a *Ground power start* (an engine run on the ground; it doesn't fly until the part is on). A cart left hooked up to it isn't stuck there: hook it up to the next plane that needs a start and it's towed straight over. The start's card says where the cart is (*GPU cart 1 is on Cargo C-7, AOG for a part*), and *Ground power carts ▸* opens on that cart. Autopilot does the same if you miss a week.
+
 ## 6. Crewmates' problems (cross-trade reports)
 
 From week 3 the island throws up problems one trade has and another has to fix. All three of you report and all three fix:
@@ -83,6 +85,8 @@ From week 3 the island throws up problems one trade has and another has to fix. 
 The two vehicles use the hydraulic bench with their own rules. The bucket truck takes the AW hydraulic oil on its decal, not aviation 5606, and the boom comes down onto its rest before anything on the lift cylinder is opened. The van's brakes take DOT 3/4 brake fluid (a glycol); mineral fluid swells its seals.
 
 A report lands on the fixer's list, ready, no approval. While it's open it either **slows the reporter down** (2 jobs a turn, or 1 desk task), **costs cash every week**, or (the GPU cable) **keeps that cart tagged out**. Tap it to see who's waiting on you, then *Start*. A fix that doesn't hold comes back a week or two later. A money leak that comes back also charges the weeks it only looked fixed. Autopilot patches a slow-down, but a money leak waits for a person.
+
+**Whose move it is.** A report and the part chain's next step count the same way: the crew strip marks who's *waiting on you* and who's *blocking you*, the top of the island screen says what for, *End turn* asks first when a crewmate is waiting on you (*Seb is waiting on you: approve the part …*), and with ntfy set up the crew gets pinged when a report comes in or is closed out, and when the chain moves on to someone's move.
 
 ## 7. Lend a hand
 

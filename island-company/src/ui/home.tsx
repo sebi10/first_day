@@ -4,7 +4,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
-import { gseForStart, powered, tierDef, urgency } from '../sim/econ';
+import { gseForStart, powered, startCart, tierDef, urgency } from '../sim/econ';
 import { ROLES, type IslandState, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
@@ -18,7 +18,7 @@ import { Island } from './island';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
-import { blocks, capNow, launchFor, mateStatus, teamNumbers } from './select';
+import { blocks, capNow, launchFor, mateStatus, owedBy, teamNumbers } from './select';
 import { settings } from './settings';
 import { shareText } from './share';
 import { C, ROLE_TINT } from './theme';
@@ -67,7 +67,8 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
     if (g.blocker) {
       fx.bad();
       toast(`${g.blocker}.`);
-      setGse(g.cart?.id ?? null);
+      // on the cart that's there, else the one to tow over (it may be on a plane that's down for a part)
+      setGse(g.cart?.id ?? startCart(s, o.assetId)?.id ?? null);
       return;
     }
     fx.tap();
@@ -335,7 +336,8 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
           <Lobby ctl={ctl} onPass={onSeat} />
         ) : (
           <>
-            {waitingOn.map((b, i) => (
+            {/* the part chain's move is on its own banner below (with the stepper); the crew strip counts it with the rest */}
+            {waitingOn.filter((b) => b.kind !== 'chain').map((b, i) => (
               <div class="card row" key={`w${i}`} style={{ gap: 10 }}>
                 <Icon name="clock" size={20} color={C.inkSoft} />
                 <span>
@@ -343,11 +345,11 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
                 </span>
               </div>
             ))}
-            {mine.length > 0 && (
+            {mine.some((b) => b.kind !== 'chain') && (
               <div class="card row" style={{ gap: 10, borderLeft: `6px solid ${C.rust}`, alignItems: 'flex-start' }}>
                 <Icon name="alert" size={20} color={C.rust} />
                 <span class="col" style={{ gap: 2 }}>
-                  {mine.map((b, i) => (
+                  {mine.filter((b) => b.kind !== 'chain').map((b, i) => (
                     <span key={i}>
                       You're blocking <b>{s.players[b.to]?.name ?? ROLE_LABEL[b.to]}</b>: {b.text}
                     </span>
@@ -485,6 +487,11 @@ function Dock({
   const gridCapped = (r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1) || !!capNow(s, r)?.full;
   // jobs this seat could still start this turn (none once a per-turn limit is used up)
   const playable = gridCapped ? 0 : ready;
+  // a crewmate waiting on this seat (a report to fix, the part chain's next step): ending the turn says so first
+  const owed = owedBy(s, r);
+  const ask = playable > 0 || owed.length > 0;
+  // a report or a chain step carried over never rolls an incident: only the other jobs pick up deferral risk
+  const risky = readyList.filter((o) => o.kind !== 'report' && !o.chain).length;
   // the next useful thing, always under the thumb
   const next: { label: string; go(): void } | null = turn?.ended
     ? null
@@ -528,12 +535,12 @@ function Dock({
                   <Btn block onClick={next.go} style={{ flex: '1 1 auto', minWidth: 0 }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{next.label}</span>
                   </Btn>
-                  <Btn kind="ink" onClick={() => (playable > 0 ? setConfirm(true) : void end())} style={{ flex: 'none', padding: '0 16px' }}>
+                  <Btn kind="ink" onClick={() => (ask ? setConfirm(true) : void end())} style={{ flex: 'none', padding: '0 16px' }}>
                     End turn
                   </Btn>
                 </div>
               ) : (
-                <Btn block kind="ink" onClick={() => (playable > 0 ? setConfirm(true) : void end())}>
+                <Btn block kind="ink" onClick={() => (ask ? setConfirm(true) : void end())}>
                   End turn{playable ? ` · ${playable} job${playable > 1 ? 's' : ''} left` : ready ? ' · limit reached' : ''}
                 </Btn>
               )}
@@ -569,9 +576,16 @@ function Dock({
       <Sheet open={confirm} onClose={() => setConfirm(false)} label="End turn">
         <div class="col" style={{ gap: 12 }}>
           <h2>End your turn?</h2>
-          <span class="muted">
-            {ready} ready job{ready > 1 ? 's' : ''} will carry to next week and pick up deferral risk.
-          </span>
+          {owed.map((m) => (
+            <span key={m.key} class="fault" style={{ fontWeight: 700 }}>
+              {s.players[m.waits]?.name ?? ROLE_LABEL[m.waits]} is waiting on you: {m.text}.
+            </span>
+          ))}
+          {ready > 0 && (
+            <span class="muted">
+              {ready} ready job{ready > 1 ? 's' : ''} will carry to next week{risky ? ' and pick up deferral risk' : ''}.
+            </span>
+          )}
           <div class="row" style={{ gap: 8 }}>
             <Btn kind="ghost" block onClick={() => setConfirm(false)}>
               Keep working

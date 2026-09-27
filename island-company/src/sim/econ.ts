@@ -294,9 +294,34 @@ export function gseForStart(s: IslandState, o: Pick<Order, 'kind' | 'assetId'>):
   if (o.kind !== 'gpustart') return { cart: null, blocker: null };
   const plane = s.assets.find((a) => a.id === o.assetId)?.name ?? 'the plane';
   const cart = cartOn(s, o.assetId) ?? null;
-  if (!cart) return { cart, blocker: `Hook a charged cart up to ${plane} first` };
+  if (!cart) {
+    // the only charged cart may be sitting on another plane (one that's AOG for a part isn't going anywhere): say where
+    const away = startCart(s, o.assetId);
+    const at = away?.hookedTo ? s.assets.find((a) => a.id === away.hookedTo) : undefined;
+    const down = at ? (isAog(s, at.id) ? ', AOG for a part' : isTagged(s, at.id) ? ', grounded this week' : '') : '';
+    return { cart, blocker: `Hook a charged cart up to ${plane} first${at ? `: ${away!.name} is on ${at.name}${down}` : ''}` };
+  }
   const rep = cableReport(s, cart.id);
   if (rep) return { cart, blocker: `${cart.name} is tagged out until ${s.players[rep.role]?.name ?? ROLE_LABEL[rep.role]} fixes its cable: hook up another cart` };
   if (cart.charge < GSE.minStart) return { cart, blocker: `Hook a charged cart up to ${plane} first: ${cart.name} is down to ${Math.round(cart.charge)}%` };
   return { cart, blocker: null };
+}
+
+/**
+ * The cart for a start on this plane, as the mechanic would pick it: the one
+ * already on it if it's charged and in service; else the best-charged one on
+ * the charger or parked; else one hooked up to another plane, a plane that
+ * isn't flying first (AOG for a part, or grounded: it needs its cart least).
+ * Autopilot and the paper-sim bots use it, so a cart left on a grounded plane
+ * never holds up the starts, and the start's card uses it to say where the
+ * cart is. Null: no charged cart in service (or no plane).
+ */
+export function startCart(s: IslandState, assetId: string | null): GseCart | null {
+  if (!assetId) return null;
+  const ok = (c: GseCart) => c.charge >= GSE.minStart && !cableReport(s, c.id);
+  const carts = gseCarts(s);
+  const on = carts.find((c) => c.hookedTo === assetId);
+  if (on && ok(on)) return on;
+  const rank = (c: GseCart) => (!c.hookedTo ? 0 : outOfService(s, c.hookedTo) ? 1 : 2);
+  return carts.filter((c) => ok(c) && c.hookedTo !== assetId).sort((a, b) => rank(a) - rank(b) || b.charge - a.charge)[0] ?? null;
 }

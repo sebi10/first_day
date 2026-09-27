@@ -3,7 +3,7 @@
 // cable as last inspected, and the moves (plug in, hook up, unhook, inspect).
 // The other seats see the same card read-only.
 import { CABLE_BAND, GSE, ROLE_LABEL } from '../sim/data';
-import { cableReport, gseCarts, powered } from '../sim/econ';
+import { cableReport, gseCarts, isAog, powered } from '../sim/econ';
 import type { GseCart, GseOp, IslandState, Role } from '../sim/types';
 import { fx } from './feedback';
 import { Btn, Icon } from './kit';
@@ -13,9 +13,10 @@ import type { Ctl } from './useIsland';
 /** a start needs 30%: green from 60, amber from 30, rust below */
 export const chargeColor = (charge: number) => (charge >= 60 ? C.palm : charge >= GSE.minStart ? '#C9A86A' : C.rust);
 
-/** "On charge", "Hooked to Twin N-12", "Parked" */
+/** "On charge", "Hooked to Twin N-12", "Hooked to Cargo C-7 (AOG)", "Parked" */
 export function cartWhere(s: IslandState, c: GseCart) {
-  if (c.hookedTo) return `Hooked to ${s.assets.find((a) => a.id === c.hookedTo)?.name ?? 'a plane'}`;
+  // a plane down for a part isn't flying: its cart is the first one to tow over for another plane's start
+  if (c.hookedTo) return `Hooked to ${s.assets.find((a) => a.id === c.hookedTo)?.name ?? 'a plane'}${isAog(s, c.hookedTo) ? ' (AOG)' : ''}`;
   return c.charging ? 'On charge' : 'Parked';
 }
 
@@ -103,9 +104,12 @@ export function GseSheet({ ctl, focus, onClose }: { ctl: Ctl; focus: string | nu
         const inspectedNow = c.inspected?.week === s.week && !c.inspected.fixed;
         return (
           <div key={c.id} class="card col" style={{ gap: 8, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${rep ? C.rust : chargeColor(c.charge)}` }}>
-            <div class="row spread">
-              <b style={{ fontSize: 17 }}>{c.name}</b>
-              <span class={`chip ${c.charging ? 'sea' : c.hookedTo ? 'ink' : ''}`}>{cartWhere(s, c)}</span>
+            <div class="row spread" style={{ gap: 8 }}>
+              <b style={{ fontSize: 17, whiteSpace: 'nowrap' }}>{c.name}</b>
+              {/* "Hooked to Cargo C-7 (AOG)" can be long: it wraps, the name doesn't */}
+              <span class={`chip ${c.charging ? 'sea' : c.hookedTo ? 'ink' : ''}`} style={{ whiteSpace: 'normal', textAlign: 'right', borderRadius: 12 }}>
+                {cartWhere(s, c)}
+              </span>
             </div>
             <div class="row spread">
               <span class="label">Charge</span>
