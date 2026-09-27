@@ -383,6 +383,8 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
       return {};
     } catch (e) {
       if (!isNetworkError(e)) {
+        // the rules want a newer build: reload to it (src/main.tsx, at most once a minute)
+        if (isStaleClient(e)) window.dispatchEvent(new CustomEvent('ic:stale'));
         void firebaseStore.load(id);
         return { error: String((e as Error)?.message ?? e) };
       }
