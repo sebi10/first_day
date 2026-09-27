@@ -58,7 +58,10 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
   - verify the version gate (`DOC_VERSION` 3, rules `v == 3`, migration tests)
   - merge `jobflow` into `claude/jolly-keller-gy5hs4` with `--no-ff`, check commit trailers, and push, which deploys
   - watch the run, run the live rules probe, report to the owner, and update this file
-- **Risk:** cloud branches exist only in the cloud container until pushed. If that session dies before pushing, the design can be re-run from the template; the owner's words and the 13 design decisions are in its `USER`/`ASSUME` blocks.
+- **Backup on GitHub:** branch **`backup/jobflow`** is a snapshot of the cloud integration branch `jobflow`, with the spec, all four packages and the integration. The owner OK'd it on 2026-09-27. The cloud session refreshes it at each check-in until the deploy.
+  - Pushes to `backup/*` don't deploy.
+  - **If the cloud session dies before deploying,** pick up from there locally. `git fetch origin backup/jobflow`, then check the stage it reached with `git log`. Run the remaining stages (reviews → fix → QA) from the template, then deploy per §6.4.
+  - Merge it into the deploy branch with `--no-ff`. The deploy branch has the handoff commits on top of `jobflow`'s base.
 - **The spec's key decisions** (full text: `docs/JOBFLOW.md` §25 once merged):
   1. v1 covers the jobs that make up ~90% of the work. Rare jobs keep the diagnosis but come with parts pre-filled.
      - Deferred to v2: ignition, the turbine hot section, calibration, cores, shelf life, line-crew NPCs, morale.
