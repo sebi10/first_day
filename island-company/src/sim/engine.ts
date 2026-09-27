@@ -615,6 +615,8 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       resolveWeek(s, now);
       return { s };
     }
+    default:
+      return fail('That move comes with the job flow update.');
   }
 }
 
@@ -1114,7 +1116,7 @@ function spawnRedo(s: IslandState, o: Order, now: number) {
       kind: d.orderKind,
       assetId: d.assetId,
       title: `${base} (redo)`,
-      puzzle: d.puzzle,
+      puzzle: d.puzzle as Order['puzzle'],
       tier: d.tier,
       cost: 0,
       parts: 0,

@@ -105,7 +105,10 @@ export interface Defect {
   job?: string;
   /** the job as a noun ("prop bolt re-torque", "alternator replacement redo") for the review's "traced to" line */
   log?: string;
-  puzzle: PuzzleId;
+  /** the puzzle of the job that left it; 'flow' and 'elec' for the job flow's own mistakes (rule keys like `flow:task`, `elec:nogfci`) */
+  puzzle: PuzzleId | 'flow' | 'elec';
+  /** a wrong-task or NFF defect remembers the fault it left: the alert it re-raises (docs/JOBFLOW.md 11.1) */
+  alert?: { sym: string; kind: string; alert: string };
   /** what went wrong, when the puzzle reported it and a rule exists for it ('hot' for a hot start): picks the `<puzzle>:<variant>` rule */
   variant?: string;
   /** that job's title, as it appeared on the card */
@@ -227,6 +230,12 @@ export interface PartChain {
   bench?: { id: string; fault: 'unit' | 'wiring'; call?: 'unit' | 'wiring'; by?: string; week?: number; again?: boolean };
   /** the bench found the wiring at fault: fixed, no part needed */
   wired?: boolean;
+  /**
+   * Opened from the job flow's research branch (a `plan` or `repick` with research, or a displaced
+   * part at receiving or the install): it doesn't ground the plane by itself (the alert does, if it
+   * is an airworthiness one). Older chains: none.
+   */
+  flow?: boolean;
 }
 
 export interface Order {
@@ -268,6 +277,12 @@ export interface Order {
   redo?: { week: number; by: Role; name: string; cost: number };
   /** part chain: the job it stopped ('job'), or one of its steps ('bench': the electrician's check at the airplane) */
   chain?: { id: string; step: 'job' | 'lookup' | 'research' | 'buy' | 'fee' | 'bench' };
+  /** the job flow (docs/JOBFLOW.md 2.4): the alert it came from, the task, the lines. Legacy orders: none */
+  flow?: JobFlow;
+  /** ms: the `now` of the action that created it (a card that came after the analyst ended the turn goes through on the standing approval) */
+  at?: number;
+  /** an electrician's bench order for a plane's electrical unit: the alert it checks */
+  bench?: string;
 }
 
 export interface Player {
@@ -355,7 +370,31 @@ export interface WeekReport {
   nearMisses: number;
   cashStart: number;
   cashEnd: number;
-  costs: { fixed: number; insurance: number; leak: number; incidents: number; refunds: number; loan?: number; /** open 'leak' reports */ reports?: number; /** charging the ground power carts */ power?: number };
+  costs: {
+    /** overhead + payroll (old renderers read this) */
+    fixed: number;
+    insurance: number;
+    leak: number;
+    incidents: number;
+    refunds: number;
+    loan?: number;
+    /** open 'leak' reports */
+    reports?: number;
+    /** charging the ground power carts */
+    power?: number;
+    /** the tier's overhead (leases, utilities, property insurance, admin, licences) */
+    overhead?: number;
+    /** the NPC staff's wages */
+    payroll?: number;
+    /** the stores carrying charge (storage and insurance on stock) */
+    carry?: number;
+    /** freight paid at the payment run (the AOG boat on POs) */
+    freight?: number;
+    /** labour on job-flow cards approved this week */
+    labor?: number;
+    /** purchase orders paid at the payment run (parts, consumables, materials, tools, building), freight excluded */
+    parts?: number;
+  };
   housesBooked: number;
   housesRentable: number;
   partsDelivered: number;
@@ -422,6 +461,7 @@ export interface IslandState {
   cash: number;
   /** cash when the current week opened (for the review) */
   openCash: number;
+  /** RETIRED (the generic parts kits): migrate() turns them into store credit. Kept for old readers */
   parts: { stock: number; inTransit: number };
   rates: { nightly: number; charter: number };
   insurance: Insurance;
@@ -484,10 +524,69 @@ export interface IslandState {
    * otherwise its first flight is lost. Older islands: none.
    */
   weakBattery?: { assetId: string; week: number } | null;
+
+  // --- the job flow, purchasing, finance tracking and NPC staff (docs/JOBFLOW.md; all optional: old islands read as noted) ---
+  /** open alerts, and closed ones for ALERTS.keep weeks (hard cap 40). Old islands: [] */
+  alerts?: Alert[];
+  /** stock lines by item (sparse). Old islands: migrated to the starter stock */
+  inv?: Record<ItemId, StockLine>;
+  /** purchase orders: open, held, received and unpaid, and closed ones for STOCK.keepWeeks */
+  pos?: PurchaseOrder[];
+  /** requisitions: open ones, and closed ones for STOCK.keepWeeks */
+  reqs?: Requisition[];
+  /** engineering authorizations the research branch has issued (an ICA part approved for one airplane) */
+  eas?: EaRecord[];
+  /** vendor store credit, USD (migrated kits, returns and scrap): applied at the payment runs */
+  credit?: number;
+  /** the standing limit: late cards and requisitions approved at the resolve, a week. Absent: the two work budgets' sum */
+  standing?: number;
+  /** finance tracking: the last 26 weeks (sparse) */
+  ledger?: WeekLedger[];
+  /** NPC staff on the island's payroll (pilots, housekeepers, builders) */
+  staff?: Npc[];
+  /** this week's hiring board */
+  hiring?: { week: number; cands: Candidate[] } | null;
+  /** the builders' site work: open and finished builds */
+  builds?: Build[];
+  /** the week the job flow started on this island (teaching weeks follow it). Old islands: the migration week */
+  flowSince?: number;
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */
-export const WEEK_BOUND = ['complete', 'approve', 'defer', 'counter', 'acceptCounter', 'rejectCounter', 'buyList', 'endTurn', 'tag', 'squawk', 'gse'] as const;
+export const WEEK_BOUND = [
+  'complete',
+  'approve',
+  'defer',
+  'counter',
+  'acceptCounter',
+  'rejectCounter',
+  'buyList',
+  'endTurn',
+  'tag',
+  'squawk',
+  'gse',
+  // the job flow (docs/JOBFLOW.md 7): every flow and purchasing move but setStanding
+  'plan',
+  'nff',
+  'mel',
+  'melExtend',
+  'makeSafe',
+  'askBench',
+  'repick',
+  'dropJob',
+  'request',
+  'cancelReq',
+  'approveReq',
+  'deferReq',
+  'buy',
+  'setStock',
+  'scrap',
+  'nudge',
+  // NPC staff (15.9)
+  'hire',
+  'letGo',
+  'build',
+] as const;
 
 /** What the mechanic can do with a ground power cart. */
 export type GseOp = 'charge' | 'unplug' | 'hook' | 'unhook' | 'inspect';
@@ -534,4 +633,403 @@ export type Action =
   | { t: 'unpost'; role: Role; id: number }
   | { t: 'cosmetic'; role: Role; id: string }
   | { t: 'practice'; role: Role; puzzle: PuzzleId; tier: number; score: number }
-  | { t: 'resolve'; week: number };
+  | { t: 'resolve'; week: number }
+  // --- the job flow (docs/JOBFLOW.md 7) ---
+  /** the tech's plan for an alert: the task found in the manual / reference, and the lines picked (a rare job's pre-filled line counts as a pick) */
+  | { t: 'plan'; role: OpsRole; alert: string; task: TaskId; pick: PickLine[]; research?: boolean; week?: number }
+  /** no fault found: close the alert */
+  | { t: 'nff'; role: OpsRole; alert: string; week?: number }
+  /** placard the item INOP under the company MEL (category C): the plane flies on it at this week's resolve */
+  | { t: 'mel'; role: 'mech'; alert: string; week?: number }
+  /** the analyst's one extension of an MEL placard */
+  | { t: 'melExtend'; alert: string; week?: number }
+  /** make a hazard safe: breaker off and tagged, or a blank-off */
+  | { t: 'makeSafe'; role: 'elec'; alert: string; how: 'breaker' | 'blankoff'; week?: number }
+  /** ask the electrician to meter a plane's electrical unit and its circuit */
+  | { t: 'askBench'; role: 'mech'; alert: string; week?: number }
+  /** a new pick for a flow job (after a stop, or a change of mind); `research`: send the job to the part chain's research */
+  | { t: 'repick'; role: OpsRole; order: string; pick: PickLine[]; research?: boolean; week?: number }
+  /** drop a flow job: its alert goes back to open */
+  | { t: 'dropJob'; role: OpsRole; order: string; week?: number }
+  /** a stock or tool requisition (no job): the analyst's call */
+  | { t: 'request'; role: OpsRole; item: ItemId; qty: number; why?: string; week?: number }
+  | { t: 'cancelReq'; role: Role; req: string; week?: number }
+  /** extended for flow cards: the supplier and freight for the lines to buy */
+  | { t: 'approve'; orderId: string; week?: number; ship?: 'boat' | 'flight'; buy?: BuyChoice }
+  | { t: 'approveReq'; reqs: string[]; buy?: BuyChoice; week?: number }
+  | { t: 'deferReq'; req: string; week?: number }
+  /** a stock purchase order */
+  | { t: 'buy'; lines: { item: ItemId; qty: number }[]; buy?: BuyChoice; week?: number }
+  /** min / max (reorder point and order-up-to level) for an item; both null clears them */
+  | { t: 'setStock'; item: ItemId; rop: number | null; max: number | null; week?: number }
+  /** return stock to the vendor (75% credit) or write off a consumable */
+  | { t: 'scrap'; item: ItemId; qty: number; week?: number }
+  /** remind a trade about an alert nobody has planned */
+  | { t: 'nudge'; alert: string; week?: number }
+  /** the standing limit a week (late cards approved at the resolve) */
+  | { t: 'setStanding'; amount: number }
+  // --- NPC staff (package D implements; 15.9) ---
+  | StaffAction;
+
+// ---------------------------------------------------------------------------
+// The job flow, purchasing, finance tracking and NPC staff (docs/JOBFLOW.md).
+// Package A writes every type here up front; the UI packages code against them.
+
+/** an item's P/N or catalog number, unique across the whole catalog */
+export type ItemId = string;
+export type ItemKind = 'part' | 'consumable' | 'rotable' | 'material' | 'lot' | 'tool';
+export type ItemTrade = 'mech' | 'elec' | 'build';
+/** chapter browse in the supply catalog and the stock planner */
+export type ItemCat =
+  | 'wheels' | 'brakes' | 'tires' | 'prop' | 'hydraulic' | 'avionics' | 'dcpower' | 'engine' | 'airframe' | 'hardware' | 'fluids' | 'generator' | 'repair' // mech
+  | 'wire' | 'cable' | 'breakers' | 'devices' | 'boxes' | 'conduit' | 'connectors' | 'grounding' | 'equipment' | 'lots' | 'tools' // elec
+  | 'site'; // build
+
+export interface ElecSpec {
+  amps?: number;
+  poles?: 1 | 2;
+  awg?: number;
+  conductors?: number;
+  /** a DF device is both */
+  gfci?: boolean;
+  afci?: boolean;
+  df?: boolean;
+  gfpe?: boolean;
+  /** where the protection sits */
+  form?: 'receptacle' | 'breaker' | 'panel';
+  tr?: boolean;
+  wr?: boolean;
+  inUse?: boolean;
+  single?: boolean;
+  /** box, cubic inches (314.16) */
+  volume?: number;
+  /** wiring method (334, 340, 310) */
+  method?: 'nm' | 'uf' | 'thwn' | 'bare';
+  raceway?: 'emt' | 'pvc40' | 'pvc80' | 'lfnc';
+  /** raceway trade size */
+  size?: '1/2' | '3/4' | '1';
+  /** EMT connectors (358.42) */
+  fitting?: 'setscrew' | 'raintight';
+  /** splice listed for direct burial (300.5(E), 110.14(B)) */
+  burial?: boolean;
+  /** what the device is, for the pick judge's slot categories */
+  device?: 'receptacle' | 'switch3' | 'switch1' | 'switch4' | 'cover' | 'plate' | 'box' | 'element' | 'relay' | 'spa' | 'splice' | 'clamp' | 'rod' | 'connector';
+}
+
+export interface Item {
+  /** = pn */
+  id: ItemId;
+  pn: string;
+  /** as the IPC or the catalog prints it */
+  nomen: string;
+  trade: ItemTrade;
+  kind: ItemKind;
+  cat: ItemCat;
+  /** the family (14.2): 'tire:twin', 'lining:cargo', 'oilFilter:float', 'gfci20', 'thwn6', 'BLD-DECK' */
+  fam: string;
+  unit: 'ea' | 'use' | 'ft' | 'qt' | 'gal' | 'set' | 'lot';
+  /** units per purchase pack (a spool of safety wire is 25 uses; #6 THWN-2 is a 500 ft spool, cut to length) */
+  pack: number;
+  /** 'spool' | 'roll' | 'case' | 'box' | 'bag' | 'bundle' | 'stick' | 'kit' | 'lot' */
+  packName?: string;
+  /** sold cut to length: buy any number of units, not whole packs (wire by the foot) */
+  cut?: boolean;
+  /** USD per pack at list, flat (list prices don't rise with the island tier); a unit costs price / pack */
+  price: number;
+  /** weeks by scheduled freight, >= 1 (1 = this week's carrier) */
+  lead: number;
+  /** rides the cargo plane (from tier 2), not a guest flight's hold: cases, coils, bundles, rotables, wheel assemblies */
+  bulk?: boolean;
+  /** as the IPC prints it (mech) */
+  supsdBy?: { pn: string; code: 1 | 2 | 3 };
+  /** mech: planes whose IPC lists it; undefined = shop-wide */
+  models?: ('twin' | 'cargo' | 'float')[];
+  /** an STC / field-approval (ICA) part: the holder */
+  ica?: string;
+  /** an FAA-PMA replacement: its eligibility text */
+  pma?: string;
+  /** electrical */
+  spec?: ElecSpec;
+  /** NEC basis (electrical items and tools) */
+  nec?: string[];
+  /** search keywords and synonyms */
+  tags: string[];
+  /** mech: the IPC tag (slot) it fills and the figure it is in (the first one, for a P/N in several) */
+  slot?: string;
+  ata?: string;
+}
+
+/** one line of a pick: `slot` names the task's main slot it fills (optional: the engine infers it) */
+export type PickLine = { item: ItemId; qty: number; slot?: string };
+
+export interface StockLine {
+  /** units on hand, reserved ones included */
+  on: number;
+  /** orderId -> units reserved for that job (soft while the job's card is pending: 9.2) */
+  res?: Record<string, number>;
+  /** reorder point on inventory position (9.1); rop/max absent = not auto-replenished */
+  rop?: number;
+  /** order-up-to level */
+  max?: number;
+  /** moving-average unit cost, for valuation */
+  avg?: number;
+  /** week the line was first received (the 'new' class) */
+  got?: number;
+}
+
+/** purchasing suppliers (not aircraft.ts VENDORS, which are the makers' CAGE codes) */
+export type SupplierId = 'oem' | 'broker' | 'supply' | 'online' | 'yard' | 'barge';
+export type Freight = 'sched' | 'aog';
+export type BuyChoice = { vendor?: SupplierId; freight?: Freight };
+
+export interface PoLine {
+  item: ItemId;
+  qty: number;
+  /** USD per unit */
+  unit: number;
+  /** the job it is bought for */
+  order?: string;
+  /** the requisition it fills */
+  req?: string;
+  /** held at receiving: the document missing */
+  hold?: string;
+  /** units received (a held line: 0 until released) */
+  got?: number;
+  /** sent back at receiving: why (credited at the payment run, less restocking) */
+  back?: string;
+  /** shipped under supersession as this P/N */
+  as?: ItemId;
+}
+
+export interface PurchaseOrder {
+  /** 'po12' */
+  id: string;
+  /** placed (committed) */
+  week: number;
+  vendor: SupplierId;
+  freight: Freight;
+  /** the week whose resolve delivers it */
+  eta: number;
+  lines: PoLine[];
+  /** lines + freight: committed when placed, paid at the payment run after receipt (9.7) */
+  cost: number;
+  freightCost: number;
+  /** 'auto': work budget, standing approval, replenishment, autopilot, migration */
+  by: Role | 'auto';
+  status: 'open' | 'held' | 'received' | 'paid' | 'returned';
+  /** receiving quarantine: released at this week's resolve */
+  hold?: number;
+  /** week received */
+  got?: number;
+  /** week paid */
+  paid?: number;
+  /** USD the three-way match withheld (an overbilling it found) */
+  caught?: number;
+  /** credited back at the payment run: lines sent back at receiving, less restocking */
+  refund?: number;
+  /** receiving: "shipped as TR-155-02 (supersedes TR-155-01, INTCHG 2)", "held: no 8130-3 with the exchange unit" */
+  notes?: string[];
+  /** the carrier class: small lines on any flight, bulk on the cargo plane, building materials on the supply boat */
+  carrier?: 'any' | 'bulk' | 'boat';
+}
+
+export interface Requisition {
+  /** 'rq7' */
+  id: string;
+  week: number;
+  /** ms, the `now` of the action (standing approvals, 8.5) */
+  at: number;
+  /** who asked */
+  role: OpsRole;
+  item: ItemId;
+  qty: number;
+  /** the job it is for; none = a stock or tool request */
+  order?: string;
+  status: 'open' | 'ordered' | 'filled' | 'cancelled';
+  po?: string;
+  /** stock requests: the tech's note ("L/H tire at 2/32 on Twin N-12") */
+  why?: string;
+  deferredWeek?: number;
+  /** week it was filled or cancelled (closed ones are kept STOCK.keepWeeks) */
+  closed?: number;
+}
+
+export interface EaRecord {
+  assetId: string;
+  ata: string;
+  tag: string;
+  pn: string;
+  ea: string;
+  week: number;
+}
+
+export type AlertSrc =
+  | 'squawk' | 'trend' | 'wear' | 'due' | 'ad' | 'finding' | 'again' | 'landing' // mech
+  | 'guest' | 'utility' | 'code' | 'takeoff'; // elec (plus 'finding', 'again')
+
+export interface Alert {
+  /** 'a31' */
+  id: string;
+  role: OpsRole;
+  assetId: string;
+  /** SYMPTOMS key (src/sim/alerts.ts); the text, the finding and the site derive from it and `seed` */
+  sym: string;
+  src: AlertSrc;
+  /** raised */
+  week: number;
+  /** from this week's resolve an unfixed fault bites (== week: it bites now) */
+  due: number;
+  seed: number;
+  /** HIDDEN: the catalog kind that fixes it; 'nff' = nothing wrong; 'wiring' = the electrician's fix (5.4); 'repair' */
+  kind: string;
+  /** HIDDEN: the cause's index in the symptom (its finding and what it needs derive from it); -1 for an NFF cause */
+  cause: number;
+  /** HIDDEN: a real fault whose Investigate shows the NFF finding (tier 3+ intermittents, 5.1) */
+  looksNff?: boolean;
+  status: 'open' | 'job' | 'closed';
+  /** the job planned from it */
+  order?: string;
+  /** placarded INOP under the company MEL (category C, 10) */
+  mel?: { until: number; by: string; ext?: boolean };
+  safe?: { how: 'breaker' | 'blankoff'; week: number; by: string };
+  bench?: { order?: string; call?: 'unit' | 'wiring'; by?: string; week?: number; again?: boolean };
+  /** kind 'repair': the defect and how it came to light (today's RepairInfo) */
+  repair?: RepairInfo;
+  /** re-raised: the week of the sign-off or NFF close that didn't fix it */
+  again?: number;
+  /** the pilot who wrote it up or landed hard (from staff) */
+  who?: string;
+  /** the week the analyst last nudged the trade about it */
+  nudged?: number;
+  closed?: { week: number; how: 'fixed' | 'nff' | 'wired' | 'dropped' };
+  /** prefilled alerts (due, AD, code, take-off, write-ups): the task the Manual step opens with */
+  task?: TaskId;
+  /** the only guest plane's early-sign wording was raised (5.6) */
+  sole?: boolean;
+}
+
+/** the resolve's review-line writer, shared with the staff hooks */
+export type Liner = (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void;
+
+/** 'amm:twin:32-40-02', 'afm:float:4', 'gsm:2-4', 'ref:gfci' */
+export type TaskId = string;
+
+export interface JobFlow {
+  /** the alert it came from */
+  alert: string;
+  /** the task card chosen in the Manual / Reference step */
+  task: TaskId;
+  /** what the tech chose (a rare job's pre-filled line counts as a pick) */
+  pick: PickLine[];
+  /** what the task draws on its own: consumables */
+  bench: { item: ItemId; qty: number }[];
+  /** the task's shop tools (owned or requisitioned; never consumed) */
+  tools: ItemId[];
+  /** requisitions for an approved job's new shortfall (a pending card's shortfall lives on the card: 8.6) */
+  reqs?: string[];
+  /** the part chain's research branch holds this job (not in the IPC) */
+  research?: boolean;
+  /** research waits for the open chain to close */
+  queued?: boolean;
+  /** value of pick + bench at plan time (USD) */
+  bom: number;
+  /** the job stopped at receiving or the install: why ("P/N 066-19500 doesn't fit: …") */
+  stop?: string;
+  /** the stop sends the job to the research branch (a displaced part) */
+  stopResearch?: boolean;
+  /** the fault was in the wiring (the electrician's check): the return-to-service step, no lines */
+  wired?: boolean;
+  /** the IPC slot the research branch is about */
+  researchSlot?: string;
+}
+
+export type SpendCat = 'parts' | 'consumables' | 'rotables' | 'materials' | 'tools' | 'building' | 'freight' | 'labor' | 'carry' | 'payroll' | 'overhead' | 'eng';
+
+export interface WeekLedger {
+  w: number;
+  /** revenue, net of refunds */
+  rev: number;
+  /** cash at week end */
+  cash: number;
+  /** cash out by category (POs at payment, 9.7) */
+  sp: Partial<Record<SpendCat, number>>;
+  /** cash out by trade */
+  tr: Partial<Record<'mech' | 'elec' | 'build' | 'fin', number>>;
+  /** parts consumed + labour, by asset (sparse) */
+  as?: Record<string, number>;
+  /** units consumed (sparse: only items that moved) */
+  use?: Record<ItemId, number>;
+  /** value consumed at average cost (stock used) */
+  usedV?: number;
+  /** value received into stock (stock built) */
+  rcvV?: number;
+  /** inventory value at week end (moving-average cost) */
+  inv: number;
+  /** written off: scrapped consumables, the 25% lost on a return (value, non-cash) */
+  loss?: number;
+  /** main-slot value covered from stock at plan / main-slot value planned */
+  fill?: [number, number];
+  /** job-weeks spent waiting on parts */
+  wait?: number;
+  /** store credit used at payment */
+  cr?: number;
+  /** plane-weeks AOG on an alert, by cause (20.5) */
+  aog?: Partial<Record<'stock' | 'approval' | 'plan' | 'carrier', number>>;
+}
+
+export type NpcRole = 'pilot' | 'housekeeper' | 'builder';
+export interface Npc {
+  id: string;
+  name: string;
+  role: NpcRole;
+  skill: 1 | 2 | 3 | 4 | 5;
+  wage: number;
+  hired: number;
+  start: number;
+}
+export interface Candidate {
+  id: string;
+  name: string;
+  role: NpcRole;
+  skill: 1 | 2 | 3 | 4 | 5;
+  ask: number;
+  start: number;
+}
+/** `done`: work units done (fractional); `drawn`: units whose materials have left stock; `need`: units (BUILDS, 15.5) */
+export interface Build {
+  id: string;
+  what: string;
+  tier?: number;
+  cottage?: string;
+  done: number;
+  drawn?: number;
+  need: number;
+  started: number;
+  finished?: number;
+  rework?: number;
+  idle?: number;
+}
+
+export type StaffAction = { t: 'hire'; cand: string; week?: number } | { t: 'letGo'; npc: string; week?: number } | { t: 'build'; what: 'cottage'; week?: number };
+
+/** An electrical job's site (derived from the alert's seed: src/sim/alerts.ts siteOf) */
+export interface ElecSite {
+  room: 'bath' | 'kitchen' | 'bedroom' | 'living' | 'laundry' | 'outdoor' | 'hall' | 'panel' | 'spa' | 'dock' | 'gen';
+  /** where the device the fix replaces sits, when it isn't the complaint's room (default: room) */
+  deviceRoom?: ElecSite['room'];
+  /** the circuit's breaker as it is */
+  amps: 15 | 20 | 30 | 50 | 60 | 100;
+  /** its conductors as they are */
+  awg: 14 | 12 | 10 | 8 | 6 | 3;
+  /** an individual branch circuit with a single receptacle (a microwave, a window unit) */
+  single?: boolean;
+  /** protection already there upstream (the device is on a GFCI's LOAD side; an AFCI breaker) */
+  upstream?: 'gfci' | 'afci' | 'df';
+  wet?: boolean;
+  run?: 'nm' | 'buried' | 'exposed';
+  feet?: number;
+  /** transfer: the backed-up load, amps */
+  load?: number;
+  /** the appliance on a `single` circuit: 'microwave' | 'window unit' */
+  appliance?: string;
+}

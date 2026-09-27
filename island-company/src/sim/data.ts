@@ -1,7 +1,7 @@
 // Every tunable number lives here so balance passes touch one file.
 // scripts/balance.ts re-runs the paper sim against these values.
 import type { PuzzleId } from '../puzzles/types';
-import type { Asset, Insurance, OpsRole, Role } from './types';
+import type { Asset, Insurance, ItemTrade, OpsRole, Role, SupplierId } from './types';
 
 export const ECON = {
   startCash: 8000,
@@ -33,7 +33,7 @@ export const ECON = {
   flightWear: 1,
   houseWear: 2,
   houseInspectionWeeks: 8,
-  /** a kit shipped by boat when no plane could carry it */
+  /** a kit shipped by boat when no plane could carry it (the part chain's name for FREIGHT.aog) */
   boatKit: 350,
   planeInspectionFlights: 12,
   nearMissPerFlight: 0.1,
@@ -72,7 +72,12 @@ export const MODELS: Record<string, AssetModel> = {
 export type TierDef = {
   n: number;
   name: string;
+  /** today's fixed cost a week (= overhead + the standard crew's payroll; kept for old readers and tests) */
   fixed: number;
+  /** the tier's overhead a week: leases, utilities, property insurance, admin, licences (fixed = overhead + payroll) */
+  overhead: number;
+  /** stores bin locations (9.6) */
+  bins: number;
   /** weekly revenue budget for the board grade */
   budget: number;
   adds: { id: string; model: string; name: string }[];
@@ -87,6 +92,8 @@ export const TIERS: TierDef[] = [
   {
     n: 1,
     name: 'Airstrip',
+    overhead: 740,
+    bins: 40,
     fixed: 1500,
     budget: 3900,
     adds: [
@@ -103,6 +110,8 @@ export const TIERS: TierDef[] = [
   {
     n: 2,
     name: 'Outpost',
+    overhead: 1220,
+    bins: 50,
     fixed: 2300,
     budget: 5900,
     adds: [
@@ -118,6 +127,8 @@ export const TIERS: TierDef[] = [
   {
     n: 3,
     name: 'Village',
+    overhead: 1920,
+    bins: 60,
     fixed: 3000,
     budget: 6900,
     adds: [{ id: 'gen', model: 'gen', name: 'Generator house' }],
@@ -129,6 +140,8 @@ export const TIERS: TierDef[] = [
   {
     n: 4,
     name: 'Harbor',
+    overhead: 5740,
+    bins: 75,
     fixed: 7000,
     budget: 16000,
     adds: [
@@ -144,6 +157,8 @@ export const TIERS: TierDef[] = [
   {
     n: 5,
     name: 'Resort',
+    overhead: 8180,
+    bins: 90,
     fixed: 9500,
     budget: 22000,
     adds: [{ id: 'h7', model: 'lodge', name: 'The Lodge' }],
@@ -169,6 +184,8 @@ export type CatalogEntry = {
   targets: string[];
   /** 0 = not eligible now */
   weight(a: Asset, week: number): number;
+  /** a per-model factor on today's card: the twin's 100-hour and oil change (two engines), the cargo plane's starter-generator */
+  costBy?: Partial<Record<string, number>>;
 };
 
 const below = (h: number, w: number) => (a: Asset) => (a.health < h ? w : 0);
@@ -178,19 +195,21 @@ export const CATALOG: CatalogEntry[] = [
   {
     kind: 'inspect100', log: '100-hr inspection', role: 'mech', title: '100-hr inspection', puzzle: 'crack', tier: 1, cost: 180, parts: 0, gain: 10,
     targets: ['twin', 'cargo', 'float'],
+    costBy: { twin: 1.6 },
     weight: (a) => ((a.sinceInspection ?? 0) >= ECON.planeInspectionFlights - 2 ? 100 : 0),
   },
   { kind: 'tires', log: 'tire and brake job', role: 'mech', title: 'Tire and brake', puzzle: 'torque', tier: 1, cost: 320, parts: 1, gain: 10, targets: ['twin', 'cargo', 'float'], weight: below(96, 3) },
   { kind: 'prop', log: 'prop bolt re-torque', role: 'mech', title: 'Prop bolt re-torque', puzzle: 'torque', tier: 2, cost: 280, parts: 0, gain: 12, targets: ['twin', 'cargo', 'float'], weight: below(90, 3) },
   { kind: 'corrosion', log: 'wheel-half penetrant check', role: 'mech', title: 'Wheel-half penetrant check', puzzle: 'crack', tier: 2, cost: 520, parts: 0, gain: 16, targets: ['twin', 'cargo', 'float'], weight: below(86, 4) },
   { kind: 'avionics', log: 'com radio swap', role: 'mech', title: 'Swap the com radio', puzzle: 'teardown', tier: 2, cost: 640, parts: 1, gain: 14, targets: ['twin', 'cargo', 'float'], weight: below(92, 2) },
-  { kind: 'alternator', log: 'alternator replacement', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4) },
-  { kind: 'cylinder', log: 'cylinder swap', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'cargo', 'float'], weight: below(65, 8) },
+  { kind: 'alternator', log: 'alternator replacement', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4), costBy: { cargo: 1.3 } },
+  // a turbine has no cylinders (and its logbooks record no 50-hour oil changes): pistons only
+  { kind: 'cylinder', log: 'cylinder swap', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'float'], weight: below(65, 8) },
   { kind: 'spar', log: 'wing spar inspection', role: 'mech', title: 'Wing spar inspection', puzzle: 'crack', tier: 3, cost: 880, parts: 0, gain: 22, targets: ['twin', 'cargo', 'float'], weight: below(60, 8) },
   // paperwork, not a repair: no health gain, but no load sheet means half the charters stay on the ramp
   { kind: 'wb', log: 'charter load sheet', role: 'mech', title: 'Charter load sheet', puzzle: 'balance', tier: 1, cost: 0, parts: 0, gain: 0, targets: ['twin', 'float'], weight: () => 100 },
   { kind: 'wire', log: 'prop bolt safety wiring', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
-  { kind: 'oil', log: 'oil change', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
+  { kind: 'oil', log: 'oil change', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'float'], weight: below(97, 2), costBy: { twin: 1.8 } },
   // power brakes and an accumulator: the twin's brake-and-gear system and the amphibian floats' gear system
   { kind: 'hydraulics', log: 'brake hydraulic servicing', role: 'mech', title: 'Service the brake hydraulics', puzzle: 'hydraulics', tier: 2, cost: 260, parts: 0, gain: 13, targets: ['twin', 'float'], weight: below(94, 4) },
   // the singles only (the puzzle's airframes): a piston single through order tier 3, a turbine single from tier 4
@@ -218,6 +237,146 @@ export const CATALOG: CatalogEntry[] = [
 ];
 
 export const CATALOG_BY_KIND = Object.fromEntries(CATALOG.map((c) => [c.kind, c]));
+
+// ---------------------------------------------------------------------------
+// The job flow: purchasing, stock, alerts and labour (docs/JOBFLOW.md). Tune here.
+
+/** purchasing suppliers (3.6): price multiplier by line type, weeks added to the item's lead, the AOG boat, receiving paperwork (3.7) */
+export type SupplierDef = {
+  id: SupplierId;
+  name: string;
+  short: string;
+  trade: ItemTrade;
+  /** price x by item kind; `rest` for every other kind */
+  mult: { parts?: number; rotables?: number; consumables?: number; rest: number };
+  leadAdd: number;
+  /** may ship on the AOG boat */
+  aog: boolean;
+  /** receiving: the chance a line comes without its paperwork, by line type (none: nothing checked) */
+  paper?: { part?: number; rotable?: number };
+  /** the document receiving checks */
+  doc?: { part: string; rotable: string };
+};
+
+export const SUPPLIERS: Record<SupplierId, SupplierDef> = {
+  oem: {
+    id: 'oem',
+    name: 'Harbor Aero Supply (OEM distributor)',
+    short: 'OEM',
+    trade: 'mech',
+    mult: { rest: 1 },
+    leadAdd: 0,
+    aog: true,
+    paper: { part: 0.02, rotable: 0.08 },
+    doc: { part: "the maker's certificate of conformance", rotable: "an FAA 8130-3 matching the unit's data plate" },
+  },
+  broker: {
+    id: 'broker',
+    name: 'Tradewind Surplus (broker)',
+    short: 'Broker',
+    trade: 'mech',
+    mult: { parts: 0.8, rotables: 0.8, consumables: 0.9, rest: 0.9 },
+    leadAdd: 1,
+    aog: false,
+    paper: { part: 0.25, rotable: 0.25 },
+    doc: { part: 'traceability to the maker or an approved repair station (AC 20-62E)', rotable: 'traceability to the maker or an approved repair station (AC 20-62E)' },
+  },
+  supply: { id: 'supply', name: 'Mainland Electric Supply', short: 'Supply house', trade: 'elec', mult: { rest: 1 }, leadAdd: 0, aog: true },
+  online: { id: 'online', name: 'Voltbox (online)', short: 'Online', trade: 'elec', mult: { rest: 0.85 }, leadAdd: 1, aog: false },
+  yard: { id: 'yard', name: 'Harbor Lumber & Block', short: 'Yard', trade: 'build', mult: { rest: 1 }, leadAdd: 0, aog: false },
+  barge: { id: 'barge', name: 'Island barge (bulk)', short: 'Barge', trade: 'build', mult: { rest: 0.85 }, leadAdd: 1, aog: false },
+};
+
+/** each trade's default supplier */
+export const DEFAULT_SUPPLIER: Record<ItemTrade, SupplierId> = { mech: 'oem', elec: 'supply', build: 'yard' };
+
+/** freight: scheduled rides the week's carrier for free; the AOG boat brings a PO at this week's resolve whatever flew */
+export const FREIGHT = { aog: 350 };
+
+/** stock and purchasing (9) */
+export const STOCK = {
+  /** the carrying charge a week: storage and insurance on the stock's value (cash) */
+  carry: 0.001,
+  /** the cost of cash tied up a week (26% a year): shown on the Money tab, never charged */
+  capital: 0.005,
+  /** a line sent back at receiving: restocking, a share of its value (at least `restockMin`) */
+  restock: 0.15,
+  restockMin: 40,
+  /** scrap: a return to the vendor credits this share of average cost (the rest is booked as loss) */
+  returnCredit: 0.75,
+  /** autopilot's purchasing for an absent analyst, a week */
+  autopilotCap: 800,
+  /** closed POs and requisitions kept this many weeks (the invoice match, the UI) */
+  keepWeeks: 2,
+  /** the finance ledger's length */
+  ledgerWeeks: 26,
+  /** 90% cycle service (suggested reorder points) */
+  z: 1.28,
+  /** most lines on one PO or buy */
+  maxLines: 12,
+  /** the most units of one item on a plan line (wire by the foot) */
+  maxQty: 500,
+};
+
+/** alerts (5) */
+export const ALERTS = {
+  /** a week's chance of one extra alert whose cause is "no fault" (outside the slots) */
+  nff: { mech: 0.125, elec: 0.25 } as Record<OpsRole, number>,
+  /** at alert tier 3+, an intermittent symptom with a real cause shows the NFF finding this often */
+  looksNff: 0.3,
+  /** an NFF close (or a wrong task) on a real fault comes back after this many weeks */
+  againMin: 1,
+  againMax: 2,
+  /** closed alerts are kept this many weeks */
+  keep: 2,
+  /** hard cap on stored alerts (oldest closed dropped first) */
+  cap: 40,
+  /** teaching weeks after the flow starts on an island (alert tier 1) */
+  teachWeeks: 2,
+};
+
+/** labour: the floor under a job's labour (8.3), an hourly rate x hours by task number */
+export const LABOR = {
+  rate: { mech: 85, elec: 75 } as Record<OpsRole, number>,
+  hours: {
+    '05-20-01': 0.6,
+    '05-20-02': 0.6,
+    '79-00-01': 1,
+    '32-40-01': 2,
+    '32-40-02': 2.5,
+    '32-40-03': 3,
+    '32-42-01': 1.5,
+    '29-10-01': 1.5,
+    '61-10-01': 2,
+    '61-10-02': 0.75,
+    '23-10-01': 1,
+    '24-30-01': 3,
+    '24-30-02': 1,
+    '72-30-01': 8,
+    '57-10-01': 4,
+    'GSM 2-1': 2,
+    'GSM 2-4': 2,
+    'R-OUT': 0.75,
+    'R-GFCI': 1,
+    'R-WH': 1,
+    'R-GRND': 1,
+    'R-3WAY': 1.5,
+    'R-INSP': 1,
+    'R-STORM': 8,
+    'R-FLICK': 1,
+    'R-SPA': 4,
+    'R-FEED': 4,
+    'R-PANEL': 12,
+    'R-DEAD': 1.5,
+    'R-DOCK': 5,
+    'R-XFER': 6,
+    'R-GENT': 1.5,
+  } as Record<string, number>,
+  minDefault: 50,
+};
+
+/** today's auction fair value of a generic kit (the money a job that needed a kit carried): 340 at tier 1, +10% a tier */
+export const kitValue = (tier: number) => Math.round((340 * (1 + 0.1 * (Math.max(1, tier) - 1))) / 10) * 10;
 
 export const FIN_TASKS = {
   close: { title: 'Weekly close', puzzle: 'variance' as PuzzleId, tier: 1 },
