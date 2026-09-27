@@ -35,6 +35,10 @@ async function device(name, opts) {
       await page.waitForTimeout(o.wait ?? 250);
     },
     finishPuzzle: async () => {
+      // a mechanic job on a plane opens its detail first (the manual), then Start
+      await page.waitForTimeout(300);
+      const start = page.locator('.sheet button:has-text("Start the job")');
+      if (!(await page.locator('.phost-body').count()) && (await start.count())) await start.first().click();
       await page.waitForSelector('.phost-body', { timeout: 8000 });
       await page.waitForTimeout(400);
       if (await page.locator('.howto').count()) await page.locator('.howto').click();
