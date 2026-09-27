@@ -147,6 +147,14 @@ async function device(name, opts) {
       if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).click();
       await page.waitForTimeout(800);
     },
+    /** the week's review, if it's up: its text, then Onward and close */
+    closeReview: async () => {
+      const text = await page.locator('.overlay').first().innerText().catch(() => '');
+      if (await page.getByRole('button', { name: 'Onward' }).count()) await d.click('Onward');
+      if (await page.locator('.overlay button[aria-label="Close"]').count()) await page.locator('.overlay button[aria-label="Close"]').first().click();
+      await page.waitForTimeout(300);
+      return text;
+    },
   };
   return d;
 }
@@ -269,16 +277,32 @@ const reviews = await Promise.all([seb, mia, ravi, sebLaptop].map((d) => d.page.
 console.log('review visible on [seb-phone, mia, ravi, seb-laptop]:', reviews.map((c) => c > 0));
 for (const d of [seb, mia, ravi, sebLaptop]) await d.shot('review');
 
-// 7. Week 2: the line the analyst bought landed at the resolve, and Seb's phone shows it on hand
-for (const d of [seb]) {
-  if (await d.page.getByRole('button', { name: 'Onward' }).count()) await d.click('Onward');
-  if (await d.page.locator('.overlay button[aria-label="Close"]').count()) await d.page.locator('.overlay button[aria-label="Close"]').first().click();
-}
+// 7. Week 2: the line the analyst bought landed at the resolve, and Seb's phone shows it on hand. About one OEM
+// part line in 50 comes without its paperwork and receiving quarantines it a week (stock.ts receivePo): then the
+// review said why, the phone says it lands tonight, and it's on hand once week 2 resolves
+const review = await seb.closeReview();
 await seb.page.waitForTimeout(800);
-const landed = await seb.stores(asked.pn);
+let landed = await seb.stores(asked.pn);
 console.log(`week 2 on the phone: ${asked.pn} ${asked.on} → ${landed.on} on hand`);
-if (landed.on <= asked.on) throw new Error(`the request for ${asked.pn} didn't land (${landed.text})`);
-await seb.shot('week2-stores');
+const held = landed.on <= asked.on;
+if (held) {
+  const why = /quarantined|waits a week/.test(review);
+  console.log(`${asked.pn} is held a week (the review said why: ${why}): ending week 2 to see it land`);
+  if (!why || !/on order, lands tonight/.test(landed.text)) throw new Error(`the request for ${asked.pn} didn't land (${landed.text})`);
+  await seb.shot('week2-held');
+  await seb.page.keyboard.press('Escape');
+  for (const d of [ravi, mia, sebLaptop]) await d.closeReview();
+  await ravi.endTurn();
+  await mia.endTurn();
+  await sebLaptop.endTurn();
+  await seb.page.waitForTimeout(3500);
+  await seb.closeReview();
+  await seb.page.waitForTimeout(800);
+  landed = await seb.stores(asked.pn);
+  console.log(`week 3 on the phone: ${asked.pn} ${asked.on} → ${landed.on} on hand`);
+  if (landed.on <= asked.on) throw new Error(`the request for ${asked.pn} didn't land after its week in quarantine (${landed.text})`);
+}
+await seb.shot(held ? 'week3-stores' : 'week2-stores');
 
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors');
 await browser.close();
