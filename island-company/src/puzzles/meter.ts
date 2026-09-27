@@ -264,6 +264,32 @@ const PLACES: Record<string, { receps: string[]; jboxes: string[]; lights: strin
       looseNeutral: ['The 28 V ground power drops out whenever the avionics load it up.', 'The bay lights dim and the 28 V supply cuts out under load.'],
     },
   },
+  // the job flow's shower tingle (R-WH): the bath and the hall on the way to the heater closet, the water heater last
+  heater: {
+    receps: ['Bath outlet', 'Hall outlet', 'Vanity outlet', 'Linen-closet outlet', 'Laundry outlet', 'Bedroom outlet', 'Utility outlet', 'Hall-end outlet'],
+    jboxes: ["Heater closet's J-box"],
+    lights: ['Hall light', 'Bath light', 'Closet light'],
+    last: 'Water heater',
+    symptoms: {
+      openHot: ['No hot water, and the bath outlets are dead. Breaker is on.'],
+      openNeutral: ['The bath outlets are dead, but the pen tester beeps.'],
+      looseHot: ['The bath lights flicker whenever the water heater cycles on.'],
+      looseNeutral: ['The hall lights dim when the water heater kicks on, and there was a tingle at the shower valve.'],
+    },
+  },
+  // the job flow's grounding and bonding (R-GRND): the panel's ground bar, the water entrance, the heater's piping
+  bond: {
+    receps: ['Panel ground bar', 'Water entrance', "Heater's piping", 'Kitchen outlet', 'Bath outlet', 'Laundry outlet', 'Hose-bib outlet', 'Hall outlet'],
+    jboxes: ['Water-entrance J-box', "Heater closet's J-box"],
+    lights: ['Bath light', 'Hall light', 'Porch light'],
+    last: 'Shower valve',
+    symptoms: {
+      openHot: ['Dead outlets along the plumbing wall. Breaker is on.'],
+      openNeutral: ['Outlets on the plumbing wall are dead, but the pen tester beeps.'],
+      looseHot: ['A tingle at the shower valve, and the bath lights flicker.'],
+      looseNeutral: ['A tingle at the shower valve when the heater runs; the lights dim with it.'],
+    },
+  },
   office: {
     receps: ['Printer outlet', 'Desk outlet', 'Copier outlet', 'Kettle outlet', 'Monitor outlet', 'Filing-room outlet', 'Router outlet', 'Window outlet'],
     jboxes: ['Ceiling J-box', 'Wall J-box', 'Floor box'],

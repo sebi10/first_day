@@ -1,10 +1,76 @@
-// The technicians' "Your move" group (docs/JOBFLOW.md 17.2): new alerts, ready
-// jobs and stopped jobs, due now first. Package A mounts it at the top of
-// Home's main column for the techs; package B draws it (select.ts's
-// yourMoves / flowMove / dockNext have the data). Until then it renders nothing.
-import type { OpsRole } from '../../sim/types';
+// The technicians' "Your move" group (docs/JOBFLOW.md 17.2), at the top of
+// Home's main column (A mounts it): new alerts, ready jobs and stopped jobs,
+// due now first, then hazards and airworthiness, then by due week; for the
+// electrician also the circuit checks the mechanic asked for. A row opens the
+// job flow (through the `ic:open` contract: the ops panel hosts the sheet);
+// a ready job's Start starts it. The What's new sheet shows here once.
+import { liveAlerts } from '../../sim/alerts';
+import type { OpsRole, Order } from '../../sim/types';
+import { openTarget, yourMoves } from '../select';
 import type { Ctl } from '../useIsland';
+import { Icon } from '../kit';
+import { AlertRow } from './AlertRow';
+import { WhatsNew } from './WhatsNew';
+import { assetTitle, nameOf } from './words';
+import './flow.css';
 
-export function YourMove(_props: { ctl: Ctl; role: OpsRole }) {
-  return null;
+/** start a one-tap job (an inspection, code prep): the ops panel plans it and starts it */
+export const startAlert = (alert: string) => window.dispatchEvent(new CustomEvent('ic:flow', { detail: { alert, start: true } }));
+
+/** the electrician's circuit checks at an airplane the mechanic asked for (bench orders): the electrician's move */
+export const benchChecks = (ctl: Pick<Ctl, 's'>, role: OpsRole): Order[] =>
+  role === 'elec' ? ctl.s.orders.filter((o) => o.role === 'elec' && !!o.bench && o.status === 'ready') : [];
+
+export function YourMove({ ctl, role }: { ctl: Ctl; role: OpsRole }) {
+  const { s } = ctl;
+  const rows = yourMoves(s, role);
+  const checks = benchChecks(ctl, role);
+  const ended = !!s.turns[role]?.ended;
+  const n = rows.length + checks.length;
+  return (
+    <>
+      <WhatsNew ctl={ctl} role={role} />
+      {n === 0 ? (
+        <div class="card jf-your empty">
+          <span class="label">Your move</span>
+          <span class="muted">{liveAlerts(s).some((a) => a.role === role) ? 'Nothing on you right now: your open alerts wait on a crewmate or a delivery (the inbox below).' : 'No alerts open. The next ones come when the week opens.'}</span>
+        </div>
+      ) : (
+        <div class="card jf-your">
+          <div class="row spread">
+            <h3>Your move</h3>
+            <span class="label num">
+              {n} {ended ? '· turn over' : ''}
+            </span>
+          </div>
+          <div class="jf-rows" role="list">
+            {checks.map((o) => {
+              const al = s.alerts?.find((x) => x.id === o.bench);
+              return (
+                <div key={o.id} class="jf-arow mine" role="listitem">
+                  <button class="jf-arow-main" onClick={() => openTarget({ order: o.id })}>
+                    <span class="jf-src utility">
+                      <Icon name="meter" size={20} />
+                    </span>
+                    <span class="col grow" style={{ gap: 3, minWidth: 0 }}>
+                      <span class="jf-arow-sym">{o.title}</span>
+                      <span class="jf-arow-meta">
+                        <span class="label">
+                          {assetTitle(s, s.assets.find((x) => x.id === o.assetId))} · {nameOf(s, 'mech')} asked{al?.bench?.again ? ' again' : ''}
+                        </span>
+                      </span>
+                    </span>
+                    <span class="jf-move mine">Your move</span>
+                  </button>
+                </div>
+              );
+            })}
+            {rows.map(({ alert: a }) => (
+              <AlertRow key={a.id} s={s} a={a} me={role} held={ended} quiet onOpen={() => openTarget({ alert: a.id })} onStart={() => (a.order ? openTarget({ order: a.order }) : startAlert(a.id))} />
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

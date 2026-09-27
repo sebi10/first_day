@@ -1,22 +1,29 @@
-// Mechanic hangar / electrician cottages: assets, work orders, covering.
+// Mechanic hangar / electrician cottages: the assets (folded into one chip
+// row), the ground power carts, the inbox (the job flow's waiting alerts, the
+// other work, what closed), covering, and the job flow's sheets.
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
 import { isChainStep } from '../sim/chain';
-import { gseForStart, hangarJobs, houseBlocker, isAog, orderCost, orderTier, planeCapacity, powered, startCart } from '../sim/econ';
+import { gseForStart, hangarJobs, hazardOn, houseBlocker, isAog, isTagged, orderCost, orderTier, planeCapacity, powered, restrictedBy, startCart } from '../sim/econ';
 import { squawkable } from '../sim/engine';
-import type { Asset, Order, Role } from '../sim/types';
+import { installCheck } from '../sim/flow';
+import type { Asset, IslandState, Order, Role } from '../sim/types';
+import { FlowHost } from './flow/FlowHost';
+import { Inbox } from './flow/Inbox';
+import { local } from './flow/words';
 import { GroundPowerCard } from './gse';
-import { Btn, Health, Icon, Sheet, TierDots, usd } from './kit';
+import { Btn, Health, Icon, Sheet, TierDots, toast, usd } from './kit';
 import { hasManual, ManualSection } from './manual';
 import { OrderCard, OrderDetail } from './orders';
-import { capNow, openOrders } from './select';
+import { capNow } from './select';
 import type { Ctl } from './useIsland';
 
 export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' | 'elec'; onPlay(o: Order, cover?: boolean): void; /** open the ground power sheet (on one cart) */ onGse?(cart: string | null): void }) {
   const { s } = ctl;
   const [sel, setSel] = useState<Order | null>(null);
   const [writeUp, setWriteUp] = useState<Asset | null>(null);
-  const orders = openOrders(s, role);
+  const foldKey = `ic.jf.assets.${role}`;
+  const [assetsOpen, setAssetsOpen] = useState(() => local.get(foldKey) === '1');
   const turn = s.turns[role];
   const canWrite = s.week >= 1 && !turn?.ended && s.squawked?.[role] !== s.week;
   const pw = powered(s);
@@ -34,16 +41,26 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
     else setSel(o);
   };
 
+  const heldWhy = (o: Order): string | null =>
+    cappedFor(o) ? (gridCapped && !isChainStep(o) ? 'Grid down: hangar tools offline, 1 hangar job this week.' : (cap?.text ?? 'You’ve hit this turn’s job limit.')) : null;
+  const toggleAssets = () => {
+    local.set(foldKey, assetsOpen ? '0' : '1');
+    setAssetsOpen(!assetsOpen);
+  };
+
   return (
     <>
       <div class="card col" style={{ gap: 4 }}>
-        <div class="row spread">
-          <h3>{role === 'mech' ? 'Hangar + airstrip' : 'Cottages + grid'}</h3>
-          <span class="label">
-            <Icon name="box" size={14} /> {(s.pos ?? []).filter((p) => p.status === 'open' || p.status === 'held').length} POs open
+        <button class="jf-fold" aria-expanded={assetsOpen} onClick={toggleAssets}>
+          <span class="col grow" style={{ gap: 4, minWidth: 0 }}>
+            <h3>{role === 'mech' ? 'Hangar + airstrip' : 'Cottages + grid'}</h3>
+            <AssetChips s={s} role={role} />
           </span>
-        </div>
-        {role === 'mech' &&
+          <span class="jf-fold-caret" aria-hidden="true">
+            {assetsOpen ? '▴' : '▾'}
+          </span>
+        </button>
+        {assetsOpen && role === 'mech' &&
           s.assets
             .filter((a) => a.kind === 'plane')
             .map((p) => {
@@ -65,7 +82,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                 </div>
               );
             })}
-        {role === 'elec' &&
+        {assetsOpen && role === 'elec' &&
           s.assets
             .filter((a) => a.kind !== 'plane')
             .map((h) => {
@@ -100,7 +117,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
       <GroundPowerCard ctl={ctl} role={role} onOpen={(id) => onGse?.(id)} />
 
       <span class="label" style={{ padding: '0 4px' }}>
-        {canWrite ? 'Tap an asset to write up what it needs (1 squawk a week). The analyst decides if it’s worth the money.' : s.squawked?.[role] === s.week ? 'Squawk written up this week.' : ''}
+        {canWrite ? 'Open the list and tap an asset to write up what it needs (1 write-up a week): it comes back as an alert with its task filled in.' : s.squawked?.[role] === s.week ? 'Write-up done this week.' : ''}
       </span>
 
       {gridCapped && (
@@ -110,16 +127,11 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
       )}
       {cap && <CapNotice cap={cap} />}
 
-      <div class="row spread" style={{ marginTop: 4 }}>
-        <h2>Work orders</h2>
-        <span class="label">{orders.filter((o) => o.status === 'ready').length} ready</span>
-      </div>
-      {orders.length === 0 && <div class="card muted">Queue clear. Nice.</div>}
-      {orders.map((o) => (
-        <OrderCard key={o.id} s={s} o={o} onOpen={open} held={cappedFor(o) || !!turn?.ended} me={role} />
-      ))}
+      <Inbox ctl={ctl} role={role} onOrder={open} held={cappedFor} />
 
       <CoverSection ctl={ctl} role={role} onPlay={onPlay} />
+
+      <FlowHost ctl={ctl} role={role} onPlay={onPlay} onOrder={open} heldWhy={heldWhy} />
 
       <Sheet open={!!writeUp} onClose={() => setWriteUp(null)} label="Write up">
         {writeUp && <WriteUp ctl={ctl} role={role} asset={writeUp} can={canWrite} onDone={() => setWriteUp(null)} />}
@@ -196,6 +208,46 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
         )}
       </Sheet>
     </>
+  );
+}
+
+/** The assets in one chip row: what's down, placarded, made safe or shut (a tap on the row opens today's list). */
+function AssetChips({ s, role }: { s: IslandState; role: 'mech' | 'elec' }) {
+  const chips: { text: string; tone?: string }[] = [];
+  if (role === 'mech') {
+    const planes = s.assets.filter((a) => a.kind === 'plane');
+    const aog = planes.filter((p) => isAog(s, p.id)).length;
+    const gnd = planes.filter((p) => isTagged(s, p.id)).length;
+    const restricted = planes.some((p) => !!restrictedBy(s, p.id));
+    const mel = (s.alerts ?? []).filter((a) => a.status !== 'closed' && a.mel && a.mel.until >= s.week).length;
+    const low = planes.filter((p) => p.health < 40).length;
+    chips.push({ text: `${planes.length} plane${planes.length === 1 ? '' : 's'}` });
+    if (aog) chips.push({ text: `AOG ${aog}`, tone: 'rust' });
+    if (gnd) chips.push({ text: `GND ${gnd}`, tone: 'rust' });
+    if (restricted) chips.push({ text: 'restricted', tone: 'rust' });
+    if (mel) chips.push({ text: `MEL ${mel}`, tone: 'sea' });
+    if (low) chips.push({ text: `under 40: ${low}`, tone: 'rust' });
+  } else {
+    const houses = s.assets.filter((a) => a.kind === 'house');
+    const shut = houses.filter((h) => !!houseBlocker(s, h)).length;
+    const safe = houses.filter((h) => hazardOn(s, h.id)?.safe).length;
+    const tagged = s.assets.filter((a) => a.kind !== 'plane' && isTagged(s, a.id)).length;
+    chips.push({ text: `${houses.length} house${houses.length === 1 ? '' : 's'}` });
+    if (shut) chips.push({ text: `closed ${shut}`, tone: 'rust' });
+    if (safe) chips.push({ text: `SAFE ${safe}`, tone: 'palm' });
+    if (tagged) chips.push({ text: `red-tag ${tagged}`, tone: 'rust' });
+    if (powered(s).gridDown) chips.push({ text: 'grid down', tone: 'rust' });
+  }
+  const pos = (s.pos ?? []).filter((p) => p.status === 'open' || p.status === 'held').length;
+  if (pos) chips.push({ text: `${pos} PO${pos > 1 ? 's' : ''} open` });
+  return (
+    <span class="row wrap" style={{ gap: 4 }}>
+      {chips.map((c) => (
+        <span key={c.text} class={`jf-flag ${c.tone ?? ''}`}>
+          {c.text}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -306,7 +358,17 @@ export function CoverSection({ ctl, role, onPlay }: { ctl: Ctl; role: Role; onPl
           .sort((a, b) => b.deferrals - a.deferrals || b.tier - a.tier)
           .slice(0, 3)
           .map((o) => (
-            <OrderCard key={o.id} s={s} o={o} onOpen={() => onPlay(o, true)} />
+            <OrderCard
+              key={o.id}
+              s={s}
+              o={o}
+              onOpen={() => {
+                // a job-flow job runs its install check first, for whoever starts it
+                const stop = o.flow ? installCheck(s, o) : null;
+                if (stop) return void toast(`At the start: ${stop.stop}`);
+                onPlay(o, true);
+              }}
+            />
           ))}
       {used >= allowance && <span class="muted">You already lent a hand this week.</span>}
       <span class="label">Only if you actually know the trade.</span>

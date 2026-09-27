@@ -1,0 +1,1048 @@
+/* The technicians' job flow (docs/JOBFLOW.md 17.2). Phone first: 44 px
+   targets, one thumb; the sheet rises from the bottom on a phone and is a
+   480 px panel on the right of a desktop. Tokens come from styles.css. */
+
+/* ---------- the sheet ---------- */
+.jf-scrim {
+  z-index: 40;
+}
+/* week 0's walk-through: above its full-screen overlay (z 50), under the toasts (z 90) */
+.jf-scrim.raised {
+  z-index: 60;
+}
+.jf-sheet.raised {
+  z-index: 61;
+}
+.jf-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  max-width: 480px;
+  margin: 0 auto;
+  height: 94dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -10px 40px rgba(31, 42, 48, 0.25);
+  overflow: hidden;
+  animation: slide-up 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.jf-head {
+  flex: none;
+  padding: 10px var(--g) 6px;
+  background: var(--paper);
+  box-shadow: 0 8px 14px -14px rgba(31, 42, 48, 0.5);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jf-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px var(--g) 18px;
+  -webkit-overflow-scrolling: touch;
+}
+.jf-foot {
+  flex: none;
+  padding: 10px var(--g) calc(12px + var(--safe-b));
+  background: var(--paper);
+  box-shadow: 0 -10px 14px -14px rgba(31, 42, 48, 0.45);
+}
+/* the on-screen keyboard is up: the list gets the room */
+.jf-sheet.kb .jf-foot,
+.jf-sheet.kb .jf-flags {
+  display: none;
+}
+.jf-sheet.kb .jf-sym {
+  -webkit-line-clamp: 1;
+}
+.jf-sheet.kb .jf-dots {
+  display: none;
+}
+
+/* ---------- the header ---------- */
+.jf-top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.jf-src {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: rgba(224, 164, 88, 0.3);
+  color: var(--ink);
+}
+.jf-src.guest,
+.jf-src.utility,
+.jf-src.code,
+.jf-src.takeoff {
+  background: rgba(244, 211, 94, 0.45);
+}
+.jf-src.again,
+.jf-src.landing {
+  background: rgba(199, 80, 47, 0.18);
+  color: var(--rust);
+}
+.jf-sym {
+  font-size: 16px;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.jf-where {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jf-x {
+  flex: none;
+  appearance: none;
+  border: 0;
+  width: 44px;
+  height: 44px;
+  margin: -6px -8px 0 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--ink-soft);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.jf-x:active {
+  background: var(--sand);
+}
+.jf-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.jf-flag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--sand-deep);
+  color: var(--ink);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+.jf-flag.rust {
+  background: var(--rust);
+  color: var(--white);
+}
+.jf-flag.sea {
+  background: rgba(46, 124, 147, 0.16);
+  color: var(--sea-deep);
+}
+.jf-flag.palm {
+  background: rgba(78, 138, 90, 0.18);
+  color: #2f5e3a;
+}
+.jf-tier {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+/* the five dots */
+.jf-dots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* five equal columns whatever the words ("Investigate" and the electrician's "Reference" side by side) */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+  /* the first and last words may use the head's side padding */
+  margin: 0 -8px;
+}
+.jf-dots li {
+  position: relative;
+  min-width: 0;
+}
+.jf-dots span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.jf-dots li + li::before {
+  content: '';
+  position: absolute;
+  top: 11px;
+  right: calc(50% + 12px);
+  width: calc(100% - 20px);
+  height: 2px;
+  background: rgba(31, 42, 48, 0.14);
+}
+.jf-dots li.done::before,
+.jf-dots li.now::before {
+  background: var(--sea);
+}
+.jf-dots button {
+  appearance: none;
+  border: 0;
+  background: none;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.jf-dots button[disabled] {
+  cursor: default;
+}
+.jf-dots i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 2px rgba(31, 42, 48, 0.22);
+  position: relative;
+}
+.jf-dots li.done i {
+  background: var(--sea);
+  color: var(--white);
+  box-shadow: none;
+}
+.jf-dots li.now i {
+  background: var(--ink);
+  box-shadow: 0 0 0 4px rgba(31, 42, 48, 0.12);
+}
+.jf-dots li.now span {
+  color: var(--ink);
+  font-weight: 900;
+}
+.jf-dots li.skip i {
+  background: repeating-linear-gradient(45deg, rgba(31, 42, 48, 0.08) 0 3px, transparent 3px 6px);
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.12);
+}
+.jf-dots li.skip span {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+/* ---------- step bodies ---------- */
+.jf-step {
+  animation: fade 0.15s ease both;
+}
+.jf-note {
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14.5px;
+  line-height: 1.35;
+  background: rgba(46, 124, 147, 0.1);
+  box-shadow: inset 4px 0 0 var(--sea);
+}
+.jf-note.warn {
+  background: rgba(224, 164, 88, 0.2);
+  box-shadow: inset 4px 0 0 var(--mech);
+}
+.jf-note.ok {
+  background: rgba(78, 138, 90, 0.14);
+  box-shadow: inset 4px 0 0 var(--palm);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.jf-finding p {
+  font-size: 16px;
+  line-height: 1.4;
+}
+.jf-finding {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.08);
+}
+.jf-ask {
+  background: var(--sand);
+  box-shadow: none;
+}
+.jf-empty {
+  margin: 4px 2px;
+  font-size: 14.5px;
+}
+.jf-taskline {
+  appearance: none;
+  border: 0;
+  text-align: left;
+  background: var(--sand);
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-height: 44px;
+  font-size: 14.5px;
+  line-height: 1.3;
+  color: var(--ink);
+  cursor: pointer;
+}
+.jf-taskline.static {
+  cursor: default;
+}
+.jf-back {
+  appearance: none;
+  border: 0;
+  background: none;
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 4px;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--sea-deep);
+  cursor: pointer;
+}
+.jf-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 4px;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--sea-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: left;
+  cursor: pointer;
+}
+.jf-link.danger {
+  color: var(--rust);
+}
+.jf-link[disabled] {
+  opacity: 0.45;
+}
+.jf-backbtn {
+  appearance: none;
+  border: 0;
+  flex: none;
+  width: 48px;
+  min-height: 48px;
+  border-radius: 999px;
+  background: var(--sand-deep);
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+/* ---------- search ---------- */
+.jf-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jf-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--white);
+  border-radius: 14px;
+  padding: 0 4px 0 12px;
+  box-shadow: inset 0 0 0 2px rgba(31, 42, 48, 0.12);
+  min-height: 48px;
+}
+.jf-input:focus-within {
+  box-shadow: inset 0 0 0 2px var(--sea);
+}
+.jf-glass {
+  flex: none;
+  color: var(--ink-soft);
+}
+.jf-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 17px; /* 16+ keeps iOS from zooming the page on focus */
+  min-height: 46px;
+  padding: 0;
+}
+.jf-input input::-webkit-search-cancel-button {
+  display: none;
+}
+.jf-clear {
+  appearance: none;
+  border: 0;
+  background: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.jf-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(-1 * var(--g));
+  padding: 0 var(--g) 2px;
+  align-items: center;
+}
+.jf-chips::-webkit-scrollbar {
+  display: none;
+}
+.jf-chips-lead {
+  flex: none;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.jf-chip {
+  flex: none;
+  appearance: none;
+  border: 0;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--sand);
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.12);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+  position: relative;
+}
+/* 44 px to the touch, 40 to the eye */
+.jf-chip::after {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+.jf-chip.hint {
+  background: rgba(78, 138, 90, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(78, 138, 90, 0.4);
+}
+.jf-chip.comp {
+  background: var(--white);
+}
+.jf-chip.on {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+}
+
+/* result rows */
+.jf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jf-row {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.1);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 15px;
+}
+.jf-row:active {
+  background: var(--sand);
+}
+.jf-row.likely {
+  box-shadow: inset 0 0 0 2px var(--palm), 0 0 0 3px rgba(78, 138, 90, 0.18);
+}
+.jf-row.np {
+  opacity: 0.62;
+}
+.jf-row-title {
+  line-height: 1.25;
+  font-weight: 600;
+}
+.jf-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+  background: var(--sand-deep);
+  color: var(--ink);
+}
+.jf-badge.ok {
+  background: rgba(78, 138, 90, 0.18);
+  color: #2f5e3a;
+}
+.jf-badge.short {
+  background: rgba(224, 164, 88, 0.3);
+  color: #7a4a10;
+}
+/* on order, and the book's own informational badges (never `.order`: that's the order card's class) */
+.jf-badge.coming,
+.jf-badge.info {
+  background: rgba(46, 124, 147, 0.15);
+  color: var(--sea-deep);
+}
+.jf-badge.none {
+  background: rgba(199, 80, 47, 0.14);
+  color: #9e3a1f;
+}
+/* a search row with nothing in stores: said, but quieter than the IPC's own badges */
+.jf-badge.quiet {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.16);
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+/* the IPC as printed */
+.jf-plate summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.jf-ipc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jf-fig-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eef0ea;
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.12);
+  font-size: 14px;
+}
+.jf-eff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.jf-mark {
+  color: var(--palm);
+  font-weight: 900;
+}
+.jf-ipc-row {
+  align-items: flex-start;
+  min-height: 60px;
+}
+.jf-ipc-row.assy {
+  background: #eef0ea;
+}
+.jf-item {
+  flex: none;
+  width: 34px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  padding-top: 2px;
+}
+.jf-pn {
+  font-size: 14.5px;
+  letter-spacing: 0.01em;
+}
+.jf-nomen {
+  font-size: 13.5px;
+  font-family: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.jf-sub {
+  margin-top: 6px;
+}
+
+/* ---------- parts / materials ---------- */
+.jf-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 14px;
+  padding: 4px 4px 4px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.12);
+}
+.jf-slot.filled {
+  box-shadow: inset 0 0 0 1px rgba(46, 124, 147, 0.4);
+}
+.jf-slot.hl {
+  box-shadow: inset 0 0 0 2px var(--rust);
+}
+.jf-slot.research {
+  background: rgba(143, 184, 222, 0.18);
+}
+.jf-slot > .col {
+  padding: 8px 10px;
+}
+.jf-slot-main {
+  appearance: none;
+  border: 0;
+  background: none;
+  text-align: left;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 15px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.jf-slot-main:active {
+  background: var(--sand);
+}
+.jf-fill {
+  font-size: 14.5px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.jf-fill.empty {
+  color: var(--sea-deep);
+  font-weight: 800;
+}
+.jf-slot-ctl {
+  gap: 6px;
+  padding: 0 6px 6px 10px;
+  flex-wrap: wrap;
+}
+.jf-slot .jf-link {
+  margin-left: 6px;
+  font-size: 13.5px;
+}
+.jf-slot .jf-x {
+  margin: 0;
+}
+.jf-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--sand);
+  border-radius: 999px;
+}
+.jf-qty button {
+  appearance: none;
+  border: 0;
+  background: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--ink);
+  cursor: pointer;
+}
+.jf-qty button[disabled] {
+  opacity: 0.35;
+}
+.jf-qty b {
+  min-width: 34px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* ---------- stock ---------- */
+.jf-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jf-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 52px;
+  border-radius: 12px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.1);
+  flex-wrap: wrap;
+}
+.jf-line > .jf-badge {
+  margin-left: auto;
+}
+/* the words keep at least half the row: a long badge drops under them instead of squeezing them */
+.jf-line > .col {
+  flex: 1 1 55%;
+}
+.jf-line-text {
+  font-size: 14.5px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.jf-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sea-deep);
+}
+.jf-tag.bench {
+  color: var(--ink-soft);
+}
+.jf-tag.tool {
+  color: #7a4a10;
+}
+.jf-summary {
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.35;
+  background: rgba(46, 124, 147, 0.12);
+}
+.jf-summary.ready {
+  background: rgba(78, 138, 90, 0.16);
+  color: #2f5e3a;
+}
+.jf-summary.card {
+  background: rgba(143, 184, 222, 0.28);
+}
+
+/* ---------- a job ---------- */
+.jf-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--sand);
+  font-size: 15px;
+}
+.jf-stage.mine {
+  background: var(--ink);
+  color: var(--paper);
+}
+.jf-stage.done,
+.jf-stage.closed {
+  background: rgba(78, 138, 90, 0.16);
+}
+.jf-card {
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px rgba(143, 184, 222, 0.8);
+  font-size: 14.5px;
+}
+
+/* ---------- rows: Your move, the inbox ---------- */
+.jf-your {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px;
+  border-left: 6px solid var(--ink);
+}
+.jf-your.empty {
+  border-left-color: rgba(31, 42, 48, 0.2);
+  gap: 2px;
+}
+.jf-your h3 {
+  padding-left: 4px;
+}
+.jf-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jf-arow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 14px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.1);
+  padding-right: 6px;
+}
+.jf-arow.mine {
+  box-shadow: inset 0 0 0 1px rgba(31, 42, 48, 0.22);
+}
+.jf-arow.closed {
+  opacity: 0.7;
+}
+.jf-arow-main {
+  appearance: none;
+  border: 0;
+  background: none;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 8px 4px 8px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 14px;
+}
+.jf-arow-main:active {
+  background: var(--sand);
+}
+.jf-arow-sym {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.jf-chev {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+.jf-arow-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 4px;
+  align-items: center;
+}
+.jf-arow-meta .label {
+  font-size: 12.5px;
+  margin-right: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.jf-move {
+  flex: none;
+  max-width: 38%;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  background: var(--sand-deep);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jf-move.mine {
+  background: var(--ink);
+  color: var(--paper);
+}
+.jf-move.due {
+  background: var(--rust);
+  color: var(--white);
+}
+.jf-start {
+  flex: none;
+  min-width: 76px;
+}
+.jf-inbox-head {
+  margin-top: 4px;
+  padding: 0 4px;
+}
+.jf-stores {
+  appearance: none;
+  border: 0;
+  min-height: 40px;
+  padding: 0 14px;
+  cursor: pointer;
+  position: relative;
+}
+.jf-stores::after {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+.jf-stores.low {
+  background: rgba(224, 164, 88, 0.35);
+}
+.jf-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+.jf-closed summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  padding: 0 4px;
+}
+.jf-closed summary::-webkit-details-marker {
+  display: none;
+}
+.jf-closed summary::after {
+  content: '▾';
+  color: var(--ink-soft);
+  margin-left: 8px;
+}
+.jf-closed[open] summary::after {
+  content: '▴';
+}
+.jf-closed .jf-rows {
+  margin-top: 6px;
+}
+
+/* the asset list, folded into a chip row */
+.jf-fold {
+  appearance: none;
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+.jf-fold-caret {
+  flex: none;
+  width: 32px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 16px;
+}
+
+/* stores (the tech's read-only stock) */
+.jf-inv-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  min-height: 56px;
+  border-bottom: 1px solid rgba(31, 42, 48, 0.08);
+}
+.jf-text {
+  border: 0;
+  border-radius: 12px;
+  min-height: 48px;
+  padding: 0 12px;
+  font-size: 17px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 2px rgba(31, 42, 48, 0.12);
+}
+.jf-text:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--sea);
+}
+
+/* what's new, the stop sheet */
+.jf-new-icon,
+.jf-stop-mark {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--sand);
+}
+.jf-stop-mark {
+  background: rgba(199, 80, 47, 0.14);
+  color: var(--rust);
+}
+.jf-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(31, 42, 48, 0.18);
+}
+.jf-dot.on {
+  background: var(--ink);
+}
+
+/* the reference and generator cards */
+.ref-card p {
+  line-height: 1.45;
+}
+.gsm-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 14.5px;
+}
+.jf-draws {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--sand);
+}
+
+/* ---------- desktop: a right-hand panel ---------- */
+@media (min-width: 900px) {
+  .jf-sheet {
+    left: auto;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    margin: 0;
+    width: 480px;
+    max-width: 480px;
+    height: auto;
+    border-radius: 22px 0 0 22px;
+    animation: jf-slide-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .jf-row:hover,
+  .jf-arow-main:hover,
+  .jf-slot-main:hover {
+    background: rgba(242, 227, 198, 0.6);
+  }
+}
+@keyframes jf-slide-in {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.reduce-motion .jf-sheet,
+.reduce-motion .jf-step {
+  animation: none;
+}

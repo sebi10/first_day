@@ -2,13 +2,24 @@
 // move it is), and the stepper on the job and its steps. What the chain knows
 // that the players don't (whether a P/N or a request is right) never shows:
 // that comes back at receiving, from engineering, or as an incident.
+// A chain the job flow opened (its research branch: the part isn't in the IPC)
+// says so, and says AOG only when the job's alert grounds the plane (13).
 import { benchMove, chainMove, chainSteps, isAre, needsFreight, openChain } from '../sim/chain';
 import { ECON, ROLE_LABEL } from '../sim/data';
+import { alertAog } from '../sim/econ';
 import type { IslandState, Order, PartChain, Role } from '../sim/types';
 import { Icon, usd } from './kit';
 import { C, ROLE_TINT } from './theme';
 
 const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
+
+/** does this chain ground its plane: every legacy chain does; a flow-opened one only when the job's alert grounds it */
+export function chainGrounds(s: IslandState, c: PartChain): boolean {
+  if (!c.flow) return true;
+  const job = s.orders.find((o) => o.id === c.orderId);
+  const al = job?.flow ? s.alerts?.find((a) => a.id === job.flow!.alert) : undefined;
+  return !!al && alertAog(s, c.assetId)?.id === al.id;
+}
 
 /** Found → IPC → (Logbooks → Engineering) → Buy → Delivery → Install */
 export function ChainStepper({ c }: { c: PartChain }) {
@@ -45,17 +56,24 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
   const mine = m.who === role;
   // the electrician's check runs beside the lookup or the research: a second move, another seat's
   const bm = benchMove(s, c);
+  const grounds = chainGrounds(s, c);
   return (
     <div class="card col chain-banner" style={{ gap: 8, borderLeft: `6px solid ${mine ? C.rust : C.mech}` }}>
       <div class="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-        <Icon name="plane" size={20} color={C.rust} />
+        <Icon name="plane" size={20} color={grounds ? C.rust : C.ink} />
         <span class="col grow" style={{ gap: 2 }}>
           <b>
-            {asset?.name} AOG: {c.item}
+            {c.flow ? `Research: the ${c.item} on ${asset?.name ?? 'the plane'} isn't in the IPC` : `${asset?.name} AOG: ${c.item}`}
           </b>
           <span class="label">
-            Found on {c.title} in week {c.week}
-            {c.aogWeeks ? ` · grounded ${c.aogWeeks} week${c.aogWeeks > 1 ? 's' : ''} so far` : c.wired ? ' · no flights until the job is finished' : ' · no flights until the part is on'}
+            {c.flow ? `From ${c.title} in week ${c.week}` : `Found on ${c.title} in week ${c.week}`}
+            {!grounds
+              ? ': the job waits for the part; the plane keeps flying'
+              : c.aogWeeks
+                ? ` · grounded ${c.aogWeeks} week${c.aogWeeks > 1 ? 's' : ''} so far`
+                : c.wired
+                  ? ' · no flights until the job is finished'
+                  : ' · no flights until the part is on'}
           </span>
         </span>
       </div>
@@ -109,7 +127,9 @@ export function ChainOrigin({ s, o, me }: { s: IslandState; o: Order; me?: Role 
             : `The part is here: install ${c.pn}, then finish the job. It counts as the job itself.`
           : c.step === 'check'
             ? `The part is looked up. It's bought once ${nameOf(s, 'elec')}'s check says the ${c.item} ${isAre(c.item)} really bad.`
-            : `This job found a part it can't be finished without. ${asset?.name ?? 'The plane'} is grounded until it's on.`
+            : c.flow
+              ? `The ${c.item} isn't in this airplane's IPC: the research branch finds in the records how it got there and gets it approved. The job waits for that part${chainGrounds(s, c) ? `, and ${asset?.name ?? 'the plane'} is grounded until it's on` : ''}.`
+              : `This job found a part it can't be finished without. ${asset?.name ?? 'The plane'} is grounded until it's on.`
       : step === 'lookup'
         ? 'Find the part in the IPC for this airplane (its S/N and SB status) and order it, or, if it isn’t in the IPC, send it for research.'
         : step === 'research'
@@ -121,7 +141,7 @@ export function ChainOrigin({ s, o, me }: { s: IslandState; o: Order; me?: Role 
             : step === 'buy'
               ? needsFreight(s, c)
                 ? `The part for ${asset?.name ?? 'the plane'}. The cargo plane is the one down: the AOG boat brings it when the week resolves (+${usd(ECON.boatKit)} on the PO), or the next guest flight carries it free a week later. The plane earns nothing until it's on.`
-                : `The part for ${asset?.name ?? 'the plane'}: it rides the next cargo flight once approved. The plane earns nothing until it's on.`
+                : `The part for ${asset?.name ?? 'the plane'}: it rides the next cargo flight once approved.${chainGrounds(s, c) ? " The plane earns nothing until it's on." : ''}`
               : 'Engineering reviews the request the mechanic sent: the answer comes a week later, when the week resolves.';
   return (
     <div class="card col" style={{ gap: 8, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${done ? C.palm : C.rust}` }}>

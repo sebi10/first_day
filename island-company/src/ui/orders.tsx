@@ -1,11 +1,21 @@
 // Work-order cards: the universal container (same radius, shadow, grammar).
-import { CABLE_REPORT, defectRule, ECON, GSE, incidentText, ROLE_LABEL } from '../sim/data';
+// A job-flow job (docs/JOBFLOW.md 17.2) adds its alert on the card, and in the
+// detail its task, each line's state, the POs carrying them and the stop; the
+// tech's own job opens in the job-flow sheet (Repick, Drop the job, Start).
+import { alertShort } from '../sim/alerts';
+import { CABLE_REPORT, defectRule, ECON, GSE, incidentText, ROLE_LABEL, SUPPLIERS } from '../sim/data';
 import { deferralRisk, expectedDeferralCost, gseForStart, needsCart } from '../sim/econ';
 import { isEmergency, tracedTo } from '../sim/engine';
+import { flowStage, installCheck } from '../sim/flow';
+import { itemById } from '../sim/items';
+import { taskById } from '../sim/tasks';
 import type { IslandState, Order, Role } from '../sim/types';
-import { ChainChip, ChainOrigin } from './chain';
-import { Icon, TierDots, usd } from './kit';
-import { capWords, reportSaid } from './select';
+import { ChainChip, ChainOrigin, chainGrounds } from './chain';
+import { jobLineStates } from './flow/JobView';
+import { lineWords } from './flow/steps';
+import { landsWords } from './flow/words';
+import { Btn, Icon, TierDots, usd } from './kit';
+import { capWords, openTarget, reportSaid } from './select';
 import { C, ROLE_TINT } from './theme';
 
 const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
@@ -48,7 +58,7 @@ function OriginChips({ s, o }: { s: IslandState; o: Order }) {
   const rep = o.report;
   return (
     <>
-      {o.chain && <span class="chip rust">AOG · part chain</span>}
+      {o.chain && (s.chain?.id === o.chain.id && !chainGrounds(s, s.chain) ? <span class="chip">Research · part chain</span> : <span class="chip rust">AOG · part chain</span>)}
       {o.repair && <span class="chip ink">Repair · from week {o.repair.defect.week}</span>}
       {o.redo && <span class="chip ink">Redo · week {o.redo.week} sign-off</span>}
       {rep && (
@@ -95,6 +105,9 @@ export function OrderCard({ s, o, onOpen, held, me }: { s: IslandState; o: Order
   const carried = o.deferrals > 0 && o.status !== 'done' && o.kind !== 'report' && !o.chain;
   const risk = carried ? deferralRisk(o, o.lastDeferredWeek === s.week ? 0 : 1) : 0;
   const cls = `card order ${o.status === 'ready' && !held ? 'ready' : ''} ${o.status === 'done' ? 'done' : ''} ${o.status === 'ready' && held ? 'held' : ''}`;
+  // a job-flow job: the alert it answers, in its short words
+  const al = o.flow ? s.alerts?.find((x) => x.id === o.flow!.alert) : undefined;
+  const flowAlert = al ? capFirst(alertShort(s, al)) : null;
   return (
     <button
       class={cls}
@@ -110,6 +123,7 @@ export function OrderCard({ s, o, onOpen, held, me }: { s: IslandState; o: Order
           <b style={{ fontSize: 16, lineHeight: 1.2 }}>{o.title}</b>
           {o.cost > 0 && <span class="num" style={{ fontWeight: 800, fontSize: 15 }}>{usd(o.cost)}</span>}
         </span>
+        {flowAlert && <span class="label" style={{ lineHeight: 1.3 }}>{flowAlert}</span>}
         <span class="row wrap" style={{ gap: 6 }}>
           <span class="label">{asset?.name ?? (o.report ? 'Cross-trade report' : o.leak ? `${usd(o.leak)} at stake` : 'Desk')}</span>
           <TierDots tier={o.tier} />
@@ -159,6 +173,7 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
         {o.parts > 0 && <span class="chip">Needs {o.parts} parts kit</span>}
       </div>
       <Origin s={s} o={o} />
+      {o.flow && <FlowDetail s={s} o={o} role={role} />}
       <ChainOrigin s={s} o={o} me={role} />
       {needsCart(o.kind) && o.assetId && o.status !== 'done' && o.status !== 'cancelled' && (
         <p class={gseForStart(s, o).blocker ? 'fault' : 'muted'} style={{ margin: 0, fontWeight: 700 }}>
@@ -177,11 +192,9 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
         </p>
       )}
       {o.status === 'pending' && o.chain && role === 'fin' && <p class="muted" style={{ margin: 0 }}>A grounded plane waits on it: approve it on your desk (it goes through a cash freeze).</p>}
-      {o.status === 'waiting_part' && !o.chain && (
+      {o.status === 'waiting_part' && !o.chain && !o.flow && (
         <p class="muted" style={{ margin: 0 }}>
-          {o.flow?.stop
-            ? `Stopped: ${o.flow.stop}`
-            : `Approved. Waiting on its parts: ${(s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.lines.some((l) => l.order === o.id && l.got === undefined)).map((p) => `${p.id} week ${p.eta}`).join(', ') || `a request to ${ROLE_LABEL.fin}`}.`}
+          {`Approved. Waiting on its parts: ${(s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.lines.some((l) => l.order === o.id && l.got === undefined)).map((p) => `${p.id} week ${p.eta}`).join(', ') || `a request to ${ROLE_LABEL.fin}`}.`}
         </p>
       )}
       {o.status === 'done' && o.result?.blind && (
@@ -211,6 +224,77 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
         <p class="fault" style={{ margin: 0 }}>
           Cash under $2,000: {isEmergency(s, o) ? 'safety-critical, so it can still be approved.' : 'frozen until cash recovers.'}
         </p>
+      )}
+    </div>
+  );
+}
+
+const capFirst = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/**
+ * A job-flow job in the order detail: the task, each line as it stands
+ * (reserved, on a PO and when it lands, held at receiving with the document
+ * named, sent back, requested), the POs carrying its lines, and the stop. The
+ * tech whose job it is opens it in the job-flow sheet: Repick, Drop the job,
+ * and Start (which runs the install check first).
+ */
+function FlowDetail({ s, o, role }: { s: IslandState; o: Order; role: Role }) {
+  const f = o.flow!;
+  const t = taskById(f.task);
+  const al = s.alerts?.find((x) => x.id === f.alert);
+  const lines = jobLineStates(s, o);
+  const pos = (s.pos ?? []).filter((p) => p.lines.some((l) => l.order === o.id));
+  const check = o.status === 'ready' ? installCheck(s, o) : null;
+  const stage = al ? flowStage(s, al) : null;
+  const mine = role === o.role && o.status !== 'done' && o.status !== 'cancelled' && !!al;
+  return (
+    <div class="card col" style={{ gap: 8, background: 'var(--sand)', boxShadow: 'none' }}>
+      {t && (
+        <span>
+          <span class="label">{t.book === 'REF' ? 'Reference' : al?.repair ? 'Repair' : t.book}</span> <b>{t.no}</b> {t.title}
+        </span>
+      )}
+      {al && <span class="label">For: {capFirst(alertShort(s, al))}</span>}
+      {f.wired && <span>{nameOf(s, 'elec')}'s check found the fault in the wiring and fixed it: no part.</span>}
+      {lines.length > 0 && (
+        <div class="col" style={{ gap: 4 }}>
+          {lines.map((l) => (
+            <span key={l.item} class="row spread" style={{ gap: 8, alignItems: 'flex-start' }}>
+              <span style={{ minWidth: 0 }}>{itemById(l.item)?.kind === 'tool' ? itemById(l.item)!.nomen : lineWords(l.item, l.qty)}</span>
+              <b class={l.tone === 'none' ? 'fault' : ''} style={{ flex: 'none', maxWidth: '48%', textAlign: 'right', fontSize: 13, ...(l.tone === 'ok' ? { color: C.palm } : {}) }}>
+                {l.words}
+              </b>
+            </span>
+          ))}
+        </div>
+      )}
+      {pos.length > 0 && (
+        <div class="col" style={{ gap: 2 }}>
+          <span class="label">Purchase orders</span>
+          {pos.map((p) => (
+            <span key={p.id} class="label">
+              {p.id} · {SUPPLIERS[p.vendor].short}
+              {p.freight === 'aog' ? ' · AOG boat' : ''} ·{' '}
+              {p.status === 'open' ? landsWords(s.week, p.eta) : p.status === 'held' ? `held at receiving${p.notes?.length ? `: ${p.notes[p.notes.length - 1]}` : ''}` : p.status === 'returned' ? 'sent back' : `received week ${p.got ?? p.eta}`}
+            </span>
+          ))}
+        </div>
+      )}
+      {f.stop && (
+        <span class="fault" style={{ fontWeight: 700 }}>
+          Work stopped: {f.stop}
+        </span>
+      )}
+      {check && !f.stop && (
+        <span class="fault" style={{ fontWeight: 700 }}>
+          At the start: {check.stop}
+        </span>
+      )}
+      {stage === 'research' && <span class="label">In research: the airplane's logbooks, then engineering.</span>}
+      {mine && (
+        <Btn small kind="soft" onClick={() => openTarget({ alert: al!.id })}>
+          Open the job ▸
+        </Btn>
       )}
     </div>
   );

@@ -1,10 +1,14 @@
 // Electrician · Conduit bending. Lay out bend marks on a straight stick of
-// 1/2-in EMT, set each bend's angle, bend it, and test-fit it on the wall
-// between the panel and the hot-tub disconnect. Real trade math: take-up for
-// stubs, offset multipliers and shrink, 3- and 4-point saddles, the 360° rule.
+// EMT, set each bend's angle, bend it, and test-fit it on the wall between the
+// panel and the hot-tub disconnect. Real trade math: take-up for stubs, offset
+// multipliers and shrink, 3- and 4-point saddles, the 360° rule. The stick is
+// 1/2 in unless the job flow's pick says otherwise: the spa run's 3/4 in EMT
+// takes the 3/4 in bender's 6 in take-up, and the puzzle labels the stick, the
+// connectors and the wire the electrician chose (display only: the score reads
+// the bends, never the pick).
 import { rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, settle, shade, stage } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 export const ANGLES = [10, 22.5, 30, 45, 60, 90] as const;
 /** Field table for a hand bender: offset multiplier and shrink per inch of rise. */
@@ -15,12 +19,15 @@ export const TABLE: Record<number, { mult: number; shrink: number }> = {
   45: { mult: 1.414, shrink: 3 / 8 },
   60: { mult: 1.155, shrink: 1 / 2 },
 };
-/** 1/2-in EMT hand bender: deduct 5 in from a stub height to place the arrow. */
-export const TAKE_UP = 5;
+/** EMT sizes the hand bender takes */
+export type StickSize = '1/2' | '3/4';
+/** a hand bender's take-up: deduct it from a stub height to place the arrow (1/2 in EMT: 5 in, 3/4 in EMT: 6 in) */
+export const takeUp = (size: StickSize = '1/2') => (size === '3/4' ? 6 : 5);
 /** 3-point saddle rule: outer marks 2-1/2 in per inch of height; center shrink 3/16 in per inch */
 export const SADDLE3_SPREAD = 2.5;
 export const SADDLE3_SHRINK = 3 / 16;
-const PIPE_R = 0.35; // half the OD of 1/2-in EMT
+/** half the OD of the stick: 1/2 in EMT 0.706 in, 3/4 in EMT 0.922 in */
+const pipeR = (size: StickSize) => (size === '3/4' ? 0.46 : 0.35);
 
 export type Bend = { at: number; angle: number; dir: 1 | -1 };
 export type JobKind = 'stub' | 'offset' | 'stubOffset' | 'stubSaddle3' | 'stubSaddle4';
@@ -28,10 +35,19 @@ export type Obstacle =
   | { kind: 'beam' | 'duct'; x: number; y: number; w: number; h: number }
   | { kind: 'pipe'; x: number; y: number; r: number };
 
+/** what the job flow's pick puts in the run, as the puzzle labels it (an EMT pick only) */
+export type ConduitLabels = { stick: string; connectors?: string; wire?: string };
+
 export type ConduitModel = {
   seed: number;
   tier: number;
   job: JobKind;
+  /** the stick's trade size: the pick's EMT, else 1/2 in */
+  size: StickSize;
+  /** the bender's take-up for that size, inches */
+  takeUp: number;
+  /** the stick, connectors and wire the electrician picked; null without an EMT pick (the stick stays today's plain 1/2 in) */
+  labels: ConduitLabels | null;
   /** stub-up height (0 = no stub; the run starts level out of a side knockout) */
   stub: number;
   /** offset / saddle height */
@@ -60,8 +76,40 @@ export type ConduitModel = {
 const q4 = (v: number) => Math.round(v * 4) / 4;
 const rad = (d: number) => (d * Math.PI) / 180;
 
-export function generateConduit(seed: number, tier: number, tools: string[] = []): ConduitModel {
+type Pick = NonNullable<PuzzleContext['pick']>;
+
+/** "3 × 8 AWG + 10 AWG EGC": the wire lines of a pick, by gauge */
+function wireWords(pick: Pick): string | undefined {
+  const wires = pick.filter((l) => /^THWN-/.test(l.pn));
+  if (!wires.length) return undefined;
+  const awg = (l: Pick[number]) => l.pn.replace(/^THWN-/, '');
+  const main = wires.find((l) => l.slot === 'wire') ?? wires[0];
+  const egc = wires.find((l) => l.slot === 'egc' && l !== main);
+  return `${awg(main)} AWG${egc ? ` + ${awg(egc)} AWG EGC` : ''}`;
+}
+
+/** the stick size and the labels from the job flow's pick: only an EMT pick labels the run */
+export function pickLabels(pick: Pick | undefined): { size: StickSize; labels: ConduitLabels | null } {
+  const stick = pick?.find((l) => l.spec?.raceway === 'emt' && !l.spec.device);
+  if (!pick || !stick) return { size: '1/2', labels: null };
+  const size: StickSize = stick.spec?.size === '3/4' ? '3/4' : '1/2';
+  const conn = pick.find((l) => l.spec?.device === 'connector' && l.spec.raceway === 'emt');
+  const wire = wireWords(pick);
+  const fitting = conn?.spec?.fitting === 'raintight' ? 'raintight' : conn?.spec?.fitting === 'setscrew' ? 'set-screw' : undefined;
+  return {
+    size,
+    labels: {
+      stick: `${size === '3/4' ? '¾' : '½'}″ EMT · ${stick.pn}`,
+      ...(conn ? { connectors: `${fitting ?? 'EMT'} connectors ${conn.pn}` } : {}),
+      ...(wire ? { wire } : {}),
+    },
+  };
+}
+
+export function generateConduit(seed: number, tier: number, tools: string[] = [], pick?: Pick): ConduitModel {
   const r = rng(seed);
+  const { size, labels } = pickLabels(pick);
+  const tu = takeUp(size);
   const t = clamp(Math.round(tier), 0, 5);
   const job: JobKind = (['stub', 'stub', 'offset', 'stubOffset', 'stubSaddle3', 'stubSaddle4'] as const)[t];
   const hasStub = job !== 'offset';
@@ -98,9 +146,9 @@ export function generateConduit(seed: number, tier: number, tools: string[] = []
   const showTable = t <= 2 || tools.includes('bender');
   const hints: string[] =
     t === 0
-      ? [`Stub ${stub} in − 5 in take-up = mark at ${stub - TAKE_UP} in`, 'Angle 90°, then Bend']
+      ? [`Stub ${stub} in − ${tu} in take-up = mark at ${stub - tu} in`, 'Angle 90°, then Bend']
       : t === 1
-        ? ['Stub-up: mark at stub height − 5 in take-up']
+        ? [`Stub-up: mark at stub height − ${tu} in take-up`]
         : t === 2
           ? ['Offset: marks apart = rise × multiplier', 'Add the shrink to the distance to the beam']
           : [];
@@ -108,6 +156,9 @@ export function generateConduit(seed: number, tier: number, tools: string[] = []
     seed,
     tier: t,
     job,
+    size,
+    takeUp: tu,
+    labels,
     stub,
     rise,
     x1,
@@ -127,12 +178,13 @@ export function generateConduit(seed: number, tier: number, tools: string[] = []
 
 export type Corner = { x: number; y: number; angle: number; dir: 1 | -1; heading: number };
 
-/** Stick position of the sharp corner a bend makes: a 90 lands its back 5 in past the arrow. */
-export const cornerAt = (b: Bend) => b.at + (b.angle === 90 ? TAKE_UP : 0);
+/** Stick position of the sharp corner a bend makes: a 90 lands its back one take-up past the arrow. */
+export const cornerAt = (b: Bend, tu = takeUp()) => b.at + (b.angle === 90 ? tu : 0);
 
 /** Bend the stick. `progress` (bends done, fractional) animates it. Heading in degrees, y up. */
 export function bendPath(m: ConduitModel, bends: Bend[], progress = Infinity) {
-  const sorted = [...bends].sort((a, b) => cornerAt(a) - cornerAt(b));
+  const at = (b: Bend) => cornerAt(b, m.takeUp);
+  const sorted = [...bends].sort((a, b) => at(a) - at(b));
   let x = 0;
   let y = m.stub;
   let h = m.stub ? -90 : 0;
@@ -140,7 +192,7 @@ export function bendPath(m: ConduitModel, bends: Bend[], progress = Infinity) {
   const pts: { x: number; y: number }[] = [{ x, y }];
   const corners: Corner[] = [];
   sorted.forEach((b, i) => {
-    const c = Math.min(m.stickLen, Math.max(pos, cornerAt(b)));
+    const c = Math.min(m.stickLen, Math.max(pos, at(b)));
     x += (c - pos) * Math.cos(rad(h));
     y += (c - pos) * Math.sin(rad(h));
     pos = c;
@@ -159,11 +211,11 @@ export type Check = { label: string; err: number; ok: boolean; x: number; y: num
 
 const BIG = 24;
 
-function obstacleDepth(o: Obstacle, px: number, py: number): number {
+function obstacleDepth(o: Obstacle, px: number, py: number, pr: number): number {
   // how deep a point of the conduit centreline sits inside the obstacle (grown by the pipe radius)
-  if (o.kind === 'pipe') return Math.max(0, o.r + PIPE_R - Math.hypot(px - o.x, py - o.y));
-  const dx = Math.min(px - (o.x - PIPE_R), o.x + o.w + PIPE_R - px);
-  const dy = Math.min(py - (o.y - PIPE_R), o.y + o.h + PIPE_R - py);
+  if (o.kind === 'pipe') return Math.max(0, o.r + pr - Math.hypot(px - o.x, py - o.y));
+  const dx = Math.min(px - (o.x - pr), o.x + o.w + pr - px);
+  const dy = Math.min(py - (o.y - pr), o.y + o.h + pr - py);
   return Math.max(0, Math.min(dx, dy));
 }
 
@@ -233,7 +285,7 @@ export function fitChecks(m: ConduitModel, bends: Bend[]) {
         const px = a.x + ((b.x - a.x) * s) / Math.max(1, n);
         const py = a.y + ((b.y - a.y) * s) / Math.max(1, n);
         if (px > m.panelX) continue;
-        const d = obstacleDepth(m.obstacle, px, py);
+        const d = obstacleDepth(m.obstacle, px, py, pipeR(m.size));
         if (d > depth) {
           depth = d;
           at = { x: px, y: py };
@@ -268,7 +320,7 @@ export function scoreConduit(m: ConduitModel, sticks: Bend[][]): number {
 export function solveConduit(m: ConduitModel, angle: 10 | 22.5 | 30 | 45 | 60 = 30): Bend[] {
   const out: Bend[] = [];
   const base = m.stub;
-  if (m.stub) out.push({ at: m.stub - TAKE_UP, angle: 90, dir: 1 });
+  if (m.stub) out.push({ at: m.stub - m.takeUp, angle: 90, dir: 1 });
   const t = TABLE[angle];
   if (m.job === 'offset' || m.job === 'stubOffset') {
     const m2 = base + m.x1 + m.rise * t.shrink;
@@ -339,7 +391,7 @@ export const conduit: PuzzleDef = {
   term: 'Offset multiplier: marks apart = offset height × multiplier (30° → ×2).',
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 10,
   mount(host, p) {
-    const m = generateConduit(p.seed, p.tier, p.tools);
+    const m = generateConduit(p.seed, p.tier, p.tools, p.context?.pick);
     const hasBender = p.tools.includes('bender');
     const st = stage(host.el);
     const { ctx } = st;
@@ -686,7 +738,7 @@ export const conduit: PuzzleDef = {
       }
       // deck (stub jobs) — the run sits on it
       if (m.stub) {
-        const dy = sy(-PIPE_R - 0.4);
+        const dy = sy(-pipeR(m.size) - 0.4);
         ctx.fillStyle = C.sandDeep;
         ctx.fillRect(0, dy, g.w, g.sceneH);
         ctx.strokeStyle = shade(C.sandDeep, -0.18);
@@ -850,6 +902,17 @@ export const conduit: PuzzleDef = {
       }
       if (m.table && m.job !== 'stub' && state === 'layout') drawTable(g);
       if (fit?.over) label(ctx, `${fit.degrees}° between pull points: over 360°`, g.w / 2, top + g.sceneH - 14, { size: 12, weight: 800, color: C.rust });
+      // what the pick puts in this run (an EMT pick only): the connectors at both ends, the wire it carries.
+      // One line along the scene's bottom edge, where only siding or deck shows
+      else if (m.labels && (m.labels.connectors || m.labels.wire)) {
+        const line = [m.labels.connectors, m.labels.wire ? `wire ${m.labels.wire}` : undefined].filter(Boolean).join(' · ');
+        ctx.font = `700 9.5px ${FONT}`;
+        const tw = Math.min(g.w - 2 * g.pad, ctx.measureText(line).width + 12);
+        ctx.fillStyle = 'rgba(251,245,233,0.9)';
+        roundRect(ctx, g.w / 2 - tw / 2, top + g.sceneH - 17, tw, 14, 6);
+        ctx.fill();
+        label(ctx, line, g.w / 2, top + g.sceneH - 10, { size: 9.5, weight: 700, color: C.inkSoft });
+      }
     }
 
     function drawTable(g: G) {
@@ -907,7 +970,7 @@ export const conduit: PuzzleDef = {
       ctx.lineWidth = 1.2;
       ctx.stroke();
       label(ctx, m.stub ? 'stub end' : 'box end', g.sL - 4, y + 10, { size: 9.5, weight: 800, color: C.inkSoft, align: 'left' });
-      label(ctx, `${m.stickLen / 12}-ft ${m.stickLen === 120 ? 'stick' : 'offcut'} · ½″ EMT`, g.sR + 4, y + 10, {
+      label(ctx, `${m.stickLen / 12}-ft ${m.stickLen === 120 ? 'stick' : 'offcut'} · ${m.labels?.stick ?? '½″ EMT'}`, g.sR + 4, y + 10, {
         size: 9.5,
         weight: 700,
         color: C.inkSoft,
@@ -935,7 +998,7 @@ export const conduit: PuzzleDef = {
       const cur = sel();
       if (hasBender && state === 'layout' && cur) {
         // the table printed on the shoe, nothing more: the layout math stays the electrician's
-        let txt = cur.angle === 90 ? 'bender: arrow on the mark · 90° take-up 5″' : '';
+        let txt = cur.angle === 90 ? `bender: arrow on the mark · 90° take-up ${m.takeUp}″` : '';
         if (!txt && TABLE[cur.angle]) txt = `bender: ${deg(cur.angle)} · ×${TABLE[cur.angle].mult} · shrink ${sixteenths(TABLE[cur.angle].shrink)}″ per inch`;
         label(ctx, txt, g.w / 2, y + 124, { size: 11, weight: 800, color: C.seaDeep });
       }
