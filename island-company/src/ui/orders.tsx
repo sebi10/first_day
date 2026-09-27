@@ -179,8 +179,9 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       {o.status === 'pending' && o.chain && role === 'fin' && <p class="muted" style={{ margin: 0 }}>A grounded plane waits on it: approve it on your desk (it goes through a cash freeze).</p>}
       {o.status === 'waiting_part' && !o.chain && (
         <p class="muted" style={{ margin: 0 }}>
-          Approved. The kit rides the next {s.assets.some((a) => a.model === 'cargo') ? 'cargo' : 'guest'} flight ({s.parts.inTransit} in transit, {s.parts.stock} in stock).
-          {s.parts.inTransit === 0 ? ` Nothing is in transit: ${ROLE_LABEL.fin} needs to buy one.` : ''}
+          {o.flow?.stop
+            ? `Stopped: ${o.flow.stop}`
+            : `Approved. Waiting on its parts: ${(s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.lines.some((l) => l.order === o.id && l.got === undefined)).map((p) => `${p.id} week ${p.eta}`).join(', ') || `a request to ${ROLE_LABEL.fin}`}.`}
         </p>
       )}
       {o.status === 'done' && o.result?.blind && (

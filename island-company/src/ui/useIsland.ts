@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ntfy } from '../net/notify';
 import { sessions, storeFor, type IslandRef } from '../net/session';
 import type { SyncStatus } from '../net/store';
-import { ENGINE_VERSION, canResolve, seatOf } from '../sim/engine';
+import { ENGINE_VERSION, canResolve, cloneState, seatOf } from '../sim/engine';
+import { migrate } from '../sim/migrate';
 import { WEEK_BOUND, type Action, type IslandState, type Role } from '../sim/types';
 import { fx } from './feedback';
 import { toast, useNow } from './kit';
@@ -25,7 +26,8 @@ export function useIsland(ref: IslandRef) {
   const latest = useRef<IslandState | null>(null);
   latest.current = s ?? null;
 
-  useEffect(() => store.subscribe(ref.id, setS), [ref.id, ref.mode]);
+  // an island saved before the job flow is migrated in memory for display (docs/JOBFLOW.md 19.2); its first write stores it as v3
+  useEffect(() => store.subscribe(ref.id, (doc) => setS(doc && (doc.engine ?? 0) < ENGINE_VERSION ? migrate(cloneState(doc)) : doc)), [ref.id, ref.mode]);
   useEffect(() => store.status(setSync), [ref.mode]);
   // offline moves the server refused once back online (usually: the week closed first)
   useEffect(() => {

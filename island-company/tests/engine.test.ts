@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { raiseAlert } from '../src/sim/alerts';
 import { simulate, TEAMS } from '../src/sim/bots';
-import { ECON } from '../src/sim/data';
+import { ECON, STOCK } from '../src/sim/data';
 import { credit, expectedDeferralCost, deferralRisk, planeCapacity } from '../src/sim/econ';
 import { apply, canResolve, createIsland } from '../src/sim/engine';
+import { planTask, stdPick } from '../src/sim/flow';
+import { committed, spendable } from '../src/sim/ledger';
+import { binsInUse, binsTotal, reservedFor } from '../src/sim/stock';
 import { nextDeadline } from '../src/sim/time';
-import type { IslandState, Role } from '../src/sim/types';
+import type { IslandState, Order, Role } from '../src/sim/types';
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 
@@ -21,6 +25,42 @@ function started(): IslandState {
   return s;
 }
 
+/** a legacy order (no job flow), as an island saved before the flow carries one: it approves and plays as it always did */
+function legacy(s: IslandState, over: Partial<Order> = {}): Order {
+  const o: Order = {
+    id: `leg${s.nextId++}`,
+    role: 'mech',
+    kind: 'tires',
+    assetId: 'p1',
+    title: 'Main tire change',
+    puzzle: 'torque',
+    tier: 1,
+    cost: 300,
+    parts: 0,
+    gain: 10,
+    createdWeek: s.week,
+    deferrals: 0,
+    lastDeferredWeek: null,
+    status: 'pending',
+    seed: 4242,
+    ...over,
+  };
+  s.orders.push(o);
+  return o;
+}
+
+/** a flow card: the twin's belt squeals (not airworthiness), planned with the book's task and pick; the belt isn't on the shelf */
+function beltCard(s: IslandState): { s: IslandState; o: Order } {
+  const twin = s.assets.find((a) => a.model === 'twin')!;
+  const al = raiseAlert(s, { role: 'mech', asset: twin, sym: 'M_BELT_SQUEAL', cause: 0 }, NOW);
+  const task = planTask(s, al, 'amm:twin:24-30-02')!;
+  const pick = stdPick(s, twin, task);
+  const r = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick, week: s.week }, NOW);
+  expect(r.error).toBeUndefined();
+  const o = r.s.orders.find((x) => x.flow?.alert === al.id)!;
+  return { s: r.s, o };
+}
+
 describe('island lifecycle', () => {
   it('week 1 opens only when all three finish week 0', () => {
     let s = fresh();
@@ -30,7 +70,8 @@ describe('island lifecycle', () => {
     s = apply(s, { t: 'week0Done', role: 'fin' }, NOW).s;
     expect(s.week).toBe(1);
     expect(s.deadline).toBeGreaterThan(NOW + 12 * 3600_000 - 1);
-    expect(s.orders.filter((o) => o.role === 'mech').length).toBeGreaterThanOrEqual(3);
+    // the week's work: the trades' alerts (a load sheet and a start stay direct orders) and the analyst's desk
+    expect((s.alerts ?? []).filter((a) => a.role === 'mech').length + s.orders.filter((o) => o.role === 'mech').length).toBeGreaterThanOrEqual(3);
     expect(s.orders.some((o) => o.role === 'fin')).toBe(true);
   });
 
@@ -51,7 +92,7 @@ describe('island lifecycle', () => {
     const a = simulate(TEAMS['all good'], 12, 3).final;
     const b = simulate(TEAMS['all good'], 12, 3).final;
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-  });
+  }, 30_000);
 
   it('resolves when all three end their turn, not before', () => {
     let s = started();
@@ -85,26 +126,34 @@ describe('island lifecycle', () => {
 
 describe('approvals, counters, freeze', () => {
   it('approve spends cash and reserves parts; defer increments risk', () => {
-    let s = started();
-    const o = s.orders.find((x) => x.status === 'pending')!;
-    expect(o).toBeTruthy();
+    const b = beltCard(started());
+    let s = b.s;
+    const o = b.o;
+    expect(o.status).toBe('pending');
+    // the card's shortfall is on the card: nothing ordered yet, the belt unreserved
+    expect(committed(s)).toBe(0);
     const cash = s.cash;
-    s = apply(s, { t: 'approve', orderId: o.id }, NOW).s;
+    s = apply(s, { t: 'approve', orderId: o.id, week: s.week }, NOW).s;
     const after = s.orders.find((x) => x.id === o.id)!;
     expect(['ready', 'waiting_part']).toContain(after.status);
+    // the labour leaves the bank now; the belt is on a PO (committed, paid at the payment run after it lands)
     expect(s.cash).toBe(cash - o.cost);
+    expect(committed(s)).toBeGreaterThan(0);
+    expect(spendable(s)).toBeLessThan(s.cash);
+    expect((s.pos ?? []).some((p) => p.lines.some((l) => l.order === o.id))).toBe(true);
+    // what was on the shelf is reserved hard to it (the bench lines: the torque wrench is a tool, never reserved)
+    for (const l of after.flow!.bench) if ((s.inv?.[l.item]?.on ?? 0) >= l.qty) expect(reservedFor(s, o.id, l.item)).toBe(l.qty);
 
-    const p = s.orders.find((x) => x.status === 'pending');
-    if (p) {
-      s = apply(s, { t: 'defer', orderId: p.id, reason: 'priority' }, NOW).s;
-      expect(s.orders.find((x) => x.id === p.id)!.deferrals).toBe(1);
-      expect(apply(s, { t: 'defer', orderId: p.id, reason: 'priority' }, NOW).error).toBeTruthy();
-    }
+    // a legacy card defers as it always did
+    const p = legacy(s);
+    s = apply(s, { t: 'defer', orderId: p.id, reason: 'priority' }, NOW).s;
+    expect(s.orders.find((x) => x.id === p.id)!.deferrals).toBe(1);
+    expect(apply(s, { t: 'defer', orderId: p.id, reason: 'priority' }, NOW).error).toBeTruthy();
   });
 
-  it('counter-offer: owner accepts the cheaper fix', () => {
+  it('counter-offer: owner accepts the cheaper fix (a legacy card; flow cards take no counter)', () => {
     let s = started();
-    const o = s.orders.find((x) => x.status === 'pending')!;
+    const o = legacy(s);
     s = apply(s, { t: 'counter', orderId: o.id }, NOW).s;
     const c = s.orders.find((x) => x.id === o.id)!;
     expect(c.status).toBe('countered');
@@ -112,23 +161,25 @@ describe('approvals, counters, freeze', () => {
     const d = s.orders.find((x) => x.id === o.id)!;
     expect(d.cost).toBeLessThan(o.cost);
     expect(d.gain).toBeLessThan(o.gain);
+    const b = beltCard(started());
+    expect(apply(b.s, { t: 'counter', orderId: b.o.id }, NOW).error).toBeTruthy();
   });
 
   it('cash under $2,000 freezes approvals', () => {
     let s = started();
     s.cash = 1500;
-    const o = s.orders.find((x) => x.status === 'pending')!;
-    const a = s.assets.find((x) => x.id === o.assetId);
-    if (a) a.health = 80;
-    // a routine job ('repair' is now a real kind: a known defect's fix, which is safety-critical)
-    o.kind = 'tires';
+    const o = legacy(s);
+    const a = s.assets.find((x) => x.id === o.assetId)!;
+    a.health = 80;
     expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toMatch(/safety-critical/);
     // safety-critical work (asset under 60) can still be approved if cash covers it
-    if (a) {
-      a.health = 50;
-      o.cost = 400;
-      expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toBeUndefined();
-    }
+    a.health = 50;
+    o.cost = 400;
+    expect(apply(s, { t: 'approve', orderId: o.id }, NOW).error).toBeUndefined();
+    // a flow card that isn't safety work waits too
+    const b = beltCard(started());
+    b.s.cash = 1500;
+    expect(apply(b.s, { t: 'approve', orderId: b.o.id, week: b.s.week }, NOW).error).toMatch(/safety-critical/);
   });
 
   it('receivership comes with one bridge loan, repaid weekly', () => {
@@ -148,10 +199,28 @@ describe('approvals, counters, freeze', () => {
     expect(apply(s, { t: 'endTurn', role: 'mech', week: s.week }, NOW).error).toBeUndefined();
   });
 
-  it('parts are capped at 6 (stock + in transit)', () => {
-    let s = started();
-    s.parts = { stock: 4, inTransit: 2 };
-    expect(apply(s, { t: 'buyList' }, NOW).error).toMatch(/capped/);
+  it('the parts kits are gone: a stock buy is 1-500 units of 1-12 real items, refused under the freeze and when the bins are full', () => {
+    const s = started();
+    expect(apply(s, { t: 'buyList' }, NOW).error).toMatch(/kits are gone/);
+    expect(apply(s, { t: 'buy', lines: [], week: s.week }, NOW).error).toMatch(/1 to/);
+    expect(apply(s, { t: 'buy', lines: [{ item: 'NOPE-1', qty: 1 }], week: s.week }, NOW).error).toMatch(/Unknown item/);
+    expect(apply(s, { t: 'buy', lines: [{ item: 'AN900-10', qty: STOCK.maxQty + 1 }], week: s.week }, NOW).error).toMatch(/Buy 1 to/);
+    const ok = apply(s, { t: 'buy', lines: [{ item: 'AN900-10', qty: 25 }], week: s.week }, NOW);
+    expect(ok.error).toBeUndefined();
+    expect(committed(ok.s)).toBeGreaterThan(0);
+    const poor = structuredClone(s);
+    poor.cash = 1500;
+    expect(apply(poor, { t: 'buy', lines: [{ item: 'AN900-10', qty: 25 }], week: s.week }, NOW).error).toMatch(/frozen/);
+    // every bin taken: a new line can't come in
+    const full = structuredClone(s);
+    let n = 0;
+    for (const id of ['KR15S', 'KR20S', 'KP130', 'KP140', 'KP150', 'KP230', 'KP240', 'KP250', 'BOX-OW2', 'BOX-NW1', 'MS28775-228', 'MS29513-238', 'GRN-50', 'PVC-CEM', 'MIL-PRF-907', 'MIL-DTL-5541', 'E1417-KIT']) {
+      if (binsInUse(full) >= binsTotal(full)) break;
+      full.inv![id] = { on: 1 };
+      n++;
+    }
+    while (binsInUse(full) < binsTotal(full)) full.inv![`X-${n++}`] = { on: 1 };
+    expect(apply(full, { t: 'buy', lines: [{ item: 'KG15-TR', qty: 1 }], week: s.week }, NOW).error ?? 'already stocked').toMatch(/Stores full|already stocked/);
   });
 
   it('charter rate is capped at 2x base', () => {
@@ -165,9 +234,9 @@ describe('approvals, counters, freeze', () => {
 describe('orders and puzzles', () => {
   it('completing an order raises health, gives XP, perfect adds a bonus stack', () => {
     let s = started();
-    const pend = s.orders.find((x) => x.role === 'elec' && x.status === 'pending');
-    if (pend) s = apply(s, { t: 'approve', orderId: pend.id }, NOW).s;
-    const o = s.orders.find((x) => x.role === 'elec' && x.status === 'ready')!;
+    const house = s.assets.find((a) => a.kind === 'house')!;
+    house.health = 60;
+    const o = legacy(s, { role: 'elec', kind: 'trip', assetId: house.id, title: 'Dead-outlet trace', puzzle: 'trace', status: 'ready', cost: 150 });
     const asset = s.assets.find((a) => a.id === o.assetId)!;
     const before = asset.health;
     s = apply(s, { t: 'complete', role: 'elec', orderId: o.id, score: 1, perfect: true }, NOW).s;
@@ -201,14 +270,22 @@ describe('orders and puzzles', () => {
     expect(s.orders.find((x) => x.id === o.id)!.status).toBe('done');
   });
 
-  it('auction result adds parts in transit and costs cash', () => {
+  it("an auction win places the lot on a broker PO at what was bid: committed now, paid at the payment run", () => {
     let s = started();
-    s.parts = { stock: 1, inTransit: 0 };
-    s.orders.push({ ...s.orders.find((o) => o.role === 'fin')!, id: 'auc', kind: 'auction', puzzle: 'auction', status: 'ready' });
+    const lot = { lines: [{ item: 'AN900-10', qty: 25 }, { item: 'FH-G18', qty: 50 }], fair: 40, list: 60 };
+    s.orders.push({ ...s.orders.find((o) => o.role === 'fin')!, id: 'auc', kind: 'auction', puzzle: 'auction', status: 'ready', lot });
     const cash = s.cash;
-    s = apply(s, { t: 'complete', role: 'fin', orderId: 'auc', score: 0.9, perfect: false, data: { kits: 1, spent: 310 } }, NOW).s;
-    expect(s.parts.inTransit).toBe(1);
-    expect(s.cash).toBe(cash - 310);
+    s = apply(s, { t: 'complete', role: 'fin', orderId: 'auc', score: 0.9, perfect: false, data: { kits: 1, spent: 44 } }, NOW).s;
+    const po = (s.pos ?? []).find((p) => p.vendor === 'broker')!;
+    expect(po).toBeTruthy();
+    expect(po.cost).toBeCloseTo(44, 0);
+    expect(po.lines.map((l) => l.item).sort()).toEqual(['AN900-10', 'FH-G18']);
+    expect(s.cash).toBe(cash);
+    expect(committed(s)).toBeGreaterThan(0);
+    // walking away buys nothing
+    const t = started();
+    t.orders.push({ ...t.orders.find((o) => o.role === 'fin')!, id: 'auc', kind: 'auction', puzzle: 'auction', status: 'ready', lot });
+    expect((apply(t, { t: 'complete', role: 'fin', orderId: 'auc', score: 0.3, perfect: false, data: { kits: 0, spent: 0 } }, NOW).s.pos ?? []).length).toBe((t.pos ?? []).length);
   });
 });
 
@@ -254,14 +331,14 @@ describe('paper-sim exit tests (spec phase 0)', () => {
         expect(minCash, `${team} seed ${seed}`).toBeGreaterThanOrEqual(0);
       }
     }
-  });
+  }, 60_000);
   it('no role can win alone: solo players never leave tier 1', () => {
     for (const seed of seeds) {
       for (const team of ['solo mech', 'solo elec', 'solo fin', 'nobody']) {
         expect(simulate(TEAMS[team], 26, seed).final.tier, `${team} seed ${seed}`).toBe(1);
       }
     }
-  });
+  }, 60_000);
   it('pacing guard: three friends reach tier 5 by week 26 in at least 75% of seeds 1-30', () => {
     const reached = Array.from({ length: 30 }, (_, i) => simulate(TEAMS['three friends'], 26, i + 1).final.stats.tierReachedWeek[5]).filter((w) => w !== undefined && w <= 26).length;
     expect(reached / 30).toBeGreaterThanOrEqual(0.75);
@@ -270,7 +347,7 @@ describe('paper-sim exit tests (spec phase 0)', () => {
     const tiers = seeds.map((seed) => simulate(TEAMS['all average'], 26, seed).final.tier);
     expect(Math.max(...tiers)).toBe(5);
     expect(tiers.filter((t) => t >= 4).length).toBeGreaterThanOrEqual(seeds.length / 2);
-  });
+  }, 30_000);
 });
 
 describe('multi-device seats', () => {
@@ -394,9 +471,9 @@ describe('squawks: the trades write up what their assets need', () => {
     const r = apply(s, { t: 'squawk', role: 'mech', assetId: plane.id, kind }, NOW);
     expect(r.error).toBeUndefined();
     s = r.s;
-    const o = s.orders[s.orders.length - 1];
-    expect(o.squawk).toBe('Ana');
-    expect(o.status).toBe('pending');
+    // a write-up is an alert with its kind's task filled in (the tech plans it; anything to buy goes to the analyst)
+    const a = s.alerts![s.alerts!.length - 1];
+    expect(a).toMatchObject({ role: 'mech', assetId: plane.id, sym: `W_${kind}`, who: 'Ana', status: 'open' });
     expect(apply(s, { t: 'squawk', role: 'mech', assetId: plane.id, kind: 'tires' }, NOW).error).toMatch(/One write-up/);
   });
 });

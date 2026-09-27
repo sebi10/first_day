@@ -10,6 +10,7 @@ import { chainMove, engineeringFee, islandAircraft, judgePart, manualCard, openC
 import { CHAIN, DEFECT_RULES, ECON, defectRule, defectVariant } from '../src/sim/data';
 import { capOf, outOfService } from '../src/sim/econ';
 import { apply, chainWouldOpen, createIsland, isEmergency } from '../src/sim/engine';
+import { repairTask } from '../src/sim/flow';
 import { hashSeed } from '../src/sim/rng';
 import { ROLES, type Asset, type IslandState, type Order } from '../src/sim/types';
 import { launchFor } from '../src/ui/select';
@@ -292,7 +293,8 @@ describe('in the IPC: lookup → buy → delivery → install', () => {
     // the cash at the end of the week: its own flows, plus the credit (the next week's petty-cash approvals come after)
     const h = s.history.at(-1)!;
     const c = h.costs;
-    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0)));
+    // (the job flow's own outgoings too: the carrying charge on the stock, and any payment run)
+    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0) - (c.carry ?? 0) - (c.parts ?? 0) - (c.freight ?? 0)));
     // the banner says why it's back at the IPC, until the new lookup is handed in
     expect(s.chain!.back).toMatch(new RegExp(`^Sent back at receiving: P/N ${wrong} is not effective for`));
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: rightPn(ac, '32-40', 'lining') } });
@@ -372,6 +374,8 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: oem } });
     s = approve(s, step(s).id);
     s = resolve(s);
+    // now and then the paperwork comes a week late (a seeded roll on the chain's id): the check waits for it
+    if (s.chain!.step === 'transit') s = resolve(s);
     expect(s.chain!.returns).toBe(1);
     // receiving already says the IPC doesn't list it: straight to the records, not the book again
     expect(s.chain!.step).toBe('research');
@@ -403,9 +407,13 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     const insp: Order = { ...s.orders[0], id: 'insp', kind: 'inspect100', title: '100-hr inspection', puzzle: 'crack', assetId: 'p2', status: 'ready', role: 'mech', tier: 2, cost: 180, gain: 10, chain: undefined, repair: undefined, redo: undefined, report: undefined };
     s.orders.push(insp);
     s = complete(s, insp);
-    const rep = s.orders.find((o) => o.kind === 'repair' && o.repair?.defect.variant === 'unapproved')!;
+    // the repair is an alert, planned like any: its job is the logbook research (the paperwork), no redo
+    const al = s.alerts!.find((a) => a.repair?.defect.variant === 'unapproved')!;
+    expect(al.repair!.defect.redo).toBe(false);
+    const planned = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: repairTask(s, al)!.id, pick: [], week: s.week }, NOW);
+    expect(planned.error).toBeUndefined();
+    const rep = planned.s.orders.find((o) => o.flow?.alert === al.id)!;
     expect(rep.puzzle).toBe('logbook');
-    expect(rep.repair!.defect.redo).toBe(false);
     expect(s.feed.some((f) => /found an ICA part installed without the engineering authorization GMM 4\.7\(c\) requires/.test(f.text))).toBe(true);
   });
 });
@@ -485,7 +493,8 @@ describe('the rules around it', () => {
         }
       });
     }
-    expect(total).toBeGreaterThan(4);
+    // chains open from the job flow's research branch only now (CHAIN.flowChance 0): fewer, but they do
+    expect(total).toBeGreaterThan(1);
     expect(opens).toBeGreaterThanOrEqual(closes);
   });
 });

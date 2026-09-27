@@ -4,13 +4,14 @@
 // the UI), the teaching warnings before commit, and the stops at the install.
 // Pure: nothing here changes the island.
 import { figSb, ipcFor, planeModel, plantedFor, plantRows, rowFor, type Aircraft, type AnyAta, type Ata } from './aircraft';
-import { causeOf, needsOf, protectionNeeded, siteOf, symptomOf } from './alerts';
+import { alertFlags, alertTier, causeOf, fixesOf, needsOf, protectionNeeded, siteOf, symptomOf } from './alerts';
 import { islandAircraft, judgePart, type PartCheck } from './chain';
-import { CATALOG_BY_KIND, DEFECT, defectRule, kitValue, type DefectRule } from './data';
-import { orderCost, orderTier, round10 } from './econ';
-import { itemById, lineValue, planeItemIds, priceAt } from './items';
+import { CATALOG_BY_KIND, DEFECT, defectRule, FREIGHT, kitValue, SUPPLIERS, type DefectRule } from './data';
+import { alertAog, downtimeOf, hazardOn, houseWeekRevenue, orderCost, orderTier, restrictedBy, round10 } from './econ';
+import { buyUnits, itemById, lineValue, planeItemIds, priceAt } from './items';
+import { aogOk, cardBuyLines, etaOf, owned, reservedFor, uncovered, unitCost, vendorFor } from './stock';
 import { benchFor, fixedFor, laborMin, slotQty, slotsAt, taskById, type MainSlot, type Task } from './tasks';
-import type { Alert, Asset, EaRecord, ElecSite, IslandState, Item, ItemId, PickLine } from './types';
+import type { Alert, Asset, BuyChoice, EaRecord, ElecSite, Freight, IslandState, Item, ItemId, OpsRole, Order, PickLine, SupplierId, TaskId } from './types';
 
 export const acOf = (s: IslandState, asset: Pick<Asset, 'id' | 'model' | 'kind'> | undefined | null): Aircraft | null =>
   asset && asset.kind === 'plane' ? islandAircraft(s.seed, asset) : null;
@@ -481,3 +482,256 @@ export function repairLabor(s: Pick<IslandState, 'tier'>, d: { cost: number; puz
   const line = repairLine(rule, d.job, d.role === 'elec' ? 'elec' : 'mech');
   return round10(Math.max(50, today - (line ? lineValue(line) : 0)));
 }
+
+
+// ---------------------------------------------------------------------------
+// Repairs: a hidden defect's fix, planned from its alert (4.4)
+
+/** the repair alert's defect rule (its words and its fix) */
+export const repairRule = (d: { puzzle: string; role: 'mech' | 'elec' | 'fin'; orderKind: string; variant?: string; rule?: string }) => defectRule(d.puzzle, d.role, d.rule ?? d.orderKind, d.variant);
+
+/**
+ * A repair alert's task: its fix rule's puzzle and job, with the pre-filled
+ * line (RPR-{job} where the fix carries parts; an `ipc:noteff` repair carries
+ * the effective part the inspection found missing, the original task's right
+ * pick). No Investigate or Manual step: the flow opens at Stock.
+ */
+export function repairTask(s: IslandState, a: Alert): Task | undefined {
+  const r = a.repair;
+  if (!r) return undefined;
+  const d = r.defect;
+  const rule = repairRule(d);
+  const trade: OpsRole = d.role === 'elec' ? 'elec' : 'mech';
+  let fixed: { item: ItemId; qty: number }[] | undefined;
+  if (d.puzzle === 'ipc' && d.variant === 'noteff' && d.task) {
+    const t = taskById(d.task);
+    const asset = s.assets.find((x) => x.id === d.assetId);
+    if (t && asset) fixed = stdPick(s, asset, t, null, t.main.map((m) => m.slot)).map((l) => ({ item: l.item, qty: l.qty }));
+  } else {
+    const line = repairLine(rule, d.job, trade);
+    if (line) fixed = [line];
+  }
+  return {
+    id: `repair:${a.id}`,
+    trade,
+    book: trade === 'elec' ? 'REF' : 'AMM',
+    no: 'Repair',
+    title: rule.fix.title,
+    short: rule.fix.title,
+    chapter: 'Repairs',
+    kind: 'repair',
+    job: rule.fix.job ?? d.job ?? d.orderKind,
+    main: [],
+    ...(fixed?.length ? { fixed } : {}),
+    bench: [],
+    tools: [],
+    keywords: [],
+  };
+}
+
+/** the task a plan names: a task in the manual set, or a repair alert's own task */
+export function planTask(s: IslandState, a: Alert, task: TaskId): Task | undefined {
+  if (task.startsWith('repair:')) return task === `repair:${a.id}` ? repairTask(s, a) : undefined;
+  return taskById(task);
+}
+
+// ---------------------------------------------------------------------------
+// The stage a player sees (2.4), derived
+
+export type FlowStage = 'new' | 'bench' | 'approval' | 'parts' | 'research' | 'ready' | 'done' | 'closed';
+
+const isOpen = (o: Order | undefined) => !!o && o.status !== 'done' && o.status !== 'cancelled';
+
+export function flowStage(s: IslandState, a: Alert): FlowStage {
+  if (a.status === 'closed') return 'closed';
+  const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+  const benchOpen = !!a.bench?.order && isOpen(s.orders.find((x) => x.id === a.bench!.order));
+  if (!o || o.status === 'cancelled') return benchOpen ? 'bench' : 'new';
+  if (o.status === 'done') return 'done';
+  if (o.status === 'pending' || o.status === 'countered') return 'approval';
+  const chainHolds = o.chain?.step === 'job' && s.chain?.id === o.chain.id && s.chain.step !== 'done' && s.chain.step !== 'install';
+  if (o.flow?.queued || chainHolds) return 'research';
+  if (o.status === 'ready') return 'ready';
+  if (benchOpen) return 'bench';
+  return 'parts';
+}
+
+// ---------------------------------------------------------------------------
+// The install check (8.7): what the tech finds when the box is opened
+
+const lc = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
+/**
+ * What stops a flow job at the install: a mechanic's line that isn't this
+ * airplane's part (wrong, unlisted), or the IPC part of an assembly an
+ * alteration replaced (research); a needed slot short or empty; an
+ * electrician's line in the wrong category; a required tool not owned. A part
+ * that isn't effective doesn't stop it (the mistake surfaces later).
+ */
+export function installCheck(s: IslandState, o: Order): { stop: string; research?: boolean } | null {
+  if (!o.flow || o.flow.wired) return null;
+  const a = s.alerts?.find((x) => x.id === o.flow!.alert);
+  const asset = s.assets.find((x) => x.id === o.assetId);
+  for (const t of o.flow.tools) if (!owned(s, t)) return { stop: `${itemById(t)?.nomen ?? t} isn't in the shop: the job waits for it.` };
+  const task = a ? planTask(s, a, o.flow.task) : taskById(o.flow.task);
+  if (!task || !asset) return null;
+  const right = !!a && fixesOf(s, a).includes(task.id);
+  const needs = a && right ? needsOf(s, a) : [];
+  if (task.trade === 'mech' && asset.kind === 'plane') {
+    const ac = acOf(s, asset)!;
+    const tier = a ? alertTier(s, a, o.role) : 3;
+    const { slots } = assignSlots(task, o.flow.pick, null, ac);
+    // the research branch's part (13) goes in the slot it researched: the chain brought it, the pick never held it
+    const ch = o.flow.research && o.chain && s.chain?.id === o.chain.id ? s.chain : null;
+    for (const m of task.main) {
+      if (!m.ata || !m.tag) continue;
+      if (ch && m.tag === ch.tag) continue;
+      const lines = slots.get(m.slot) ?? [];
+      for (const l of lines) {
+        const c = judgeSlot(s, asset, m.ata, m.tag, l.item);
+        if (c.ok) continue;
+        if (c.why === 'displaced') return { stop: `The ${lc(m.label)} assembly on ${asset.name} isn't the one in the IPC: it was altered. Research the records.`, research: true };
+        if (c.why === 'wrong' || c.why === 'unlisted')
+          return { stop: tier <= 2 ? `${l.item} isn't the ${lc(m.label)} this airplane takes: check the IPC for S/N ${ac.serial}.` : `The ${lc(m.label)} doesn't fit: check the IPC.` };
+      }
+      const need = !m.optional || needs.includes(m.slot);
+      if (!need) continue;
+      const have = lines.reduce((n, l) => n + l.qty, 0);
+      const want = slotQty(m, ac, null);
+      if (have === 0) {
+        const f = a ? causeOf(a)?.finding : undefined;
+        return { stop: `${f ? `${f.split(';')[0].replace(/\.$/, '')}: this` : 'This'} job replaces the ${lc(m.label)}, and none was picked.` };
+      }
+      if (have < want) {
+        const short = want - have;
+        const word = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'][short] ?? String(short);
+        return { stop: `${word} ${lc(m.label)}${short > 1 && !/s$/.test(m.label) ? 's' : ''} short: the AMM does ${m.tag === 'lining' ? 'both brakes' : 'the set'}.` };
+      }
+    }
+  } else if (task.trade === 'elec') {
+    const site = a ? siteOf(s, a) : null;
+    const v = judgeElecPick(task, site, o.flow.pick);
+    if ('stop' in v) return { stop: v.stop };
+    const { slots } = assignSlots(task, o.flow.pick, site);
+    for (const m of slotsAt(task, site)) {
+      const need = !m.optional || needs.includes(m.slot);
+      if (need && !(slots.get(m.slot) ?? []).length) return { stop: `This job needs ${/^[aeiou]/i.test(m.label) ? 'an' : 'a'} ${lc(m.label)}, and none was picked.` };
+    }
+  }
+  return null;
+}
+
+/** main-slot value covered from stock at plan time / planned (the fill rate) */
+export function fillOf(s: IslandState, o: Order): [number, number] {
+  if (!o.flow) return [0, 0];
+  let f = 0;
+  let p = 0;
+  for (const l of o.flow.pick) {
+    const unit = unitCost(s, l.item);
+    p += l.qty * unit;
+    f += Math.min(l.qty, reservedFor(s, o.id, l.item)) * unit;
+  }
+  return [f, p];
+}
+
+// ---------------------------------------------------------------------------
+// The card (8.6): A computes, C draws
+
+export type Arrival = { eta: number; outWeeks: number };
+export type Card = {
+  labour: number;
+  fromStock: { item: ItemId; qty: number; value: number }[];
+  toBuy: { item: ItemId; qty: number; unit: number; supplier: SupplierId; eta: number }[];
+  tools: { item: ItemId; price: number }[];
+  freight: { sched: Arrival; aog?: Arrival & { cost: number }; pick: Freight };
+  total: number;
+  aog: boolean;
+  restricted: boolean;
+  shut: boolean;
+  downtime?: { flights: number; usd: number };
+  due: number;
+  mel?: { until: number; ext?: boolean };
+  budget: { trade: OpsRole; spent: number; of: number };
+};
+
+/** resolves the asset spends out (AOG, restricted, closed) waiting on lines that land at `eta`'s resolve (the job is done the week after) */
+function outWeeks(s: IslandState, a: Alert | undefined, eta: number): number {
+  if (!a) return 0;
+  const f = alertFlags(s, a);
+  if (!f.aw && !f.hazard) return 0;
+  const from = Math.max(a.due, s.week);
+  if (f.hazard && !a.safe) return Math.max(0, eta - s.week + 1);
+  if (a.mel && a.mel.until >= eta) return 0;
+  return Math.max(0, eta - from + 1);
+}
+
+/**
+ * What a flow card shows and costs: the labour, the lines from stock and to
+ * buy (a pending card's shortfall lives only on the card; an approved job's
+ * uncovered shortfall), the tools to buy, both freights with what each does to
+ * the asset, and the default: the AOG boat when the scheduled arrival leaves
+ * the asset out longer and that downtime costs more than the boat.
+ */
+export function cardOf(s: IslandState, o: Order, buy?: BuyChoice): Card {
+  const a = o.flow ? s.alerts?.find((x) => x.id === o.flow!.alert) : undefined;
+  const asset = s.assets.find((x) => x.id === o.assetId);
+  const pending = o.status === 'pending' || o.status === 'countered';
+  const lines = pending ? cardBuyLines(s, o) : uncovered(s, o);
+  const W = s.week;
+  const fromStock = (o.flow ? [...o.flow.pick, ...o.flow.bench] : [])
+    .map((l) => l.item)
+    .filter((id, i, arr) => arr.indexOf(id) === i)
+    .map((id) => ({ item: id, qty: reservedFor(s, o.id, id), value: Math.round(reservedFor(s, o.id, id) * unitCost(s, id) * 100) / 100 }))
+    .filter((l) => l.qty > 0);
+  const toBuy: Card['toBuy'] = [];
+  const tools: Card['tools'] = [];
+  let schedEta = W;
+  let aogPossible = true;
+  for (const l of lines) {
+    const x = itemById(l.item);
+    if (!x) continue;
+    const vendor = vendorFor(x, buy);
+    const unit = Math.round(priceAt(x, vendor) * 100) / 100;
+    const qty = buyUnits(x, l.qty);
+    const eta = etaOf(W, x, vendor);
+    schedEta = Math.max(schedEta, eta);
+    if (!aogOk(x, vendor)) aogPossible = false;
+    if (l.tool) tools.push({ item: l.item, price: Math.round(unit * qty) });
+    else toBuy.push({ item: l.item, qty, unit, supplier: vendor, eta });
+  }
+  const anyToBuy = toBuy.length + tools.length > 0;
+  const sched: Arrival = { eta: anyToBuy ? schedEta : W, outWeeks: outWeeks(s, a, anyToBuy ? schedEta : W - 1) };
+  const vendors = new Set([...toBuy.map((l) => l.supplier), ...tools.map((t) => vendorFor(itemById(t.item)!, buy))]);
+  const aogCost = FREIGHT.aog * Math.max(1, vendors.size);
+  const aog = anyToBuy && aogPossible ? { eta: W, outWeeks: outWeeks(s, a, W), cost: aogCost } : undefined;
+  const down = asset?.kind === 'plane' ? downtimeOf(s, asset.id) : asset?.kind === 'house' ? { flights: 0, usd: Math.round(houseWeekRevenue(s, asset)) } : undefined;
+  const saved = aog ? sched.outWeeks - aog.outWeeks : 0;
+  const auto: Freight = aog && saved > 0 && saved * (down?.usd ?? 0) > aog.cost ? 'aog' : 'sched';
+  const pick: Freight = buy?.freight && (buy.freight === 'sched' || aog) ? buy.freight : auto;
+  const labour = pending ? o.cost : 0;
+  const buyTotal = toBuy.reduce((n, l) => n + l.qty * l.unit, 0) + tools.reduce((n, t) => n + t.price, 0);
+  const aogNow = asset?.kind === 'plane' ? alertAog(s, asset.id)?.id === a?.id && !!a : false;
+  const restricted = asset?.kind === 'plane' ? restrictedBy(s, asset.id)?.id === a?.id && !!a : false;
+  const hz = asset?.kind === 'house' ? hazardOn(s, asset.id) : undefined;
+  return {
+    labour,
+    fromStock,
+    toBuy,
+    tools,
+    freight: { sched, ...(aog ? { aog } : {}), pick },
+    total: Math.round(labour + buyTotal + (pick === 'aog' && aog ? aog.cost : 0)),
+    aog: aogNow,
+    restricted,
+    shut: !!hz && hz.id === a?.id && !hz.safe,
+    ...(down ? { downtime: { flights: down.flights, usd: Math.round(down.usd) } } : {}),
+    due: a?.due ?? W,
+    ...(a?.mel ? { mel: { until: a.mel.until, ...(a.mel.ext ? { ext: true } : {}) } } : {}),
+    budget: { trade: o.role === 'elec' ? 'elec' : 'mech', spent: s.autoSpent[o.role === 'elec' ? 'elec' : 'mech'] ?? 0, of: s.autoBudget[o.role === 'elec' ? 'elec' : 'mech'] ?? 0 },
+  };
+}
+
+/** a supplier's words on a card line (C draws them) */
+export const supplierWords = (v: SupplierId) => {
+  const d = SUPPLIERS[v];
+  return d.leadAdd ? `${d.short}, +${d.leadAdd} week` : d.short;
+};

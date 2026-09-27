@@ -836,6 +836,25 @@ export function symptomText(s: IslandState, a: Alert): string {
   return text;
 }
 
+/**
+ * The alert in a few words, for review lines, the feed and the analyst's needs (no P/N): the symptom's first
+ * clause without who noticed it ("Guest at Cottage 1:", "Utility log:"), the twin's engine said at the end
+ * ("low-voltage light (L/H engine)"), lower case unless it opens on an acronym ("GEN OFF light on the ground run").
+ */
+export function alertShort(s: IslandState, a: Alert): string {
+  let t = symptomText(s, a).replace(/^Written up (again|by [^:]+): /i, '');
+  let eng = '';
+  const m = /^(L\/H|R\/H) engine: /i.exec(t);
+  if (m) {
+    eng = ` (${m[1]} engine)`;
+    t = t.slice(m[0].length);
+  }
+  t = t.replace(/^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm|Weekly test|Weekly generator run): /i, '');
+  const first = t.split(/[;:]|\.(?=\s|$)/)[0].trim();
+  const lead = /^[A-Z0-9]{2}/.test(first) ? first : first.charAt(0).toLowerCase() + first.slice(1);
+  return lead + eng;
+}
+
 /** the site of an electrical job (derived from the seed): room, circuit, AWG, run, protection upstream */
 export function siteOf(s: IslandState, a: Pick<Alert, 'seed' | 'sym' | 'cause' | 'role' | 'assetId'>): ElecSite | null {
   const sym = SYMPTOMS[a.sym];
@@ -1100,7 +1119,8 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     const openOrders = s.orders.filter((o) => o.role === role && openOrder(o));
     // jobs stuck waiting for parts don't count: the trade always has something it can do by hand
     const workable = openOrders.filter((o) => o.status !== 'waiting_part');
-    const openAlerts = (s.alerts ?? []).filter((a) => a.role === role && a.status === 'open');
+    // a no-fault alert doesn't take a slot (5.1), and doesn't count as work on its asset
+    const openAlerts = (s.alerts ?? []).filter((a) => a.role === role && a.status === 'open' && a.cause >= 0);
     const live = liveAlerts(s);
     const target = s.tier >= 3 ? 5 : 4;
     let openCount = workable.length + openAlerts.length;

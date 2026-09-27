@@ -1,13 +1,18 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
 import type { PuzzleId } from '../puzzles/types';
+import { alertFlags, alertShort, liveAlerts, soleGuest } from '../sim/alerts';
 import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { externalPower } from '../sim/aircraft';
 import { CABLE_REPORT, ECON, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
 import { cartOn, flightsAvailable, flightsPerPlane, gseCarts, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap } from '../sim/econ';
+import { cardOf, flowStage } from '../sim/flow';
+import { itemById } from '../sim/items';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
-import { ROLES, type Action, type IslandState, type Order, type Role } from '../sim/types';
+import { invoiceContext, reqValue, stockFlags, urgentJob } from '../sim/stock';
+import { taskById } from '../sim/tasks';
+import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Order, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
 
 /** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
@@ -15,7 +20,8 @@ export type Block = { from: Role; to: Role; text: string; kind?: CrossMove['kind
 
 export function blocks(s: IslandState): Block[] {
   const out: Block[] = [];
-  const pending = s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week && !o.chain);
+  // legacy cards (no job flow): today's count. Flow cards and requisitions come in with the cross-trade moves below
+  const pending = s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week && !o.chain && !o.flow);
   const byRole = (r: Role) => pending.filter((o) => o.role === r).length;
   for (const r of ['mech', 'elec'] as Role[])
     if (byRole(r)) out.push({ from: 'fin', to: r, text: `${byRole(r)} approval${byRole(r) > 1 ? 's' : ''} waiting` });
@@ -26,13 +32,35 @@ export function blocks(s: IslandState): Block[] {
     .reduce((n, p) => n + (p.health >= 40 ? 1 : 0), 0);
   if (passengerCap === 0) out.push({ from: 'mech', to: 'elec', text: 'no guest flights: houses stay empty' });
   const cargo = planes(s).find((p) => MODELS[p.model].cargo);
-  if (cargo && cargo.health < 40 && s.parts.inTransit > 0) out.push({ from: 'mech', to: 'elec', text: 'cargo plane grounded: parts stuck' });
+  const stuck = (s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.carrier === 'bulk' && p.eta <= s.week).length;
+  if (cargo && cargo.health < 40 && stuck > 0) out.push({ from: 'mech', to: 'elec', text: `cargo plane grounded: ${stuck} PO${stuck > 1 ? 's' : ''} waiting for a flight` });
   if (powered(s).gridDown) out.push({ from: 'elec', to: 'mech', text: 'grid down: hangar tools offline' });
   if (houses(s).length && housesRentable(s) === 0) out.push({ from: 'elec', to: 'fin', text: 'no rentable houses: no revenue' });
   if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
-  // cross-trade moves: a crewmate's report and the part chain, counted the same way
-  for (const m of crossMoves(s)) out.push({ from: m.who, to: m.waits, text: m.text, kind: m.kind });
+  // cross-trade moves: a crewmate's report, the part chain and the job flow, counted the same way. The flow's
+  // cards and requisitions are one line per pair of seats (16); a grounded plane or a closed house gets its own
+  const tally = new Map<string, { from: Role; to: Role; cards: number; reqs: number; usd: number }>();
+  for (const m of crossMoves(s)) {
+    if (m.kind === 'flow' && (m.key.startsWith('flow:card:') || m.key.startsWith('flow:req:'))) {
+      const k = `${m.who}>${m.waits}`;
+      const t = tally.get(k) ?? tally.set(k, { from: m.who, to: m.waits, cards: 0, reqs: 0, usd: 0 }).get(k)!;
+      if (m.key.startsWith('flow:card:')) t.cards++;
+      else t.reqs++;
+      t.usd += m.usd ?? 0;
+      continue;
+    }
+    out.push({ from: m.who, to: m.waits, text: m.text, kind: m.kind });
+  }
+  for (const t of tally.values()) out.push({ from: t.from, to: t.to, text: `${waitWords(t.cards, t.reqs)} waiting (${usdWords(t.usd)})`, kind: 'flow' });
   return out;
+}
+
+const usdWords = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+/** "2 cards and 1 requisition" */
+function waitWords(cards: number, reqs: number): string {
+  const c = cards ? `${cards} card${cards > 1 ? 's' : ''}` : '';
+  const r = reqs ? `${reqs} requisition${reqs > 1 ? 's' : ''}` : '';
+  return [c, r].filter(Boolean).join(' and ');
 }
 
 /**
@@ -45,7 +73,19 @@ export function blocks(s: IslandState): Block[] {
  * so a report and a chain step count toward "whose move is it" the same way.
  * `key` changes when the move does (a push goes out for a new one).
  */
-export type CrossMove = { key: string; kind: 'report' | 'chain'; who: Role; waits: Role; text: string; /** "the hangar work lights are dead" / "Cargo C-7 AOG: brake linings" */ what: string; /** the move in a few words */ short: string };
+export type CrossMove = {
+  key: string;
+  kind: 'report' | 'chain' | 'flow';
+  who: Role;
+  waits: Role;
+  text: string;
+  /** "the hangar work lights are dead" / "Cargo C-7 AOG: brake linings" */
+  what: string;
+  /** the move in a few words */
+  short: string;
+  /** a flow card or requisition: what it comes to */
+  usd?: number;
+};
 
 export function crossMoves(s: IslandState): CrossMove[] {
   const out: CrossMove[] = [];
@@ -71,7 +111,192 @@ export function crossMoves(s: IslandState): CrossMove[] {
     const effect = rep.effect === 'cap' ? ` (${capWords(rep.by)})` : rep.effect === 'gse' ? ` (${gseCarts(s).find((c) => c.id === rep.cart)?.name ?? 'a GPU cart'} tagged out)` : ` (−\u2060$${rep.amount.toLocaleString('en-US')}/wk)`;
     out.push({ key: `report:${o.id}`, kind: 'report', who: o.role, waits: rep.by, text: `${reportSaid(o)}${effect}`, what: reportSaid(o), short: 'fix the report' });
   }
+  out.push(...flowMoves(s));
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// The job flow's moves (docs/JOBFLOW.md 16)
+
+const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
+const assetName = (s: IslandState, id: string | null | undefined) => s.assets.find((x) => x.id === id)?.name;
+
+/** what the electrician meters for a bench alert */
+const BENCH_WHAT: Record<string, string> = { M_COM_DEAD: 'com 1', M_LOW_VOLTS: 'the alternator circuit', M_GEN_OFF: 'the starter-generator circuit' };
+
+/** one alert's next move: the inbox chip and the stepper's "next" line (16) */
+export function flowMove(s: IslandState, a: Alert): { who: Role | null; chip: string; text: string } {
+  const where = assetName(s, a.assetId) ? ` on ${assetName(s, a.assetId)}` : '';
+  const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+  switch (flowStage(s, a)) {
+    case 'new':
+      return { who: a.role, chip: a.due <= s.week ? 'Due now' : 'Your move', text: `find the fix for ${alertShort(s, a)}${where}` };
+    case 'bench':
+      return { who: 'elec', chip: `${nameOf(s, 'elec')}: meter it`, text: `meter ${BENCH_WHAT[a.sym] ?? 'the circuit'}${where}` };
+    case 'approval':
+      return { who: 'fin', chip: `${nameOf(s, 'fin')}: approve`, text: `approve ${o?.title ?? 'the card'}${where} (${usdWords(o ? cardOf(s, o).total : 0)})` };
+    case 'parts': {
+      if (o?.flow?.stop) return { who: a.role, chip: 'Repick', text: `repick: ${o.flow.stop}` };
+      const reqs = (s.reqs ?? []).filter((r) => r.order === o?.id && r.status === 'open');
+      if (reqs.length) {
+        const usd = reqs.reduce((n, r) => n + reqValue(r), 0);
+        return { who: 'fin', chip: `${nameOf(s, 'fin')}: buy`, text: `buy ${reqs.length} line${reqs.length > 1 ? 's' : ''} for ${o?.title ?? 'the job'} (${usdWords(usd)})` };
+      }
+      // everything is ordered: when it comes (the first line still out)
+      const lines = (s.pos ?? []).flatMap((p) => (p.status === 'open' || p.status === 'held' ? p.lines.filter((l) => l.order === o?.id && l.got === undefined && !l.back).map((l) => ({ p, l })) : []));
+      const held = lines.find((x) => x.p.status === 'held' || x.l.hold);
+      if (held) return { who: null, chip: 'Held: paperwork', text: `the ${itemById(held.l.item)?.nomen.split(',')[0].toLowerCase() ?? held.l.item} waits for its paperwork (week ${held.p.hold ?? s.week + 1})` };
+      const tool = lines.find((x) => itemById(x.l.item)?.kind === 'tool');
+      if (tool && lines.length === 1) return { who: null, chip: 'Tool on order', text: `the ${itemById(tool.l.item)?.nomen.split(',')[0].toLowerCase() ?? tool.l.item} comes week ${tool.p.eta}` };
+      const first = lines.sort((x, y) => x.p.eta - y.p.eta)[0];
+      if (first) return { who: null, chip: `Parts wk ${first.p.eta}`, text: `the ${itemById(first.l.item)?.nomen.split(',')[0].toLowerCase() ?? first.l.item} comes week ${first.p.eta}${first.p.eta <= s.week ? ' (next flight)' : ''}` };
+      return { who: null, chip: 'Parts', text: `waiting on parts for ${o?.title ?? 'the job'}` };
+    }
+    case 'research': {
+      const ch = openChain(s);
+      if (ch && o?.chain && ch.id === o.chain.id) {
+        const m = chainMove(s, ch);
+        return { who: m.who, chip: m.chip, text: m.text };
+      }
+      return { who: null, chip: 'Research queued', text: 'the research opens when the part chain in progress closes' };
+    }
+    case 'ready':
+      return { who: a.role, chip: 'Ready', text: `do ${o?.title ?? 'the job'}${where}` };
+    case 'done':
+      return { who: null, chip: 'Done', text: '' };
+    default:
+      return { who: null, chip: 'Closed', text: '' };
+  }
+}
+
+/** what an alert does to its asset now, in words (the grounded plane, the restricted one, the closed house) */
+function bites(s: IslandState, o: Order): string | null {
+  if (!urgentJob(s, o)) return null;
+  const asset = s.assets.find((x) => x.id === o.assetId);
+  if (!asset) return null;
+  if (asset.kind === 'plane') return soleGuest(s, asset.id) ? `${asset.name} flies restricted` : `${asset.name} is AOG`;
+  return `${asset.name} is closed`;
+}
+
+/** the job flow's cross-trade moves (inside crossMoves), when both seats are held */
+export function flowMoves(s: IslandState): CrossMove[] {
+  const out: CrossMove[] = [];
+  const held = (a: Role, b: Role) => !!s.players[a] && !!s.players[b];
+  for (const o of s.orders) {
+    if (!o.flow || o.status === 'done' || o.status === 'cancelled') continue;
+    const where = assetName(s, o.assetId) ? ` on ${assetName(s, o.assetId)}` : '';
+    if (o.status === 'pending' && o.lastDeferredWeek !== s.week && held('fin', o.role)) {
+      const total = cardOf(s, o).total;
+      out.push({ key: `flow:card:${o.id}`, kind: 'flow', who: 'fin', waits: o.role, text: `approve ${o.title}${where} (${usdWords(total)})`, what: `${o.title}${where}`, short: 'approve the card', usd: total });
+    }
+    if (o.status === 'ready' && held(o.role, 'fin')) {
+      const b = bites(s, o);
+      if (b) out.push({ key: `flow:aog:${o.id}`, kind: 'flow', who: o.role, waits: 'fin', text: `${b}: do ${o.title}`, what: b, short: 'do the job' });
+    }
+  }
+  for (const r of s.reqs ?? []) {
+    if (r.status !== 'open' || r.deferredWeek === s.week || !held('fin', r.role)) continue;
+    const x = itemById(r.item);
+    const usd = reqValue(r);
+    out.push({ key: `flow:req:${r.id}`, kind: 'flow', who: 'fin', waits: r.role, text: `buy ${r.qty} × ${x?.pn ?? r.item} (${usdWords(usd)})`, what: `${r.qty} × ${x?.pn ?? r.item}`, short: 'buy it', usd });
+  }
+  for (const a of liveAlerts(s)) {
+    if (!a.bench?.order || a.bench.call || !held('elec', 'mech')) continue;
+    const b = s.orders.find((x) => x.id === a.bench!.order);
+    if (!b || b.status === 'done' || b.status === 'cancelled') continue;
+    const plane = assetName(s, a.assetId) ?? 'the plane';
+    out.push({ key: `flow:bench:${a.id}`, kind: 'flow', who: 'elec', waits: 'mech', text: `meter ${BENCH_WHAT[a.sym] ?? 'the circuit'} on ${plane}`, what: `${plane}: ${alertShort(s, a)}`, short: 'meter it' });
+  }
+  return out;
+}
+
+/** this trade's open alerts due this week with no job signed off (due now first, then hazards and airworthiness) */
+export function dueNow(s: IslandState, role: OpsRole): Alert[] {
+  return liveAlerts(s)
+    .filter((a) => a.role === role && a.status !== 'closed' && a.due <= s.week)
+    .filter((a) => {
+      const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+      return !o || o.status !== 'done';
+    })
+    .sort((a, b) => a.due - b.due || rank(s, a) - rank(s, b));
+}
+const rank = (s: IslandState, a: Alert) => {
+  const f = alertFlags(s, a);
+  return f.hazard ? 0 : f.aw ? 1 : 2;
+};
+
+/** the tech's "Your move" rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then by due week */
+export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?: Order }[] {
+  const rows: { alert: Alert; order?: Order }[] = [];
+  for (const a of liveAlerts(s)) {
+    if (a.role !== role || a.status === 'closed') continue;
+    const m = flowMove(s, a);
+    if (m.who !== role) continue;
+    const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+    rows.push({ alert: a, order: o && o.status !== 'cancelled' ? o : undefined });
+  }
+  return rows.sort((x, y) => Number(y.alert.due <= s.week) - Number(x.alert.due <= s.week) || rank(s, x.alert) - rank(s, y.alert) || x.alert.due - y.alert.due || (x.alert.id < y.alert.id ? -1 : 1));
+}
+
+export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' };
+
+/** the Dock's primary button (16): a tech's first Your move row (a ready job opens its start); the analyst's cards and requisitions */
+export function dockNext(s: IslandState, role: Role): { label: string; target: DockTarget } | null {
+  if (s.turns[role]?.ended) return null;
+  if (role === 'fin') {
+    const cards = s.orders.filter((o) => o.flow && o.status === 'pending' && o.lastDeferredWeek !== s.week).length;
+    const reqs = (s.reqs ?? []).filter((r) => r.status === 'open' && r.deferredWeek !== s.week).length;
+    if (cards + reqs > 0) return { label: `Review ${[cards ? `${cards} card${cards > 1 ? 's' : ''}` : '', reqs ? `${reqs} requisition${reqs > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ')} ▸`, target: { desk: 'approvals' } };
+    const urgent = stockFlags(s).filter((f) => f.urgent).length;
+    if (urgent > 0) return { label: `Stock: ${urgent} urgent ▸`, target: { desk: 'stock' } };
+    return null;
+  }
+  const row = yourMoves(s, role as OpsRole)[0];
+  if (!row) return null;
+  const where = assetName(s, row.alert.assetId);
+  if (row.order?.status === 'ready') return { label: `Start: ${row.order.title}${where ? ` · ${where}` : ''} ▸`, target: { order: row.order.id } };
+  return { label: `Next: ${alertShort(s, row.alert)}${where ? ` · ${where}` : ''} ▸`, target: { alert: row.alert.id } };
+}
+
+/** the End-turn confirm's flow lines (16); home adds today's ready jobs, owed moves and carts */
+export function endTurnChecks(s: IslandState, role: Role): { text: string; urgent: boolean }[] {
+  const out: { text: string; urgent: boolean }[] = [];
+  if (role === 'fin') {
+    const cards = s.orders.filter((o) => o.flow && o.status === 'pending' && o.lastDeferredWeek !== s.week);
+    const reqs = (s.reqs ?? []).filter((r) => r.status === 'open' && r.deferredWeek !== s.week);
+    if (cards.length + reqs.length > 0) {
+      const who = [...new Set([...cards.map((o) => o.role), ...reqs.map((r) => r.role)])].map((r) => nameOf(s, r)).join(', ');
+      const limit = s.standing ?? (s.autoBudget.mech ?? 0) + (s.autoBudget.elec ?? 0);
+      out.push({
+        text: `${waitWords(cards.length, reqs.length)} ${cards.length + reqs.length > 1 ? 'wait' : 'waits'} on you (${who}). After you end your turn, anything that comes in goes through tonight up to your standing limit (${usdWords(limit)}); the rest waits for next week.`,
+        urgent: cards.some((o) => urgentJob(s, o)),
+      });
+    }
+    return out;
+  }
+  const trade = role as OpsRole;
+  for (const a of liveAlerts(s)) {
+    if (a.role !== trade || a.status === 'closed') continue;
+    const asset = s.assets.find((x) => x.id === a.assetId);
+    const name = asset?.name ?? 'the asset';
+    const f = alertFlags(s, a);
+    const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+    const signed = o?.status === 'done';
+    if (a.due <= s.week && !signed && (f.aw || f.hazard)) {
+      if (f.hazard && !a.safe) out.push({ text: `Make it safe or fix it, or ${name} stays closed: ${alertShort(s, a)}.`, urgent: true });
+      else if (f.aw && asset?.kind === 'plane' && !(a.mel && a.mel.until >= s.week))
+        out.push({ text: `Fix it or placard it this week, or ${name} ${soleGuest(s, asset.id) ? 'flies restricted' : 'is AOG'}: ${alertShort(s, a)}.`, urgent: true });
+      continue;
+    }
+    if (a.status === 'open') out.push({ text: `Plan it now so the parts come in time: ${alertShort(s, a)} on ${name} (due wk ${a.due}).`, urgent: a.due <= s.week + 1 });
+  }
+  return out.sort((x, y) => Number(y.urgent) - Number(x.urgent));
+}
+
+/** open a job-flow target: B's ops panel and C's desk listen for it */
+export function openTarget(t: DockTarget): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('ic:open', { detail: t }));
 }
 
 /** The cross-trade moves that are this seat's to make: a crewmate is waiting on each (the end-turn check names them). */
@@ -97,8 +322,46 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
     const c = openChain(after);
     const aog = c ? ` ${after.assets.find((x) => x.id === c.assetId)?.name ?? 'A plane'} AOG: ${chainMove(after, c).chip}.` : '';
     const reps = fresh.map((m) => ` ${name(m.waits)} reports ${m.what}: ${name(m.who)}'s move.`).join('');
-    push(`${after.name}: week ${h.week} resolved`, `Grade ${h.grade}. Revenue $${h.revenue.toLocaleString('en-US')}, ${h.flightsFlown}/${h.flightsScheduled} flights, ${h.incidents.length} incidents.${aog}${reps}`);
+    // the job flow: parts that came in, and what bites this week
+    const inLines = h.lines.map((l) => /^Parts for (.+?) are in: (.+?), your move\.$/.exec(l.text)).filter((m): m is RegExpExecArray => !!m);
+    const partsIn = inLines.length ? ` Parts in: ${inLines.map((m) => `${m[1]} (${m[2]})`).join(', ')}.` : '';
+    const due = (['mech', 'elec'] as OpsRole[]).flatMap((r) => dueNow(after, r).filter((a) => a.status === 'open' || a.status === 'job')).filter((a) => {
+      const f = alertFlags(after, a);
+      return f.aw || f.hazard;
+    });
+    const dueWords = due.length
+      ? ` Due now: ${due
+          .slice(0, 3)
+          .map((a) => `${alertShort(after, a)} on ${after.assets.find((x) => x.id === a.assetId)?.name ?? 'an asset'}`)
+          .join('; ')} (fix it or ${due.some((a) => alertFlags(after, a).hazard) ? 'make it safe' : 'placard it'} this week).`
+      : '';
+    push(`${after.name}: week ${h.week} resolved`, `Grade ${h.grade}. Revenue $${h.revenue.toLocaleString('en-US')}, ${h.flightsFlown}/${h.flightsScheduled} flights, ${h.incidents.length} incidents.${aog}${reps}${partsIn}${dueWords}`);
     return out;
+  }
+  // the job flow: a new card or requisition goes to the analyst, a bench ask to the electrician, a nudge to the trade
+  if (a.t === 'plan' || a.t === 'repick') {
+    const o = after.orders.find((x) => x.flow && x.status === 'pending' && (a.t === 'plan' ? x.flow.alert === a.alert : x.id === a.order) && !before.orders.some((y) => y.id === x.id && y.status === 'pending'));
+    if (o) {
+      const card = cardOf(after, o);
+      const parts = card.total - card.labour;
+      const where = after.assets.find((x) => x.id === o.assetId)?.name;
+      const late = after.turns.fin?.ended ? ' It goes through tonight on your standing approval unless you defer it.' : '';
+      push(`${after.name}: a card for ${name('fin')}`, `${name(o.role)} sent ${o.title}${where ? ` on ${where}` : ''}: ${usdWords(card.total)} (${parts > 0 ? `parts ${usdWords(parts)}, ` : ''}labour ${usdWords(card.labour)}).${late}`);
+    }
+  }
+  if (a.t === 'request') {
+    const x = itemById(a.item);
+    push(`${after.name}: a request for ${name('fin')}`, `${name(a.role)} asks for ${a.qty} × ${x?.pn ?? a.item} (${usdWords(reqValue({ item: a.item, qty: a.qty }))}).`);
+  }
+  if (a.t === 'askBench') {
+    const al = after.alerts?.find((x) => x.id === a.alert);
+    const plane = al ? after.assets.find((x) => x.id === al.assetId)?.name : undefined;
+    if (al) push(`${after.name}: ${name('elec')}, meter it`, `${name('mech')} asks you to meter ${BENCH_WHAT[al.sym] ?? 'the circuit'} on ${plane ?? 'the plane'}: the unit, or its wiring?`);
+  }
+  if (a.t === 'nudge') {
+    const al = after.alerts?.find((x) => x.id === a.alert);
+    const where = al ? after.assets.find((x) => x.id === al.assetId)?.name : undefined;
+    if (al) push(`${after.name}: ${name(al.role)}, plan it`, `${name('fin')}: ${where ?? 'the asset'}'s ${alertShort(after, al)} is due week ${al.due}. Plan it so the parts come in time.`);
   }
   // a report raised mid-week (a cart's cable written up at an inspection), or one closed out: tell the other trade
   for (const m of fresh) push(`${after.name}: ${name(m.waits)} reports`, `${m.what.charAt(0).toUpperCase() + m.what.slice(1)}. ${name(m.who)}, your move.`);
@@ -222,6 +485,35 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
     context.chain = { step: o.chain.step, tag: ch.tag, item: ch.item, found: ch.found ?? '', from: ch.title, by: ch.by, week: ch.week };
   // the chain's circuit check on the airplane: what is really wrong (the meter's readings follow it)
   if (ch && o.chain && o.chain.id === ch.id && o.chain.step === 'bench' && ch.bench) context.bench = { fault: ch.bench.again ? 'wiring' : ch.bench.fault };
+  // the job flow's check on an alert's unit: the alert's cause says (the wiring cause, or the unit)
+  if (o.bench) {
+    const al = s.alerts?.find((x) => x.id === o.bench);
+    if (al) context.bench = { fault: al.bench?.again || al.kind === 'wiring' ? 'wiring' : 'unit' };
+  }
+  // the job flow: the lines the tech chose (display only), and the chosen task's card
+  if (o.flow && !o.flow.wired) {
+    context.pick = o.flow.pick.map((l) => {
+      const x = itemById(l.item);
+      return { pn: x?.pn ?? l.item, nomen: x?.nomen ?? l.item, qty: l.qty, ...(l.slot ? { slot: l.slot } : {}), ...(x?.spec ? { spec: x.spec } : {}) };
+    });
+    const t = taskById(o.flow.task);
+    if (t?.job) context.job = t.job;
+  }
+  // the analyst's desk: the auction's real lot, the invoice match's real POs
+  if (o.kind === 'auction' && o.lot) {
+    context.lot = {
+      fair: o.lot.fair,
+      list: o.lot.list,
+      lines: o.lot.lines.map((l) => {
+        const x = itemById(l.item);
+        return { pn: x?.pn ?? l.item, nomen: x?.nomen ?? l.item, qty: l.qty, list: Math.round((x?.price ?? 0) * l.qty) };
+      }),
+    };
+  }
+  if (o.puzzle === 'invoice') {
+    const inv = invoiceContext(s);
+    if (inv) context.invoice = inv;
+  }
   // the manual: torque and servicing values come from the plane's own task card (marked while the game teaches)
   if (asset?.kind === 'plane' && o.role === 'mech' && CARD_DRIVEN.has(o.puzzle)) {
     const card = manualCard(islandAircraft(s.seed, asset), o.job ?? o.kind, o.puzzle, tier <= 2);

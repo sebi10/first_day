@@ -226,6 +226,8 @@ describe('autopilot and the bots never start without a charged cart', () => {
     setCart(s, 'gpu1', { charge: 60 });
     const t = tagOut(s, 'gpu2');
     t.orders = t.orders.filter((o) => o.role !== 'mech');
+    // the mechanic's alerts aside: a job planned from one would take the slots these tests are about
+    t.alerts = (t.alerts ?? []).filter((a) => a.role !== 'mech');
     const a = order(t, { kind: 'gpustart', puzzle: 'gpu', assetId: 'p2', tier: 4, title: 'Ground power start: weak battery' });
     const b = order(t, { kind: 'gpustart', puzzle: 'gpu', assetId: 'p3', tier: 4, title: 'Ground power start: weak battery' });
     const oil = order(t, { kind: 'oil', puzzle: 'safetywire', assetId: 'p3', tier: 1, title: 'Oil change + safety wire', gain: 9, cost: 190 });
@@ -412,6 +414,6 @@ describe('whose move is it: reports and chain steps count the same way', () => {
     expect(p.title).toBe('Hangar Isle: week 5 resolved');
     expect(p.body).toMatch(/ Cargo C-7 AOG: Waiting on Ana: IPC lookup\./);
     // a botched fix that comes back has burnt the plug end: the push says so in those words
-    expect(p.body).toMatch(new RegExp(` Ana reports ${CABLE_REPORT.pitted.said}: Ben's move\\.$`));
+    expect(p.body).toMatch(new RegExp(` Ana reports ${CABLE_REPORT.pitted.said}: Ben's move\\.( |$)`));
   });
 });

@@ -107,8 +107,8 @@ export interface Defect {
   log?: string;
   /** the puzzle of the job that left it; 'flow' and 'elec' for the job flow's own mistakes (rule keys like `flow:task`, `elec:nogfci`) */
   puzzle: PuzzleId | 'flow' | 'elec';
-  /** a wrong-task or NFF defect remembers the fault it left: the alert it re-raises (docs/JOBFLOW.md 11.1) */
-  alert?: { sym: string; kind: string; alert: string };
+  /** a wrong-task or NFF defect remembers the fault it left: the alert it re-raises (docs/JOBFLOW.md 11.1), with its cause */
+  alert?: { sym: string; kind: string; alert: string; cause?: number };
   /** what went wrong, when the puzzle reported it and a rule exists for it ('hot' for a hot start): picks the `<puzzle>:<variant>` rule */
   variant?: string;
   /** that job's title, as it appeared on the card */
@@ -134,6 +134,12 @@ export interface Defect {
   redo: boolean;
   /** report comebacks: which report reopens */
   report?: ReportInfo;
+  /** DEFECT_RULES_BY_KIND key when it isn't the job's kind (a job-flow task's own words: 'wh', 'bond') */
+  rule?: string;
+  /** words for the rule's blanks beyond the asset ({symptom}, {room}, {what}), fixed at sign-off */
+  words?: Record<string, string>;
+  /** the job flow's task that left it (an `ipc:noteff` repair carries its effective part) */
+  task?: string;
 }
 
 /** Corrective job for a defect that was found or surfaced. */
@@ -283,6 +289,8 @@ export interface Order {
   at?: number;
   /** an electrician's bench order for a plane's electrical unit: the alert it checks */
   bench?: string;
+  /** the parts auction's lot (the analyst's desk task): what a win places on a broker PO */
+  lot?: { lines: { item: ItemId; qty: number }[]; fair: number; list: number };
 }
 
 export interface Player {
@@ -462,7 +470,7 @@ export interface IslandState {
   /** cash when the current week opened (for the review) */
   openCash: number;
   /** RETIRED (the generic parts kits): migrate() turns them into store credit. Kept for old readers */
-  parts: { stock: number; inTransit: number };
+  parts?: { stock: number; inTransit: number };
   rates: { nightly: number; charter: number };
   insurance: Insurance;
   autoBudget: Record<OpsRole, number>;
@@ -608,7 +616,6 @@ export type Action =
       week?: number;
     }
   /** `ship`: a part chain's part, when the plane that would carry it is down: the AOG boat now, or next week's guest flight */
-  | { t: 'approve'; orderId: string; week?: number; ship?: 'boat' | 'flight' }
   | { t: 'defer'; orderId: string; reason: 'cash' | 'priority'; week?: number }
   | { t: 'counter'; orderId: string; week?: number }
   | { t: 'acceptCounter'; orderId: string; week?: number }
@@ -941,6 +948,8 @@ export interface JobFlow {
   wired?: boolean;
   /** the IPC slot the research branch is about */
   researchSlot?: string;
+  /** a line or a tool was missing when it was planned (the AOG-by-cause count: 'stock') */
+  short?: boolean;
 }
 
 export type SpendCat = 'parts' | 'consumables' | 'rotables' | 'materials' | 'tools' | 'building' | 'freight' | 'labor' | 'carry' | 'payroll' | 'overhead' | 'eng';
