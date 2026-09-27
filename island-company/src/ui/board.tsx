@@ -316,13 +316,13 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
           </div>
           <div class="card col" style={{ gap: 4 }}>
             <h3>Costs</h3>
-            <span class="label num">
-              Fixed {usd(r.costs.fixed)} · insurance {usd(r.costs.insurance)} · leakage {usd(r.costs.leak)} · incidents {usd(r.costs.incidents)} · refunds{' '}
-              {usd(r.costs.refunds)}
-              {r.costs.loan ? ` · loan ${usd(r.costs.loan)}` : ''}
-              {r.costs.reports ? ` · open reports ${usd(r.costs.reports)}` : ''}
-              {r.costs.power ? ` · GPU charging ${usd(r.costs.power)}` : ''}
-            </span>
+            <div class="row wrap" style={{ gap: '2px 14px' }}>
+              {costLines(r).map(([k, v]) => (
+                <span key={k} class="label num" style={{ whiteSpace: 'nowrap' }}>
+                  {k} <b style={{ color: C.ink }}>{usd(v)}</b>
+                </span>
+              ))}
+            </div>
             <span class="label num">Incident roll seed {r.seed} — every outcome is replayable.</span>
           </div>
           <div class="row" style={{ gap: 8 }}>
@@ -337,6 +337,32 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
       </div>
     </div>
   );
+}
+
+/**
+ * The week's costs, as the review lists them: the fixed cost split into overhead and
+ * payroll where the week recorded them, then what the job flow paid (labour on
+ * approved cards, the POs paid at the payment run and their freight, the carrying
+ * charge on stock), then insurance, leakage, incidents, refunds and the rest. A cost
+ * that was nothing that week isn't listed; the fixed cost always is.
+ */
+export function costLines(r: WeekReport): [string, number][] {
+  const c = r.costs;
+  const fixed: [string, number][] = c.overhead !== undefined || c.payroll !== undefined ? [['Overhead', c.overhead ?? 0], ['Payroll', c.payroll ?? 0]] : [['Fixed', c.fixed]];
+  const rest: [string, number | undefined][] = [
+    ['Labour', c.labor],
+    ['Parts and stock', c.parts],
+    ['Freight', c.freight],
+    ['Carrying', c.carry],
+    ['Insurance', c.insurance],
+    ['Leakage', c.leak],
+    ['Incidents', c.incidents],
+    ['Refunds', c.refunds],
+    ['Loan', c.loan],
+    ['Open reports', c.reports],
+    ['GPU charging', c.power],
+  ];
+  return [...fixed, ...rest.filter((x): x is [string, number] => !!x[1])];
 }
 
 /** What happens next after a defect incident: the repair (waiting on the analyst, or auto-approved), then the redo if there is one. */

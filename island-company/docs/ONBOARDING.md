@@ -32,7 +32,7 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 1. Open the app. Read the 2–3 "since you left" lines.
 2. Do 2–4 jobs. Each job is a 60–120 s puzzle; the clock starts on your first touch. The better the work, the more the asset recovers: a bare pass (60%) restores 81% of the job, a clean one 105%, and perfect runs add a small permanent bonus. On an easy job (tier 1) you see your score, and under 40% it comes back as **rework** with a fresh fault. From tier 2 you don't see a score at all (see *No one tells you you're wrong*).
 3. Make your calls:
-   - **Analyst:** swipe cards (→ approve, ← defer, ↑ cheaper fix), then set prices on the demand curve.
+   - **Analyst:** approve the cards (→ approve, ← defer: the parts, the supplier and the freight) and the techs' requests, keep the stock ahead of the alerts, then set prices on the demand curve (see *Analyst: the desk*).
    - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident). Once a week you can also **write up a squawk**: tap one of your assets and pick the job you judge it needs; it lands on the analyst's desk with your name on it.
 4. Tap **End turn**.
 
@@ -81,6 +81,29 @@ Nothing tells you a P/N is wrong when you order it. A part that isn't effective 
 You get one chain at a time, with a breather after each. It never falls on the island's only guest plane: that one keeps its spares on the shelf.
 
 **A grounded plane and the carts.** A plane that's down for a part can still take a *Ground power start* (an engine run on the ground; it doesn't fly until the part is on). A cart left hooked up to it isn't stuck there: hook it up to the next plane that needs a start and it's towed straight over. The start's card says where the cart is (*GPU cart 1 is on Cargo C-7, AOG for a part*), and *Ground power carts ▸* opens on that cart. Autopilot does the same if you miss a week.
+
+## 5a. Analyst: the desk
+
+The desk sits under the island: the cash card on top (**spendable** is cash less what open purchase orders have committed), then four tabs. It opens on **Approvals** when something waits for you, else on **Stock**.
+
+**Approvals.**
+
+- A tech's plan for an alert becomes a **card**: the task from the manual, what comes off the shelf, what has to be bought (P/N, supplier, when it lands) and the labour. The chips say what's at stake: *AOG*, *Restricted* or *House closed* when the job keeps an asset out, *Due now*, an MEL placard's last week, and *Waiting a week ≈ $X* (the incident risk plus the revenue lost). Swipe right or tap *Approve*; swipe left to defer it a week.
+- **Supplier and freight ▾.** The mechanic's parts come from the OEM or the broker (20% off parts and 10% off the rest, a week slower, one line in four held a week for its traceability, no AOG boat); the electrician's from the supply house or online (15% off, a week slower, no AOG boat). Scheduled freight rides the week's carrier: the next flight, the cargo flight for bulk, or the supply boat. The **AOG boat** ($350 a PO) brings it at this week's resolve. It's only offered when it's faster, which includes a line due tonight on a plane that is itself down (*slips a week: Cargo C-7 is down*).
+- **Requests** are stock and tools a tech asks for with no job, and an approved job's new shortfall. They're grouped the way they'll be ordered (one PO per supplier and carrier). Untick what you don't want, pick the suppliers and the freight, and approve them together with the running total; *Defer a week* puts one off. The boat only takes the lines it gets here sooner.
+- **Nothing locks when you end your turn.** Approve cards and requests any time that week. What comes in after you ended goes through at the resolve up to your **standing limit** (Money tab), most urgent first; the rest waits for you.
+- **Desk work.** The desk puzzles run on the island's own paper now. The parts auction bids on a broker's lot of parts the island actually uses: a win puts it on the shelf. The three-way match pays last week's deliveries: your POs, what receiving counted and the vendors' invoices, line by line.
+
+**Stock.**
+
+- **Flags**, each with its one tap: a job waiting on parts (approve its card or request), a line at its reorder point (order it), a slow or dead line (stop reordering it, or return it for 75% store credit), a fast mover with no min/max, the stores full (every stocked line holds a bin), paperwork held at receiving.
+- **Needs.** Alerts nobody has planned yet, by due week. They never name a part: the tech's plan does. **Nudge** the tech to plan early so the parts come in time. MEL placards: a plane flies on a placarded item to the end of the placard's week. You can extend it once, even in the week after it ran out; without the extension the plane is grounded at that week's resolve (the only guest plane flies restricted instead). Approved jobs waiting on parts, line by line.
+- **The planner.** A row per family of parts (the right part and its near misses side by side), ranked by how often it moved (*fast*, *steady*, *slow*, *dead*) and by value moved (**A**, **B**, **C**), with its weeks of use, turnover, days of supply and the next four weeks' forecast. Filter by class, trade, parts or consumables, or search the supply catalog. Open a P/N for its position, lead time and known demand, and a suggested **min/max** (*Use 4 / 6*): with one set, the stores reorder up to the max at the resolve whenever the position falls to the reorder point. *Buy…* orders stock now; *Return…* sends it back.
+- **Receiving**: what's held for its paperwork (an 8130-3 that matches), what's on the way and on which carrier, what's payable at the next payment run (net 7, after the three-way match), and what's paid. An exchange unit's core goes back in its box.
+
+**Money.** Cash over 12 weeks; revenue against its budget and what went out, week by week (tap a week for its numbers, or *Table*); the runway (the weeks spendable cash covers overhead, payroll and insurance with no revenue); where it went (jobs and stock, capex, overhead and payroll, insurance and incidents, by category, trade and asset); the stock card (inventory, cash tied up in stock and open POs, the fill rate, jobs waiting on parts, stock received against used, the fast and slow movers). Then the **work budgets** (a job whose parts are all on the shelf goes ahead on its trade's budget with no card) and the **standing limit**, pricing, insurance, overhead and payroll.
+
+**Staff.** The island's payroll: pilots, housekeepers and builders. Hiring is your call once the staff update is in; until then the week pays the tier's standard crew.
 
 ## 6. Crewmates' problems (cross-trade reports)
 
