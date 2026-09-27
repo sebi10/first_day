@@ -1,0 +1,203 @@
+/* The staff desk and the builders' line on Home (docs/JOBFLOW.md 15.11).
+   Phone first: 390 px, one thumb, 44 px targets. Rust stays the alert hue only
+   (a builder with nothing to build is information, not an alert). */
+.staff {
+  gap: 12px;
+}
+.st-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.st-big {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+.st-pay {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.st-sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  font-size: 15px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.st-chip {
+  white-space: normal;
+  text-align: left;
+}
+.st-sum span:last-child {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+/* skill: five dots */
+.st-dots {
+  display: inline-flex;
+  gap: 3px;
+  flex: none;
+}
+.st-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(31, 42, 48, 0.14);
+}
+.st-dots i.on {
+  background: var(--sea);
+}
+
+.st-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(46, 124, 147, 0.12);
+  flex: none;
+}
+.st-name {
+  font-weight: 800;
+}
+
+/* the crew */
+.st-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-top: 6px;
+  padding-bottom: 10px;
+}
+.st-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(31, 42, 48, 0.08);
+}
+.st-row:last-of-type {
+  border-bottom: 0;
+}
+.st-doing {
+  font-size: 14px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.st-foot {
+  padding-top: 6px;
+}
+
+/* the hiring board */
+.st-cand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.st-does {
+  font-size: 15px;
+  font-weight: 700;
+}
+.st-need {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.st-money {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.st-money.good,
+.st-good {
+  color: #2f5e3a;
+}
+.st-money.bad,
+.st-bad {
+  color: var(--ink);
+}
+.st-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 15px;
+  background: var(--white);
+}
+
+/* the site work */
+.st-build {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.st-units {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.st-units li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  font-size: 15px;
+}
+.st-units li.done {
+  color: var(--ink-soft);
+}
+.st-units li.later {
+  color: var(--ink-soft);
+}
+.st-tick {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(31, 42, 48, 0.08);
+  flex: none;
+}
+.st-units li.done .st-tick {
+  background: rgba(78, 138, 90, 0.2);
+  color: #2f5e3a;
+}
+.st-units li.working .st-tick,
+.st-units li.next .st-tick {
+  background: var(--sea);
+  color: #fff;
+}
+.st-warn {
+  color: var(--ink);
+  background: rgba(244, 211, 94, 0.35);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+/* the builders' line on Home */
+.st-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 15px;
+}
+.st-status.wait {
+  border-left: 6px solid #e0b43a;
+}
+.st-status.ok,
+.st-status.none {
+  border-left: 6px solid var(--palm);
+}

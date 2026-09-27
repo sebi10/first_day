@@ -35,6 +35,8 @@ function withCargo(w = 4, float = false): IslandState {
   s.week = w;
   s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 80, touchedWeek: 0, sinceInspection: 2 });
   if (float) s.assets.push({ id: 'p3', kind: 'plane', model: 'float', name: 'Float F-3', health: 80, touchedWeek: 0, sinceInspection: 2 });
+  // a second pilot, as the tier that brings the cargo plane has (the pilots' duty caps the fleet's flights)
+  s.staff!.push({ id: 'n900', name: 'Kai M.', role: 'pilot', skill: 3, wage: 320, hired: 0, start: 0 });
   return s;
 }
 
@@ -487,6 +489,8 @@ describe('flight days on a weak battery: the cart chore most weeks', () => {
       s = apply(s, { t: 'join', uid: 'c', name: 'Cy', role: 'fin' }, NOW).s;
       for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'week0Done', role: r }, NOW).s;
       s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 90, touchedWeek: 0, sinceInspection: 0 });
+      // and its pilot (the pilots' duty caps the fleet's flights)
+      s.staff!.push({ id: 'n900', name: 'Kai M.', role: 'pilot', skill: 3, wage: 320, hired: 0, start: 0 });
       s.week = GSE.weakFrom;
       s.deadline = NOW;
       // resolve the week before: its week-open rolls this one's weak battery

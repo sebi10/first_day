@@ -177,6 +177,15 @@ export const POS: Record<string, Pt> = {
   office: OFFICE,
 };
 
+/** the extra cottages' plots (docs/JOBFLOW.md 15.6): in the lagoon grove, off the grid's poles (fed underground) */
+export const PLOT: Record<string, Pt> = {
+  h8: [262, 220],
+  h9: [304, 252],
+};
+/** the grove's young palms still standing: a plot in use ("h8,h9": built or going up) is cleared of the palms on it */
+export const groveLeft = (plots: string): Pt[] =>
+  SPOT.grove.filter((g) => !plots.split(',').some((id) => PLOT[id] && Math.hypot(g[0] - PLOT[id][0], g[1] - PLOT[id][1]) < 24));
+
 /** where each plane is worked on when it is AOG: every plane has its own spot */
 export const AOG_SPOT: Record<string, Pt> = {
   p1: [162, 352], // on jacks on the apron, out of the hangar mouth (room for its bubble above)

@@ -1,6 +1,6 @@
 // What the island gains between tiers (src/sim/growth.ts flourishes), plus
 // the finished dock. Every piece has a reserved spot in geo.tsx SPOT.
-import { curve, DOCK, lin, P, SPOT, type Pt } from './geo';
+import { curve, DOCK, groveLeft, lin, P, SPOT, type Pt } from './geo';
 import { Dinghy, Yacht } from './craft';
 import { K, mix, tones } from './paint';
 import { blob } from './rocks';
@@ -169,13 +169,15 @@ const GX = SPOT.grove.map((p) => p[0]), GY = SPOT.grove.map((p) => p[1]);
 const GC: Pt = [(Math.min(...GX) + Math.max(...GX)) / 2, (Math.min(...GY) + Math.max(...GY)) / 2];
 const CLEARING = curve(blob(GC[0] - 2, GC[1] + 4, (Math.max(...GX) - Math.min(...GX)) / 2 + 16, (Math.max(...GY) - Math.min(...GY)) / 2 + 12, 311, 11, 0.12));
 const ring = (x: number, y: number, rx: number, ry: number) => `M${x - rx} ${y}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0`;
-export function GroveField() {
+/** `plots`: the extra cottages' plots in use ("h8,h9"), cleared of their palms (docs/JOBFLOW.md 15.6) */
+export function GroveField({ plots = '' }: { plots?: string }) {
+  const palms = groveLeft(plots);
   return (
     <g>
       <path d={CLEARING} fill={mix(K.grassLight, K.grassLighter, 0.5)} opacity=".75" />
-      <path d={SPOT.grove.map(([x, y]) => ring(x + 1, y + 0.5, 9, 3.6)).join('')} fill="#e6cf98" />
-      <path d={SPOT.grove.map(([x, y]) => ring(x + 1, y + 0.5, 5.6, 2.2)).join('')} fill="#c9a86a" />
-      <path d={SPOT.grove.map(([x, y]) => ring(x + 11, y + 1, 9, 2.8)).join('')} fill={K.shadow} />
+      <path d={palms.map(([x, y]) => ring(x + 1, y + 0.5, 9, 3.6)).join('')} fill="#e6cf98" />
+      <path d={palms.map(([x, y]) => ring(x + 1, y + 0.5, 5.6, 2.2)).join('')} fill="#c9a86a" />
+      <path d={palms.map(([x, y]) => ring(x + 11, y + 1, 9, 2.8)).join('')} fill={K.shadow} />
     </g>
   );
 }

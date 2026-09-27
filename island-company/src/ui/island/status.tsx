@@ -8,7 +8,7 @@
 // dotted leader line.
 import { K } from './paint';
 
-export type Icon = 'wrench' | 'cone' | 'noflight' | 'noentry' | 'broken' | 'clipboard' | 'bolt-off' | 'bolt' | 'cash' | 'warn';
+export type Icon = 'wrench' | 'cone' | 'noflight' | 'noentry' | 'broken' | 'clipboard' | 'bolt-off' | 'bolt' | 'cash' | 'placard' | 'tag' | 'warn';
 /** alert = out of service, warn = needs attention soon, ok = running on backup (information only) */
 export type Tone = 'alert' | 'warn' | 'ok';
 
@@ -81,6 +81,26 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
           <path d="M2 -10L-6 1H0L-2 10L6 -1H0Z" fill={ink} />
           <path d="M-9 -8L9 8" stroke={sub} stroke-width="4.6" stroke-linecap="round" />
           <path d="M-9 -8L9 8" stroke={ink} stroke-width="2" stroke-linecap="round" />
+        </g>
+      );
+    case 'placard':
+      // flying restricted on an INOP item: a placard on its post
+      return (
+        <g>
+          <rect x={-10} y={-11} width={20} height={13} rx={1.8} fill={ink} />
+          <path d="M-6 -6.6h12M-6 -2.4h7" stroke={sub} stroke-width="2" stroke-linecap="round" />
+          <path d="M0 2v7.4" stroke={ink} stroke-width="3" />
+          <path d="M-5.4 10h10.8" stroke={ink} stroke-width="2.6" stroke-linecap="round" />
+        </g>
+      );
+    case 'tag':
+      // made safe: the breaker is off and tagged (a lockout tag on its string)
+      return (
+        <g>
+          <path d="M-1 -8q-6 -4 -9 1" stroke={ink} stroke-width="1.5" fill="none" stroke-linecap="round" />
+          <path d="M-6.5 -5.4l6.5 -5.2l6.5 5.2v16.4h-13z" fill={ink} />
+          <circle cy={-5.4} r={1.9} fill={sub} />
+          <path d="M-3.4 1h6.8M-3.4 5.4h6.8" stroke={sub} stroke-width="1.7" stroke-linecap="round" />
         </g>
       );
     case 'bolt':

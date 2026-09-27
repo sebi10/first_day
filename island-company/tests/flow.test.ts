@@ -251,11 +251,11 @@ describe('the moves and their words', () => {
     expect(late).toMatch(/^Week 5 closed before that synced/);
   });
 
-  it('the staff moves wait for the staff update; kits and counter-offers are gone from the flow', () => {
+  it('the staff moves check their own rules (tests/staff.test.ts); kits and counter-offers are gone from the flow', () => {
     let s = island();
-    expect(no(s, { t: 'hire', cand: 'x', week: 5 })).toBe('Hiring opens with the staff update.');
-    expect(no(s, { t: 'letGo', npc: s.staff![0].id, week: 5 })).toBe('Hiring opens with the staff update.');
-    expect(no(s, { t: 'build', what: 'cottage', week: 5 })).toBe('Hiring opens with the staff update.');
+    expect(no(s, { t: 'hire', cand: 'x', week: 5 })).toBe('That candidate took another job.');
+    expect(no(s, { t: 'letGo', npc: 'n999', week: 5 })).toBe('They have already left.');
+    expect(no(s, { t: 'build', what: 'cottage', week: 5 })).toBe('Extra cottages open at tier 3.');
     expect(no(s, { t: 'buyList', week: 5 })).toBe('Parts kits are gone: buy real items from the stock planner.');
     const r = plan(s, raise(s, 'M_BELT_SQUEAL', 0, 'p1'));
     s = r.s;

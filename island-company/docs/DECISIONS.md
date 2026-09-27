@@ -616,7 +616,65 @@ What C delivers: `src/ui/purchasing/` (a pure view model in `model.ts`; the appr
 
 ### Staff (D)
 
-Package D records its decisions here. With A's stubs the game plays as before the staff update (`tests/staffstub.test.ts`).
+What D delivers: `src/sim/staff.ts` behind the hooks A wired (who flies what and the pilots' cap, tours, tire wear and write-ups by the pilot, hard landings, the housekeepers' turnovers and reviews, the payroll, the builders' week and its materials, the hiring board, the effect statements, `hire` / `letGo` / `build`, the fin bot and autopilot), the analyst's *Staff and payroll* desk section and the builders' line on Home (`src/ui/staff/`), the staff on the island (`src/ui/island/staff.tsx`) with the placard, no-entry and tag bubbles, four island-lab scenes, and `tests/staff.test.ts` (26 tests). With the standard crew and hard landings off, every week of a season resolves exactly as with A's stubs (`tests/staff.test.ts`); with the stubs on, the game plays as before the staff update (`tests/staffstub.test.ts`).
+
+Where D departs from the spec, and why:
+
+- **The contractor commissions a new tier.** The week a tier arrives (its crew project finishes during a turn), the standard crew's increase for it is flown and cleaned by the mainland contractor: a ferry pilot's 6 flights, a skill-3 housekeeper's turnovers (`commissioning`). From the next week the island's own staff do it. Without this, every tier-up lost flights and bookings in the week before the analyst could see a board with the new places on it. That week the desk says so (*"the contractor's ferry pilot flies the new plane this week only. From week 7 that's your crew: one more pilot."*), and the effect statements look at the week after.
+- **The first site's lots come with the island.** A new island has the t2 site's materials on the shelf (`newIslandStaff`): the builders start in week 1, and the analyst first meets the buying on the second site. Without them a tier-1 island spent $640 before its first B+ weeks.
+- **A candidate drawn for a need can fill it.** A pilot for the guest planes is skill 3+, anyone else 2+; the rest of the board draws 25 / 30 / 25 / 15 / 5 %. With the plain draw, a pilot need was often a skill 1 who can't fly guests.
+- **Pacing the builders' materials (the fin bot).** The next tier's site work two units at a time; a site two tiers ahead all at once when the next tier's crew project opens, or earlier while the cash stays over that tier's cash gate after the buy; three tiers ahead (the builders ran ahead) it waits. A's `finStock` bought the next two units whenever the builders idled (`buyBuildUnits` in `src/sim/bots.ts`: that one line removed, in A's file). It spent the tier-3 $18,000 gate on the villas' materials and put tier 3 back about a week. Tried and dropped: buying ahead of a tier with no cash gate (the Lodge's materials at tier 3, the generator house's at tier 1) put tier 5 back 0.3–0.7 week for all average; a three-unit villa site (decking, ties and shutters as one unit) cut the late villa sites from 13 to 9 of 30 but cost a seed of tier 5.
+- **The spec's "no new building below today's health in 90% of games" isn't met.** A tier's site work is short when the tier arrives in about half the games (three friends: 16 of 30). The villas and dock are short in 13 (8 lower on average), the generator house in 3 (7.5 lower), the Lodge in 2 (4 lower). The villa site is the tight one: its materials wait for the tier-3 cash gate, and tier 4 follows tier 3 by about four weeks. Having all of it on time costs tier 5 more than the late site work costs the new buildings (two to three weeks of the electrician's upkeep). An analyst who buys ahead when the cash allows, or hires a second builder for the villa site, is on time; the desk shows the cash gate beside the buy.
+- **Effect statements.** Each is `projectWeek` with and without the person, as specified, plus:
+  - a hire that adds no revenue this week (a builder, a spare) says *"no new income"* instead of repeating its wage as the net;
+  - a pilot whose gap a grounded or restricted plane hides this week shows it on the full schedule (*"every flight this week has a pilot; on the full schedule +2 flights a week"*);
+  - a builder's finish week counts a skill 4–5 hire's notice week, and says *"either way: no sooner with them"* when it wouldn't move.
+  - The spec's *"new villas start at 81 instead of 84"* needs the crew project's quality and the week the tier comes, and neither is known at the hire. While the build's tier's crew project is open (the tier can come at this week's resolve), the statement gives the difference: *"if tier 4 comes this week, its new buildings start 4 higher"*.
+- **The fin bot's crew.** Only guest-qualified pilots (skill 3+) count toward its standard crew. It hires the best candidate who starts now (then the most skilled, then the cheapest) asking at most 1.25 × the skill-3 wage.
+- **The naive analyst** hires every skill 4–5 candidate while the wages (hires giving notice included) stay under 1.8 × the standard payroll. In a crunch (spendable under $4,000) it lets the dearest hire above the standard crew go, severance and all. It ends at 171% of the standard payroll, stays at tier 2 (tier 3 before the staff update) and has 3 weeks below $0: over-hiring costs something now.
+- **Idle builders.** A site two tiers ahead waiting on materials on purpose says so once, as information (*"Builders idle: the site work on the villas and the seaplane dock (tier 4) waits for materials. Buy them on the desk (Staff) when the cash allows."*), not every week as a fault, and Home offers no one-tap buy for it.
+- **Extra cottages.** Plots `h8` and `h9` in the lagoon grove; the grove's young palms on a plot in use are cleared. `COTTAGE_SHELL` is $17,000: at tiers 3–4 a cottage rents a median $800–900 a week when the guests outnumber the houses, a payback of 21–27 weeks. The start sheet prices a housekeeper in when every turnover is taken, and says when the cottage would sit empty (*"3 of 4 houses are booked"*). The `cottages` variant (three friends, an analyst who starts one at tier 4 over $40,000) starts one in 28 of 30 games and finishes it by week 26 in 20. It reaches tier 5 in 12 of 30 games (the plain three friends: 25), with 0 weeks below $0: a cottage is an investment for an island that keeps playing, not a shortcut.
+- **A's files touched (for the merge):**
+  - `src/sim/bots.ts`: the one line above.
+  - `tests/staffstub.test.ts`: it tests the stubs, so it sets `STAFF_TEST.stubs` in `beforeAll`.
+  - `tests/flow.test.ts`: the staff moves' refusals are the real ones now (*"That candidate took another job."*, *"They have already left."*, *"Extra cottages open at tier 3."*).
+  - `tests/gse.test.ts`: `withCargo()` and `weakWeek()` add the tier-2 second pilot, since one pilot can't fly the cargo plane's four flights too.
+- **Left for A:**
+  - `nextTierProgress` has no *"Site work (builders): 2.5 of 4"* line yet (15.5).
+  - The review's *"2 flights lost: the pilots fly 6 a week. Hire a pilot?"* (and its housekeeping twin) still asks when a hire starts next week.
+  - `PROJECTS[2].jobs.fin.title` *"Pay the builders (three-way match)"* now reads as paying the island's own builders; it's the mainland contractor's invoice.
+
+**On the island.** Up to 8 figures, each a `<use>` of one of three symbols drawn once (`StaffDefs`, kept in `staff.tsx` beside the figures rather than in `LifeDefs`):
+
+- builders in hard hats and hi-vis on the open site, with a two-frame hammer when motion is on;
+- a pilot by the lead guest plane and one by the cargo plane (none by a plane that's down, or by the floatplane on the water);
+- a housekeeper at up to two open houses.
+
+None are out in a storm or at night; at night one figure works late in the lit office window. A site shows the further of the crew project's stage and the builders' (`⌊3 × done / need⌋`). The restricted plane gets a sunflower placard bubble, a house closed by a hazard the no-entry bubble, a made-safe house a small tag. The beaten scene is 1,390 SVG nodes (budget 1,500; `scripts/island-shots.mjs` now fails over it). New island-lab scenes: `staff`, `staff-night`, `staff-alerts` (placard, no entry, tag, a cottage going up) and `staff-cottages`.
+
+#### Balance (26 weeks × 30 seeds, medians)
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk | Payroll @26 | Late site work |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| All good | 5 / 9 / 16 / 21 | 99% | $6,739 | 0 | $11,525 | 104% | 30% of games |
+| All average | 7 / 12 / 16 / **22** | 95% | $5,554 | **0** | $9,668 | 104% | 53% |
+| **Three friends** | 8 / 12 / 16 / **23** | 91% | $5,792 | **0** | $9,226 | 103% | 53% |
+| Naive analyst | 5 / – (tier 2 at week 26) | 93% | −$1,174 | 3 | $4,456 | 171% | 3% |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 40% / 85% / 94% | −$687 / −$9,035 / −$82,076 | 2 / 44 / 16 | | 100% | |
+| Every solo team, nobody | stay at tier 1 | | | | | 100% | |
+
+Against the same code with the staff stubbed (A's table): tier 5 in 25 of 30 games for the three friends (stubbed 24), mean week 23.3 (23.3); all average 27 of 30 (27), 22.6 (22.3); all good 30 of 30, 21.0 (21.1). That is within the spec's ±0.5 week. The pacing guard holds (it needs 23), and no solo or absent team leaves tier 1. Where the money goes per game (90 seeds): about $2,100 of building materials, $520 of payroll over the standard crew's (hires ask 0.95–1.1 × the wage, and skill 4 costs 1.2 ×), 0.4 flights and 0.2 bookings lost to a crew short for a week, 0.4 hard landings and 1.3 builder-weeks of rework.
+
+Robust (90 seeds × 4 crews), beside the same code stubbed:
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash | Stubbed: wk → T5 / miss / weeks < $0 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 24 / 24 / 25 / 25 | 30 / 26 / 34 / 32 | 18 / 4 / 1 / 1 | −$38,286 / −$23,294 / −$2,996 / −$5,499 | 24 / 24 / 24 / 24 · 25 / 27 / 24 / 23 · 18 / 1 / 0 / 1 |
+| All average | – / a / b / c | 23 / 24 / 24 / 24 | 19 / 19 / 19 / 22 | 1 / 0 / 0 / 4 | −$424 / $3,592 / $1,137 / −$10,701 | 22 / 23 / 23 / 23 · 15 / 11 / 12 / 16 · 0 / 0 / 0 / 0 |
+
+The robust sweep shows the cost the 30-seed table hides: half a week (three friends) to a week (all average) later to tier 5 at the median, and 23 and 25 more of 360 games missing it by week 26. That is the $3,000 above, at the $60,000 gate, in games that were already making it by a week or less. The staff don't slow the job flow: the latency stays at 0.66–0.69 weeks (A's standard run: 0.68). If it needs buying back, the spec's levers come in order: `TIERS[].overhead` (A already took $150 off at tiers 2–5), then the `BUILDS` quantities.
+
+**Knobs:** `STAFF` (wages 320 / 180 / 260, skill wage × 0.7 / 0.85 / 1 / 1.2 / 1.45, severance 2 weeks, duty 6, guest pilots skill 3+, charter 0.04, hard landings 0.8% / 0.5% / 0.3% / 0.2% / 0.1% a flight, −2 health, turnovers 2–6, reviews 0.025, builder output 0.6 / 0.8 / 1 / 1.25 / 1.5, rework 20% / 12% / 6% / 3% / 1%, the standard crews, the board 3 / 4 from tier 3, at most 10 staff); `BUILDS` as specified; `COTTAGE_SHELL` $17,000.
 
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 

@@ -26,6 +26,9 @@ for (const [label, w, dpr] of [
   }
   const nodes = await page.$$eval('.scn', (els) => els.map((e) => [e.getAttribute('data-id'), e.querySelectorAll('svg *').length]));
   console.log(label, 'svg nodes per scenario', JSON.stringify(Object.fromEntries(nodes)));
+  // the node budget (docs/JOBFLOW.md 15.10): the busiest scene, the beaten island at night, stays at or under 1,500
+  const beaten = Object.fromEntries(nodes).beaten;
+  if (beaten > 1500) errors.push(`${label}: the beaten scene has ${beaten} SVG nodes (budget 1,500)`);
 }
 console.log(errors.length ? 'ERRORS\n' + errors.join('\n') : 'no errors');
 await browser.close();

@@ -1,7 +1,9 @@
 // Build sites for tiers still to come. Subtle while they are only planned
-// (cleared plot, survey stakes, a buoy); a real construction site while the
-// crew project is under way: 0 stakes, string lines and lumber, 1 slabs
-// poured, 2 timber frames and scaffolding (and a tower crane on the houses).
+// (cleared plot, survey stakes, a buoy); a real construction site once the
+// builders are on it or the crew project is under way (whichever is further):
+// 0 stakes, string lines and lumber, 1 slabs poured, 2 timber frames and
+// scaffolding (and a tower crane on the houses). The builders on it are the
+// island's own staff, drawn by the island at crewSpots().
 import { DOCK, lin, P, type Pt, type V3 } from './geo';
 import { K, mix } from './paint';
 import { box, post, seg } from './solid';
@@ -92,14 +94,23 @@ function Crane({ x, h, z = 22 }: { x: number; h: number; z?: number }) {
   );
 }
 
-function Worker({ x, y }: { x: number; y: number }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <use href="#i-guy" style={{ color: '#ff8c42' }} />
-      <path d="M-3 -12.4a3 3 0 0 1 6 0h1v1h-8v-1z" fill="#ffd23f" />
-    </g>
-  );
+/**
+ * Where the builders stand on a site (island coordinates, from the site's
+ * ground point): up to three spots on the plot. The island draws the island's
+ * own builders there (src/ui/island/staff.tsx), one each.
+ */
+export function crewSpots(kind: SiteKind, x: number, y: number): Pt[] {
+  const { w } = DIM[kind];
+  const big = kind === 'villa' || kind === 'lodge';
+  const k = big ? 1 : 1.2;
+  const [ox, oy] = kind === 'gen' ? [7, -6] : [0, 0];
+  return ([[-w * 0.4, 10], [w * 0.6, 4], [w * 0.05, 15]] as Pt[]).map(([lx, ly]) => [x + ox + k * lx, y + oy + k * ly]);
 }
+/** the floatplane dock's site: builders on the stem, by the pilings */
+export const DOCK_CREW: Pt[] = [
+  [DOCK.root[0] - 12, DOCK.root[1] + 4],
+  [DOCK.root[0] + 12, DOCK.root[1] + 8],
+];
 
 /** a little board on a post: what will be built here */
 function PlotSign({ x, kind }: { x: number; kind: SiteKind }) {
@@ -171,9 +182,7 @@ export function Site({ x, y, kind, stage }: { x: number; y: number; kind: SiteKi
       <path d={`M${-w - 6} ${by}h${w * 0.9}`} stroke="#ff7a1f" stroke-width="3.4" />
       <path d={`M${-w - 6} ${by}h${w * 0.9}`} stroke="#fff" stroke-width="3.4" stroke-dasharray="3 3" />
       <path d={`M${-w - 5} ${by + 3}v-4M${-w * 0.15 - 6} ${by + 3}v-4`} stroke="#555" stroke-width="1.2" />
-      {/* the crew at work */}
-      <Worker x={-w * 0.4} y={10} />
-      {stage >= 1 && <Worker x={w * 0.6} y={4} />}
+      {/* the island's builders stand on it (drawn by the island: crewSpots) */}
       {stage >= 1 && (
         <g transform={`translate(${w + 8} 8)`}>
           <ellipse cx={3} cy={2} rx={7} ry={2.4} fill={K.shadow} />
