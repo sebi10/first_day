@@ -2,7 +2,7 @@
 // inspects their cables. Wear stays hidden until an inspection (or until it is
 // too far gone to miss), and a start through pitted pins surfaces later as an
 // incident, never as a verdict at sign-off.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { cartOut, crankPower, flip, generateGpu, newSim, plugIn, pushPlug, setCart as cartSwitch, setCartVolts, step as gpuStep } from '../src/puzzles/gpu';
 import { generateHydraulics } from '../src/puzzles/hydraulics';
 import { generateMeter } from '../src/puzzles/meter';
@@ -14,6 +14,9 @@ import { cableBand, cableReport, gseCarts, gseForStart } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
 import type { GseCart, IslandState, Order, Role } from '../src/sim/types';
+
+// whole seasons of the paper sim: give a loaded CI box room (see tests/ipc.test.ts)
+vi.setConfig({ testTimeout: 30000 });
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 

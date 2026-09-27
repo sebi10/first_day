@@ -1,7 +1,7 @@
 // The part chain: manual → IPC → logbooks → engineering approval → install,
 // across all three seats. Wrong answers never show at once: they come back at
 // receiving, from engineering a week later, or as a hidden defect.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { generateHydraulics, prechargeOther } from '../src/puzzles/hydraulics';
 import { generateTorque, torqueData, workedTo } from '../src/puzzles/torque';
 import { ammTaskFor, ipcFor, rowFor, type Ata } from '../src/sim/aircraft';
@@ -13,6 +13,9 @@ import { apply, chainWouldOpen, createIsland, isEmergency } from '../src/sim/eng
 import { hashSeed } from '../src/sim/rng';
 import { ROLES, type Asset, type IslandState, type Order } from '../src/sim/types';
 import { launchFor } from '../src/ui/select';
+
+// whole seasons of the paper sim: give a loaded CI box room (see tests/ipc.test.ts)
+vi.setConfig({ testTimeout: 30000 });
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 const CARGO: Asset = { id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 70, touchedWeek: 5, sinceInspection: 0 };

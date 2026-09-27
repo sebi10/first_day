@@ -3,7 +3,7 @@
 // crewmate's report can tag the other cart out: none of that may hold the chain
 // up, and the chain may never hold up the starts. Reports and chain steps are
 // the same kind of "whose move is it" on every surface.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
 import { chainAtaOf, islandAircraft, openChain, plantFor, rightPn } from '../src/sim/chain';
 import { CABLE_REPORT, CHAIN, GSE, REPORT_BY_KEY } from '../src/sim/data';
@@ -12,6 +12,9 @@ import { apply, chainWouldOpen, createIsland } from '../src/sim/engine';
 import { hashSeed, rng } from '../src/sim/rng';
 import { ROLES, type Asset, type GseCart, type IslandState, type Order, type Role } from '../src/sim/types';
 import { blocks, crossMoves, owedBy, pushes } from '../src/ui/select';
+
+// whole seasons of the paper sim: give a loaded CI box room (see tests/ipc.test.ts)
+vi.setConfig({ testTimeout: 30000 });
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 const CARGO: Asset = { id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 70, touchedWeek: 5, sinceInspection: 0 };
