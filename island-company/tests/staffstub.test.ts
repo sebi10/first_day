@@ -2,8 +2,10 @@
 // game plays exactly as before the staff update. The standard crew's payroll
 // plus the tier's overhead is today's fixed cost; the pilots and housekeepers
 // cap nothing; charter, reviews and wear are unchanged; new buildings start at
-// today's health; and the staff moves wait for package D.
-import { describe, expect, it, vi } from 'vitest';
+// today's health; and the staff moves wait for package D. Package D's hooks
+// replaced the stubs: STAFF_TEST.stubs puts them back for this file (each test
+// file runs in its own module context, so the switch never leaks).
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { MODELS, TIERS } from '../src/sim/data';
 import { capFleet, fixedNow } from '../src/sim/econ';
@@ -13,6 +15,7 @@ import {
   BUILDS,
   NPC_ROLES,
   STAFF,
+  STAFF_TEST,
   builtShare,
   charterMult,
   housekeepingCap,
@@ -29,6 +32,8 @@ import {
 import { ROLES, type Asset, type IslandState } from '../src/sim/types';
 
 vi.setConfig({ testTimeout: 30000 });
+beforeAll(() => void (STAFF_TEST.stubs = true));
+afterAll(() => void (STAFF_TEST.stubs = false));
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 function started(): IslandState {

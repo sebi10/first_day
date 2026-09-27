@@ -42,6 +42,19 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 - **The inspection is your call.** *Inspect the cable* shows the plug end up close: the boot and the insulation, the contact face. Weathered crazing on the rubber is harmless; cracks through it, heat discoloration and pitted, burnt contacts are not. Call it **Serviceable** or **Tag it out**. A tagged-out cart goes to the electrician for a new plug. A worn one called serviceable stays in service, and a start through burnt contacts can quietly damage the plane's receptacle. A cable re-terminated this week is looked at next week, when the new plug has settled.
 - A run-down cart shows in the start itself: its voltmeter sags under the load. The start is on the plane's own airframe and placard (the cargo plane is a turbine with an amp limit; the floatplane is a high-wing piston on its float wheels, battery master ON).
 
+**Analyst: the island's staff.** The island has its own people on the payroll: **pilots** fly the planes, **housekeepers** turn the houses over between guests, **builders** do the site work for the next tier's buildings. None of them does a trade's job. Who is on the payroll is your call: *Staff and payroll* on your desk.
+
+- **The crew.** A new island starts with a pilot, a housekeeper and a builder, all skill 3. The desk shows the *standard crew* for your tier (tier 2 needs a second pilot, tier 4 a second housekeeper) and what each person does this week (*flies 6: Twin N-12 4 · Cargo C-7 2*). Their wages are part of the fixed cost every week. Short of pilots or housekeepers, flights and bookings are lost, and the review says so.
+- **The hiring board.** New names every week (3, 4 from tier 3), the first ones for what the island is short of. Every card says what that person would do here, in flights, bookings or weeks of site work, then in money. More skill costs more and does more: a skill-5 pilot sells more tours and lands softer, a skill 1–2 pilot flies only the cargo runs, a better housekeeper turns over more houses and lifts the reviews, a better builder is faster and fails the inspector less. Skill 4–5 give notice and start the week after.
+- **Hard landings.** Now and then a pilot lands hard (a green one more often, never on the island's only guest plane): the plane takes −2, and the mechanic gets a hard-landing inspection for next week in that pilot's name.
+- **Letting someone go** costs two weeks' wages (nothing if you hired them this week). The sheet says what you'd lose and when the saving pays back the severance.
+- **The site work.** The builders set each new tier's buildings: piers and footings, decks, roof flashing, shutters, the seaplane dock. You buy their materials from the yard (*Buy the next unit*; Home has a one-tap buy for the next tier's). They come on the supply boat, and without them the builders stand idle. The crew project still decides when a tier arrives; the site work decides how healthy its new buildings start, up to 15 lower if the tier comes first. A site two tiers ahead can wait: the cash for the tier in between comes first.
+- **The week a tier arrives** the mainland contractor flies the new plane and cleans the new houses. From the next week that's your crew's job, so hire that week (the desk reminds you).
+- **Extra cottages (tier 3+).** Up to two in the lagoon grove: a $17,000 prefab shell, then the builders' site work. The desk says what one would rent at this week's bookings and when it pays back; with a house already empty, it wouldn't.
+- On autopilot your seat fills an empty place in the standard crew and buys the next tier's materials. It never lets anyone go or starts a cottage.
+
+You'll see them on the island: builders in hard hats on the site, a pilot by the planes, a housekeeper at a booked house, and at night someone working late in the office window.
+
 The week resolves at **20:00 island time**, or as soon as all three have ended their turn. Everyone gets the board review. Miss a day and your role runs on autopilot at 50%: nothing is lost, but that week doesn't count toward unlocks.
 
 ## 4. No one tells you you're wrong
@@ -117,4 +130,5 @@ After each of your first 3 days, send one message in the group chat:
 - **Realism:** "a real mechanic/electrician/analyst would never…". This is the most valuable feedback, and it matters most for the incidents and repairs: tell us when the failure, the find or the fix isn't what would really happen.
 - **Difficulty:** name any puzzle that was too easy or too hard at its tier.
 - **Waiting:** any time you felt blocked by a teammate, and for how long.
+- **Staff:** a hire or a let-go whose card said one thing while the week did another.
 - **Fun:** the best moment and the most boring moment.

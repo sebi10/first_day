@@ -489,8 +489,7 @@ function finStock(s: IslandState, reserve: number, now: number): IslandState {
       s = step(s, { t: 'scrap', item: id, qty: free, week: s.week }, now);
     }
   }
-  // the builders' next two units
-  s = buyBuildUnits(s, 2, now);
+  // the builders' next two units: botStaff buys them (the staff update's policy paces them against the tier cash gates)
   return s;
 }
 

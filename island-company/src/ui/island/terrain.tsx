@@ -6,7 +6,7 @@
 import type { Weather } from '../../sim/types';
 import {
   APRON, BEACH_STEPS, BRIDGES, COAST, COAST_S, DOCK, FALLS, H, HANGAR_PAD, LIP, MOUTH, MOUTH_WATER, PATHS, PLATEAU, PLATEAU_S, POOL, POS, RIVER, RIVER_S, RUNWAY, RUNWAY_ANGLE,
-  RUNWAY_C, RUNWAY_LEN, SPOT, SQUARE, TAXIWAY, TERRACE, TERRACE_H, W, WINDSOCK, curve, edgeDist, inPoly, inset, lin, lineDist, scatter, type Pt, type Zone,
+  RUNWAY_C, RUNWAY_LEN, SPOT, SQUARE, TAXIWAY, TERRACE, TERRACE_H, W, WINDSOCK, curve, edgeDist, groveLeft, inPoly, inset, lin, lineDist, scatter, type Pt, type Zone,
 } from './geo';
 import { GroveField } from './extras';
 import { FloraDefs, Palm, Use } from './flora';
@@ -591,7 +591,7 @@ const LOT_TREES: { tier: number; pts: Pt[] }[] = [
 /** the young palms of the grove flourish, sorted in with the wood: a round
  *  tree that would share a canopy with one of them was cleared for the grove */
 const GROVE_CLEAR = 25;
-function Scatter({ motion, wind, storm, tier, night, grove, site }: { motion: boolean; wind: boolean; storm: boolean; tier: number; night: boolean; grove: boolean; site: boolean }) {
+function Scatter({ motion, wind, storm, tier, night, grove, site, plots }: { motion: boolean; wind: boolean; storm: boolean; tier: number; night: boolean; grove: boolean; site: boolean; plots: string }) {
   const zones = ZONES;
   const tufts = scatter(11, 90, onGrass, zones, 14);
   const flowers = scatter(12, 48, onGrass, zones, 17);
@@ -610,7 +610,8 @@ function Scatter({ motion, wind, storm, tier, night, grove, site }: { motion: bo
   // while the generator's shed goes up, the two beach palms in front of its plot are cut back
   const palms = PALMS.filter(([x, y]) => clearOf([x, y], TALL) && !(site && Math.hypot(x - POS.gen[0], y - POS.gen[1]) < 56));
   palms.forEach(([x, y, s, l], i) => items.push({ y, el: <Palm key={`p${i}`} x={x} y={y} s={s} lean={l} motion={motion} wind={wind} storm={storm} night={night} /> }));
-  if (grove) SPOT.grove.forEach(([x, y], i) => items.push({ y, el: <Use key={`g${i}`} id="i-sapling" x={x} y={y} flip={i % 2 === 1} /> }));
+  // a cottage plot in use is cleared of its palms (each keeps its facing)
+  if (grove) SPOT.grove.forEach(([x, y], i) => groveLeft(plots).some((g) => g[0] === x && g[1] === y) && items.push({ y, el: <Use key={`g${i}`} id="i-sapling" x={x} y={y} flip={i % 2 === 1} /> }));
   items.sort((a, b) => a.y - b.y);
   return (
     <g>
@@ -659,8 +660,8 @@ function Puddles() {
   );
 }
 
-/** `site`: the generator's shed is being built (its plot is cleared of palms) */
-export function Terrain({ tier, weather, motion, paved, night, grove, site }: { tier: number; weather: Weather; motion: boolean; paved: boolean; night: boolean; grove: boolean; site: boolean }) {
+/** `site`: the generator's shed is being built (its plot is cleared of palms); `plots`: the extra cottages' plots in use ("h8,h9"), cleared of the grove's palms */
+export function Terrain({ tier, weather, motion, paved, night, grove, site, plots = '' }: { tier: number; weather: Weather; motion: boolean; paved: boolean; night: boolean; grove: boolean; site: boolean; plots?: string }) {
   return (
     <g>
       <Sea motion={motion} weather={weather} />
@@ -671,7 +672,7 @@ export function Terrain({ tier, weather, motion, paved, night, grove, site }: { 
       <Terrace />
       <River />
       {/* the grove's clearing is ground: the mountain's foot stands on it */}
-      {grove && <GroveField />}
+      {grove && <GroveField plots={plots} />}
       <Mountain />
       <Falls motion={motion} />
       <Lookout />
@@ -686,7 +687,7 @@ export function Terrain({ tier, weather, motion, paved, night, grove, site }: { 
       ))}
       <Airfield weather={weather} motion={motion} night={night} />
       {weather === 'storm' && <Puddles />}
-      <Scatter motion={motion} wind={weather !== 'clear'} storm={weather === 'storm'} tier={tier} night={night} grove={grove} site={site} />
+      <Scatter motion={motion} wind={weather !== 'clear'} storm={weather === 'storm'} tier={tier} night={night} grove={grove} site={site} plots={plots} />
     </g>
   );
 }
