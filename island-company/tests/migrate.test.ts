@@ -1,0 +1,201 @@
+// The v2 -> v3 migration (docs/JOBFLOW.md 19.2) on island docs the base engine
+// (6c0c426) wrote with its own bots (scripts/fixtures-v2.ts, three friends).
+// The first doc that matched each state, by the seed of `simulate` and the week:
+//
+//   v2-6c0c426-early          seed 5,  week 4   tier 1, start of the week, 3 kits in stock
+//   v2-6c0c426-kits           seed 58, week 19  tier 4, mid-week, 2 kits in transit, 2 orders waiting on kits
+//   v2-6c0c426-countered      seed 1,  week 2   tier 1, a countered order that carries a kit
+//   v2-6c0c426-repair         seed 1,  week 12  tier 3, a pending repair with parts
+//   v2-6c0c426-chain-transit  seed 4,  week 24  tier 5, an open chain with its part in transit (the plane AOG)
+//   v2-6c0c426-chain-review   seed 4,  week 23  tier 5, an open chain waiting on engineering's answer
+//   v2-6c0c426-midweek        seed 1,  week 9   tier 3, the mechanic ended, the electrician one job in, the analyst not started
+//   v2-6c0c426-late           seed 1,  week 22  tier 4, storm season
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { botTurn, TEAMS } from '../src/sim/bots';
+import { islandAircraft, openChain } from '../src/sim/chain';
+import { kitValue, STOCK } from '../src/sim/data';
+import { ENGINE_VERSION, apply } from '../src/sim/engine';
+import { cardOf, flowStage } from '../src/sim/flow';
+import { committed } from '../src/sim/ledger';
+import { migrate } from '../src/sim/migrate';
+import { hashSeed, rng } from '../src/sim/rng';
+import { jobLines, reservedFor, stockFlags } from '../src/sim/stock';
+import { ROLES, type IslandState, type Order } from '../src/sim/types';
+import { blocks, crossMoves, dockNext, endTurnChecks, flowMoves, launchFor, openOrders, teamNumbers, yourMoves } from '../src/ui/select';
+
+vi.setConfig({ testTimeout: 30000 });
+
+const FIXTURES = ['early', 'kits', 'countered', 'repair', 'chain-transit', 'chain-review', 'midweek', 'late'].map((n) => `v2-6c0c426-${n}`);
+const load = (name: string): IslandState => JSON.parse(readFileSync(resolve(import.meta.dirname, 'fixtures', `${name}.json`), 'utf8'));
+const open = (o: Order) => o.status !== 'done' && o.status !== 'cancelled';
+const clone = (s: IslandState): IslandState => JSON.parse(JSON.stringify(s));
+
+/** every selector a screen runs on the island */
+function selectors(s: IslandState) {
+  blocks(s);
+  crossMoves(s);
+  flowMoves(s);
+  teamNumbers(s);
+  stockFlags(s);
+  for (const role of ROLES) {
+    dockNext(s, role);
+    endTurnChecks(s, role);
+    if (role !== 'fin') yourMoves(s, role);
+    for (const o of openOrders(s, role)) if (o.status === 'ready') launchFor(s, o, role);
+  }
+  for (const o of s.orders) if (o.flow && o.status === 'pending') expect(cardOf(s, o).total).toBeGreaterThanOrEqual(0);
+  for (const a of s.alerts ?? []) flowStage(s, a);
+  for (const a of s.assets) if (a.kind === 'plane') expect(islandAircraft(s.seed, a).registration).toMatch(/^N\d/);
+}
+
+/** the rest of the week on this build (the seats that haven't ended play as the paper sim's crew), then the resolve */
+function week(s: IslandState, salt: string, json: boolean) {
+  const team = TEAMS['three friends'];
+  const now = s.deadline ?? s.updatedAt;
+  const W = s.week;
+  let x = s;
+  for (const role of ROLES) {
+    if (x.turns[role]?.ended) continue;
+    x = botTurn(x, role, team[role], rng(hashSeed('migrate', salt, role, W)), now - 3600_000);
+    if (json) x = clone(x);
+    x = apply(x, { t: 'endTurn', role, week: W }, now - 3600_000).s;
+    if (json) x = clone(x);
+  }
+  if (x.week === W) x = apply(x, { t: 'resolve', week: W }, now + 1000).s;
+  expect(x.week).toBe(W + 1);
+  return x;
+}
+
+describe('the v2 docs the base engine wrote', () => {
+  for (const name of FIXTURES) {
+    it(`${name}: migrates once, keeps the cash and every order, turns the kits into credit, and plays ten weeks the same in memory and through JSON`, () => {
+      const doc = load(name);
+      expect(doc.engine).toBe(2);
+      const kits = (doc.parts?.stock ?? 0) + (doc.parts?.inTransit ?? 0);
+      const m = migrate(clone(doc));
+      // idempotent, field by field
+      expect(JSON.stringify(migrate(clone(m)))).toBe(JSON.stringify(m));
+      // the money: cash as it was, the kits as store credit at the vendors
+      expect(m.cash).toBe(doc.cash);
+      expect(m.credit).toBe(kits * kitValue(doc.tier));
+      expect(m.parts).toEqual({ stock: 0, inTransit: 0 });
+      expect(committed(m)).toBe(Math.max(0, Math.round((m.pos ?? []).reduce((n, p) => n + p.cost, 0) - (m.credit ?? 0))));
+      // no order lost, none waiting on kits
+      for (const o of doc.orders.filter(open)) {
+        const after = m.orders.find((x) => x.id === o.id);
+        expect(after, o.id).toBeTruthy();
+        expect(open(after!), o.id).toBe(true);
+      }
+      expect(m.orders.filter((o) => open(o) && o.parts > 0)).toEqual([]);
+      // the new fields
+      expect(m.alerts!.every((a) => a.status === 'job')).toBe(true);
+      expect(m.flowSince).toBe(doc.week);
+      expect(m.staff!.length).toBeGreaterThan(0);
+      expect(m.ledger!.length).toBe(Math.min(STOCK.ledgerWeeks - 1, doc.history.length));
+      expect(m.reqs).toEqual([]);
+      expect(m.eas).toEqual([]);
+      // a mid-week doc keeps its turns
+      expect(m.turns).toEqual(doc.turns);
+      selectors(m);
+      // ten weeks of the crew on this build: the doc it writes is v3, the same through JSON
+      let a = clone(doc);
+      let b = clone(doc);
+      for (let w = 0; w < 10; w++) {
+        a = week(a, name, false);
+        b = week(b, name, true);
+        selectors(a);
+        expect(a.engine).toBe(ENGINE_VERSION);
+        expect(Number.isFinite(a.cash)).toBe(true);
+      }
+      expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+      expect(JSON.stringify(a).length).toBeLessThan(150_000);
+    });
+  }
+});
+
+describe('what the migration does to the orders', () => {
+  it('an approved order waiting on kits becomes a flow job: what the shelf has is reserved, the rest lands on an automatic PO at this week’s resolve', () => {
+    const doc = load('v2-6c0c426-kits');
+    const waiting = doc.orders.filter((o) => o.status === 'waiting_part' && o.parts > 0 && !o.chain);
+    expect(waiting.length).toBeGreaterThanOrEqual(2);
+    const m = migrate(clone(doc));
+    for (const w of waiting) {
+      const o = m.orders.find((x) => x.id === w.id)!;
+      expect(o.flow, o.id).toBeTruthy();
+      expect(['ready', 'waiting_part']).toContain(o.status);
+      expect(o.approvedWeek).toBe(w.approvedWeek);
+      const al = m.alerts!.find((a) => a.id === o.flow!.alert)!;
+      expect(al).toMatchObject({ status: 'job', order: o.id, src: 'finding' });
+      // every line is on the shelf for it, or on an automatic PO due this week
+      for (const l of jobLines(o)) {
+        const onPo = (m.pos ?? []).filter((p) => p.by === 'auto' && p.eta === doc.week).reduce((n, p) => n + p.lines.filter((x) => x.order === o.id && x.item === l.item).reduce((k, x) => k + x.qty, 0), 0);
+        expect(reservedFor(m, o.id, l.item) + onPo, `${o.id} ${l.item}`).toBeGreaterThanOrEqual(l.qty);
+      }
+    }
+    // the rest of the week and its resolve: the POs land, the jobs are ready for next week
+    const after = week(clone(doc), 'kits', false);
+    for (const w of waiting) {
+      const o = after.orders.find((x) => x.id === w.id)!;
+      expect(['ready', 'done']).toContain(o.status);
+    }
+    const auto = (after.pos ?? []).filter((p) => p.by === 'auto' && p.week === doc.week && p.lines.some((l) => waiting.some((w) => w.id === l.order)));
+    for (const p of auto) expect(['received', 'paid']).toContain(p.status);
+  });
+
+  it('a countered card that carries a kit becomes a pending flow card, re-priced, its counter gone', () => {
+    const doc = load('v2-6c0c426-countered');
+    const c = doc.orders.find((o) => o.status === 'countered' && o.parts > 0)!;
+    const m = migrate(clone(doc));
+    const o = m.orders.find((x) => x.id === c.id)!;
+    expect(o).toMatchObject({ status: 'pending', parts: 0, pushedBack: false });
+    expect(o.counter).toBeUndefined();
+    expect(o.flow).toBeTruthy();
+    const card = cardOf(m, o);
+    expect(card.labour).toBe(o.cost);
+    expect(card.total).toBeGreaterThan(0);
+    // the analyst approves it on this build
+    const r = apply(m, { t: 'approve', orderId: o.id, week: m.week }, (m.updatedAt ?? 0) + 1000);
+    expect(r.error).toBeUndefined();
+  });
+
+  it('a pending repair with parts becomes a flow card carrying its RPR line', () => {
+    const doc = load('v2-6c0c426-repair');
+    const rp = doc.orders.find((o) => o.kind === 'repair' && o.status === 'pending' && o.parts > 0)!;
+    const m = migrate(clone(doc));
+    const o = m.orders.find((x) => x.id === rp.id)!;
+    expect(o).toMatchObject({ status: 'pending', parts: 0, kind: 'repair' });
+    expect(o.flow!.pick.some((l) => l.item.startsWith('RPR-'))).toBe(true);
+    const al = m.alerts!.find((a) => a.id === o.flow!.alert)!;
+    expect(al).toMatchObject({ sym: 'R_REPAIR', kind: 'repair', status: 'job' });
+  });
+
+  it('open part chains run to the end on this build', () => {
+    for (const name of ['v2-6c0c426-chain-transit', 'v2-6c0c426-chain-review']) {
+      const doc = load(name);
+      expect(openChain(doc)).toBeTruthy();
+      let s = clone(doc);
+      for (let w = 0; w < 8 && openChain(s); w++) s = week(s, name, false);
+      expect(openChain(s), name).toBeFalsy();
+    }
+  });
+
+  it('the mid-week doc: the seats still playing finish their turns', () => {
+    const doc = load('v2-6c0c426-midweek');
+    expect(doc.turns.mech?.ended).toBe(true);
+    const W = doc.week;
+    let s = clone(doc);
+    const now = s.updatedAt + 60_000;
+    const elec = s.orders.find((o) => o.role === 'elec' && o.status === 'ready' && o.kind !== 'project');
+    if (elec) {
+      const r = apply(s, { t: 'complete', role: 'elec', orderId: elec.id, score: 0.9, perfect: false, week: W }, now);
+      expect(r.error).toBeUndefined();
+      s = r.s;
+    }
+    for (const role of ['elec', 'fin'] as const) s = apply(s, { t: 'endTurn', role, week: W }, now).s;
+    expect(s.week).toBe(W + 1);
+    expect(s.engine).toBe(ENGINE_VERSION);
+    expect(s.history.at(-1)!.week).toBe(W);
+  });
+});

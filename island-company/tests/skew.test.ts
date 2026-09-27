@@ -165,3 +165,35 @@ describe('a chain step handed in after its week closed', () => {
     expect(r.error).toBe(`Week ${s.week - 1} closed before that synced. The IPC lookup is still waiting in week ${s.week} (autopilot doesn't do it): hand it in again.`);
   });
 });
+
+describe('the job flow’s version gate (docs/JOBFLOW.md 19.1)', () => {
+  it('the engine, the doc and the rules are all at 3', () => {
+    expect(ENGINE_VERSION).toBe(3);
+    const net = readFileSync(resolve(import.meta.dirname, '..', 'src', 'net', 'firebase.ts'), 'utf8');
+    expect(net).toMatch(/const DOC_VERSION = 3;/);
+    const rules = readFileSync(resolve(import.meta.dirname, '..', 'firestore.rules'), 'utf8');
+    expect(rules).toMatch(/request\.resource\.data\.v == 3/);
+    expect(rules).not.toMatch(/data\.v == 2/);
+  });
+
+  it('the live and skew docs migrate on their first move: kits become store credit, the stock, the crew and the ledger come up', () => {
+    for (const name of [...LIVE, 'skew-79f806b-approved', 'skew-79f806b-resolved-corrosion', 'skew-79f806b-resolved-tires']) {
+      const doc = load(name);
+      const kits = (doc.parts?.stock ?? 0) + (doc.parts?.inTransit ?? 0);
+      const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
+      expect(r.error, name).toBeUndefined();
+      const s = r.s;
+      expect(s.engine).toBe(3);
+      // (a skew doc's first move also heals its chain, which may pay for the part it had approved)
+      if (!doc.chain) expect(s.cash).toBe(doc.cash);
+      expect(s.parts).toEqual({ stock: 0, inTransit: 0 });
+      expect((s.credit ?? 0) > 0 || kits === 0).toBe(true);
+      expect(Object.keys(s.inv ?? {}).length).toBeGreaterThan(20);
+      expect(s.staff?.length).toBeGreaterThan(0);
+      expect(s.alerts).toBeTruthy();
+      expect(s.flowSince).toBe(doc.week);
+      expect(s.orders.filter((o) => o.status !== 'done' && o.status !== 'cancelled' && o.parts > 0)).toEqual([]);
+      selectors(s);
+    }
+  });
+});

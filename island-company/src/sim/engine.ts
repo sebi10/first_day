@@ -61,6 +61,8 @@ import {
   cardBuyLines,
   carryCost,
   consume,
+  dueJob,
+  forgetDerived,
   invoiceContext,
   isSafetyJob,
   jobLines,
@@ -438,6 +440,13 @@ export function cloneState<T>(v: T): T {
 }
 
 export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
+  const r = applyMove(prev, a, now);
+  // a move can read the memoized analytics part way and then change the island: whoever reads the result recomputes them
+  if (r.s !== prev) forgetDerived(r.s);
+  return r;
+}
+
+function applyMove(prev: IslandState, a: Action, now: number): ApplyResult {
   const fail = (error: string): ApplyResult => ({ s: prev, error });
   // written by a newer build: this one would lose what it doesn't know about
   if ((prev.engine ?? 0) > ENGINE_VERSION) return fail('This island was saved by a newer version of Island Company. Reload the app to keep playing.');
@@ -1016,7 +1025,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       const al = alertById(s, a.alert);
       const asset = al ? s.assets.find((x) => x.id === al.assetId) : undefined;
       if (!al || al.status === 'closed' || !asset) return fail('That alert is not open.');
-      if (al.role !== 'mech' || asset.kind !== 'plane') return fail('Not your trade.');
+      if (a.role !== 'mech' || al.role !== 'mech' || asset.kind !== 'plane') return fail('Not your trade.');
       const o = al.order ? s.orders.find((x) => x.id === al.order) : undefined;
       if (o?.status === 'done') return fail('That job is done.');
       if (alertFlags(s, al).mel !== 'C') return fail(`No MEL relief for that on ${asset.name}.`);
@@ -1042,7 +1051,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       const al = alertById(s, a.alert);
       const asset = al ? s.assets.find((x) => x.id === al.assetId) : undefined;
       if (!al || al.status === 'closed' || !asset) return fail('That alert is not open.');
-      if (al.role !== 'elec') return fail('Not your trade.');
+      if (a.role !== 'elec' || al.role !== 'elec') return fail('Not your trade.');
       if (!alertFlags(s, al).hazard) return fail('Nothing there to make safe.');
       if (al.safe) return fail('It is already made safe.');
       const o = al.order ? s.orders.find((x) => x.id === al.order) : undefined;
@@ -1061,7 +1070,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
     case 'askBench': {
       const al = alertById(s, a.alert);
       if (!al || al.status === 'closed') return fail('That alert is not open.');
-      if (al.role !== 'mech') return fail('Not your trade.');
+      if (a.role !== 'mech' || al.role !== 'mech') return fail('Not your trade.');
       if (!alertFlags(s, al).bench) return fail('Nothing on that one for the electrician to meter.');
       if (al.bench?.call) return fail('The circuit has been checked.');
       if (al.bench?.order && open(s.orders.find((x) => x.id === al.bench!.order)!)) return fail('The check is already asked for.');
@@ -1375,7 +1384,7 @@ function approveFlow(s: IslandState, o: Order, auto: boolean, buy: BuyChoice, by
   o.approvedWeek = s.week;
   o.autoApproved = auto;
   o.pushedBack = false;
-  o.counter = undefined;
+  delete o.counter;
   if (lines.length) placePo(s, lines.map((l) => ({ item: l.item, qty: l.qty, order: o.id })), buy, by, now);
   o.status = jobReady(s, o) ? 'ready' : 'waiting_part';
 }
@@ -1667,7 +1676,9 @@ function missedWiringFlow(s: IslandState, o: Order, al: Alert, name: string, tur
   const elec = nameOf(s, 'elec');
   o.flow!.stop = `Still no output with the new unit: waiting on ${elec}'s circuit check`;
   const b = flowBenchOrder(s, al, true);
-  al.bench = { ...(al.bench ?? {}), order: b.id, again: true, call: undefined };
+  // (no `call` key at all: a key set to undefined keeps its place in memory but not through JSON, and the doc must stringify the same either way)
+  const { call: _called, ...bench } = al.bench ?? {};
+  al.bench = { ...bench, order: b.id, again: true };
   feed(
     s,
     'all',
@@ -2513,7 +2524,9 @@ function missedWiring(s: IslandState, c: PartChain, o: Order, name: string, turn
   gainXp(s, 'mech', blindXpFloor(o.tier));
   o.status = 'waiting_part';
   o.title = c.title;
-  c.bench = { ...c.bench!, call: undefined, again: true, id: benchOrder(s, c, true).id };
+  // (no `call` key at all: an undefined one keeps its place in memory but not through JSON)
+  const { call: _called, ...bench } = c.bench!;
+  c.bench = { ...bench, again: true, id: benchOrder(s, c, true).id };
   c.step = 'check';
   delete c.stepId;
   const elec = nameOfRole(s, 'elec');
@@ -3092,9 +3105,9 @@ function autoRun(s: IslandState, role: Role) {
     let n = 0;
     for (const o of pend) {
       if (o.flow) {
-        // a job whose alert grounds a plane, restricts the only guest plane or closes a house: whenever spendable covers it, default freight
+        // a job whose alert grounds a plane, restricts the only guest plane or closes a house (or whose placard runs out): whenever spendable covers it, default freight
         const card = cardOf(s, o);
-        const urgent = urgentJob(s, o) || urgentJob(s, o, s.week + 1);
+        const urgent = dueJob(s, o);
         if (urgent && spendable(s) - card.total >= 0) {
           approveFlow(s, o, true, { freight: card.freight.pick }, 'auto', now);
           continue;
@@ -3102,7 +3115,11 @@ function autoRun(s: IslandState, role: Role) {
         if (n < 2 && spendable(s) - card.total >= ECON.autopilotFloor && s.receivership === 0) {
           approveFlow(s, o, true, { freight: card.freight.pick }, 'auto', now);
           n++;
+          continue;
         }
+        // a card that has waited three weeks fails more often than not: it goes through while spendable stays above the freeze
+        // (a tool or a lot makes a card dear, and an empty seat shouldn't let the island rot for want of one)
+        if (o.deferrals >= 3 && spendable(s) - card.total >= ECON.freezeBelow && s.receivership === 0) approveFlow(s, o, true, { freight: card.freight.pick }, 'auto', now);
         continue;
       }
       if (n >= 2) continue;
@@ -4088,7 +4105,8 @@ export function resolveWeek(s: IslandState, now: number) {
     tierUp,
   };
   s.history.push(report);
-  if (s.history.length > 40) s.history.splice(0, s.history.length - 40);
+  // the week reports keep as many weeks as the ledger (every screen reads 12 at most): the doc budget (2.8)
+  if (s.history.length > STOCK.ledgerWeeks) s.history.splice(0, s.history.length - STOCK.ledgerWeeks);
   feed(s, 'all', GRADE_VALUE[grade] >= 3 ? 'good' : 'bad', `Week ${W} resolved: ${grade}. Revenue ${usd(revenue)}, ${flown}/${scheduled} flights, ${incidents.length} incident${incidents.length === 1 ? '' : 's'}.`, now);
 
   // 19. the ledger's week closes (revenue, cash, inventory value), trimmed to 26 weeks

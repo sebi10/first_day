@@ -1063,7 +1063,10 @@ export function raiseAlert(s: IslandState, o: RaiseOpts, _now: number): Alert {
   }
   const soleWords = sole && sym.sole && sym.sole !== 'none';
   const lead = soleWords ? (sym.sole as { lead: [number, number] }).lead : sym.lead;
-  const due = o.due ?? W + r.int(lead[0], lead[1]);
+  // the teaching weeks (17.5): a crew new to the flow gets a week to act on everything it raises (nothing grounds a plane
+  // or closes a house before anyone could have planned it)
+  const teaching = W < (s.flowSince ?? 1) + ALERTS.teachWeeks;
+  const due = o.due ?? Math.max(W + r.int(lead[0], lead[1]), teaching ? W + 1 : 0);
   const a: Alert = {
     id,
     role: o.role,

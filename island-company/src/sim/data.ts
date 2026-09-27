@@ -410,7 +410,7 @@ export const STARTER: Record<number, StarterLine[]> = {
 /** alerts (5) */
 export const ALERTS = {
   /** a week's chance of one extra alert whose cause is "no fault" (outside the slots) */
-  nff: { mech: 0.125, elec: 0.25 } as Record<OpsRole, number>,
+  nff: { mech: 0.2, elec: 0.4 } as Record<OpsRole, number>,
   /** at alert tier 3+, an intermittent symptom with a real cause shows the NFF finding this often */
   looksNff: 0.3,
   /** an NFF close (or a wrong task) on a real fault comes back after this many weeks */
@@ -464,8 +464,10 @@ export const LABOR = {
   minDefault: 50,
 };
 
-/** today's auction fair value of a generic kit (the money a job that needed a kit carried): 340 at tier 1, +10% a tier */
-export const kitValue = (tier: number) => Math.round((300 * (1 + 0.1 * (Math.max(1, tier) - 1))) / 10) * 10;
+/** the money a job that needed a parts kit carried in today's card (the auction's fair value was 340 at tier 1; tuned: docs/DECISIONS.md, Real job flow · Balance) */
+export const KIT = { base: 300 };
+/** a kit's value at a tier: KIT.base at tier 1, +10% a tier */
+export const kitValue = (tier: number) => Math.round((KIT.base * (1 + 0.1 * (Math.max(1, tier) - 1))) / 10) * 10;
 
 export const FIN_TASKS = {
   close: { title: 'Weekly close', puzzle: 'variance' as PuzzleId, tier: 1 },

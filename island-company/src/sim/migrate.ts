@@ -6,7 +6,7 @@
 // field is absent. It runs at the top of apply() and in the UI's read path.
 import { SYMPTOMS } from './alerts';
 import { islandAircraft } from './chain';
-import { kitValue, TIERS } from './data';
+import { kitValue, STOCK, TIERS } from './data';
 import { bomValue, laborCost, repairLabor, repairTask, stdPick } from './flow';
 import { hashSeed } from './rng';
 import { migrateStaff } from './staff';
@@ -116,7 +116,7 @@ function convertOrders(s: IslandState, W: number) {
     } else {
       // a card: re-priced (labour, and what's to buy), soft reservations; a counter-offer is gone
       o.status = 'pending';
-      o.counter = undefined;
+      delete o.counter;
       o.pushedBack = false;
       reserve(s, o.id, jobLines(o));
       o.cost = o.repair
@@ -126,9 +126,9 @@ function convertOrders(s: IslandState, W: number) {
   }
 }
 
-/** the ledger from the week reports: revenue, cash, and the fixed cost split into overhead and the standard payroll (nothing item-level) */
+/** the ledger from the week reports (the weeks before this one, leaving room for its row): revenue, cash, and the fixed cost split into overhead and the standard payroll (nothing item-level) */
 function backfill(s: IslandState): WeekLedger[] {
-  return s.history.slice(-26).map((h) => {
+  return s.history.slice(-(STOCK.ledgerWeeks - 1)).map((h) => {
     const t = TIERS[Math.max(1, Math.min(5, h.tier)) - 1];
     const payroll = t.fixed - t.overhead;
     return { w: h.week, rev: h.revenue, cash: h.cashEnd, sp: { overhead: h.costs.fixed - payroll, payroll }, tr: {}, inv: 0 };

@@ -8,7 +8,10 @@ import { generateTeardown } from '../src/puzzles/teardown';
 import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
 import { defectChance, defectSeverity, gseCarts, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
-import { repairLabor, repairTask } from '../src/sim/flow';
+import { protectionNeeded, raiseAlert, siteOf } from '../src/sim/alerts';
+import { fixTaskFor, judgeElecPick, judgeSlot, planTask, repairLabor, repairTask, stdPickFor } from '../src/sim/flow';
+import { itemById } from '../src/sim/items';
+import { taskById } from '../src/sim/tasks';
 import { hashSeed } from '../src/sim/rng';
 import type { Alert, Defect, IslandState, Order, ReportInfo, Role } from '../src/sim/types';
 
@@ -789,5 +792,136 @@ describe('hidden defects from hydraulic servicing and ground power starts', () =
     r = readyUp(r, rep.id);
     r = complete(r, 'mech', r.orders.find((x) => x.id === rep.id)!, 0.9).s;
     expect(r.orders.find((x) => x.redo)).toMatchObject({ kind: 'hydraulics', puzzle: 'hydraulics', title: 'Service the brake hydraulics (redo)' });
+  });
+});
+
+describe('the job flow’s wrong choices surface later (11)', () => {
+  /** a planned flow job on a started island in week `w`: the task that fixes it and the right pick unless told otherwise */
+  function flowJob(s: IslandState, sym: string, cause: number, assetId: string, over: { task?: string; pick?: { item: string; qty: number; slot?: string }[] } = {}) {
+    const asset = s.assets.find((a) => a.id === assetId)!;
+    const al = raiseAlert(s, { role: sym.startsWith('E_') ? 'elec' : 'mech', asset, sym, cause }, NOW);
+    const task = over.task ? planTask(s, al, over.task)! : fixTaskFor(s, al)!;
+    const r = apply(s, { t: 'plan', role: al.role, alert: al.id, task: task.id, pick: over.pick ?? stdPickFor(s, al, task), week: s.week }, NOW);
+    expect(r.error).toBeUndefined();
+    const o = r.s.orders.find((x) => x.flow?.alert === al.id)!;
+    return { s: r.s, al, o };
+  }
+
+  it('a wrong task: the job signs off, a sure defect, and the fault comes back with its own words (an incident, and the alert again)', () => {
+    let s = atWeek(6);
+    // the belt squeals (the fix is the belt, 24-30-02); the tech does the alternator (24-30-01) instead
+    s.inv!['HA-2419-4'] = { on: 1 };
+    s.inv!['HA-B38'] = { on: 1 };
+    const r = flowJob(s, 'M_BELT_SQUEAL', 0, 'p1', { task: 'amm:twin:24-30-01' });
+    s = r.s;
+    if (r.o.status === 'pending') s = apply(s, { t: 'approve', orderId: r.o.id, week: s.week }, NOW).s;
+    expect(s.orders.find((o) => o.id === r.o.id)!.status).toBe('ready');
+    s = complete(s, 'mech', s.orders.find((o) => o.id === r.o.id)!, 0.9).s;
+    const d = (s.defects ?? []).find((x) => x.puzzle === 'flow' && x.variant === 'task')!;
+    expect(d).toBeTruthy();
+    expect(d.alert).toMatchObject({ alert: r.al.id, sym: 'M_BELT_SQUEAL' });
+    expect(s.alerts!.find((a) => a.id === r.al.id)!.status).toBe('closed');
+    // it surfaces at its due week: an incident in the symptom's words, and the alert again, due now
+    for (let i = 0; i < 4 && s.alerts!.every((a) => a.src !== 'again'); i++) s = endAll(s);
+    const back = s.alerts!.find((a) => a.src === 'again' && a.sym === 'M_BELT_SQUEAL')!;
+    expect(back).toBeTruthy();
+    expect(back.due).toBe(back.week);
+    const inc = s.history.flatMap((h) => h.incidents).find((i) => i.kind === 'defect' && i.assetId === 'p1');
+    expect(inc?.title).toMatch(/the same fault is back|didn't fix|belt/i);
+  });
+
+  it('a part not effective for this airplane installs, and leaves a sure defect (ipc:noteff)', () => {
+    let s = atWeek(6);
+    const al = raiseAlert(s, { role: 'mech', asset: s.assets.find((a) => a.id === 'p1')!, sym: 'M_BRAKE_CHATTER', cause: 0 }, NOW);
+    const task = fixTaskFor(s, al)!;
+    const std = stdPickFor(s, al, task);
+    const lining = std.find((l) => itemById(l.item)?.slot === 'lining')!.item;
+    const twin = s.assets.find((a) => a.id === 'p1')!;
+    const near = Object.keys(s.inv!).find((id) => id !== lining && itemById(id)?.slot === 'lining' && judgeSlot(s, twin, '32-40', 'lining', id).why === 'noteff')!;
+    expect(near).toBeTruthy();
+    const r = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick: std.map((l) => (l.item === lining ? { ...l, item: near } : l)), week: s.week }, NOW);
+    s = r.s;
+    const o = s.orders.find((x) => x.flow?.alert === al.id)!;
+    if (o.status === 'pending') s = apply(s, { t: 'approve', orderId: o.id, week: s.week }, NOW).s;
+    s = complete(s, 'mech', s.orders.find((x) => x.id === o.id)!, 0.95).s;
+    expect(s.orders.find((x) => x.id === o.id)!.status).toBe('done');
+    const d = (s.defects ?? []).find((x) => x.puzzle === 'ipc' && x.variant === 'noteff');
+    expect(d).toMatchObject({ assetId: 'p1' });
+  });
+
+  it('every electrical variant, on a site built for it (the rule order: category stop, then 11.3)', () => {
+    const outlet = taskById('ref:outlet')!;
+    const threeway = taskById('ref:3way')!;
+    const spa = taskById('ref:spa')!;
+    const feeder = taskById('ref:feeder')!;
+    const l = (item: string, slot: string, qty = 1) => ({ item, qty, slot });
+    const cases: [string, ReturnType<typeof judgeElecPick>][] = [
+      ['nogfci', judgeElecPick(outlet, { room: 'bath', amps: 20, awg: 12 }, [l('KR20-TR', 'receptacle')])],
+      ['noafci', judgeElecPick(outlet, { room: 'bedroom', amps: 15, awg: 14 }, [l('KR15-TR', 'receptacle')])],
+      ['oversized', judgeElecPick(outlet, { room: 'bedroom', amps: 15, awg: 14 }, [l('KR15-TR', 'receptacle'), l('KP120AF', 'protection')])],
+      ['undersized', judgeElecPick(threeway, { room: 'hall', amps: 20, awg: 12 }, [l('KS3', 'switch', 2), l('NMB-14-3', 'cable', 25)])],
+      ['rating', judgeElecPick(outlet, { room: 'kitchen', amps: 20, awg: 12, single: true, upstream: 'df' }, [l('KR15S', 'receptacle')])],
+      ['notr', judgeElecPick(outlet, { room: 'living', amps: 15, awg: 14, upstream: 'afci' }, [l('KR15', 'receptacle')])],
+      ['nowr', judgeElecPick(outlet, { room: 'outdoor', amps: 20, awg: 12, upstream: 'gfci' }, [l('KR20-TR', 'receptacle')])],
+      ['boxfill', judgeElecPick(threeway, { room: 'hall', amps: 20, awg: 12 }, [l('KS3', 'switch', 2), l('NMB-12-3', 'cable', 25), l('BOX-NW1', 'box')])],
+      [
+        'raintight',
+        judgeElecPick(spa, { room: 'spa', amps: 50, awg: 8, wet: true, feet: 40 }, [
+          l('SPA-50GF', 'spa'),
+          l('KP250', 'feed'),
+          l('THWN-8', 'wire', 120),
+          l('THWN-10', 'egc', 40),
+          l('EMT-34', 'emt'),
+          l('EMT-C34SS', 'connectors', 2),
+          l('PVC40-1', 'pvc', 4),
+        ]),
+      ],
+      ['noburial', judgeElecPick(feeder, { room: 'panel', amps: 100, awg: 3, run: 'buried' }, [l('SPLIT-4', 'splice', 4)])],
+    ];
+    for (const [variant, v] of cases) expect(v, variant).toMatchObject({ ok: false, variant });
+    // a line in the wrong category stops the install instead (no defect)
+    expect(judgeElecPick(outlet, { room: 'living', amps: 15, awg: 14 }, [l('KS1', 'receptacle')])).toMatchObject({ stop: expect.stringMatching(/it doesn't go there\.$/) });
+    // and the right devices pass
+    expect(judgeElecPick(outlet, { room: 'bath', amps: 20, awg: 12 }, [l('KG20-TR', 'receptacle')])).toEqual({ ok: true });
+  });
+
+  it('the engine plants the electrician’s sure defect at the sign-off: a bath receptacle with no GFCI', () => {
+    let s = atWeek(6);
+    const house = s.assets.find((a) => a.kind === 'house')!;
+    // a dead outlet in a room the code wants GFCI protection in, nothing upstream: replaced with a plain TR receptacle
+    let pick: { item: string; qty: number; slot?: string }[] = [];
+    let al: Alert | undefined;
+    for (let i = 0; i < 60 && !al; i++) {
+      const a = raiseAlert(s, { role: 'elec', asset: house, sym: 'E_DEAD_OUTLET', cause: 0, seed: hashSeed('gfci-room', i) }, NOW);
+      const site = siteOf(s, a);
+      if (site && protectionNeeded(site).gfci && !site.upstream) {
+        al = a;
+        pick = [{ item: site.amps === 20 ? 'KR20-TR' : 'KR15-TR', qty: 1, slot: 'receptacle' }, { item: 'WN-ASST', qty: 1 }];
+      }
+    }
+    expect(al).toBeTruthy();
+    s.inv!['KR15-TR'] = { on: 10 };
+    s.inv!['KR20-TR'] = { on: 10 };
+    const r = apply(s, { t: 'plan', role: 'elec', alert: al!.id, task: 'ref:outlet', pick, week: s.week }, NOW);
+    expect(r.error).toBeUndefined();
+    s = r.s;
+    const o = s.orders.find((x) => x.flow?.alert === al!.id)!;
+    if (o.status === 'pending') s = apply(s, { t: 'approve', orderId: o.id, week: s.week }, NOW).s;
+    s = complete(s, 'elec', s.orders.find((x) => x.id === o.id)!, 0.95).s;
+    expect((s.defects ?? []).find((d) => d.puzzle === 'elec' && d.variant === 'nogfci')).toMatchObject({ assetId: house.id });
+  });
+
+  it('a service-neutral fault made safe at a branch breaker comes back as a shock and re-raises the alert, due now (elec:isolation)', () => {
+    let s = atWeek(6);
+    const house = s.assets.find((a) => a.kind === 'house')!;
+    const al = raiseAlert(s, { role: 'elec', asset: house, sym: 'E_SHOWER_TINGLE', cause: 2 }, NOW);
+    s = apply(s, { t: 'makeSafe', role: 'elec', alert: al.id, how: 'breaker', week: s.week }, NOW).s;
+    const d = s.defects!.find((x) => x.variant === 'isolation')!;
+    for (let w = s.week; w <= d.dueWeek; w++) s = endAll(s);
+    const back = s.alerts!.find((a) => a.id === al.id);
+    expect(back?.status).not.toBe('closed');
+    expect(back?.safe).toBeUndefined();
+    expect(back!.due).toBeLessThanOrEqual(s.week);
+    expect(s.history.flatMap((h) => h.incidents).some((i) => i.assetId === house.id && /tingle|shock/i.test(i.title))).toBe(true);
   });
 });

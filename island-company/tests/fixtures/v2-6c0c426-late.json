@@ -1,0 +1,3396 @@
+{
+ "v": 1,
+ "id": "fx-1",
+ "name": "Fixture Island",
+ "createdAt": 1788264000000,
+ "creatorTz": "Europe/Paris",
+ "resolveHour": 20,
+ "seed": 3985547672,
+ "week": 22,
+ "deadline": 1789927200000,
+ "tier": 4,
+ "cash": 63328,
+ "openCash": 63328,
+ "parts": {
+  "stock": 3,
+  "inTransit": 0
+ },
+ "rates": {
+  "nightly": 250,
+  "charter": 590
+ },
+ "insurance": "standard",
+ "autoBudget": {
+  "mech": 500,
+  "elec": 500
+ },
+ "autoSpent": {
+  "mech": 0,
+  "elec": 0
+ },
+ "assets": [
+  {
+   "id": "p1",
+   "kind": "plane",
+   "model": "twin",
+   "name": "Twin N-12",
+   "health": 84.5,
+   "touchedWeek": 21,
+   "sinceInspection": 14
+  },
+  {
+   "id": "h1",
+   "kind": "house",
+   "model": "cottage",
+   "name": "Cottage 1",
+   "health": 62.4,
+   "touchedWeek": 20,
+   "inspectionUntil": 28
+  },
+  {
+   "id": "h2",
+   "kind": "house",
+   "model": "cottage",
+   "name": "Cottage 2",
+   "health": 60.3,
+   "touchedWeek": 21,
+   "inspectionUntil": 23
+  },
+  {
+   "id": "g1",
+   "kind": "grid",
+   "model": "panel",
+   "name": "Island grid",
+   "health": 66.6,
+   "touchedWeek": 16
+  },
+  {
+   "id": "p2",
+   "kind": "plane",
+   "model": "cargo",
+   "name": "Cargo C-7",
+   "health": 58.1,
+   "touchedWeek": 19,
+   "sinceInspection": 11
+  },
+  {
+   "id": "h3",
+   "kind": "house",
+   "model": "cottage",
+   "name": "Cottage 3",
+   "health": 94,
+   "touchedWeek": 21,
+   "inspectionUntil": 26
+  },
+  {
+   "id": "h4",
+   "kind": "house",
+   "model": "cottage",
+   "name": "Cottage 4",
+   "health": 59.8,
+   "touchedWeek": 18,
+   "inspectionUntil": 26
+  },
+  {
+   "id": "gen",
+   "kind": "generator",
+   "model": "gen",
+   "name": "Generator house",
+   "health": 75,
+   "touchedWeek": 16
+  },
+  {
+   "id": "p3",
+   "kind": "plane",
+   "model": "float",
+   "name": "Float F-3",
+   "health": 66.8,
+   "touchedWeek": 20,
+   "sinceInspection": 11
+  },
+  {
+   "id": "h5",
+   "kind": "house",
+   "model": "villa",
+   "name": "Villa East",
+   "health": 58.9,
+   "touchedWeek": 19,
+   "inspectionUntil": 24
+  },
+  {
+   "id": "h6",
+   "kind": "house",
+   "model": "villa",
+   "name": "Villa West",
+   "health": 56.2,
+   "touchedWeek": 20,
+   "inspectionUntil": 24
+  }
+ ],
+ "orders": [
+  {
+   "role": "mech",
+   "kind": "repair",
+   "assetId": "p1",
+   "title": "Replace the wheel through-bolts and check the holes for elongation",
+   "puzzle": "teardown",
+   "tier": 2,
+   "cost": 230,
+   "parts": 0,
+   "gain": 10,
+   "status": "done",
+   "job": "wheel",
+   "repair": {
+    "defect": {
+     "id": "d167",
+     "orderKind": "tires",
+     "job": "tires",
+     "log": "tire and brake job",
+     "puzzle": "torque",
+     "title": "Tire and brake",
+     "assetId": "p1",
+     "role": "mech",
+     "by": "mech",
+     "name": "Seb",
+     "week": 17,
+     "dueWeek": 18,
+     "severity": 1,
+     "cost": 380,
+     "tier": 2,
+     "gain": 10,
+     "redo": true
+    },
+    "via": "incident",
+    "problem": "wheel through-bolts below torque, with fretting at the joint",
+    "incident": "Wheel through-bolts on Twin N-12 found loose at the walkaround"
+   },
+   "id": "o181",
+   "createdWeek": 18,
+   "deferrals": 1,
+   "lastDeferredWeek": 19,
+   "seed": 1063775320,
+   "approvedWeek": 19,
+   "autoApproved": true,
+   "pushedBack": false,
+   "deferReason": "open",
+   "result": {
+    "score": 0.5473111646994948,
+    "perfect": false,
+    "credit": 0.7783866988196969,
+    "by": "mech",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "gfci",
+   "assetId": "h3",
+   "title": "GFCI in wet rooms",
+   "puzzle": "wireup",
+   "tier": 3,
+   "cost": 290,
+   "parts": 0,
+   "gain": 10,
+   "status": "done",
+   "id": "o184",
+   "createdWeek": 19,
+   "deferrals": 1,
+   "lastDeferredWeek": 19,
+   "seed": 176818232,
+   "approvedWeek": 19,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open",
+   "result": {
+    "score": 0.6357019210979342,
+    "perfect": false,
+    "credit": 0.8314211526587605,
+    "by": "elec",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "gfci",
+   "assetId": "h6",
+   "title": "GFCI in wet rooms",
+   "puzzle": "wireup",
+   "tier": 3,
+   "cost": 290,
+   "parts": 0,
+   "gain": 10,
+   "status": "done",
+   "id": "o185",
+   "createdWeek": 19,
+   "deferrals": 1,
+   "lastDeferredWeek": 19,
+   "seed": 2538752882,
+   "approvedWeek": 19,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open",
+   "result": {
+    "score": 0.6139808766590431,
+    "perfect": false,
+    "credit": 0.8183885259954259,
+    "by": "elec",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "hydraulics",
+   "assetId": "p1",
+   "title": "Service the brake hydraulics (redo)",
+   "puzzle": "hydraulics",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 4,
+   "status": "done",
+   "approvedWeek": 19,
+   "autoApproved": true,
+   "redo": {
+    "week": 16,
+    "by": "mech",
+    "name": "Seb",
+    "cost": 310
+   },
+   "id": "o191",
+   "createdWeek": 19,
+   "deferrals": 1,
+   "lastDeferredWeek": 19,
+   "seed": 2129846558,
+   "deferReason": "open",
+   "result": {
+    "score": 0.7138860230380668,
+    "perfect": false,
+    "credit": 0.8783316138228401,
+    "by": "mech",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p1",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "cancelled",
+   "id": "o193",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1378504201
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p3",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "cancelled",
+   "id": "o194",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1548294241
+  },
+  {
+   "role": "mech",
+   "kind": "alternator",
+   "assetId": "p3",
+   "title": "Replace alternator",
+   "puzzle": "teardown",
+   "tier": 4,
+   "cost": 1150,
+   "parts": 1,
+   "gain": 18,
+   "status": "done",
+   "id": "o195",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 174502795,
+   "approvedWeek": 20,
+   "autoApproved": false,
+   "pushedBack": false,
+   "result": {
+    "score": 0.5225439157849177,
+    "perfect": false,
+    "credit": 0.7635263494709505,
+    "by": "mech",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "codeprep",
+   "assetId": "h1",
+   "title": "Code inspection prep",
+   "puzzle": "panel",
+   "tier": 3,
+   "cost": 210,
+   "parts": 0,
+   "gain": 6,
+   "status": "done",
+   "id": "o196",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 4103486346,
+   "approvedWeek": 20,
+   "autoApproved": false,
+   "pushedBack": false,
+   "result": {
+    "score": 0.5394263442186638,
+    "perfect": false,
+    "credit": 0.7736558065311983,
+    "by": "elec",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "hottub",
+   "assetId": "h3",
+   "title": "Run conduit to the hot tub",
+   "puzzle": "conduit",
+   "tier": 4,
+   "cost": 640,
+   "parts": 1,
+   "gain": 16,
+   "status": "done",
+   "id": "o197",
+   "createdWeek": 20,
+   "deferrals": 1,
+   "lastDeferredWeek": 20,
+   "seed": 3225601324,
+   "approvedWeek": 20,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open",
+   "result": {
+    "score": 0.759888697839342,
+    "perfect": false,
+    "credit": 0.9059332187036051,
+    "by": "elec",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "trip",
+   "assetId": "h2",
+   "title": "Trace dead outlets",
+   "puzzle": "trace",
+   "tier": 3,
+   "cost": 170,
+   "parts": 0,
+   "gain": 12,
+   "status": "done",
+   "id": "o198",
+   "createdWeek": 20,
+   "deferrals": 1,
+   "lastDeferredWeek": 20,
+   "seed": 3082669446,
+   "approvedWeek": 20,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open",
+   "result": {
+    "score": 0.5893333114031701,
+    "perfect": false,
+    "credit": 0.8035999868419021,
+    "by": "elec",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "reconcile",
+   "assetId": null,
+   "title": "Bank reconciliation",
+   "puzzle": "reconcile",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "leak": 1190,
+   "id": "o199",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2235147758,
+   "result": {
+    "score": 0.7519903894513845,
+    "perfect": false,
+    "credit": 0.9011942336708307,
+    "by": "fin",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "invoice",
+   "assetId": null,
+   "title": "Three-way match: vendor invoices",
+   "puzzle": "invoice",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "leak": 220,
+   "id": "o200",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 999933602,
+   "result": {
+    "score": 0.7233655713265761,
+    "perfect": false,
+    "credit": 0.8840193427959456,
+    "by": "fin",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "auction",
+   "assetId": null,
+   "title": "Parts auction",
+   "puzzle": "auction",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o201",
+   "createdWeek": 20,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 209981132,
+   "result": {
+    "score": 0.7144267749274149,
+    "perfect": false,
+    "credit": 0.878656064956449,
+    "by": "fin",
+    "week": 20,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "tires",
+   "assetId": "p1",
+   "title": "Tire and brake (redo)",
+   "puzzle": "torque",
+   "tier": 2,
+   "cost": 0,
+   "parts": 0,
+   "gain": 5,
+   "status": "done",
+   "approvedWeek": 20,
+   "autoApproved": true,
+   "redo": {
+    "week": 17,
+    "by": "mech",
+    "name": "Seb",
+    "cost": 380
+   },
+   "id": "o202",
+   "createdWeek": 20,
+   "deferrals": 1,
+   "lastDeferredWeek": 20,
+   "seed": 2006270032,
+   "deferReason": "open",
+   "result": {
+    "score": 0.8105059317825362,
+    "perfect": false,
+    "credit": 0.9363035590695217,
+    "by": "mech",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "inspect100",
+   "assetId": "p1",
+   "title": "100-hr inspection",
+   "puzzle": "crack",
+   "tier": 3,
+   "cost": 250,
+   "parts": 0,
+   "gain": 10,
+   "status": "ready",
+   "id": "o203",
+   "createdWeek": 21,
+   "deferrals": 1,
+   "lastDeferredWeek": 21,
+   "seed": 1441959595,
+   "approvedWeek": 21,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open"
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p1",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o204",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 290654176,
+   "result": {
+    "score": 0.6838218971900641,
+    "perfect": false,
+    "credit": 0.8602931383140384,
+    "by": "mech",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p3",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o205",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3429778617,
+   "result": {
+    "score": 0.7251940568489953,
+    "perfect": false,
+    "credit": 0.8851164341093971,
+    "by": "mech",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "codeprep",
+   "assetId": "h2",
+   "title": "Code inspection prep",
+   "puzzle": "panel",
+   "tier": 3,
+   "cost": 210,
+   "parts": 0,
+   "gain": 6,
+   "status": "ready",
+   "id": "o206",
+   "createdWeek": 21,
+   "deferrals": 1,
+   "lastDeferredWeek": 21,
+   "seed": 319523143,
+   "approvedWeek": 21,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open"
+  },
+  {
+   "role": "elec",
+   "kind": "flicker",
+   "assetId": "h1",
+   "title": "Diagnose flickering lights",
+   "puzzle": "meter",
+   "tier": 3,
+   "cost": 130,
+   "parts": 0,
+   "gain": 12,
+   "status": "ready",
+   "id": "o207",
+   "createdWeek": 21,
+   "deferrals": 1,
+   "lastDeferredWeek": 21,
+   "seed": 1443529437,
+   "approvedWeek": 21,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open"
+  },
+  {
+   "role": "elec",
+   "kind": "trip",
+   "assetId": "h3",
+   "title": "Trace dead outlets",
+   "puzzle": "trace",
+   "tier": 3,
+   "cost": 170,
+   "parts": 0,
+   "gain": 12,
+   "status": "ready",
+   "id": "o208",
+   "createdWeek": 21,
+   "deferrals": 1,
+   "lastDeferredWeek": 21,
+   "seed": 2265748299,
+   "approvedWeek": 21,
+   "autoApproved": false,
+   "pushedBack": false,
+   "deferReason": "open"
+  },
+  {
+   "role": "fin",
+   "kind": "close",
+   "assetId": null,
+   "title": "Weekly close",
+   "puzzle": "variance",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "leak": 1130,
+   "id": "o209",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1253892581,
+   "result": {
+    "score": 0.8398856397951021,
+    "perfect": false,
+    "credit": 0.9539313838770613,
+    "by": "fin",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "invoice",
+   "assetId": null,
+   "title": "Three-way match: vendor invoices",
+   "puzzle": "invoice",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "leak": 320,
+   "id": "o210",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 209563785,
+   "result": {
+    "score": 0.6537770540220662,
+    "perfect": false,
+    "credit": 0.8422662324132397,
+    "by": "fin",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "auction",
+   "assetId": null,
+   "title": "Parts auction",
+   "puzzle": "auction",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o211",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2615831899,
+   "result": {
+    "score": 0.5554734685458242,
+    "perfect": false,
+    "credit": 0.7832840811274946,
+    "by": "fin",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "forecast",
+   "assetId": null,
+   "title": "4-week cash forecast",
+   "puzzle": "forecast",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o212",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3236501835,
+   "result": {
+    "score": 0.7404634301085025,
+    "perfect": false,
+    "credit": 0.8942780580651015,
+    "by": "fin",
+    "week": 21,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "project",
+   "assetId": null,
+   "title": "Acceptance inspection: aluminium deck beams",
+   "puzzle": "crack",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "id": "o213",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3169330066
+  },
+  {
+   "role": "elec",
+   "kind": "project",
+   "assetId": null,
+   "title": "Wire the lodge GFCIs",
+   "puzzle": "wireup",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "id": "o214",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3724918999
+  },
+  {
+   "role": "fin",
+   "kind": "project",
+   "assetId": null,
+   "title": "Opening budget review",
+   "puzzle": "variance",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "id": "o215",
+   "createdWeek": 21,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 283872014
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p1",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "id": "o216",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 760342173
+  },
+  {
+   "role": "mech",
+   "kind": "inspect100",
+   "assetId": "p2",
+   "title": "100-hr inspection",
+   "puzzle": "crack",
+   "tier": 3,
+   "cost": 250,
+   "parts": 0,
+   "gain": 10,
+   "status": "pending",
+   "id": "o217",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3122800872
+  },
+  {
+   "role": "mech",
+   "kind": "inspect100",
+   "assetId": "p3",
+   "title": "100-hr inspection",
+   "puzzle": "crack",
+   "tier": 3,
+   "cost": 250,
+   "parts": 0,
+   "gain": 10,
+   "status": "pending",
+   "id": "o218",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3110253027
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p3",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 3,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "id": "o219",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3096752654
+  },
+  {
+   "role": "elec",
+   "kind": "codeprep",
+   "assetId": "h5",
+   "title": "Code inspection prep",
+   "puzzle": "panel",
+   "tier": 3,
+   "cost": 210,
+   "parts": 0,
+   "gain": 6,
+   "status": "pending",
+   "id": "o220",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 256190731
+  },
+  {
+   "role": "elec",
+   "kind": "codeprep",
+   "assetId": "h6",
+   "title": "Code inspection prep",
+   "puzzle": "panel",
+   "tier": 3,
+   "cost": 210,
+   "parts": 0,
+   "gain": 6,
+   "status": "pending",
+   "id": "o221",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3891018619
+  },
+  {
+   "role": "fin",
+   "kind": "reconcile",
+   "assetId": null,
+   "title": "Bank reconciliation",
+   "puzzle": "reconcile",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "leak": 850,
+   "id": "o222",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3257408414
+  },
+  {
+   "role": "fin",
+   "kind": "invoice",
+   "assetId": null,
+   "title": "Three-way match: vendor invoices",
+   "puzzle": "invoice",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "leak": 170,
+   "id": "o223",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2636488812
+  },
+  {
+   "role": "fin",
+   "kind": "auction",
+   "assetId": null,
+   "title": "Parts auction",
+   "puzzle": "auction",
+   "tier": 5,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "id": "o224",
+   "createdWeek": 22,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1860645901
+  }
+ ],
+ "players": {
+  "mech": {
+   "uid": "u-mech",
+   "name": "Seb",
+   "role": "mech",
+   "xp": 10634,
+   "perfects": 0,
+   "week0Done": true,
+   "missedStreak": 0,
+   "cosmetic": "m0",
+   "graceUntil": 0,
+   "covers": 0,
+   "seatKey": "ahx6dj",
+   "best": {
+    "balance": 0.8211692240834236,
+    "safetywire": 0.8005818049469962,
+    "torque": 0.8013958774553611,
+    "teardown": 0.6820075949234887,
+    "crack": 0.8608975874772296
+   }
+  },
+  "elec": {
+   "uid": "u-elec",
+   "name": "Ana",
+   "role": "elec",
+   "xp": 9140,
+   "perfects": 0,
+   "week0Done": true,
+   "missedStreak": 0,
+   "cosmetic": "e0",
+   "graceUntil": 0,
+   "covers": 0,
+   "seatKey": "wzvbya",
+   "best": {
+    "trace": 0.9443793004658073,
+    "meter": 0.8761481072800233,
+    "wireup": 0.7098816130124033
+   }
+  },
+  "fin": {
+   "uid": "u-fin",
+   "name": "Cy",
+   "role": "fin",
+   "xp": 13254,
+   "perfects": 0,
+   "week0Done": true,
+   "missedStreak": 0,
+   "cosmetic": "f0",
+   "graceUntil": 0,
+   "covers": 0,
+   "seatKey": "s3hct6",
+   "best": {
+    "variance": 0.9390503255929797,
+    "auction": 0.9365703399805352,
+    "reconcile": 0.9029451309284194,
+    "invoice": 0.92223309781868,
+    "forecast": 0.7640026267897337
+   }
+  }
+ },
+ "turns": {
+  "mech": {
+   "ended": false,
+   "endedAt": null,
+   "done": 0
+  },
+  "elec": {
+   "ended": false,
+   "endedAt": null,
+   "done": 0
+  },
+  "fin": {
+   "ended": false,
+   "endedAt": null,
+   "done": 0
+  }
+ },
+ "coversUsed": {},
+ "weather": "storm",
+ "history": [
+  {
+   "week": 1,
+   "tier": 1,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 4647,
+   "budget": 3900,
+   "flightsFlown": 4,
+   "flightsScheduled": 4,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 8000,
+   "cashEnd": 9366,
+   "costs": {
+    "fixed": 1500,
+    "insurance": 150,
+    "leak": 27,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 2,
+   "housesRentable": 2,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 2544074953,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $353 of $380 budget leakage."
+    }
+   ],
+   "mvp": {
+    "mech": "4/4 flights · best: Charter load sheet 77% · 1 signed off",
+    "elec": "2/2 houses booked · best: Trace dead outlets 94% · 2 signed off",
+    "fin": "Cash +$1,366 · recovered $353"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 2,
+   "tier": 1,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 4558,
+   "budget": 3900,
+   "flightsFlown": 4,
+   "flightsScheduled": 4,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 9366,
+   "cashEnd": 11359,
+   "costs": {
+    "fixed": 1500,
+    "insurance": 150,
+    "leak": 150,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 2,
+   "housesRentable": 2,
+   "partsDelivered": 0,
+   "weather": "clear",
+   "seed": 2503291630,
+   "lines": [
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $223 of $330 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $177 of $220 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "4/4 flights · best: Charter load sheet 69% · 1 signed off",
+    "elec": "2/2 houses booked · best: Diagnose flickering lights 88%",
+    "fin": "Cash +$1,993 · recovered $400"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 3,
+   "tier": 1,
+   "grade": "B",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "C"
+   },
+   "weighted": 3.4,
+   "revenue": 4042,
+   "budget": 3900,
+   "flightsFlown": 3,
+   "flightsScheduled": 3,
+   "incidents": [
+    {
+     "kind": "defect",
+     "role": "mech",
+     "assetId": "p1",
+     "title": "Pilot wrote up a heavy landing on Twin N-12: the load sheet had the CG near the aft limit",
+     "cost": 360,
+     "from": {
+      "title": "Charter load sheet",
+      "name": "Seb",
+      "week": 1,
+      "traced": "the charter load sheet Seb signed off in week 1",
+      "redo": false,
+      "repairId": "o28"
+     }
+    }
+   ],
+   "nearMisses": 0,
+   "cashStart": 11359,
+   "cashEnd": 12776,
+   "costs": {
+    "fixed": 1500,
+    "insurance": 150,
+    "leak": 147,
+    "incidents": 180,
+    "refunds": 0
+   },
+   "housesBooked": 2,
+   "housesRentable": 2,
+   "partsDelivered": 1,
+   "weather": "wind",
+   "seed": 1150412149,
+   "lines": [
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Twin N-12: 100-hr inspection overdue (−6)."
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Pilot wrote up a heavy landing on Twin N-12: the load sheet had the CG near the aft limit. Traced to the charter load sheet Seb signed off in week 1."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $358 of $470 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $215 of $250 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Claims $360, insurance paid $180."
+    }
+   ],
+   "mvp": {
+    "mech": "3/3 flights · best: Tire and brake 80%",
+    "elec": "2/2 houses booked · best: Trace dead outlets 83% · 1 signed off",
+    "fin": "Cash +$1,417 · recovered $573"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 4,
+   "tier": 1,
+   "grade": "A",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.6000000000000005,
+   "revenue": 3435,
+   "budget": 3900,
+   "flightsFlown": 3,
+   "flightsScheduled": 3,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 12776,
+   "cashEnd": 12133,
+   "costs": {
+    "fixed": 1500,
+    "insurance": 150,
+    "leak": 98,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 2,
+   "housesRentable": 2,
+   "partsDelivered": 0,
+   "weather": "wind",
+   "seed": 597673460,
+   "lines": [
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Twin N-12: half its charters stayed on the ramp."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $605 of $670 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $177 of $210 vendor overbilling."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "Crew project open: Commission the cargo plane and cottages 3–4."
+    }
+   ],
+   "mvp": {
+    "mech": "3/3 flights · best: 100-hr inspection 86%",
+    "elec": "2/2 houses booked · best: GFCI in wet rooms 71% · 1 signed off",
+    "fin": "Cash −$643 · recovered $782"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 5,
+   "tier": 1,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 6077,
+   "budget": 5900,
+   "flightsFlown": 8,
+   "flightsScheduled": 8,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 12133,
+   "cashEnd": 15492,
+   "costs": {
+    "fixed": 2300,
+    "insurance": 188,
+    "leak": 53,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 4064741655,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $498 of $530 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $240 of $260 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "8/8 flights · best: Charter load sheet 82% · 1 signed off",
+    "elec": "4/4 houses booked · best: Trace dead outlets 67% · 2 signed off",
+    "fin": "Cash +$3,359 · recovered $737"
+   },
+   "autoRun": [],
+   "tierUp": 2
+  },
+  {
+   "week": 6,
+   "tier": 2,
+   "grade": "A",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.6000000000000005,
+   "revenue": 5394,
+   "budget": 5900,
+   "flightsFlown": 8,
+   "flightsScheduled": 8,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 15492,
+   "cashEnd": 17502,
+   "costs": {
+    "fixed": 2300,
+    "insurance": 188,
+    "leak": 154,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "clear",
+   "seed": 87920046,
+   "lines": [
+    {
+     "role": "elec",
+     "tone": "info",
+     "text": "Ana was covered by autopilot (50%)."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Twin N-12's weak battery: the pilot started it on GPU cart 1 (75% left on the cart)."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $436 of $590 unreconciled cash."
+    }
+   ],
+   "mvp": {
+    "mech": "8/8 flights · 3 signed off",
+    "elec": "4/4 houses booked",
+    "fin": "Cash +$2,010 · recovered $436"
+   },
+   "autoRun": [
+    "elec"
+   ]
+  },
+  {
+   "week": 7,
+   "tier": 2,
+   "grade": "A",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.6000000000000005,
+   "revenue": 5273,
+   "budget": 5900,
+   "flightsFlown": 8,
+   "flightsScheduled": 8,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 17502,
+   "cashEnd": 19838,
+   "costs": {
+    "fixed": 2300,
+    "insurance": 188,
+    "leak": 188,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "clear",
+   "seed": 2538002070,
+   "lines": [
+    {
+     "role": "elec",
+     "tone": "info",
+     "text": "Ana was covered by autopilot (50%)."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Twin N-12's weak battery: the pilot started it on GPU cart 1 (46% left on the cart)."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $341 of $450 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $210 of $290 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Forecast from week 3 missed by 11%."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "Crew project open: Build the generator house and ferry dock."
+    }
+   ],
+   "mvp": {
+    "mech": "8/8 flights · 3 signed off",
+    "elec": "4/4 houses booked",
+    "fin": "Cash +$2,336 · recovered $552"
+   },
+   "autoRun": [
+    "elec"
+   ]
+  },
+  {
+   "week": 8,
+   "tier": 2,
+   "grade": "B",
+   "components": {
+    "revenue": "C",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.2,
+   "revenue": 5820,
+   "budget": 6900,
+   "flightsFlown": 6,
+   "flightsScheduled": 6,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 19838,
+   "cashEnd": 22041,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 190,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 29
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "wind",
+   "seed": 2520535538,
+   "lines": [
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Cargo C-7: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($29 of power)."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $474 of $610 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $105 of $160 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "6/6 flights · 3 signed off",
+    "elec": "4/4 houses booked · 4 signed off",
+    "fin": "Cash +$2,203 · recovered $580"
+   },
+   "autoRun": [],
+   "tierUp": 3
+  },
+  {
+   "week": 9,
+   "tier": 3,
+   "grade": "B",
+   "components": {
+    "revenue": "C",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.2,
+   "revenue": 5492,
+   "budget": 6900,
+   "flightsFlown": 4,
+   "flightsScheduled": 4,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 22041,
+   "cashEnd": 22001,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 342,
+    "incidents": 625,
+    "refunds": 0
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "storm",
+   "seed": 4023872625,
+   "lines": [
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "2 flights lost on Twin N-12: storm"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "2 flights lost on Cargo C-7: storm"
+    },
+    {
+     "role": "elec",
+     "tone": "bad",
+     "text": "Storm damage: houses −3, grid −4."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $748 of $1,050 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $190 of $230 vendor overbilling."
+    },
+    {
+     "role": "all",
+     "tone": "bad",
+     "text": "Storm claim: $1,250 of roof and dock damage."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Claims $1,250, insurance paid $625."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Forecast from week 5 missed by 30%."
+    }
+   ],
+   "mvp": {
+    "mech": "4/4 flights · 3 signed off",
+    "elec": "4/4 houses booked · 3 signed off",
+    "fin": "Cash −$40 · recovered $938"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 10,
+   "tier": 3,
+   "grade": "A",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.6000000000000005,
+   "revenue": 6623,
+   "budget": 6900,
+   "flightsFlown": 4,
+   "flightsScheduled": 4,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 22001,
+   "cashEnd": 22062,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 261,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 26
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "clear",
+   "seed": 2264295598,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Cargo C-7 AOG: grounded until the com radio is fixed (4 flights cancelled)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No cargo flights carried parts: a mainland boat brought 1 kit ($350)."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($3 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 2 charged to 100% on the hangar charger ($23 of power)."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $577 of $730 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $181 of $290 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "4/4 flights · 3 signed off",
+    "elec": "4/4 houses booked · 3 signed off",
+    "fin": "Cash +$61 · recovered $759"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 11,
+   "tier": 3,
+   "grade": "B",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "C"
+   },
+   "weighted": 3.0000000000000004,
+   "revenue": 6611,
+   "budget": 6900,
+   "flightsFlown": 6,
+   "flightsScheduled": 6,
+   "incidents": [
+    {
+     "kind": "defect",
+     "role": "mech",
+     "assetId": "p2",
+     "title": "Pilot wrote up com 1 on Cargo C-7 again: still dead on transmit after the wiring was fixed",
+     "cost": 1370,
+     "from": {
+      "title": "Meter the com radio circuit",
+      "name": "Ana",
+      "week": 10,
+      "traced": "the com radio circuit check Ana signed off in week 10",
+      "redo": false,
+      "repairId": "o101"
+     }
+    }
+   ],
+   "nearMisses": 0,
+   "cashStart": 22062,
+   "cashEnd": 23937,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 660,
+    "incidents": 1285,
+    "refunds": 0,
+    "power": 3
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "wind",
+   "seed": 2729352851,
+   "lines": [
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Cy was covered by autopilot (50%)."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Cargo C-7: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($3 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Pilot wrote up com 1 on Cargo C-7 again: still dead on transmit after the wiring was fixed. Traced to the com radio circuit check Ana signed off in week 10."
+    },
+    {
+     "role": "all",
+     "tone": "good",
+     "text": "Back in service: Cargo C-7 sat 1 week for com radio: no part needed, Ana's check found the fault in the wiring. $0 in parts, fees and freight."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $290 of $580 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices skipped: $370 vendor overbilling lost."
+    },
+    {
+     "role": "all",
+     "tone": "bad",
+     "text": "Wind claim: $1,200 of roof and dock damage."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Claims $2,570, insurance paid $1,285."
+    },
+    {
+     "role": "fin",
+     "tone": "good",
+     "text": "Forecast from week 7 landed within 8%: +$1,405."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Unallocated A-grade bonus: $662 went to reserve."
+    }
+   ],
+   "mvp": {
+    "mech": "6/6 flights · 3 signed off",
+    "elec": "4/4 houses booked · 3 signed off",
+    "fin": "Cash +$1,875 · recovered $290"
+   },
+   "autoRun": [
+    "fin"
+   ]
+  },
+  {
+   "week": 12,
+   "tier": 3,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 7936,
+   "budget": 6900,
+   "flightsFlown": 8,
+   "flightsScheduled": 8,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 23937,
+   "cashEnd": 25806,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 422,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 0,
+   "weather": "clear",
+   "seed": 3537773458,
+   "lines": [
+    {
+     "role": "elec",
+     "tone": "info",
+     "text": "Ana was covered by autopilot (50%)."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Twin N-12's weak battery: the pilot started it on GPU cart 1 (75% left on the cart)."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $761 of $1,090 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $137 of $230 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "8/8 flights · 3 signed off",
+    "elec": "4/4 houses booked",
+    "fin": "Cash +$1,869 · recovered $898"
+   },
+   "autoRun": [
+    "elec"
+   ]
+  },
+  {
+   "week": 13,
+   "tier": 3,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 6974,
+   "budget": 6900,
+   "flightsFlown": 6,
+   "flightsScheduled": 6,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 25806,
+   "cashEnd": 28777,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 156,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 15
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 1,
+   "weather": "wind",
+   "seed": 89174546,
+   "lines": [
+    {
+     "role": "elec",
+     "tone": "info",
+     "text": "Ana was covered by autopilot (50%)."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Cargo C-7's weak battery: the pilot started it on GPU cart 2 (55% left on the cart)."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Cargo C-7: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($15 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Twin N-12: half its charters stayed on the ramp."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $540 of $660 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $244 of $280 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "good",
+     "text": "Forecast from week 9 landed within 8%: +$1,389."
+    }
+   ],
+   "mvp": {
+    "mech": "6/6 flights · 2 signed off",
+    "elec": "4/4 houses booked",
+    "fin": "Cash +$2,971 · recovered $784"
+   },
+   "autoRun": [
+    "elec"
+   ]
+  },
+  {
+   "week": 14,
+   "tier": 3,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "B"
+   },
+   "weighted": 3.6999999999999997,
+   "revenue": 7858,
+   "budget": 6900,
+   "flightsFlown": 8,
+   "flightsScheduled": 8,
+   "incidents": [],
+   "nearMisses": 1,
+   "cashStart": 28777,
+   "cashEnd": 32020,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 516,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 25
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 2890970813,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Cargo C-7's weak battery: the pilot started it on GPU cart 1 (50% left on the cart)."
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 2 charged to 100% on the hangar charger ($25 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Twin N-12: half its charters stayed on the ramp."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Twin N-12 flew with a known defect (air left in a brake line after the hydraulic service): a near-miss on the safety grade."
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "Seb's 100-hr inspection on Twin N-12 found air left in a brake line after the hydraulic service, left from week 12: caught before it failed."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $739 of $1,110 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $245 of $390 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "8/8 flights · 3 signed off",
+    "elec": "4/4 houses booked · 3 signed off",
+    "fin": "Cash +$3,243 · recovered $984"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 15,
+   "tier": 3,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 7863,
+   "budget": 6900,
+   "flightsFlown": 8,
+   "flightsScheduled": 8,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 32020,
+   "cashEnd": 34240,
+   "costs": {
+    "fixed": 3000,
+    "insurance": 225,
+    "leak": 338,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 27
+   },
+   "housesBooked": 4,
+   "housesRentable": 4,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 1130427279,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Cargo C-7's weak battery: the pilot started it on GPU cart 2 (55% left on the cart)."
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($27 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Twin N-12: half its charters stayed on the ramp."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $357 of $590 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $186 of $290 vendor overbilling."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "Crew project open: Bring in the floatplane and the villas."
+    }
+   ],
+   "mvp": {
+    "mech": "8/8 flights · 3 signed off",
+    "elec": "4/4 houses booked · 4 signed off",
+    "fin": "Cash +$2,220 · recovered $542"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 16,
+   "tier": 3,
+   "grade": "B",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "C"
+   },
+   "weighted": 3.0000000000000004,
+   "revenue": 15761,
+   "budget": 16000,
+   "flightsFlown": 12,
+   "flightsScheduled": 12,
+   "incidents": [
+    {
+     "kind": "defect",
+     "role": "elec",
+     "assetId": "h3",
+     "title": "Callback from Cottage 3: an outlet is warm and smells burnt",
+     "cost": 360,
+     "from": {
+      "title": "Trace dead outlets",
+      "name": "Ana",
+      "week": 15,
+      "traced": "the dead-outlet trace Ana signed off in week 15",
+      "redo": true,
+      "repairId": "o156"
+     }
+    }
+   ],
+   "nearMisses": 0,
+   "cashStart": 34240,
+   "cashEnd": 41919,
+   "costs": {
+    "fixed": 7000,
+    "insurance": 263,
+    "leak": 228,
+    "incidents": 180,
+    "refunds": 893,
+    "power": 25
+   },
+   "housesBooked": 6,
+   "housesRentable": 6,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 3149514128,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Twin N-12's weak battery: the pilot started it on GPU cart 1 (75% left on the cart)."
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 2 charged to 100% on the hangar charger ($25 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Float F-3: half its charters stayed on the ramp."
+    },
+    {
+     "role": "elec",
+     "tone": "bad",
+     "text": "Callback from Cottage 3: an outlet is warm and smells burnt. Traced to the dead-outlet trace Ana signed off in week 15."
+    },
+    {
+     "role": "elec",
+     "tone": "bad",
+     "text": "Guests at Cottage 3 refunded half after the incident."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $422 of $530 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $210 of $330 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Claims $360, insurance paid $180."
+    }
+   ],
+   "mvp": {
+    "mech": "12/12 flights · 3 signed off",
+    "elec": "6/6 houses booked · 3 signed off",
+    "fin": "Cash +$7,679 · recovered $632"
+   },
+   "autoRun": [],
+   "tierUp": 4
+  },
+  {
+   "week": 17,
+   "tier": 4,
+   "grade": "B",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "C"
+   },
+   "weighted": 3.0000000000000004,
+   "revenue": 15143,
+   "budget": 16000,
+   "flightsFlown": 9,
+   "flightsScheduled": 9,
+   "incidents": [
+    {
+     "kind": "defect",
+     "role": "mech",
+     "assetId": "p1",
+     "title": "Pilot wrote up a soft, spongy brake pedal on Twin N-12 after the hydraulic service",
+     "cost": 370,
+     "from": {
+      "title": "Service the brake hydraulics (redo)",
+      "name": "Seb",
+      "week": 16,
+      "traced": "the brake hydraulic servicing redo Seb signed off in week 16",
+      "redo": true,
+      "repairId": "o169"
+     }
+    }
+   ],
+   "nearMisses": 1,
+   "cashStart": 41919,
+   "cashEnd": 46892,
+   "costs": {
+    "fixed": 7000,
+    "insurance": 263,
+    "leak": 259,
+    "incidents": 185,
+    "refunds": 860,
+    "power": 15
+   },
+   "housesBooked": 6,
+   "housesRentable": 6,
+   "partsDelivered": 1,
+   "weather": "wind",
+   "seed": 2489584986,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Twin N-12's weak battery: the pilot started it on GPU cart 2 (75% left on the cart)."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Twin N-12: 100-hr inspection overdue (−6)."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Cargo C-7: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Float F-3: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($15 of power)."
+    },
+    {
+     "role": "elec",
+     "tone": "bad",
+     "text": "Outage at Cottage 1: guests refunded half ($860)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Pilot wrote up a soft, spongy brake pedal on Twin N-12 after the hydraulic service. Traced to the brake hydraulic servicing redo Seb signed off in week 16."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $729 of $900 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $112 of $200 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Claims $370, insurance paid $185."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Forecast from week 13 missed by 26%."
+    }
+   ],
+   "mvp": {
+    "mech": "9/9 flights · 4 signed off",
+    "elec": "6/6 houses booked · 3 signed off",
+    "fin": "Cash +$4,973 · recovered $841"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 18,
+   "tier": 4,
+   "grade": "B",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "C"
+   },
+   "weighted": 3.0000000000000004,
+   "revenue": 14070,
+   "budget": 16000,
+   "flightsFlown": 9,
+   "flightsScheduled": 9,
+   "incidents": [
+    {
+     "kind": "defect",
+     "role": "mech",
+     "assetId": "p1",
+     "title": "Wheel through-bolts on Twin N-12 found loose at the walkaround",
+     "cost": 460,
+     "from": {
+      "title": "Tire and brake",
+      "name": "Seb",
+      "week": 17,
+      "traced": "the tire and brake job Seb signed off in week 17",
+      "redo": true,
+      "repairId": "o181"
+     }
+    }
+   ],
+   "nearMisses": 1,
+   "cashStart": 46892,
+   "cashEnd": 51950,
+   "costs": {
+    "fixed": 7000,
+    "insurance": 263,
+    "leak": 229,
+    "incidents": 230,
+    "refunds": 768,
+    "power": 15
+   },
+   "housesBooked": 6,
+   "housesRentable": 6,
+   "partsDelivered": 1,
+   "weather": "wind",
+   "seed": 2520504612,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Twin N-12's weak battery: the pilot started it on GPU cart 1 (75% left on the cart)."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Cargo C-7: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Float F-3: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 2 charged to 100% on the hangar charger ($15 of power)."
+    },
+    {
+     "role": "elec",
+     "tone": "bad",
+     "text": "Outage at Cottage 1: guests refunded half ($768)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "Wheel through-bolts on Twin N-12 found loose at the walkaround. Traced to the tire and brake job Seb signed off in week 17."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $438 of $600 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $84 of $150 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Claims $460, insurance paid $230."
+    }
+   ],
+   "mvp": {
+    "mech": "9/9 flights · 2 signed off",
+    "elec": "6/6 houses booked · 3 signed off",
+    "fin": "Cash +$5,058 · recovered $521"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 19,
+   "tier": 4,
+   "grade": "A",
+   "components": {
+    "revenue": "B",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.6000000000000005,
+   "revenue": 13780,
+   "budget": 16000,
+   "flightsFlown": 12,
+   "flightsScheduled": 12,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 51950,
+   "cashEnd": 56077,
+   "costs": {
+    "fixed": 7000,
+    "insurance": 263,
+    "leak": 503,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 15
+   },
+   "housesBooked": 6,
+   "housesRentable": 6,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 491494338,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "Float F-3's weak battery: the pilot started it on GPU cart 2 (75% left on the cart)."
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 1 charged to 100% on the hangar charger ($15 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Float F-3: half its charters stayed on the ramp."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $746 of $1,200 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $242 of $290 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Forecast from week 15 missed by 26%."
+    }
+   ],
+   "mvp": {
+    "mech": "12/12 flights · 3 signed off",
+    "elec": "6/6 houses booked · 3 signed off",
+    "fin": "Cash +$4,127 · recovered $987"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 20,
+   "tier": 4,
+   "grade": "B",
+   "components": {
+    "revenue": "C",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.2,
+   "revenue": 13115,
+   "budget": 16000,
+   "flightsFlown": 12,
+   "flightsScheduled": 12,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 56077,
+   "cashEnd": 59236,
+   "costs": {
+    "fixed": 7000,
+    "insurance": 263,
+    "leak": 356,
+    "incidents": 0,
+    "refunds": 0,
+    "power": 15
+   },
+   "housesBooked": 6,
+   "housesRentable": 6,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 1156940565,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "mech",
+     "tone": "info",
+     "text": "GPU cart 2 charged to 100% on the hangar charger ($15 of power)."
+    },
+    {
+     "role": "mech",
+     "tone": "bad",
+     "text": "No load sheet for Float F-3: half its charters stayed on the ramp."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Bank reconciliation: recovered $895 of $1,190 unreconciled cash."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $159 of $220 vendor overbilling."
+    }
+   ],
+   "mvp": {
+    "mech": "12/12 flights · 3 signed off",
+    "elec": "6/6 houses booked · 3 signed off",
+    "fin": "Cash +$3,159 · recovered $1,054"
+   },
+   "autoRun": []
+  },
+  {
+   "week": 21,
+   "tier": 4,
+   "grade": "B",
+   "components": {
+    "revenue": "C",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 3.2,
+   "revenue": 12751,
+   "budget": 16000,
+   "flightsFlown": 9,
+   "flightsScheduled": 9,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 59236,
+   "cashEnd": 63328,
+   "costs": {
+    "fixed": 7000,
+    "insurance": 263,
+    "leak": 292,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 6,
+   "housesRentable": 6,
+   "partsDelivered": 1,
+   "weather": "wind",
+   "seed": 2355641046,
+   "lines": [
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Twin N-12: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Cargo C-7: wind"
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "1 flight lost on Float F-3: wind"
+    },
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $949 of $1,130 budget leakage."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Three-way match: vendor invoices: recovered $209 of $320 vendor overbilling."
+    },
+    {
+     "role": "fin",
+     "tone": "info",
+     "text": "Forecast from week 17 missed by 15%."
+    },
+    {
+     "role": "all",
+     "tone": "info",
+     "text": "Crew project open: Open the Lodge."
+    }
+   ],
+   "mvp": {
+    "mech": "9/9 flights · 3 signed off",
+    "elec": "6/6 houses booked · 2 signed off",
+    "fin": "Cash +$4,092 · recovered $1,158"
+   },
+   "autoRun": []
+  }
+ ],
+ "stats": {
+  "weeksBPlus": 16,
+  "streakBPlus": 8,
+  "perfectWeeks": 4,
+  "negCashStreak": 0,
+  "recentIncidents": [
+   1,
+   0,
+   0,
+   0
+  ],
+  "totalWeeks": 21,
+  "tierReachedWeek": {
+   "1": 0,
+   "2": 5,
+   "3": 8,
+   "4": 16
+  },
+  "aStreak": 0
+ },
+ "receivership": 0,
+ "pendingBonus": null,
+ "story": null,
+ "modifiers": [
+  {
+   "kind": "stormShield",
+   "mult": 0.5,
+   "until": 25,
+   "label": "Storm shutters"
+  },
+  {
+   "kind": "stormShield",
+   "mult": 0.5,
+   "until": 28,
+   "label": "Storm shutters"
+  }
+ ],
+ "forecasts": [
+  {
+   "week": 15,
+   "points": [
+    32761,
+    35175,
+    36970,
+    39415
+   ],
+   "actual": [
+    41919,
+    46892,
+    51950,
+    56077
+   ],
+   "paid": 0
+  },
+  {
+   "week": 17,
+   "points": [
+    43761,
+    46835,
+    51381,
+    55115
+   ],
+   "actual": [
+    51950,
+    56077,
+    59236,
+    63328
+   ],
+   "paid": 0
+  },
+  {
+   "week": 19,
+   "points": [
+    53871,
+    59761,
+    68896,
+    70939
+   ],
+   "actual": [
+    59236,
+    63328
+   ]
+  },
+  {
+   "week": 21,
+   "points": [
+    61006,
+    65040,
+    72962,
+    74607
+   ],
+   "actual": []
+  }
+ ],
+ "feed": [
+  {
+   "id": 429,
+   "week": 19,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off 100-hr inspection on Cargo C-7.",
+   "at": 1789668001000
+  },
+  {
+   "id": 430,
+   "week": 19,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb towed GPU cart 2 off the charger and hooked it up to Float F-3 (100% charge).",
+   "at": 1789668001000
+  },
+  {
+   "id": 431,
+   "week": 19,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb ended their turn.",
+   "at": 1789668001000
+  },
+  {
+   "id": 432,
+   "week": 19,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Diagnose flickering lights on Cottage 1.",
+   "at": 1789668001000
+  },
+  {
+   "id": 433,
+   "week": 19,
+   "role": "elec",
+   "tone": "good",
+   "text": "Ana reached level 20.",
+   "at": 1789668001000
+  },
+  {
+   "id": 434,
+   "week": 19,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Run conduit to the hot tub on Cottage 1.",
+   "at": 1789668001000
+  },
+  {
+   "id": 435,
+   "week": 19,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Diagnose flickering lights on Villa East.",
+   "at": 1789668001000
+  },
+  {
+   "id": 436,
+   "week": 19,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana ended their turn.",
+   "at": 1789668001000
+  },
+  {
+   "id": 437,
+   "week": 19,
+   "role": "mech",
+   "tone": "good",
+   "text": "Seb reached level 23.",
+   "at": 1789668001000
+  },
+  {
+   "id": 438,
+   "week": 19,
+   "role": "all",
+   "tone": "good",
+   "text": "Week 19 resolved: A. Revenue $13,780, 12/12 flights, 0 incidents.",
+   "at": 1789668001000
+  },
+  {
+   "id": 439,
+   "week": 20,
+   "role": "all",
+   "tone": "info",
+   "text": "Week 20 opens. Clear skies.",
+   "at": 1789668001000
+  },
+  {
+   "id": 440,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "A-grade bonus: $1,378 to reserve.",
+   "at": 1789754401000
+  },
+  {
+   "id": 441,
+   "week": 20,
+   "role": "fin",
+   "tone": "info",
+   "text": "Cy voted on “Storm shutters on sale”. Waiting for a second vote.",
+   "at": 1789754401000
+  },
+  {
+   "id": 442,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Code inspection prep ($210).",
+   "at": 1789754401000
+  },
+  {
+   "id": 443,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Cy reached level 26.",
+   "at": 1789754401000
+  },
+  {
+   "id": 444,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Replace alternator ($1,150).",
+   "at": 1789754401000
+  },
+  {
+   "id": 445,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Trace dead outlets ($170).",
+   "at": 1789754401000
+  },
+  {
+   "id": 446,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Run conduit to the hot tub ($640).",
+   "at": 1789754401000
+  },
+  {
+   "id": 447,
+   "week": 20,
+   "role": "fin",
+   "tone": "info",
+   "text": "Bank reconciliation filed.",
+   "at": 1789754401000
+  },
+  {
+   "id": 448,
+   "week": 20,
+   "role": "fin",
+   "tone": "info",
+   "text": "Three-way match: vendor invoices filed.",
+   "at": 1789754401000
+  },
+  {
+   "id": 449,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Won 1 kit for $330.",
+   "at": 1789754401000
+  },
+  {
+   "id": 450,
+   "week": 20,
+   "role": "fin",
+   "tone": "info",
+   "text": "Cy ended their turn.",
+   "at": 1789754401000
+  },
+  {
+   "id": 451,
+   "week": 20,
+   "role": "all",
+   "tone": "info",
+   "text": "Storm shutters on sale: Buy shutters.",
+   "at": 1789754401000
+  },
+  {
+   "id": 452,
+   "week": 20,
+   "role": "elec",
+   "tone": "good",
+   "text": "Ana reached level 21.",
+   "at": 1789754401000
+  },
+  {
+   "id": 453,
+   "week": 20,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Code inspection prep on Cottage 1.",
+   "at": 1789754401000
+  },
+  {
+   "id": 454,
+   "week": 20,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off GFCI in wet rooms on Villa West.",
+   "at": 1789754401000
+  },
+  {
+   "id": 455,
+   "week": 20,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off GFCI in wet rooms on Cottage 3.",
+   "at": 1789754401000
+  },
+  {
+   "id": 456,
+   "week": 20,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana ended their turn.",
+   "at": 1789754401000
+  },
+  {
+   "id": 457,
+   "week": 20,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb unhooked GPU cart 2 from Float F-3 and plugged it in on the hangar charger.",
+   "at": 1789754401000
+  },
+  {
+   "id": 458,
+   "week": 20,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Replace the wheel through-bolts and check the holes for elongation on Twin N-12.",
+   "at": 1789754401000
+  },
+  {
+   "id": 459,
+   "week": 20,
+   "role": "mech",
+   "tone": "info",
+   "text": "Repair signed off on Twin N-12. Now the original job: Tire and brake (redo).",
+   "at": 1789754401000
+  },
+  {
+   "id": 460,
+   "week": 20,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Service the brake hydraulics (redo) on Twin N-12.",
+   "at": 1789754401000
+  },
+  {
+   "id": 461,
+   "week": 20,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Replace alternator on Float F-3.",
+   "at": 1789754401000
+  },
+  {
+   "id": 462,
+   "week": 20,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb ended their turn.",
+   "at": 1789754401000
+  },
+  {
+   "id": 463,
+   "week": 20,
+   "role": "mech",
+   "tone": "good",
+   "text": "Seb reached level 24.",
+   "at": 1789754401000
+  },
+  {
+   "id": 464,
+   "week": 20,
+   "role": "fin",
+   "tone": "good",
+   "text": "Cy reached level 27.",
+   "at": 1789754401000
+  },
+  {
+   "id": 465,
+   "week": 20,
+   "role": "all",
+   "tone": "good",
+   "text": "Week 20 resolved: B. Revenue $13,115, 12/12 flights, 0 incidents.",
+   "at": 1789754401000
+  },
+  {
+   "id": 466,
+   "week": 21,
+   "role": "all",
+   "tone": "bad",
+   "text": "Week 21 opens. Wind: flight risk up.",
+   "at": 1789754401000
+  },
+  {
+   "id": 467,
+   "week": 21,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb inspected GPU cart 2's cable and plug: serviceable.",
+   "at": 1789840801000
+  },
+  {
+   "id": 468,
+   "week": 21,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Tire and brake (redo) on Twin N-12.",
+   "at": 1789840801000
+  },
+  {
+   "id": 469,
+   "week": 21,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Charter load sheet on Float F-3.",
+   "at": 1789840801000
+  },
+  {
+   "id": 470,
+   "week": 21,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Charter load sheet on Twin N-12.",
+   "at": 1789840801000
+  },
+  {
+   "id": 471,
+   "week": 21,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb ended their turn.",
+   "at": 1789840801000
+  },
+  {
+   "id": 472,
+   "week": 21,
+   "role": "elec",
+   "tone": "good",
+   "text": "Ana reached level 22.",
+   "at": 1789840801000
+  },
+  {
+   "id": 473,
+   "week": 21,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Trace dead outlets on Cottage 2.",
+   "at": 1789840801000
+  },
+  {
+   "id": 474,
+   "week": 21,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Run conduit to the hot tub on Cottage 3.",
+   "at": 1789840801000
+  },
+  {
+   "id": 475,
+   "week": 21,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana ended their turn.",
+   "at": 1789840801000
+  },
+  {
+   "id": 476,
+   "week": 21,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Code inspection prep ($210).",
+   "at": 1789840801000
+  },
+  {
+   "id": 477,
+   "week": 21,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved 100-hr inspection ($250).",
+   "at": 1789840801000
+  },
+  {
+   "id": 478,
+   "week": 21,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Diagnose flickering lights ($130).",
+   "at": 1789840801000
+  },
+  {
+   "id": 479,
+   "week": 21,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Trace dead outlets ($170).",
+   "at": 1789840801000
+  },
+  {
+   "id": 480,
+   "week": 21,
+   "role": "fin",
+   "tone": "info",
+   "text": "Weekly close filed.",
+   "at": 1789840801000
+  },
+  {
+   "id": 481,
+   "week": 21,
+   "role": "fin",
+   "tone": "info",
+   "text": "Three-way match: vendor invoices filed.",
+   "at": 1789840801000
+  },
+  {
+   "id": 482,
+   "week": 21,
+   "role": "fin",
+   "tone": "good",
+   "text": "Won 1 kit for $344.",
+   "at": 1789840801000
+  },
+  {
+   "id": 483,
+   "week": 21,
+   "role": "fin",
+   "tone": "good",
+   "text": "Cy reached level 28.",
+   "at": 1789840801000
+  },
+  {
+   "id": 484,
+   "week": 21,
+   "role": "fin",
+   "tone": "info",
+   "text": "Cy ended their turn.",
+   "at": 1789840801000
+  },
+  {
+   "id": 485,
+   "week": 21,
+   "role": "mech",
+   "tone": "good",
+   "text": "Seb reached level 25.",
+   "at": 1789840801000
+  },
+  {
+   "id": 486,
+   "week": 21,
+   "role": "all",
+   "tone": "good",
+   "text": "The island qualifies for tier 5. Crew project: Open the Lodge. One job each.",
+   "at": 1789840801000
+  },
+  {
+   "id": 487,
+   "week": 21,
+   "role": "all",
+   "tone": "good",
+   "text": "Week 21 resolved: B. Revenue $12,751, 9/9 flights, 0 incidents.",
+   "at": 1789840801000
+  },
+  {
+   "id": 488,
+   "week": 22,
+   "role": "all",
+   "tone": "bad",
+   "text": "Week 22 opens. Storm: the electrician’s week.",
+   "at": 1789840801000
+  }
+ ],
+ "nextId": 225,
+ "updatedAt": 1789840801000,
+ "gse": [
+  {
+   "id": "gpu1",
+   "name": "GPU cart 1",
+   "charge": 100,
+   "wear": 16,
+   "hookedTo": null,
+   "charging": true,
+   "inspected": {
+    "week": 19,
+    "band": "good",
+    "by": "Seb"
+   }
+  },
+  {
+   "id": "gpu2",
+   "name": "GPU cart 2",
+   "charge": 100,
+   "wear": 35,
+   "hookedTo": null,
+   "charging": true,
+   "inspected": {
+    "week": 21,
+    "band": "good",
+    "by": "Seb"
+   }
+  }
+ ],
+ "engine": 2,
+ "tags": {},
+ "weakBattery": null,
+ "defects": [
+  {
+   "id": "d180",
+   "orderKind": "inspect100",
+   "job": "inspect100",
+   "log": "100-hr inspection",
+   "puzzle": "crack",
+   "title": "100-hr inspection",
+   "assetId": "p1",
+   "role": "mech",
+   "by": "mech",
+   "name": "Seb",
+   "week": 18,
+   "dueWeek": 22,
+   "severity": 1,
+   "cost": 250,
+   "tier": 3,
+   "gain": 10,
+   "redo": true
+  },
+  {
+   "id": "d192",
+   "orderKind": "inspect100",
+   "job": "inspect100",
+   "log": "100-hr inspection",
+   "puzzle": "crack",
+   "title": "100-hr inspection",
+   "assetId": "p2",
+   "role": "mech",
+   "by": "mech",
+   "name": "Seb",
+   "week": 19,
+   "dueWeek": 22,
+   "severity": 1,
+   "cost": 250,
+   "tier": 3,
+   "gain": 10,
+   "redo": true
+  }
+ ],
+ "project": {
+  "tier": 5,
+  "title": "Open the Lodge",
+  "orders": {
+   "mech": "o213",
+   "elec": "o214",
+   "fin": "o215"
+  }
+ },
+ "chain": {
+  "id": "c87",
+  "orderId": "o80",
+  "assetId": "p2",
+  "title": "Swap the com radio",
+  "ata": "23-10",
+  "tag": "radio",
+  "item": "com radio",
+  "how": "gone",
+  "found": "Com radio is dead on transmit, and receive is weak. On the airplane: transceiver P/N TR-155-02 (Tern Avionics).",
+  "by": "Seb",
+  "week": 10,
+  "step": "done",
+  "returns": 0,
+  "rejects": 0,
+  "spent": 0,
+  "aogWeeks": 1,
+  "bench": {
+   "id": "o88",
+   "fault": "unit",
+   "call": "wiring",
+   "by": "Ana",
+   "week": 10
+  },
+  "stepAt": 1788976801000,
+  "pn": "TR-155-02",
+  "src": "ipc",
+  "wired": true,
+  "downtime": 0,
+  "story": "Cargo C-7 sat 1 week for com radio: no part needed, Ana's check found the fault in the wiring. $0 in parts, fees and freight.",
+  "closedWeek": 11
+ }
+}

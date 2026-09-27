@@ -1,0 +1,939 @@
+{
+ "v": 1,
+ "id": "fx-1",
+ "name": "Fixture Island",
+ "createdAt": 1788264000000,
+ "creatorTz": "Europe/Paris",
+ "resolveHour": 20,
+ "seed": 3985547672,
+ "week": 2,
+ "deadline": 1788372000000,
+ "tier": 1,
+ "cash": 8876,
+ "openCash": 9366,
+ "parts": {
+  "stock": 4,
+  "inTransit": 0
+ },
+ "rates": {
+  "nightly": 315,
+  "charter": 740
+ },
+ "insurance": "standard",
+ "autoBudget": {
+  "mech": 500,
+  "elec": 500
+ },
+ "autoSpent": {
+  "mech": 280,
+  "elec": 210
+ },
+ "assets": [
+  {
+   "id": "p1",
+   "kind": "plane",
+   "model": "twin",
+   "name": "Twin N-12",
+   "health": 98.7,
+   "touchedWeek": 2,
+   "sinceInspection": 8
+  },
+  {
+   "id": "h1",
+   "kind": "house",
+   "model": "cottage",
+   "name": "Cottage 1",
+   "health": 92.90826637241616,
+   "touchedWeek": 2,
+   "inspectionUntil": 8
+  },
+  {
+   "id": "h2",
+   "kind": "house",
+   "model": "cottage",
+   "name": "Cottage 2",
+   "health": 92.85601845232398,
+   "touchedWeek": 2,
+   "inspectionUntil": 8
+  },
+  {
+   "id": "g1",
+   "kind": "grid",
+   "model": "panel",
+   "name": "Island grid",
+   "health": 88,
+   "touchedWeek": 1
+  }
+ ],
+ "orders": [
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p1",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 1,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o1",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1394440742,
+   "result": {
+    "score": 0.771620300579816,
+    "perfect": false,
+    "credit": 0.9129721803478896,
+    "by": "mech",
+    "week": 1,
+    "covered": false
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "hydraulics",
+   "assetId": "p1",
+   "title": "Service the brake hydraulics",
+   "puzzle": "hydraulics",
+   "tier": 2,
+   "cost": 260,
+   "parts": 0,
+   "gain": 13,
+   "status": "done",
+   "id": "o2",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1713990665,
+   "approvedWeek": 1,
+   "autoApproved": true,
+   "pushedBack": false,
+   "result": {
+    "score": 0.7924844840122386,
+    "perfect": false,
+    "credit": 0.9254906904073432,
+    "by": "mech",
+    "week": 1,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "oil",
+   "assetId": "p1",
+   "title": "Oil change + safety wire",
+   "puzzle": "safetywire",
+   "tier": 1,
+   "cost": 190,
+   "parts": 0,
+   "gain": 9,
+   "status": "done",
+   "id": "o3",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 1138537217,
+   "approvedWeek": 1,
+   "autoApproved": false,
+   "pushedBack": false,
+   "result": {
+    "score": 0.7106224854523315,
+    "perfect": false,
+    "credit": 0.876373491271399,
+    "by": "mech",
+    "week": 1,
+    "covered": false
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "trip",
+   "assetId": "h2",
+   "title": "Trace dead outlets",
+   "puzzle": "trace",
+   "tier": 1,
+   "cost": 120,
+   "parts": 0,
+   "gain": 12,
+   "status": "done",
+   "id": "o4",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3817354565,
+   "approvedWeek": 1,
+   "autoApproved": true,
+   "pushedBack": false,
+   "result": {
+    "score": 0.9443793004658073,
+    "perfect": false,
+    "credit": 1.0166275802794844,
+    "by": "elec",
+    "week": 1,
+    "covered": false
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "feeder",
+   "assetId": "g1",
+   "title": "Trace a dead cottage feeder",
+   "puzzle": "trace",
+   "tier": 2,
+   "cost": 420,
+   "parts": 0,
+   "gain": 16,
+   "status": "done",
+   "id": "o5",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3264998500,
+   "approvedWeek": 1,
+   "autoApproved": false,
+   "pushedBack": false,
+   "result": {
+    "score": 0.9118316585477441,
+    "perfect": false,
+    "credit": 0.9970989951286464,
+    "by": "elec",
+    "week": 1,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "switch3",
+   "assetId": "h1",
+   "title": "Rewire a 3-way switch",
+   "puzzle": "wireup",
+   "tier": 2,
+   "cost": 290,
+   "parts": 0,
+   "gain": 12,
+   "status": "done",
+   "id": "o6",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2457475621,
+   "approvedWeek": 1,
+   "autoApproved": true,
+   "pushedBack": false,
+   "result": {
+    "score": 0.8071931162197142,
+    "perfect": false,
+    "credit": 0.9343158697318286,
+    "by": "elec",
+    "week": 1,
+    "covered": false,
+    "blind": true
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "close",
+   "assetId": null,
+   "title": "Weekly close",
+   "puzzle": "variance",
+   "tier": 1,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "leak": 380,
+   "id": "o7",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 897500324,
+   "result": {
+    "score": 0.9277373050386085,
+    "perfect": false,
+    "credit": 1.006642383023165,
+    "by": "fin",
+    "week": 1,
+    "covered": false
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "auction",
+   "assetId": null,
+   "title": "Parts auction",
+   "puzzle": "auction",
+   "tier": 1,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o8",
+   "createdWeek": 1,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 972030655,
+   "result": {
+    "score": 0.793053936404176,
+    "perfect": false,
+    "credit": 0.9258323618425055,
+    "by": "fin",
+    "week": 1,
+    "covered": false
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "wb",
+   "assetId": "p1",
+   "title": "Charter load sheet",
+   "puzzle": "balance",
+   "tier": 1,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "done",
+   "id": "o10",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2242259100,
+   "result": {
+    "score": 0.6885180721804499,
+    "perfect": false,
+    "credit": 0.8631108433082699,
+    "by": "mech",
+    "week": 2,
+    "covered": false
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "prop",
+   "assetId": "p1",
+   "title": "Prop bolt re-torque",
+   "puzzle": "torque",
+   "tier": 2,
+   "cost": 280,
+   "parts": 0,
+   "gain": 12,
+   "status": "done",
+   "id": "o11",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2292480289,
+   "approvedWeek": 2,
+   "autoApproved": true,
+   "pushedBack": false,
+   "result": {
+    "score": 0.7892455325042829,
+    "perfect": false,
+    "credit": 0.9235473195025696,
+    "by": "mech",
+    "week": 2,
+    "covered": false,
+    "blind": true,
+    "provisional": 0.8999999999999999
+   }
+  },
+  {
+   "role": "mech",
+   "kind": "tires",
+   "assetId": "p1",
+   "title": "Tire and brake",
+   "puzzle": "torque",
+   "tier": 1,
+   "cost": 320,
+   "parts": 1,
+   "gain": 10,
+   "status": "countered",
+   "id": "o12",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 261530600,
+   "counter": {
+    "cost": 190,
+    "gain": 6
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "flicker",
+   "assetId": "h1",
+   "title": "Diagnose flickering lights",
+   "puzzle": "meter",
+   "tier": 1,
+   "cost": 90,
+   "parts": 0,
+   "gain": 12,
+   "status": "done",
+   "id": "o13",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2557891488,
+   "approvedWeek": 2,
+   "autoApproved": true,
+   "pushedBack": false,
+   "result": {
+    "score": 0.8761481072800233,
+    "perfect": false,
+    "credit": 0.9756888643680139,
+    "by": "elec",
+    "week": 2,
+    "covered": false
+   }
+  },
+  {
+   "role": "elec",
+   "kind": "feeder",
+   "assetId": "g1",
+   "title": "Trace a dead cottage feeder",
+   "puzzle": "trace",
+   "tier": 2,
+   "cost": 420,
+   "parts": 0,
+   "gain": 16,
+   "status": "pending",
+   "id": "o14",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2156838073
+  },
+  {
+   "role": "elec",
+   "kind": "trip",
+   "assetId": "h2",
+   "title": "Trace dead outlets",
+   "puzzle": "trace",
+   "tier": 1,
+   "cost": 120,
+   "parts": 0,
+   "gain": 12,
+   "status": "done",
+   "id": "o15",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2842788979,
+   "approvedWeek": 2,
+   "autoApproved": true,
+   "pushedBack": false,
+   "result": {
+    "score": 0.730002562822774,
+    "perfect": false,
+    "credit": 0.8880015376936644,
+    "by": "elec",
+    "week": 2,
+    "covered": false
+   }
+  },
+  {
+   "role": "fin",
+   "kind": "reconcile",
+   "assetId": null,
+   "title": "Bank reconciliation",
+   "puzzle": "reconcile",
+   "tier": 1,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "leak": 330,
+   "id": "o16",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 2997588892
+  },
+  {
+   "role": "fin",
+   "kind": "invoice",
+   "assetId": null,
+   "title": "Three-way match: vendor invoices",
+   "puzzle": "invoice",
+   "tier": 1,
+   "cost": 0,
+   "parts": 0,
+   "gain": 0,
+   "status": "ready",
+   "leak": 220,
+   "id": "o17",
+   "createdWeek": 2,
+   "deferrals": 0,
+   "lastDeferredWeek": null,
+   "seed": 3081725747
+  }
+ ],
+ "players": {
+  "mech": {
+   "uid": "u-mech",
+   "name": "Seb",
+   "role": "mech",
+   "xp": 572,
+   "perfects": 0,
+   "week0Done": true,
+   "missedStreak": 0,
+   "cosmetic": "m0",
+   "graceUntil": 0,
+   "covers": 0,
+   "seatKey": "ahx6dj",
+   "best": {
+    "balance": 0.771620300579816,
+    "safetywire": 0.7106224854523315
+   }
+  },
+  "elec": {
+   "uid": "u-elec",
+   "name": "Ana",
+   "role": "elec",
+   "xp": 677,
+   "perfects": 0,
+   "week0Done": true,
+   "missedStreak": 0,
+   "cosmetic": "e0",
+   "graceUntil": 0,
+   "covers": 0,
+   "seatKey": "wzvbya",
+   "best": {
+    "trace": 0.9443793004658073,
+    "meter": 0.8761481072800233
+   }
+  },
+  "fin": {
+   "uid": "u-fin",
+   "name": "Cy",
+   "role": "fin",
+   "xp": 323,
+   "perfects": 0,
+   "week0Done": true,
+   "missedStreak": 0,
+   "cosmetic": "f0",
+   "graceUntil": 0,
+   "covers": 0,
+   "seatKey": "s3hct6",
+   "best": {
+    "variance": 0.9277373050386085,
+    "auction": 0.793053936404176
+   }
+  }
+ },
+ "turns": {
+  "mech": {
+   "ended": true,
+   "endedAt": 1788350400000,
+   "done": 2
+  },
+  "elec": {
+   "ended": true,
+   "endedAt": 1788350400000,
+   "done": 2
+  },
+  "fin": {
+   "ended": false,
+   "endedAt": null,
+   "done": 0
+  }
+ },
+ "coversUsed": {},
+ "weather": "clear",
+ "history": [
+  {
+   "week": 1,
+   "tier": 1,
+   "grade": "A",
+   "components": {
+    "revenue": "A",
+    "flights": "A",
+    "safety": "A"
+   },
+   "weighted": 4,
+   "revenue": 4647,
+   "budget": 3900,
+   "flightsFlown": 4,
+   "flightsScheduled": 4,
+   "incidents": [],
+   "nearMisses": 0,
+   "cashStart": 8000,
+   "cashEnd": 9366,
+   "costs": {
+    "fixed": 1500,
+    "insurance": 150,
+    "leak": 27,
+    "incidents": 0,
+    "refunds": 0
+   },
+   "housesBooked": 2,
+   "housesRentable": 2,
+   "partsDelivered": 1,
+   "weather": "clear",
+   "seed": 2544074953,
+   "lines": [
+    {
+     "role": "mech",
+     "tone": "good",
+     "text": "1 parts kit delivered."
+    },
+    {
+     "role": "fin",
+     "tone": "bad",
+     "text": "Weekly close: recovered $353 of $380 budget leakage."
+    }
+   ],
+   "mvp": {
+    "mech": "4/4 flights · best: Charter load sheet 77% · 1 signed off",
+    "elec": "2/2 houses booked · best: Trace dead outlets 94% · 2 signed off",
+    "fin": "Cash +$1,366 · recovered $353"
+   },
+   "autoRun": []
+  }
+ ],
+ "stats": {
+  "weeksBPlus": 1,
+  "streakBPlus": 1,
+  "perfectWeeks": 1,
+  "negCashStreak": 0,
+  "recentIncidents": [
+   0
+  ],
+  "totalWeeks": 1,
+  "tierReachedWeek": {
+   "1": 0
+  },
+  "aStreak": 1
+ },
+ "receivership": 0,
+ "pendingBonus": 465,
+ "story": null,
+ "modifiers": [],
+ "forecasts": [],
+ "feed": [
+  {
+   "id": 1,
+   "week": 0,
+   "role": "all",
+   "tone": "info",
+   "text": "Fixture Island founded. Three seats, one island.",
+   "at": 1788264000000
+  },
+  {
+   "id": 2,
+   "week": 0,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana joined.",
+   "at": 1788264000000
+  },
+  {
+   "id": 3,
+   "week": 0,
+   "role": "fin",
+   "tone": "info",
+   "text": "Cy joined.",
+   "at": 1788264000000
+  },
+  {
+   "id": 4,
+   "week": 0,
+   "role": "mech",
+   "tone": "good",
+   "text": "Seb finished week 0.",
+   "at": 1788264000000
+  },
+  {
+   "id": 5,
+   "week": 0,
+   "role": "elec",
+   "tone": "good",
+   "text": "Ana finished week 0.",
+   "at": 1788264000000
+  },
+  {
+   "id": 6,
+   "week": 0,
+   "role": "fin",
+   "tone": "good",
+   "text": "Cy finished week 0.",
+   "at": 1788264000000
+  },
+  {
+   "id": 7,
+   "week": 1,
+   "role": "all",
+   "tone": "info",
+   "text": "Week 1 opens. Clear skies.",
+   "at": 1788264000000
+  },
+  {
+   "id": 8,
+   "week": 1,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Trace a dead cottage feeder ($420).",
+   "at": 1788264000000
+  },
+  {
+   "id": 9,
+   "week": 1,
+   "role": "fin",
+   "tone": "good",
+   "text": "Approved Oil change + safety wire ($190).",
+   "at": 1788264000000
+  },
+  {
+   "id": 10,
+   "week": 1,
+   "role": "fin",
+   "tone": "good",
+   "text": "Weekly close: found $353.",
+   "at": 1788264000000
+  },
+  {
+   "id": 11,
+   "week": 1,
+   "role": "fin",
+   "tone": "good",
+   "text": "Won 1 kit for $324.",
+   "at": 1788264000000
+  },
+  {
+   "id": 12,
+   "week": 1,
+   "role": "fin",
+   "tone": "info",
+   "text": "Cy ended their turn.",
+   "at": 1788264000000
+  },
+  {
+   "id": 13,
+   "week": 1,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Trace a dead cottage feeder on Island grid.",
+   "at": 1788264000000
+  },
+  {
+   "id": 14,
+   "week": 1,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana signed off Rewire a 3-way switch on Cottage 1.",
+   "at": 1788264000000
+  },
+  {
+   "id": 15,
+   "week": 1,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana finished Trace dead outlets on Cottage 2.",
+   "at": 1788264000000
+  },
+  {
+   "id": 16,
+   "week": 1,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana ended their turn.",
+   "at": 1788264000000
+  },
+  {
+   "id": 17,
+   "week": 1,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb inspected GPU cart 1's cable and plug: serviceable.",
+   "at": 1788264000000
+  },
+  {
+   "id": 18,
+   "week": 1,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Service the brake hydraulics on Twin N-12.",
+   "at": 1788264000000
+  },
+  {
+   "id": 19,
+   "week": 1,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb finished Charter load sheet on Twin N-12.",
+   "at": 1788264000000
+  },
+  {
+   "id": 20,
+   "week": 1,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb finished Oil change + safety wire on Twin N-12.",
+   "at": 1788264000000
+  },
+  {
+   "id": 21,
+   "week": 1,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb ended their turn.",
+   "at": 1788264000000
+  },
+  {
+   "id": 22,
+   "week": 1,
+   "role": "mech",
+   "tone": "good",
+   "text": "Seb reached level 2.",
+   "at": 1788264000000
+  },
+  {
+   "id": 23,
+   "week": 1,
+   "role": "elec",
+   "tone": "good",
+   "text": "Ana reached level 2.",
+   "at": 1788264000000
+  },
+  {
+   "id": 24,
+   "week": 1,
+   "role": "fin",
+   "tone": "good",
+   "text": "Cy reached level 2.",
+   "at": 1788264000000
+  },
+  {
+   "id": 25,
+   "week": 1,
+   "role": "all",
+   "tone": "good",
+   "text": "Week 1 resolved: A. Revenue $4,647, 4/4 flights, 0 incidents.",
+   "at": 1788264000000
+  },
+  {
+   "id": 26,
+   "week": 2,
+   "role": "all",
+   "tone": "info",
+   "text": "Week 2 opens. Clear skies.",
+   "at": 1788264000000
+  },
+  {
+   "id": 27,
+   "week": 2,
+   "role": "elec",
+   "tone": "good",
+   "text": "Ana reached level 3.",
+   "at": 1788350400000
+  },
+  {
+   "id": 28,
+   "week": 2,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana finished Diagnose flickering lights on Cottage 1.",
+   "at": 1788350400000
+  },
+  {
+   "id": 29,
+   "week": 2,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana finished Trace dead outlets on Cottage 2.",
+   "at": 1788350400000
+  },
+  {
+   "id": 30,
+   "week": 2,
+   "role": "elec",
+   "tone": "info",
+   "text": "Ana ended their turn.",
+   "at": 1788350400000
+  },
+  {
+   "id": 31,
+   "week": 2,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb signed off Prop bolt re-torque on Twin N-12.",
+   "at": 1788350400000
+  },
+  {
+   "id": 32,
+   "week": 2,
+   "role": "mech",
+   "tone": "good",
+   "text": "Seb reached level 3.",
+   "at": 1788350400000
+  },
+  {
+   "id": 33,
+   "week": 2,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb finished Charter load sheet on Twin N-12.",
+   "at": 1788350400000
+  },
+  {
+   "id": 34,
+   "week": 2,
+   "role": "mech",
+   "tone": "info",
+   "text": "Seb ended their turn.",
+   "at": 1788350400000
+  },
+  {
+   "id": 35,
+   "week": 2,
+   "role": "fin",
+   "tone": "info",
+   "text": "Counter-offer on Tire and brake: $190 cheaper fix.",
+   "at": 1788350400000
+  }
+ ],
+ "nextId": 18,
+ "updatedAt": 1788350400000,
+ "gse": [
+  {
+   "id": "gpu1",
+   "name": "GPU cart 1",
+   "charge": 100,
+   "wear": 20,
+   "hookedTo": null,
+   "charging": true,
+   "inspected": {
+    "week": 1,
+    "band": "good",
+    "by": "Seb"
+   }
+  }
+ ],
+ "engine": 2,
+ "tags": {},
+ "weakBattery": null,
+ "defects": [
+  {
+   "id": "d9",
+   "orderKind": "wb",
+   "job": "wb",
+   "log": "charter load sheet",
+   "puzzle": "balance",
+   "title": "Charter load sheet",
+   "assetId": "p1",
+   "role": "mech",
+   "by": "mech",
+   "name": "Seb",
+   "week": 1,
+   "dueWeek": 2,
+   "severity": 1,
+   "cost": 0,
+   "tier": 1,
+   "gain": 0,
+   "redo": false
+  }
+ ]
+}

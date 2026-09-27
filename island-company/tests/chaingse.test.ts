@@ -281,8 +281,9 @@ describe('the paper-sim bots play both', () => {
   it('over whole seasons: every chain closes within a few weeks, starts happen on grounded planes too, no cart is left hooked up but for flight day', () => {
     let chains = 0;
     let startsAog = 0;
+    // (with the job flow a chain opens only from the research branch: about one season in three has one)
     for (const team of ['three friends', 'all average']) {
-      for (let seed = 1; seed <= 8; seed++) {
+      for (let seed = 1; seed <= 16; seed++) {
         const open = new Map<string, number>();
         let prev: IslandState | null = null;
         simulate(TEAMS[team], 26, seed, (s) => {
@@ -303,7 +304,7 @@ describe('the paper-sim bots play both', () => {
     }
     expect(chains).toBeGreaterThan(4);
     expect(startsAog).toBeGreaterThan(0);
-  });
+  }, 90_000);
 });
 
 describe('whose move is it: reports and chain steps count the same way', () => {

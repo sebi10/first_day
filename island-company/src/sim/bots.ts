@@ -7,11 +7,11 @@ import { ECON, GSE, STOCK, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
 import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
 import { cardOf, judgeSlot, planTask, repairTask, stdPick } from './flow';
-import { allItems, buyUnits, itemById } from './items';
+import { allItems, buyUnits, itemById, priceAt } from './items';
 import { spendable } from './ledger';
 import { hashSeed, rng, type Rng } from './rng';
 import { botStaff, buildDef } from './staff';
-import { available, binsInUse, binsTotal, families, insuranceSpare, isSafetyJob, knownDemand, moveClass, needsNewBin, position, stockFlags, suggestRop, urgentJob, velocity } from './stock';
+import { available, binsInUse, binsTotal, dueJob, families, insuranceSpare, isSafetyJob, knownDemand, moveClass, needsNewBin, position, stockFlags, suggestRop, urgentJob, velocity } from './stock';
 import { tasksFor, type Task } from './tasks';
 import { ROLES, type Action, type Alert, type GseCart, type IslandState, type Order, type PickLine, type Role } from './types';
 
@@ -25,6 +25,8 @@ export type Bot = {
   tierDrop?: number;
   /** absences come in streaks (holidays, busy weeks), not independent rolls */
   streak?: boolean;
+  /** the analyst starts an extra cottage at tier 4 when spendable is over $40,000 (the balance run's `cottages` variant, 20.5) */
+  cottages?: boolean;
 };
 export type Team = Record<Role, Bot>;
 
@@ -219,6 +221,9 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
   // requisitions, needs, the reorder policy (18.2); the staff through D's botStaff
   s = bot.naive ? naiveStock(s, r, now) : finStock(s, reserve, now);
   s = botStaff(s, bot, r, now);
+  // the growth project (15.6): refused until the staff update, then the builders' extra cottage
+  if (bot.cottages && s.tier >= 4 && spendable(s) > 40000 && !(s.builds ?? []).some((b) => b.id.startsWith('cottage') && b.finished === undefined))
+    s = step(s, { t: 'build', what: 'cottage', week: s.week }, now);
   return s;
 }
 
@@ -235,6 +240,8 @@ export const hit = (skill: number, alertTier: number) => clamp01(0.55 + 0.45 * s
  * four slots isn't four times as likely to go wrong as a job with one.
  */
 export const BOT_MISS = { task: 0.15, pick: 0.15, nff: 0.1, looksNff: 0.3 };
+/** the most the fin bot keeps on the shelf as a first insurance spare (one job's worth), USD */
+export const BOT_SPARE_MAX = 400;
 const open = (o: Order) => o.status !== 'done' && o.status !== 'cancelled';
 
 /** a near-miss for a slot: the other effectivity's or block's P/N, the IPC part on an altered assembly, the other amperage or protection */
@@ -339,10 +346,12 @@ function flowTurn(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: 
     if (role === 'mech' && f.mel === 'C' && !al.mel && needsBuy && al.status !== 'closed') s = step(s, { t: 'mel', role: 'mech', alert: al.id, week: s.week }, now);
     const cur = liveAlerts(s).find((x) => x.id === al.id);
     if (!cur || cur.status !== 'open') continue;
-    // a bench alert: the electrician's check when that seat is held; else the finding read right with the hit rate
+    // a bench alert: the electrician's check when that seat is held. At the teaching tiers the finding says which it is
+    // in plain words ("It's the unit."), and a player reads it: the unit is planned at once, the wiring goes to the electrician
     if (role === 'mech' && f.bench && !cur.bench?.call) {
       if (cur.bench?.order) continue;
-      if (s.players.elec) {
+      const plain = alertTier(s, cur, role) <= 2;
+      if (s.players.elec && (!plain || causeOf(cur)?.kind === 'wiring')) {
         s = step(s, { t: 'askBench', role: 'mech', alert: cur.id, week: s.week }, now);
         continue;
       }
@@ -389,7 +398,7 @@ function finCard(s: IslandState, o: Order, reserve: number, now: number): Island
   const card = cardOf(s, o);
   const asset = s.assets.find((a) => a.id === o.assetId);
   const exp = expectedDeferralCost(s, o).cost + (card.aog || card.restricted || card.shut ? (card.downtime?.usd ?? 0) : 0);
-  const urgent = urgentJob(s, o) || urgentJob(s, o, s.week + 1);
+  const urgent = dueJob(s, o);
   const critical = urgent || isSafetyJob(s, o) || o.kind === 'inspect100' || o.kind === 'codeprep' || (asset && asset.health < 70) || o.deferrals >= 2;
   const worth = exp >= card.total * 0.6 || critical;
   const room = spendable(s) - card.total;
@@ -421,11 +430,10 @@ function finStock(s: IslandState, reserve: number, now: number): IslandState {
     const f = alertFlags(s, a);
     if (f.aw || f.hazard) s = step(s, { t: 'nudge', alert: a.id, week: s.week }, now);
   }
-  // the order flags, urgent first, each through its one-tap action (a stock buy up to the suggestion, whole packs, scheduled)
-  const flags = stockFlags(s).filter((f) => f.kind === 'order' && f.act);
+  // the order flags, urgent first, each through its one-tap action (a stock buy up to the suggestion, whole packs, scheduled).
+  // A card goes by the card rule above; a job's requisition is approved (it is what the job waits on)
+  const flags = stockFlags(s).filter((f) => f.kind === 'order' && f.act && f.act.t !== 'approve');
   for (const f of flags.slice(0, 6)) {
-    // a card goes by the card rule above; a job's requisition is approved (it is what the job waits on)
-    if (f.act!.t === 'approve') continue;
     if (f.act!.t === 'approveReq') {
       if (spendable(s) > ECON.freezeBelow) s = step(s, { ...f.act!, week: s.week } as Action, now);
       continue;
@@ -450,8 +458,11 @@ function finStock(s: IslandState, reserve: number, now: number): IslandState {
       // only a line that moved: the family's other P/Ns (the near-miss beside it on the shelf) get no min/max
       if (!usedItem(s, id)) continue;
       if (spare && uses < 3) {
-        // an insurance spare the island has needed once: one job's worth on the shelf, reordered when it's drawn
+        // an insurance spare the island has needed once: one job's worth on the shelf, reordered when it's drawn.
+        // Not a rotable worth hundreds (a radio, an alternator): the placard and a lead-1 order cover those
         const worth = fam.fam.startsWith('lining') ? 4 : 1;
+        const x = itemById(id);
+        if (!x || worth * priceAt(x) > BOT_SPARE_MAX) continue;
         if (l?.rop === 0 && l.max === worth) continue;
         if (needsNewBin(s, id) && binsInUse(s) >= binsTotal(s)) continue;
         s = step(s, { t: 'setStock', item: id, rop: 0, max: worth, week: s.week }, now);

@@ -100,13 +100,13 @@ export function invValue(s: Pick<IslandState, 'inv'>): number {
   return cents(v);
 }
 
-/** resolve step 19: the week's revenue, cash and inventory value; rows older than STOCK.ledgerWeeks dropped */
+/** resolve step 19: the week's revenue, cash and inventory value. The ledger holds STOCK.ledgerWeeks rows: the week in progress and the ones before it */
 export function closeLedger(s: IslandState, W: number, revenue: number): void {
   const row = ledgerRow(s, W);
   row.rev = Math.round(revenue);
   row.cash = Math.round(s.cash);
   row.inv = Math.round(invValue(s));
-  s.ledger = (s.ledger ?? []).filter((x) => x.w > W - STOCK.ledgerWeeks);
+  s.ledger = (s.ledger ?? []).filter((x) => x.w > W + 1 - STOCK.ledgerWeeks);
 }
 
 // ---------------------------------------------------------------------------

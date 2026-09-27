@@ -365,6 +365,18 @@ export function urgentJob(s: IslandState, o: Order | undefined, week = s.week): 
   return false;
 }
 
+/**
+ * A job whose fix has to be on its way now (the fin bot's and autopilot's card rule): its alert grounds a plane,
+ * restricts the only guest plane or closes a house this week or next, or its MEL placard runs out within a week
+ * (a part approved later lands too late for the job before the placard does).
+ */
+export function dueJob(s: IslandState, o: Order | undefined): boolean {
+  if (!o?.flow) return false;
+  if (urgentJob(s, o) || urgentJob(s, o, s.week + 1)) return true;
+  const a = s.alerts?.find((x) => x.id === o.flow!.alert);
+  return !!a?.mel && a.mel.until <= s.week + 1;
+}
+
 const poUrgent = (s: IslandState, p: PurchaseOrder, week: number) => p.lines.some((l) => l.order && urgentJob(s, s.orders.find((o) => o.id === l.order), week));
 
 /** the restocking fee for a line sent back */
@@ -395,6 +407,12 @@ function slotOfLine(o: Order, item: ItemId): { ata: AnyAta; tag: string } | null
 export function receive(s: IslandState, W: number, flew: { guest: number; cargo: number }, line: Liner, judge?: (o: Order, ata: AnyAta, tag: string, pn: string) => { ok: boolean; why?: string; text: string }): Order[] {
   const cargoPlane = s.assets.some((a) => a.kind === 'plane' && MODELS[a.model]?.cargo);
   const pos = [...(s.pos ?? [])].sort((a, b) => idNum(a.id) - idNum(b.id));
+  const slipped: PurchaseOrder[] = [];
+  const toBoat = (p: PurchaseOrder) => {
+    p.freight = 'aog';
+    p.freightCost += FREIGHT.aog;
+    p.cost = cents(p.cost + FREIGHT.aog);
+  };
   for (const p of pos) {
     let released = false;
     if (p.status === 'held') {
@@ -407,18 +425,40 @@ export function receive(s: IslandState, W: number, flew: { guest: number; cargo:
       if (!carried) {
         const aogVendor = SUPPLIERS[p.vendor].aog && p.carrier !== 'boat';
         if (aogVendor && poUrgent(s, p, W)) {
-          p.freight = 'aog';
-          p.freightCost += FREIGHT.aog;
-          p.cost = cents(p.cost + FREIGHT.aog);
+          toBoat(p);
           line('fin', 'bad', `No ${p.carrier === 'bulk' && cargoPlane ? 'cargo' : ''}${p.carrier === 'bulk' && cargoPlane ? ' ' : ''}flight carried ${p.id}, and a job it serves grounds its asset: the AOG boat brought it (${usd(FREIGHT.aog)}).`);
         } else {
           p.eta = W + 1;
-          line('fin', 'info', `${p.id} (${SUPPLIERS[p.vendor].short}) waits a week: no ${p.carrier === 'bulk' && cargoPlane ? 'cargo flight' : 'flight'} carried it. It comes week ${W + 1}.`);
+          slipped.push(p);
           continue;
         }
       }
     }
     receivePo(s, p, W, released, line, judge);
+  }
+  // nothing flew at all (the fleet down): a mainland boat brings the PO of the job that waits longest, safety work
+  // first, at the AOG price (the week's kit boat before the job flow), so a grounded island can always fix a plane
+  if (flew.guest + flew.cargo === 0) {
+    const jobOf = (p: PurchaseOrder) => p.lines.map((l) => (l.order ? s.orders.find((o) => o.id === l.order) : undefined)).find((o) => !!o && o.status !== 'done' && o.status !== 'cancelled');
+    const boat = slipped
+      .filter((p) => SUPPLIERS[p.vendor].aog && p.carrier !== 'boat' && jobOf(p))
+      .sort((a, b) => Number(isSafetyJob(s, jobOf(b)!)) - Number(isSafetyJob(s, jobOf(a)!)) || idNum(a.id) - idNum(b.id))[0];
+    if (boat) {
+      slipped.splice(slipped.indexOf(boat), 1);
+      boat.eta = W;
+      toBoat(boat);
+      const o = jobOf(boat)!;
+      const at = s.assets.find((a) => a.id === o.assetId);
+      line('fin', 'bad', `Nothing flew this week: a mainland boat brought ${boat.id} for ${o.title}${at ? ` on ${at.name}` : ''} (${usd(FREIGHT.aog)}).`);
+      receivePo(s, boat, W, false, line, judge);
+    }
+  }
+  // what waits a week, in one line per carrier
+  for (const cargoOnly of [false, true]) {
+    const ps = slipped.filter((p) => (p.carrier === 'bulk' && cargoPlane) === cargoOnly);
+    if (!ps.length) continue;
+    const by = cargoOnly ? 'cargo flight' : 'flight';
+    line('fin', 'info', ps.length === 1 ? `${ps[0].id} (${SUPPLIERS[ps[0].vendor].short}) waits a week: no ${by} carried it. It comes week ${W + 1}.` : `${ps.map((p) => p.id).join(', ')} wait a week: no ${by} carried them. They come week ${W + 1}.`);
   }
   return allocate(s);
 }
@@ -595,9 +635,10 @@ export function replenish(s: IslandState, W: number, line: Liner, now = 0): Purc
     return [];
   }
   const pos = placePo(s, want, {}, 'auto', now);
+  // placed after this week's receiving: the soonest a line can land is next week's resolve
+  for (const p of pos) p.eta = Math.max(p.eta, W + 1);
   const total = pos.reduce((n, p) => n + p.cost, 0);
   line('fin', 'info', `Replenishment: ${want.length} line${want.length > 1 ? 's' : ''} ordered up to max (${usd(total)}, ${pos.map((p) => p.id).join(', ')}).`);
-  void W;
   return pos;
 }
 
@@ -743,6 +784,12 @@ function famLabel(fam: string, x: Item): string {
 }
 
 const memo = new WeakMap<IslandState, Map<string, unknown>>();
+/**
+ * The analytics are memoized per state object (a bot turn or a render reads
+ * them many times). A move may read them part way (the week open's auction lot)
+ * and then change the island: apply() forgets them before handing the state on.
+ */
+export const forgetDerived = (s: IslandState) => void memo.delete(s);
 function cached<T>(s: IslandState, key: string, f: () => T): T {
   let m = memo.get(s);
   if (!m) memo.set(s, (m = new Map()));
@@ -803,16 +850,17 @@ export function velocity(s: IslandState, fam: string): Velocity {
   });
 }
 
-/** fast / steady / slow among the families used, dead (on hand, no use in 26 weeks), new (first received under 8 weeks ago); null under 8 weeks of ledger */
+/** fast / steady / slow among the families used, dead (on hand, no use while the ledger has been full), new (first received under 8 weeks ago); null under 8 closed weeks of ledger */
 export function moveClass(s: IslandState, fam: string): MoveClass | null {
-  const weeks = (s.ledger ?? []).length;
+  // closed weeks (the ledger holds STOCK.ledgerWeeks rows with the week in progress)
+  const weeks = (s.ledger ?? []).filter((r) => r.w < s.week).length;
   if (weeks < 8) return null;
   return cached(s, `class:${fam}`, () => {
     const v = velocity(s, fam);
     if (v.weeksUsed === 0) {
       const first = Math.min(...famItems(s, fam).map((id) => s.inv?.[id]?.got ?? Infinity));
       if (Number.isFinite(first) && s.week - first < 8) return 'new';
-      if (v.onHand > 0 && weeks >= STOCK.ledgerWeeks) return 'dead';
+      if (v.onHand > 0 && weeks >= STOCK.ledgerWeeks - 1) return 'dead';
       return 'slow';
     }
     const used = families(s)
@@ -930,7 +978,12 @@ export function stockFlags(s: IslandState): StockFlag[] {
     // order: IP less the known demand within the lead is under the reorder point (no ROP: under 0)
     const seen = new Set<ItemId>();
     const cands = new Set<ItemId>([...Object.keys(s.inv ?? {}), ...(s.reqs ?? []).filter((r) => r.status === 'open').map((r) => r.item)]);
-    for (const o of s.orders) if (o.flow && o.approvedWeek !== undefined && o.status === 'waiting_part') for (const l of uncovered(s, o)) cands.add(l.item);
+    // what jobs wait on: a pending card's lines to buy, an approved job's shortfall nobody has covered
+    for (const o of s.orders) {
+      if (!o.flow) continue;
+      if (o.status === 'pending') for (const l of cardBuyLines(s, o)) cands.add(l.item);
+      else if (o.approvedWeek !== undefined && o.status === 'waiting_part') for (const l of uncovered(s, o)) cands.add(l.item);
+    }
     for (const id of cands) {
       const x = itemById(id);
       if (!x || seen.has(id)) continue;
