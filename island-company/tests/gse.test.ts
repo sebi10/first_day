@@ -9,7 +9,7 @@ import { generateMeter } from '../src/puzzles/meter';
 import { generateVariance } from '../src/puzzles/variance';
 import { generateWireup } from '../src/puzzles/wireup';
 import { simulate, TEAMS } from '../src/sim/bots';
-import { CABLE_BAND, DEFECT_RULES, GSE, REPORTS, REPORT_BY_KEY, incidentText } from '../src/sim/data';
+import { CABLE_BAND, CABLE_REPORT, DEFECT_RULES, GSE, REPORTS, REPORT_BY_KEY, incidentText } from '../src/sim/data';
 import { cableBand, cableReport, gseCarts, gseForStart } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
@@ -25,11 +25,12 @@ function started(): IslandState {
   return s;
 }
 
-/** a started island at week `w` with the cargo plane (the ground power puzzle's single) */
-function withCargo(w = 4): IslandState {
+/** a started island at week `w` with the cargo plane (the turbine single); `float`: the amphibian too (a piston single) */
+function withCargo(w = 4, float = false): IslandState {
   const s = started();
   s.week = w;
   s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 80, touchedWeek: 0, sinceInspection: 2 });
+  if (float) s.assets.push({ id: 'p3', kind: 'plane', model: 'float', name: 'Float F-3', health: 80, touchedWeek: 0, sinceInspection: 2 });
   return s;
 }
 
@@ -54,11 +55,11 @@ function addOrder(s: IslandState, f: Partial<Order> & Pick<Order, 'role' | 'kind
   s.orders.push(o);
   return o;
 }
-const startJob = (s: IslandState, tier = 2) =>
-  addOrder(s, { role: 'mech', kind: 'gpustart', puzzle: 'gpu', assetId: 'p2', tier, cost: 120, gain: 8, title: 'Ground power start: weak battery' });
+const startJob = (s: IslandState, tier = 2, assetId = 'p2') =>
+  addOrder(s, { role: 'mech', kind: 'gpustart', puzzle: 'gpu', assetId, tier, cost: 120, gain: 8, title: 'Ground power start: weak battery' });
 
-const gse = (s: IslandState, op: 'charge' | 'unplug' | 'hook' | 'unhook' | 'inspect', cart = 'gpu1', assetId?: string, role: Role = 'mech') =>
-  apply(s, { t: 'gse', role, cart, op, ...(assetId ? { assetId } : {}) }, NOW);
+const gse = (s: IslandState, op: 'charge' | 'unplug' | 'hook' | 'unhook' | 'inspect', cart = 'gpu1', assetId?: string, role: Role = 'mech', call?: 'ok' | 'tag') =>
+  apply(s, { t: 'gse', role, cart, op, ...(assetId ? { assetId } : {}), ...(call ? { call } : {}) }, NOW);
 const complete = (s: IslandState, role: Role, o: Order, score: number, data?: Record<string, unknown>) =>
   apply(s, { t: 'complete', role, orderId: o.id, score, perfect: score >= 0.95, data }, NOW);
 const resolve = (s: IslandState) => apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
@@ -140,25 +141,46 @@ describe('ground power carts: the mechanic moves them', () => {
     expect(gse(t, 'inspect').error).toBe('Your turn is over for this week.');
   });
 
-  it('an inspection shows the band, once a week; cracked or pitted is tagged out and written up for the electrician', () => {
+  it('an inspection is the mechanic\u2019s call on the plug end, once a week; tagged out, it is written up for the electrician in the words of what is wrong', () => {
     let s = withCargo();
     expect(cableBand(0)).toBe('good');
     expect(cableBand(GSE.cracked)).toBe('cracked');
     expect(cableBand(GSE.pitted)).toBe('pitted');
     s = gse(s, 'inspect').s;
     expect(cart(s).inspected).toEqual({ week: s.week, band: 'good', by: 'Ana' });
-    expect(s.feed.at(-1)!.text).toBe(`Ana inspected GPU cart 1's cable: ${CABLE_BAND.good}.`);
+    expect(s.feed.at(-1)!.text).toBe("Ana inspected GPU cart 1's cable and plug: serviceable.");
     expect(gse(s, 'inspect').error).toMatch(/already inspected this week/);
     s.week += 1;
     setCart(s, 'gpu1', { wear: 50 });
-    s = gse(s, 'inspect').s;
+    s = gse(s, 'inspect', 'gpu1', undefined, 'mech', 'tag').s;
     expect(cart(s).inspected!.band).toBe('cracked');
     const rep = cableReport(s, 'gpu1')!;
-    expect(rep).toMatchObject({ role: 'elec', kind: 'report', puzzle: 'wireup', job: 'gpuCable', status: 'ready', cost: REPORT_BY_KEY.gpuCable.cost });
-    expect(rep.report).toMatchObject({ key: 'gpuCable', by: 'mech', effect: 'gse', cart: 'gpu1' });
-    expect(s.feed.at(-1)!.text).toBe('Ana reports: the GPU cart cable insulation is cracked at the plug (GPU cart 1, tagged out). Ben, it\'s yours.');
+    expect(rep).toMatchObject({ role: 'elec', kind: 'report', puzzle: 'wireup', job: 'gpuCable', status: 'ready', cost: REPORT_BY_KEY.gpuCable.cost, title: CABLE_REPORT.cracked.title });
+    expect(rep.report).toMatchObject({ key: 'gpuCable', by: 'mech', effect: 'gse', cart: 'gpu1', band: 'cracked' });
+    expect(s.feed.at(-2)!.text).toBe(`Ana tagged GPU cart 1 out at the inspection: ${CABLE_BAND.cracked}.`);
+    expect(s.feed.at(-1)!.text).toBe("Ana reports: the GPU cart cable insulation is cracked at the plug (GPU cart 1, tagged out). Ben, it's yours.");
     // tagged out: it can't be hooked up
-    expect(gse(s, 'hook', 'gpu1', 'p2').error).toMatch(/tagged out: its cable is cracked at the plug\. Ben has to fix it first/);
+    expect(gse(s, 'hook', 'gpu1', 'p2').error).toMatch(/tagged out: its cable insulation is cracked at the plug\. Ben has to fix it first/);
+    // pitted contacts say so, in the report's title, the feed and the tag
+    const p = withCargo();
+    setCart(p, 'gpu1', { wear: 80 });
+    const q = gse(p, 'inspect', 'gpu1', undefined, 'mech', 'tag').s;
+    expect(cableReport(q, 'gpu1')!.title).toBe('GPU cart plug contacts pitted and burnt: new plug');
+    expect(q.feed.at(-1)!.text).toBe("Ana reports: the GPU cart plug contacts are pitted and burnt (GPU cart 1, tagged out). Ben, it's yours.");
+    expect(gse(q, 'hook', 'gpu1', 'p2').error).toMatch(/tagged out: its plug contacts are pitted and burnt/);
+  });
+
+  it('a worn cable called serviceable stays in service (the card says what the mechanic called); a good one tagged out goes to the electrician anyway', () => {
+    const s = withCargo();
+    setCart(s, 'gpu1', { wear: 80 });
+    const ok = gse(s, 'inspect', 'gpu1', undefined, 'mech', 'ok').s;
+    expect(cableReport(ok, 'gpu1')).toBeUndefined();
+    expect(cart(ok)).toMatchObject({ wear: 80, inspected: { band: 'good' } });
+    expect(ok.feed.at(-1)!.text).toBe("Ana inspected GPU cart 1's cable and plug: serviceable.");
+    // nothing on screen says it was wrong: the arc into a plane's receptacle comes later (see below)
+    expect(ok.feed.some((f) => /pitted|burnt|wrong/i.test(f.text))).toBe(false);
+    const good = gse(withCargo(), 'inspect', 'gpu1', undefined, 'mech', 'tag').s;
+    expect(cableReport(good, 'gpu1')!.title).toBe(CABLE_REPORT.good.title);
   });
 });
 
@@ -178,19 +200,21 @@ describe('ground power start: needs a charged cart hooked to that plane', () => 
     expect(complete(s, 'mech', o, 0.9).error).toBeUndefined();
   });
 
-  it('a start uses charge (a turbine more) and wears the cable (more after a live plug)', () => {
-    let s = gse(withCargo(), 'hook', 'gpu1', 'p2').s;
-    const a = complete(s, 'mech', startJob(s), 0.9, { errors: [], ac: 'piston' }).s;
+  it('a start uses charge by the plane (the cargo single is the turbine) and wears the cable (more after a live plug)', () => {
+    // the amphibian is a piston single, whatever the order's tier or what the puzzle says
+    let s = gse(withCargo(4, true), 'hook', 'gpu1', 'p3').s;
+    const a = complete(s, 'mech', startJob(s, 4, 'p3'), 0.9, { errors: [], ac: 'turbine' }).s;
     expect(cart(a)).toMatchObject({ charge: 100 - GSE.drain.piston, wear: GSE.startWear + GSE.wear });
+    // the cargo single is the turbine at every tier
     s = gse(withCargo(), 'hook', 'gpu1', 'p2').s;
-    const b = complete(s, 'mech', startJob(s, 4), 0.9, { errors: ['arcIn'], ac: 'turbine' }).s;
+    const b = complete(s, 'mech', startJob(s, 2), 0.9, { errors: ['arcIn'], ac: 'piston' }).s;
     expect(cart(b)).toMatchObject({ charge: 100 - GSE.drain.turbine, wear: GSE.startWear + GSE.wear + GSE.arcWear });
-    // no puzzle data (autopilot, the paper sim): the order's tier picks the airframe, as the puzzle does
+    // no puzzle data (autopilot, the paper sim): the plane still decides
     s = gse(withCargo(), 'hook', 'gpu1', 'p2').s;
-    expect(cart(complete(s, 'mech', startJob(s, 4), 0.9).s).charge).toBe(100 - GSE.drain.turbine);
+    expect(cart(complete(s, 'mech', startJob(s, 1), 0.9).s).charge).toBe(100 - GSE.drain.turbine);
     // the start drained it whatever came of it (a teaching-tier rework still used the cart)
-    s = gse(withCargo(), 'hook', 'gpu1', 'p2').s;
-    const rework = complete(s, 'mech', startJob(s, 1), 0.2).s;
+    s = gse(withCargo(4, true), 'hook', 'gpu1', 'p3').s;
+    const rework = complete(s, 'mech', startJob(s, 1, 'p3'), 0.2).s;
     expect(rework.orders.find((x) => x.kind === 'gpustart')!.status).toBe('ready');
     expect(cart(rework).charge).toBe(100 - GSE.drain.piston);
   });
@@ -279,9 +303,57 @@ describe('cable wear: hidden until inspected, and it shows up later', () => {
     s = complete(s, 'elec', rep, 0.95).s;
     expect(cableReport(s, 'gpu1')).toBeUndefined();
     expect(cart(s)).toMatchObject({ wear: 0, inspected: { band: 'good', by: 'Ben', fixed: true } });
-    expect(s.feed.at(-1)!.text).toBe("Ben closed out Ana's report: GPU cart cable insulation is cracked at the plug. GPU cart 1 is back in service.");
+    expect(s.feed.at(-1)!.text).toBe("Ben closed out Ana's report: GPU cart plug contacts pitted and burnt: new plug. GPU cart 1 is back in service.");
     s = gse(s, 'hook', 'gpu1', 'p2').s;
     expect(complete(s, 'mech', startJob(s), 0.9).error).toBeUndefined();
+  });
+
+  it('a sloppy fix looks like any new plug until it comes back; a re-inspection waits a week; a clean fix clears the comeback for good', () => {
+    let s = withCargo(4);
+    s.deadline = NOW;
+    setCart(s, 'gpu1', { wear: 75 });
+    s = gse(s, 'inspect').s;
+    // under a pass: it will come back (a teaching-tier fix under 40% isn't signed off at all)
+    s = complete(s, 'elec', cableReport(s, 'gpu1')!, 0.5).s;
+    expect(cart(s).wear).toBeLessThan(GSE.cracked);
+    expect(s.defects!.filter((d) => d.report?.cart === 'gpu1')).toHaveLength(1);
+    // the week it was re-terminated, it's left to settle
+    expect(gse(s, 'inspect').error).toBe("GPU cart 1's cable was re-terminated this week: look it over next week.");
+    // the next week the mechanic doesn't like it and tags it: the fix that was going to come back comes back now
+    s = resolve(s);
+    s = gse(s, 'inspect', 'gpu1', undefined, 'mech', 'tag').s;
+    const back = cableReport(s, 'gpu1')!;
+    expect(back.report).toMatchObject({ again: 4, cart: 'gpu1' });
+    expect((s.defects ?? []).some((d) => d.report?.cart === 'gpu1')).toBe(false);
+    // a clean fix: nothing of the old one is left to come back
+    s = complete(s, 'elec', back, 0.95).s;
+    expect(cart(s).wear).toBe(0);
+    expect((s.defects ?? []).some((d) => d.report?.cart === 'gpu1')).toBe(false);
+    for (let i = 0; i < 3; i++) {
+      s = resolve(s);
+      expect(cableReport(s, 'gpu1')).toBeUndefined();
+    }
+    expect(cart(s).wear).toBeLessThan(GSE.cracked);
+  });
+
+  it('a clean fix after a sloppy one: the old comeback never fires on the new plug', () => {
+    let s = withCargo(4);
+    s.deadline = NOW;
+    setCart(s, 'gpu1', { wear: 75 });
+    s = gse(s, 'inspect').s;
+    s = complete(s, 'elec', cableReport(s, 'gpu1')!, 0.5).s;
+    // a second report on the same cart (too far gone to miss, say) fixed cleanly before the first comeback is due
+    const d = s.defects!.find((x) => x.report?.cart === 'gpu1')!;
+    d.dueWeek = s.week + 2;
+    setCart(s, 'gpu1', { wear: GSE.autoReport });
+    s.defects = s.defects!.filter((x) => x !== d);
+    s = resolve(s);
+    s.defects = [...(s.defects ?? []), d];
+    const rep = cableReport(s, 'gpu1')!;
+    s = complete(s, 'elec', rep, 0.95).s;
+    expect((s.defects ?? []).some((x) => x.report?.cart === 'gpu1')).toBe(false);
+    for (let i = 0; i < 3; i++) s = resolve(s);
+    expect(s.orders.some((o) => o.report?.cart === 'gpu1' && o.report.again)).toBe(false);
   });
 
   it('a botched fix comes back, and the plug end is burnt again', () => {
@@ -352,16 +424,18 @@ describe('cable wear: hidden until inspected, and it shows up later', () => {
 });
 
 describe('ground power: the rest of the island', () => {
-  it('avionics work on a plane with a charged cart hooked up gets a steady bus (a small benefit)', () => {
+  it('avionics work needs a charged cart hooked up: the radio\u2019s ops check runs the bus on ground power', () => {
     const base = withCargo(4);
     const job = (s: IslandState) => addOrder(s, { role: 'mech', kind: 'avionics', puzzle: 'teardown', assetId: 'p2', tier: 1, cost: 640, gain: 14 });
     const plain = structuredClone(base);
-    const a = complete(plain, 'mech', job(plain), 0.9).s;
+    const refused = complete(plain, 'mech', job(plain), 0.9);
+    expect(refused.error).toMatch(/Hook a charged cart up to Cargo C-7 first: the radio's ops check runs the bus on ground power/);
     const hooked = gse(structuredClone(base), 'hook', 'gpu1', 'p2').s;
+    const wear = cart(hooked).wear;
     const b = complete(hooked, 'mech', job(hooked), 0.9).s;
-    const hp = (s: IslandState) => s.assets.find((x) => x.id === 'p2')!.health;
-    expect(hp(b) - hp(a)).toBeCloseTo(GSE.avionicsBonus);
+    // a little charge, and a plug-in's worth of wear (no start: no start's drain)
     expect(cart(b).charge).toBe(100 - GSE.avionicsDrain);
+    expect(cart(b).wear).toBe(wear + GSE.busWear);
   });
 
   it("autopilot tows a charged cart over for a start, and puts it back on the charger", () => {
@@ -390,6 +464,100 @@ describe('ground power: the rest of the island', () => {
     expect(starts).toBeGreaterThan(0);
     const a = simulate(TEAMS['three friends'], 20, 3).final;
     expect(JSON.stringify(simulate(TEAMS['three friends'], 20, 3).final)).toBe(JSON.stringify(a));
+  });
+});
+
+describe('flight days on a weak battery: the cart chore most weeks', () => {
+  /** an island at week `w` whose week-open rolled a weak battery (the roll is seeded: search the island seeds) */
+  function weakWeek(model: 'cargo' | 'twin' = 'cargo') {
+    for (let seed = 1; seed < 400; seed++) {
+      let s = createIsland({ id: `wb${seed}`, name: 'Weak Isle', now: NOW, tz: 'Europe/Paris', seed, creator: { uid: 'a', name: 'Ana', role: 'mech' } });
+      s = apply(s, { t: 'join', uid: 'b', name: 'Ben', role: 'elec' }, NOW).s;
+      s = apply(s, { t: 'join', uid: 'c', name: 'Cy', role: 'fin' }, NOW).s;
+      for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'week0Done', role: r }, NOW).s;
+      s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 90, touchedWeek: 0, sinceInspection: 0 });
+      s.week = GSE.weakFrom;
+      s.deadline = NOW;
+      // resolve the week before: its week-open rolls this one's weak battery
+      s.week = GSE.weakFrom - 1;
+      const x = resolve(s);
+      if (x.weakBattery?.week === x.week && x.assets.find((a) => a.id === x.weakBattery!.assetId)?.model === model) return x;
+    }
+    throw new Error('no weak battery');
+  }
+  const flights = (s: IslandState, name: string) => s.history.at(-1)!.lines.map((l) => l.text).filter((l) => l.includes(name));
+
+  it('the week opens with a weak battery on a plane that will fly, and says so to the mechanic', () => {
+    const s = weakWeek();
+    expect(s.weakBattery).toEqual({ assetId: 'p2', week: s.week });
+    expect(s.feed.some((f) => f.role === 'mech' && /Cargo C-7's battery is weak this week: its first start is on ground power\. Hook a charged cart up to it before the week resolves, or it loses a flight\./.test(f.text))).toBe(true);
+    // not every week: about GSE.weakChance of them
+    let n = 0;
+    for (let w = GSE.weakFrom; w < GSE.weakFrom + 200; w++) {
+      const x = { ...s, week: w - 1, weakBattery: null, deadline: NOW };
+      if (resolve(x).weakBattery) n++;
+    }
+    expect(n / 200).toBeGreaterThan(GSE.weakChance - 0.15);
+    expect(n / 200).toBeLessThan(GSE.weakChance + 0.15);
+  });
+
+  it('a charged cart hooked up to it: the pilot starts on it (a start\'s drain by the plane, and its wear); no job slot used', () => {
+    let s = weakWeek('cargo');
+    s = gse(s, 'hook', 'gpu1', 'p2').s;
+    const wear = cart(s).wear;
+    // everyone ends the turn (no autopilot jobs on the cart)
+    let x = s;
+    for (const r of ['mech', 'elec', 'fin'] as Role[]) x = apply(x, { t: 'endTurn', role: r, week: x.week }, NOW).s;
+    expect(flights(x, 'Cargo C-7').some((l) => /Cargo C-7's weak battery: the pilot started it on GPU cart 1 \(\d+% left on the cart\)\./.test(l))).toBe(true);
+    // the turbine's drain (off the charger all week: its idle drain too), and a start's wear
+    expect(cart(x).charge).toBe(100 - GSE.drain.turbine - GSE.idleDrain);
+    expect(cart(x).wear).toBe(wear + GSE.wear);
+    expect(x.turns.mech?.done ?? 0).toBe(0);
+    expect(x.history.at(-1)!.flightsFlown).toBe(x.history.at(-1)!.flightsScheduled);
+  });
+
+  it('no cart on it (or a flat or tagged-out one): its first flight is lost', () => {
+    const s = weakWeek('cargo');
+    s.deadline = NOW;
+    // everyone played and ended the turn: no autopilot to tow a cart over
+    let x = s;
+    for (const r of ['mech', 'elec', 'fin'] as Role[]) x = apply(x, { t: 'endTurn', role: r, week: x.week }, NOW).s;
+    expect(flights(x, 'Cargo C-7')).toContain("Cargo C-7's battery was weak and no cart was hooked up to it: its first flight was lost.");
+    const h = x.history.at(-1)!;
+    expect(h.flightsFlown).toBe(h.flightsScheduled - 1);
+    // a flat one
+    let y = gse(s, 'hook', 'gpu1', 'p2').s;
+    y = setCart(y, 'gpu1', { charge: GSE.minStart - 5 });
+    for (const r of ['mech', 'elec', 'fin'] as Role[]) y = apply(y, { t: 'endTurn', role: r, week: y.week }, NOW).s;
+    expect(flights(y, 'Cargo C-7').some((l) => /GPU cart 1 on it was down to 25%: its first flight was lost/.test(l))).toBe(true);
+  });
+
+  it("autopilot covers an empty mechanic's seat: the best charged cart goes on the plane, the others back on the charger", () => {
+    const s = weakWeek('cargo');
+    s.deadline = NOW;
+    const x = resolve(s);
+    expect(flights(x, 'Cargo C-7').some((l) => /the pilot started it on GPU cart 1/.test(l))).toBe(true);
+    // the cart stays on the plane it started (the mechanic puts it back next week, or autopilot does)
+    expect(cart(x).hookedTo).toBe('p2');
+    const y = resolve({ ...x, deadline: NOW, weakBattery: null });
+    expect(cart(y).hookedTo).toBeNull();
+    expect(cart(y).charging).toBe(true);
+  });
+
+  it('the paper-sim mechanic hooks a cart up for the flight day and puts it back after; flights are rarely lost to it', () => {
+    let weak = 0;
+    let lost = 0;
+    for (let seed = 1; seed <= 6; seed++) {
+      simulate(TEAMS['all average'], 26, seed, (s) => {
+        const h = s.history.at(-1)!;
+        for (const l of h.lines) {
+          if (/weak battery: the pilot started it on/.test(l.text)) weak++;
+          if (/battery was weak and/.test(l.text)) lost++;
+        }
+      });
+    }
+    expect(weak).toBeGreaterThan(20);
+    expect(lost / (weak + lost)).toBeLessThan(0.25);
   });
 });
 

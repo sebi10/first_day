@@ -178,6 +178,18 @@ function cached(id: string): IslandState | null {
   }
 }
 
+/**
+ * The island document's format version. firestore.rules accepts writes of this
+ * version only, and the rules and the hosting deploy together: a tab still
+ * running an older build gets permission-denied (and reloads, see flush) instead
+ * of writing with an older engine. Raise it with the rules when an old engine
+ * would corrupt a new island (v2: the part chain and the ground power carts).
+ */
+const DOC_VERSION = 2;
+
+/** a write refused by the rules: this build is older than the island's (or the rules'); reload to the new one */
+const isStaleClient = (e: unknown) => /permission-denied/i.test(String((e as { code?: string })?.code ?? e));
+
 async function transact(id: string, a: Action): Promise<{ error?: string; state?: IslandState }> {
   let error: string | undefined;
   let state: IslandState | undefined;
@@ -198,7 +210,7 @@ async function transact(id: string, a: Action): Promise<{ error?: string; state?
       return;
     }
     state = r.s;
-    if (r.s !== s) tx.set(ref, { json: JSON.stringify(r.s), week: r.s.week, updatedAt: r.s.updatedAt, v: 1 });
+    if (r.s !== s) tx.set(ref, { json: JSON.stringify(r.s), week: r.s.week, updatedAt: r.s.updatedAt, v: DOC_VERSION });
    });
   });
   return { error, state };
@@ -221,6 +233,11 @@ async function flush(id: string) {
         if (r.error) dropped.push(r.error);
       } catch (e) {
         if (isNetworkError(e)) break;
+        // the rules want a newer build: keep the move queued and reload to it
+        if (isStaleClient(e)) {
+          window.dispatchEvent(new CustomEvent('ic:stale'));
+          break;
+        }
         dropped.push(String((e as Error)?.message ?? e));
       }
       box = box.slice(1); // game-rule rejections are dropped (the island moved on), but the player hears about it
@@ -256,7 +273,7 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
     const id = newIslandId();
     const s = await withSession(async ({ db, fs }) => {
       const s = createIsland({ id, name, now: Date.now(), tz: safeTz(), creator: { uid: currentUid!, name: playerName, role } });
-      await fs.setDoc(fs.doc(db, 'islands', id), { json: JSON.stringify(s), week: s.week, updatedAt: s.updatedAt, v: 1 });
+      await fs.setDoc(fs.doc(db, 'islands', id), { json: JSON.stringify(s), week: s.week, updatedAt: s.updatedAt, v: DOC_VERSION });
       return s;
     });
     publish(id, s);
@@ -268,7 +285,7 @@ export const firebaseStore: IslandStore & { migrate(s: IslandState): Promise<voi
       const ref = fs.doc(db, 'islands', state.id);
       const existing = await fs.getDoc(ref);
       if (existing.exists()) throw new Error('An online island with this code already exists.');
-      await fs.setDoc(ref, { json: JSON.stringify(state), week: state.week, updatedAt: Date.now(), v: 1 });
+      await fs.setDoc(ref, { json: JSON.stringify(state), week: state.week, updatedAt: Date.now(), v: DOC_VERSION });
     });
     publish(state.id, state);
   },

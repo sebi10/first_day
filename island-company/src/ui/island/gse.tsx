@@ -49,6 +49,7 @@ export function GpuCart({
   tagged,
   label,
   onTap,
+  hit = 44,
 }: {
   cart: Pick<GseCart, 'id' | 'charge'>;
   at: Pt;
@@ -58,6 +59,8 @@ export function GpuCart({
   tagged: boolean;
   label: string;
   onTap?: () => void;
+  /** the tap target's size in drawing units (the island sizes it to 44 CSS px on screen) */
+  hit?: number;
 }) {
   const [x, y] = at;
   const tap = onTap
@@ -92,7 +95,7 @@ export function GpuCart({
         <path d="M-4.2 -2.8a1.8 1.8 0 1 0 .1 0M4.2 -2.8a1.8 1.8 0 1 0 .1 0" fill="#2f3438" />
         <circle cx={3.6} cy={-11.2} r={1.9} fill={cartLight(cart.charge)} stroke="#3b464b" stroke-width=".5" />
         {tagged && <path d="M7.5 -8.5h3.4v4.8h-3.4z" fill={K.red} stroke="#8a2a22" stroke-width=".5" />}
-        {onTap && <rect class="hit" x={-22} y={-30} width={44} height={44} rx={8} fill="transparent" />}
+        {onTap && <rect class="hit" x={2 - hit / 2} y={-4 - hit / 2} width={hit} height={hit} rx={8} fill="transparent" />}
       </g>
     </g>
   );

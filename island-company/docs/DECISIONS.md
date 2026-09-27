@@ -231,14 +231,14 @@ An A&P described the real workflow: *"When I get a task I get a manual. I follow
 
 ### 2. The part chain
 
-**Trigger.** A mechanic signs off an eligible job on a plane (32-40: tire and brake, wheel-half penetrant check; 61-10: prop bolt re-torque, safety-wiring the prop bolts; 29-10: brake hydraulic servicing; 23-10: com radio swap; 24-30: alternator replacement) and the job finds a part it can't be finished without. Conditions: week ≥ 3, island tier ≥ 2, not in the mechanic's grace weeks, not a repair, redo, report or crew-project job, no chain already open, and 2 weeks' rest after the last one closed. Then a roll seeded from the order and the week (`rng(hashSeed(o.seed, 'chain', week)).chance(0.3)`), never the score. It is not a new action: `complete` opens it, so the existing week stamp covers it.
+**Trigger.** A mechanic signs off an eligible job on a plane (32-40: tire and brake, wheel-half penetrant check; 61-10: prop bolt re-torque (not the safety wiring: galled threads show at the re-torque, not while wiring); 29-10: brake hydraulic servicing; 23-10: com radio swap; 24-30: alternator replacement) and the job finds a part it can't be finished without. Conditions: week ≥ 3, island tier ≥ 2, not in the mechanic's grace weeks, not a repair, redo, report or crew-project job, no chain already open, and 2 weeks' rest after the last one closed. Then a roll seeded from the order and the week (`rng(hashSeed(o.seed, 'chain', week)).chance(0.3)`), never the score. It is not a new action: `complete` opens it, so the existing week stamp covers it.
 
 **What it does.** The job is not signed off. It shows *Work stopped · Part needed* instead of a logbook entry and waits (`waiting_part`). The plane is **grounded** (`outOfService`: no flights, no capacity) until the part is on. Every seat gets a banner at the top of the island screen (the plane, the part, a stepper *Found → IPC → (Logbooks → Engineering) → Buy → Delivery → Install*, and whose move it is: *Your move: …* or *Waiting on Cy: approve the part*). Chips on every step's card say the same, and ntfy pings the crew when the step changes.
 
 | Step | Who | What |
 | --- | --- | --- |
 | IPC lookup | mechanic | The IPC puzzle on this airplane (its S/N and SB status), with the squawk: *"L/H brake linings worn below minimum … On the airplane: brake assy P/N 30-86A (Clearwater Wheel & Brake)."* Hand in a P/N, or *Not in the IPC · research the records*. Blind from tier 2. |
-| Buy | analyst | An AOG card on the desk: *Buy 066-22500 LINING … for N658VN*, "If it waits: Cargo C-7 stays grounded". No counter-offer. It rides the next cargo flight, or the boat if there is none. |
+| Buy | analyst | An AOG card on the desk: *Buy 066-22500 LINING … for N658VN*, with the freight on the PO (the AOG boat, or the next guest flight a week later, when the cargo plane is the one down), what a week grounded costs, and what the chain has cost so far. No counter-offer. (Review fixes, below.) |
 | Logbook research | mechanic | Only when the part isn't in the IPC. The logbook puzzle on this airplane finds how the assembly got there (an STC, a field-approved 337) and sends engineering a request citing it, or signs on a part from the records alone. |
 | Engineering fee | analyst | An AOG card: $380 + $40 per tier above 2. Engineering answers when the week resolves. |
 | Engineering answer | (resolve) | Approved: *"Engineering approved <P/N> for <reg> on <STC>: EA issued"*, then a Buy card for the right P/N. Rejected: *"Engineering returned the request: <reason>"* and a new research order (or back to the IPC, if the part was in the IPC all along). |
@@ -246,7 +246,7 @@ An A&P described the real workflow: *"When I get a task I get a manual. I follow
 
 **Wrong answers surface later, never at hand-in.**
 
-- **A P/N that doesn't fit** (not effective for this S/N or SB status, superseded one-way, the IPC part for an assembly an STC replaced, not the right item, NP) is caught **at receiving** when the week resolves. It goes back with a 15% restocking fee (at least $40), and a new lookup (or research) opens. The banner says why: *"Sent back at receiving: P/N 066-22600 is not effective for N658VN's SB status (EFF C: POST SB IC208-32-07; INTCHG code 3, only as the SB set)."*
+- **A P/N that doesn't fit** (not effective for this S/N or SB status, superseded one-way, the IPC part for an assembly an STC replaced, not the right item, NP) is caught **at receiving** when the week resolves. It goes back, credited its price less a 15% restocking fee (at least $40), and a new lookup (or research, when the IPC doesn't cover the assembly on the airplane) opens. The banner says why: *"Sent back at receiving: P/N 066-22600 is not effective for N658VN's SB status (EFF C: POST SB IC208-32-07; INTCHG code 3, only as the SB set)."*
 - **An ICA part put on from a logbook entry alone** (no engineering authorization) goes on and flies. It leaves a sure hidden defect (`ipc:unapproved`) that a later inspection finds. The repair is logbook research for the authorization.
 - **"Not in the IPC" when it is** costs the engineering fee and a week, then *"back to the IPC"*.
 
@@ -262,12 +262,14 @@ An A&P described the real workflow: *"When I get a task I get a manual. I follow
 | --- | --- |
 | From week / island tier | 3 / 2 |
 | Chance an eligible sign-off finds a part | 0.3 (one open chain; 2 weeks' rest after one closes) |
-| Planes with an alteration / of those field-approved | 0.5 / 0.3 |
+| Planes with an alteration / of those field-approved | 0.5 / 0.3 (on a fixed per-model ATA list) |
+| Chance on an altered plane's own assembly / elsewhere on it (review fixes) | 0.9 / 0.3 × the chance |
+| An electrical unit's fault in its wiring / a part without its 8130-3 (review fixes) | 0.3 / 0.12 |
 | Part list price at tier 1 | lining $240, prop bolts $360, filter $110, reservoir cap $130, radio $950, generator $760, starter-generator $1,350; +10% per tier; ICA part ×1.35 |
 | Engineering fee | $380 + $40 per tier above 2 |
 | Restocking fee | 15% of the part, at least $40 |
 
-Per closed chain in the paper sim (30 seeds): three friends and all average get 1.07 chains a game, the plane is grounded 2.2 resolved weeks, it costs about $950 in parts, fees and restocking, 0.13 parts go back at receiving, and 6–13% of chains are not in the IPC. All good gets 1.73 chains a game.
+Per closed chain in the paper sim (30 seeds), as first built: three friends and all average get 1.07 chains a game, the plane is grounded 2.2 resolved weeks, it costs about $950 in parts, fees and restocking, 0.13 parts go back at receiving, and 6–13% of chains are not in the IPC. All good gets 1.73 chains a game. (The review fixes bias the find toward an altered plane's own assembly: about 40% are now not in the IPC. See below.)
 
 ### 3. Balance with the chain (26 weeks × 30 seeds, medians)
 
@@ -304,11 +306,11 @@ Owner direction, the A&P: *"ground power carts have to be interactive for the me
 | Unplug | Parked |
 | Hook up to *plane* | Towed off the charger and plugged into that plane's external power receptacle. One cart per plane; a tagged-out cart can't be hooked up |
 | Unhook | Parked beside the plane |
-| Inspect the cable | Shows its band, once a week per cart: *cable and plug in good shape* (under 40), *insulation cracked near the plug* (40–69), *plug pins pitted and burnt* (70+). Cracked or pitted is tagged out and written up for the electrician on the spot |
+| Inspect the cable | Once a week per cart: a close-up of the plug end whose tells follow the hidden wear (crazing from 22, cracks through the boot from 40, heat discoloration from 60, pitted and burnt contacts from 70), and the mechanic's call: *Serviceable* (it stays in service as it is) or *Tag it out* (written up for the electrician on the spot, in the words of the band). Not in the week of a new plug |
 
 Only the mechanic moves them. The other seats see the same card read-only.
 
-**A start needs a cart.** A *Ground power start* job needs a cart hooked up to that plane, in service, with 30% or more (`gseForStart`). Until then its card says *Hook a charged cart up to Cargo C-7 first* and the engine refuses the start (lending a hand too: it's the same cart). The app never launches a puzzle that can't count: it says what's missing and opens the carts. A start takes 25% of the charge (45% for a turbine: the puzzle reports which airframe it was) and adds 7 wear, 15 more when the plug went in or came out live.
+**A start needs a cart.** A *Ground power start* job needs a cart hooked up to that plane, in service, with 30% or more (`gseForStart`). Until then its card says *Hook a charged cart up to Cargo C-7 first* and the engine refuses the start (lending a hand too: it's the same cart). The app never launches a puzzle that can't count: it says what's missing and opens the carts. A start takes 25% of the charge on the piston planes, 45% on the turbine cargo plane (by the plane's model, which is also the airframe the puzzle draws), and adds 7 wear, 15 more when the plug went in or came out live.
 
 **The puzzle gets the cart as it was left** (`context.cart`). A run-down battery rests a little below its setting and sags much further under the start load, because its internal resistance climbs as it runs down. On a 14 V start at 30% the cart's meter falls to about 11 V while cranking, against 13.4 V on a full cart. Its LED bar shows two amber lights, and it cranks a little weaker (a turbine runs a little hotter on it). Nothing is called out: the meter is the instrument.
 
@@ -317,9 +319,9 @@ Only the mechanic moves them. The other seats see the same card read-only.
 **Wear is hidden until inspected, and shows up later.**
 - At 85 the damage can't be missed: the report opens at the next week open without an inspection.
 - A start through pitted pins can arc into the plane's external power receptacle: (wear − 60) / 60, so 17% at 70, 42% at 85, 67% at 100, seeded from the order. Nothing shows at sign-off. It is a hidden defect on the plane that surfaces 1–4 weeks later through the existing `gpu:arc` row (a burnt receptacle; from 90 wear the severe kind, a melted plug), traced to *"the ground power start on a worn cart cable Seb signed off in week 12"*. The repair replaces the receptacle; there is no redo, because the start itself was fine. A 100-hr inspection finds it first.
-- The electrician's fix: *GPU cart cable insulation is cracked at the plug* (effect `gse`: that cart is tagged out, no starts on it) is a wire-up job (`gpuCable`). Cut the cable back past the crack and fit a new 28 V DC plug: red to the + pin, black to the − pin, and the small lead to the short interlock pin, which lets the aircraft's external power relay close only once the plug is fully home. Each conductor is stripped to its barrel's depth and clamped, with no hook. From tier 3 the plug face shows only its moulded + and −. The fix resets the wear (to 0 for a clean job, (0.85 − score) × 120 otherwise). A fix that doesn't hold comes back in 1–2 weeks with the plug end burnt again.
+- The electrician's fix: *GPU cart cable insulation is cracked at the plug* (effect `gse`: that cart is tagged out, no starts on it) is a wire-up job (`gpuCable`). Cut the cable back past the damage and fit a new 28 V DC plug. The cart's plug has sockets (the pins are on the airplane's AN2551 receptacle): the red 2/0 AWG lead to the + socket, the black 2/0 to the − socket, and the small lead, fed from +, to the interlock (small) socket; it mates with the receptacle's short pin, so the airplane's external power relay closes only once the plug is fully seated. Each conductor is stripped to its barrel's depth and clamped, with no hook. From tier 3 the plug face shows only its moulded + and −. The fix resets the wear (to 0 for a clean job, (0.85 − score) × 120 otherwise). A fix that doesn't hold comes back in 1–2 weeks with the plug end burnt again.
 
-**Avionics work on ground power.** A com radio swap on a plane with a charged cart hooked up gets +2 health for 5% of the charge: the radio is checked on a steady bus, not a sagging battery.
+**Avionics work on ground power.** A com radio swap needs a charged cart hooked up to the plane, as a start does: the radio's ops check runs the bus on ground power, not a sagging battery. It takes 5% of the charge and 3 wear (a plug-in). (As first built it was an optional +2 health bonus; the review fixes made it required.)
 
 **On the island.** Each cart is drawn on the apron in the island's style: a small yellow cart with its charge light (green from 60%, amber from 30%, red below), a cable to the charger outlet on the hangar wall while it charges, beside the plane with a cable to its receptacle when hooked up (on the dock for the floatplane), a red tag when tagged out, and its light over the night grade. Tapping a cart opens the ground power sheet: `role=button`, keyboard focusable (SVG takes a lower-case `tabindex`), a 44 × 44 map-unit hit area (47 px zoomed to the mechanic's zone on a phone). The ops panel's *Ground power* card shows the same thing; its rows are 44 px targets. Island-lab scenes: `gse`, `gse-zoom` (a tagged-out cart, one hooked to the twin on jacks), `gse-night`. Node budget: the beaten scene is 1365 nodes (1339 before; the limit is 1500).
 
@@ -331,7 +333,7 @@ Only the mechanic moves them. The other seats see the same card read-only.
 | Mechanic → electrician | GPU cart cable insulation is cracked at the plug | Raised by wear, never drawn at random (see above) | wire-up (`gpuCable`) | `gse`: cart tagged out |
 | Mechanic → analyst | GPU starts never make it onto the charter invoices | The ground power fee is a pass-through the billing never picks up, so the carts' cost lands in *Ground power (net)*, a price driver in the variance review, and gets billed from then on | variance (`gpu`) | leak $150 |
 | Electrician → mechanic | Bucket truck boom creeps down: hydraulic leak at the lift cylinder | Oil escaping on the lift cylinder's load side (the base port O-ring, or the rigid tube from the holding valve) lets the raised boom settle. Lower it onto its rest first: a load-side fitting is never opened with the boom up, and an extended cylinder holds oil out of the tank. Replace the seal that leaks, then top up with the decal's ISO 32 AW oil, boom stowed | hydraulics (`boom`) | cap |
-| Analyst → mechanic | Company van brake pedal is soft | Air in the brake lines: bleed at the wheel off the pedal (bleeder open, press, close), keeping the master cylinder above MIN, then fill to MAX with DOT 3/4 brake fluid, a glycol. Mineral 5606 or ATF swells a DOT system's rubber seals; silicone DOT 5 doesn't mix | hydraulics (`van`) | leak $150 |
+| Analyst → mechanic | Company van brake pedal is spongy (it goes most of the way down, and firms up when you pump it) | Air in the brake lines: bleed at the wheel off the pedal (bleeder open, press, close), keeping the master cylinder above MIN, then fill to MAX with DOT 3/4 brake fluid, a glycol. Mineral 5606 or ATF swells a DOT system's rubber seals; silicone DOT 5 doesn't mix | hydraulics (`van`) | leak $150 |
 
 In the new set all three trades report (mechanic 3, electrician 1, analyst 1) and all three fix (mechanic 2, electrician 2, analyst 1). *Company van wheel is wobbling* stays, as the torque job it is.
 
@@ -444,9 +446,77 @@ Robust (`npm run balance -- robust`, 90 seeds × 4 crews per team):
 - **The targets hold:** tier 5 in week 22 for both target teams, no week below $0 in the standard run, and every solo or absent team stays at tier 1. So nothing was tuned.
 - **If the late dip shows up in play,** the first knobs are the ones each branch named: `CHAIN.chance` (0.3), and the new jobs' queue weights.
 
+## Phase B review fixes (round 1)
+
+Three review lenses (an A&P's, a player's and a systems one) played the integrated branch on a phone and in the paper sim. What changed:
+
+### Ground power: the plane's own airframe, and a reason most weeks
+
+- **The start is on the plane the cart is hooked to.** `launchFor` sets the airframe from the plane's model and its placard (`externalPower` in `aircraft.ts`, derived from the seed): the cargo plane (IC-208C) is the turbine, with its start current limit (800, 900 or 1000 A) and *battery switch ON*; the floatplane (IC-185F) is a high-wing piston on its amphibian floats, 28 V, *battery master ON*; the twin a low-wing piston. The title carries the name and the registration. The tier only sets the aids and the clock. The cart's drain follows the plane's model, not the puzzle.
+- **Its Manual** is the flight manual's *Section 4: Starting engine with external power* with the plane's placard (volts, amp limit, battery switch), and the procedure at tiers 0–2.
+- **Weak battery (flight days).** From week 2, about one week in three (`GSE.weakChance` 0.35) opens with a plane whose battery is weak: its first start is on ground power. A charged cart in service hooked up to it when the week resolves starts it (a start's drain, its wear, and through pitted contacts the chance of an arc); otherwise its first flight is lost. It costs no job slot: it's the cart chore, most weeks. The cart stays on that plane after the start; the mechanic (or autopilot for an empty seat) puts it back on the charger next week. The end-turn sheet warns about both.
+- **Radio work needs a cart** hooked up to the plane (the ops check runs the bus on ground power), 5% of its charge and 3 wear. It replaced the optional +2 bonus.
+- **The inspection is a call.** A close-up of the plug end with tells that follow the hidden wear: harmless crazing from 22, cracks through the boot from 40, heat discoloration from 60, pitted and burnt contacts from 70 (a melted edge from 90). *Serviceable* keeps it in service as it is; *Tag it out* writes it up in the words of its band (*insulation cracked at the plug*, or *plug contacts pitted and burnt: new plug*). A re-inspection waits a week after a new plug.
+- **A botched cable fix stays hidden.** A fix under the clean line leaves the visible wear under *cracked*, so the next inspection can't give it away; the comeback, when it fires, burns the plug end again. A later fix (or a tag at an inspection) consumes that cart's pending comeback: the botch went with the old plug end. A cable already tagged out is never written up twice.
+- **The GPU plug wire-up** has sockets on the cart's plug (the pins are on the airplane's AN2551 receptacle): 2/0 AWG leads to + and −, and the interlock (small) socket fed from +.
+- **The island's cart** has a tap target of 44 CSS px at any zoom (a near miss opens its sheet).
+
+Engagement per 26-week game (30 seeds): flight days about 9, a first flight lost to a missing cart 0.1–0.4, starts 1.6–1.7, cable reports 1.5–2.5 (before: 0.2–0.3, the cable never reached *cracked*). The paper-sim mechanic calls a plug end well inside its band right 97% of the time and near the edge of *cracked* by skill; at a flat skill it had tagged good cables a third of the time and flooded the electrician.
+
+### The manual on an altered airplane (ICA)
+
+`PlantDef` carries the alteration's ICA values (torques; the power pack's fluid): the 4-blade prop's bolts 80–85 ft-lb lubricated and its spinner screws, the heavy-duty brakes, the power pack (MIL-PRF-5606 only), the radio tray, the starter-generator's V-band and QAD nut, the alternator's pulley nut and belt. On an assembly the plane's STC or field approval replaced, `manualCard` puts the ICA line first as this airplane's (`eff: 'ICA'`, its document and approval), and keeps the airframe manual's lines printed, marked *not this airplane: assembly replaced by STC …* at tiers 0–2. The torque and hydraulic puzzles work to the ICA line; torquing to the airframe manual's value there is a sure defect (`torque:ica`, `torque:ica:propBolt`). The data plate lists the alteration and tags an SB on the assembly it removed *n/a: Beaumont propeller removed by STC …*. The part chain's steps show the part's own task card (the brake linings', not the wheel's).
+
+### The part chain
+
+- **The research branch is common now.** An altered plane's trouble is mostly on its altered assembly: a job on the planted ATA finds a part at `CHAIN.plantedChance` 0.9, a job elsewhere on that plane at 0.3 × `CHAIN.chance`, an unaltered plane at `CHAIN.chance` 0.3. About 40% of chains are now *not in the IPC* (before: 6–20%), and a third of the three friends' games see the logbook research and engineering (before: under a fifth). The plant sits on a **fixed per-model ATA list** (not the catalog's jobs), so a later catalog or tuning edit can't re-roll a live island's airplanes; `tests/aircraft-golden.test.ts` pins registrations, serials, SBs, alterations and P/Ns for four island seeds.
+- **The electrician's move: the circuit check.** On a com radio, an alternator or a starter-generator, a bench order opens for the electrician beside the lookup: the meter puzzle on the airplane's 28 V DC circuit (bus, breaker, switch or relay, regulator or GCU, connectors, the unit), under the mechanic's supervision (14 CFR 43.3(d)). The fault is seeded (`CHAIN.wiringShare` 0.3 in the wiring). The part card waits on the call (`check` in the stepper). *The unit*: bought. *The wiring*, found: fixed there, no part, the lookup dropped, the mechanic finishes the job. A good unit bought for a wiring fault makes no difference at the install: it goes back for a credit, and the electrician meters again (the unit ruled out). A dead unit left in service after a wiring call, or a break still in the wiring after a fix at the wrong spot, is a sure hidden defect that comes back as a pilot write-up; the A&P replaces the unit or splices the wire. Autopilot calls the unit (the symptom), so an empty seat never holds the plane.
+- **The analyst's call.** The part card shows what a week grounded costs (a guest plane: its projected revenue; the cargo plane: its kits by boat) and what the chain has cost so far. When the cargo plane is the one down, the freight is on the PO: the AOG boat (+$350, here when the week resolves) or the next guest flight (free, a week later). A chain card stays approvable after End turn, and one that came in after the analyst ended the turn goes through at the resolve on the standing AOG approval, unless it was deferred.
+- **Receiving.** The part's paperwork first: *8130-3 in the box, matches the PO*. Now and then (`CHAIN.noPaperwork` 0.12) a part comes without it, or with a S/N that doesn't match the unit: a week in quarantine, then it goes on. A returned part is **credited its price less the restocking fee** (*Returned: $220 credited ($40 restocking)*); the freight is spent. When receiving shows the IPC doesn't cover the assembly on the airplane, the next step is the research, not another lookup.
+- **Smaller:** the hydraulic filter finding is a clogged element with sludge, no metal (metal would call for the pump and a flush); the alternator gives no output (rotor field or diodes), the starter-generator its GEN OFF light; the logbook research's work order is the chain's own finding, on its side, naming the job that found it, and says *IPC lookup: not in the IPC* (no stores slip); no chain on the safety-wire job; `ipc:unapproved` is the company's records audit (or the FAA inspector's surveillance of the GMM), not a ramp check; the chain's paperwork is exempt from the grid-down cap and damages nothing when a lend-a-hand botches it; a blind lookup gets its provisional XP settled; a stale lookup says it is still waiting in the new week.
+
+### Version skew (a tab on the old build)
+
+The live build writes island docs of format `v: 1`, and an open tab or an installed phone app can keep running it after a deploy. In a replay (`tests/fixtures/skew-79f806b-*.json`: this build's chain docs moved on by the live engine), its resolve cancelled the chain's step orders and made the stopped job ready, and its approval made the part order ready with the chain still at the buy: a plane grounded forever, or finished with no part.
+
+- **The doc version gate.** This build writes `v: 2` (`DOC_VERSION` in `src/net/firebase.ts`), and `firestore.rules` accepts only `v == 2`. Deploy the rules with the hosting build: an old tab's writes are refused (permission-denied) instead of landing. This build reloads on permission-denied (at most once a minute).
+- **Reload on a new version.** An open page reloads when a new service worker takes over (`controllerchange`), so no tab keeps the old engine.
+- **The engine version.** The doc carries `engine` (`ENGINE_VERSION` 2). `apply()` refuses a doc saved by a newer engine instead of writing over it, and the app reloads.
+- **Self-heal.** Every action and every week open first puts the open chain's orders back as they should be (`healChain`): a missing or cancelled lookup, research, check or card is recreated, a paid card moves the chain on, and the job waits for the part until the install.
+- **Live docs.** `tests/fixtures/live-79f806b-*.json` are three docs the live engine wrote (tier 1, tier 3, and mid-week with seats part way). `tests/skew.test.ts` loads them, runs every selector, and plays ten more weeks, the same in memory and through a JSON round trip.
+
+### Pacing
+
+An AOG plane is off the week's schedule (its flights were cancelled when it went down), so an AOG week can still be a perfect week for the on-time grade. `tests/engine.test.ts` guards the pace: the three friends reach tier 5 by week 26 in at least 75% of seeds 1–30.
+
+### Balance after the fixes
+
+Standard (`npm run balance`, 26 weeks × 30 seeds, medians):
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk |
+| --- | --- | --- | --- | --- | --- |
+| All good | 5 / 8 / 16 / 21 | 100% | $6,742 | 0 | $11,778 |
+| All average | 7 / 11 / 16 / **22** | 92% | $5,016 | **0** | $9,695 |
+| **Three friends** | 8 / 11 / 16 / **22** | 88% | $2,273 | **0** | $8,992 |
+| Naive analyst | stays at tier 3 | 100% | $6,166 | 0 | |
+| Every solo / absent team | stays at tier 1 | | | | |
+
+Before the fixes: three friends $1,247 minimum, all average $6,554, tier 5 in week 22 for both. The electrician-absent team now dips below $0 for 7 of 780 weeks (−$3,517) at tier 1: nobody fixes the cart's cable, so it is often tagged out on flight days. Absent seats aren't sensible play, and it still never leaves tier 1.
+
+Robust (`npm run balance -- robust`, 90 seeds × 4 crews per team):
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 23 / 24 / 23 / 23 | 21 / 20 / 20 / 14 | 6 / 6 / 2 / 3 | −$9,050 / −$28,561 / −$6,550 / −$6,413 |
+| All average | – / a / b / c | 22 / 22 / 22 / 22 | 15 / 12 / 6 / 4 | 1 / 1 / 0 / 0 | −$1,872 / −$5,198 / $6,252 / $5,048 |
+
+Before: three friends missed tier 5 in 22 / 29 / 25 / 18 games (now 75 of 360, before 94) with 1 / 1 / 1 / 2 weeks below $0; all average missed it in 15 / 16 / 13 / 8 (now 37, before 52) with none. The misses fell (the AOG schedule fix, and bots that use a returned request's reason). The late tail grew from 5 to 17 negative weeks for the three friends, in 12 of 360 games: mostly a single week at 25–26 at tier 4, largely on the seeds that dipped before (40, 67, 3, 45), plus a few new ones such as crew *a* seed 3, a long mechanic absence into a storm-and-grid collapse with no chain open. It moves between seeds with any change (a planted chance of 0.7 or a chain chance of 0.25 give 13 and 17), so it was left as is. At a weak-battery chance of 0.45 one standard seed (6) collapsed after an electrician absence left the only cart in a patch-and-comeback loop; 0.35 is the highest that keeps the standard run clean.
+
+**Knobs:** `GSE.weakChance` (0.35), `GSE.weakFrom` (2), `GSE.avionicsDrain` / `busWear` (5 / 3); `CHAIN.plantedChance` (0.9), `offPlant` (0.3), `wiringShare` (0.3), `noPaperwork` (0.12).
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
-Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; see that section for current numbers.
+Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; the current numbers are in *Phase B review fixes*.
 
 | Team | Tier at wk 26 | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 |
 | --- | --- | --- | --- | --- | --- |

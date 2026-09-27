@@ -452,17 +452,67 @@ export const DEFECT_RULES: Record<string, DefectRule> = {
     sure: true,
   },
   // The part chain: an STC / field-approval (ICA) part put on with a logbook
-  // entry, no engineering authorization. It's the right part, so nothing
-  // breaks: the records are what's wrong, and a ramp check or the next full
-  // inspection finds it.
+  // entry, no engineering authorization. It's the right part (it is on the
+  // STC's ICA parts list), so nothing breaks: what's wrong is the company's
+  // own parts control (GMM 4.7(c) wants an EA), and its records reviews find it.
   'ipc:unapproved': {
     incident: [
-      'Ramp check on {a}: the FAA inspector found an ICA part installed with no engineering authorization on record. Grounded until the EA is issued',
-      'The insurer’s audit after a hard landing on {a} found an ICA part installed with no engineering authorization: the claim was cut',
+      'Company QA’s records audit of {a} found an ICA part installed without the EA that GMM 4.7(c) requires: engineering has to issue it',
+      'The FAA principal inspector’s records surveillance wrote the company up for not following its GMM: an ICA part on {a} installed without the EA that GMM 4.7(c) requires',
     ],
-    found: 'an ICA part installed with no engineering authorization on record',
+    found: 'an ICA part installed without the engineering authorization GMM 4.7(c) requires',
     fix: { puzzle: 'logbook', title: 'Get the engineering authorization for the installed part (research the records)' },
     redo: false,
+    sure: true,
+  },
+  // The part chain's electrical check (the meter on the airplane's circuit) called the wiring and fixed a
+  // fault that wasn't the one: the dead unit went back into service. The flight it fails on says so.
+  'meter:unit': {
+    incident: [
+      'Pilot wrote up the low-voltage light on {a} again on the first flight: the alternator still isn’t charging',
+      'The battery on {a} ran flat in flight: the generator was never charging, electrical load shed and a precautionary landing',
+    ],
+    found: 'a generator that isn’t charging (the circuit check blamed the wiring)',
+    fix: { puzzle: 'teardown', title: 'Replace the generator: it never charged after the wiring check', parts: 1, job: 'alternator', cost: 1.2 },
+    redo: false,
+    sure: true,
+  },
+  'meter:wiring': {
+    incident: [
+      'Pilot wrote up the same electrical fault on {a} on the next flight: the circuit check fixed the wrong spot',
+      'The electrical fault on {a} came back in flight and the crew diverted: the real break in the wiring was never found',
+    ],
+    found: 'the break still in the wiring (the circuit check fixed the wrong spot)',
+    // aircraft wiring is the A&P's to repair (the electrician's check was under their supervision)
+    fix: { puzzle: 'teardown', title: 'Repair the chafed wire the circuit check missed (splice per AC 43.13-1B)', parts: 1, cost: 0.8 },
+    redo: false,
+    sure: true,
+  },
+  'meter:radio': {
+    incident: ['Pilot wrote up com 1 on {a} again: still dead on transmit after the wiring was fixed', 'Com 1 on {a} failed on departure: the radio itself was dead, lost comms with the tower'],
+    found: 'a com radio that is still dead (the circuit check blamed the wiring)',
+    fix: { puzzle: 'teardown', title: 'Replace the dead com radio', parts: 1, job: 'avionics', cost: 1.2 },
+    redo: false,
+    sure: true,
+  },
+  // Card-driven values on an assembly an STC or a field approval replaced: the ICA governs, and the
+  // job was worked to the airframe manual's value instead (torqueData reports 'ica:<torque key>')
+  'torque:ica': {
+    incident: [
+      'Fasteners on {a} found at the wrong torque at the walkaround: set to the airframe manual’s value, not the STC’s ICA',
+      'Fasteners on {a}, torqued to the airframe manual’s value on an STC assembly, backed off in service',
+    ],
+    found: 'fasteners torqued to the airframe manual’s value on an assembly the ICA governs',
+    fix: { puzzle: 'teardown', title: 'Replace the fasteners and check the holes for elongation', job: 'wheel' },
+    sure: true,
+  },
+  'torque:ica:propBolt': {
+    incident: [
+      'Pilot wrote up a vibration on {a}: the composite propeller’s bolts were torqued to the airframe manual’s value, not the STC’s ICA',
+      'Prop bolts on {a}, torqued to the airframe manual’s value instead of the ICA’s (lubricated threads), backed off in flight: heavy vibration, precautionary landing',
+    ],
+    found: 'prop bolts torqued to the airframe manual’s value, not the ICA’s',
+    fix: { puzzle: 'teardown', title: 'Pull the prop, replace the bolts, inspect the flange for fretting', job: 'prop' },
     sure: true,
   },
 };
@@ -682,16 +732,54 @@ export const GSE = {
   arcSpan: 60,
   /** a cable arc from wear this high is the severe kind (a melted plug) */
   arcSevere: 90,
-  /** avionics work on a plane with a charged cart hooked up: a steady bus for the radio checks (+health, some charge) */
-  avionicsBonus: 2,
+  /** avionics work runs the bus off a cart hooked up to the plane (its ops check): the charge it uses, and the wear of a plug-in */
   avionicsDrain: 5,
+  busWear: 3,
+  /**
+   * Flight days on a weak battery: from this week, this share of weeks has one plane whose first
+   * start is on ground power. A charged cart hooked up to it when the week resolves starts it (the
+   * drain and the wear of a start); otherwise its first flight is lost. It costs no job slot: it is
+   * the cart chore that keeps the charger, the carts and the cables in play most weeks.
+   */
+  weakFrom: 2,
+  weakChance: 0.35,
 };
 
 /** An inspection's words for each band. */
 export const CABLE_BAND: Record<'good' | 'cracked' | 'pitted', string> = {
   good: 'cable and plug in good shape',
   cracked: 'insulation cracked near the plug',
-  pitted: 'plug pins pitted and burnt',
+  pitted: 'plug contacts pitted and burnt',
+};
+
+/**
+ * The GPU cable report in the words of what is wrong with it: its title, what
+ * the mechanic reports, the comeback, why the cart is tagged out, and the fix.
+ * `good`: the mechanic tagged out a cable that was fine (the electrician finds
+ * nothing wrong, and re-terminates it anyway).
+ */
+export const CABLE_REPORT: Record<'good' | 'cracked' | 'pitted', { title: string; said: string; back: string; tag: string; fix: string }> = {
+  good: {
+    title: 'GPU cart plug end looks suspect: check it and re-terminate',
+    said: 'the GPU cart plug end looks suspect',
+    back: 'the GPU cart plug end looks suspect again',
+    tag: 'its plug end looked suspect at the inspection',
+    fix: 'Check the plug end, cut the cable back and fit a new plug.',
+  },
+  cracked: {
+    title: 'GPU cart cable insulation cracked at the plug',
+    said: 'the GPU cart cable insulation is cracked at the plug',
+    back: 'the GPU cart cable is cracked at the plug again',
+    tag: 'its cable insulation is cracked at the plug',
+    fix: 'Cut the cable back past the crack and fit a new plug.',
+  },
+  pitted: {
+    title: 'GPU cart plug contacts pitted and burnt: new plug',
+    said: 'the GPU cart plug contacts are pitted and burnt',
+    back: 'the GPU cart plug contacts are burnt again',
+    tag: 'its plug contacts are pitted and burnt',
+    fix: 'Cut the burnt end off and fit a new plug.',
+  },
 };
 
 /** Cross-trade reports: one trade's problem that another trade has to fix. All three trades report and fix. */
@@ -758,8 +846,9 @@ export const REPORTS: ReportDef[] = [
   { key: 'hangarGpu', by: 'mech', fixer: 'elec', title: 'Hangar 28 V ground power receptacle keeps going dead', said: "the hangar's 28 V ground power receptacle keeps going dead", back: 'the hangar 28 V ground power is dead again', puzzle: 'meter', job: 'hangar', effect: 'cap', cost: 50, notice: 'No hangar ground power' },
   // a worn cable, written up when an inspection finds it (or when it is too far gone to miss):
   // the electrician cuts it back past the damage and fits a new plug. Until then the cart is
-  // tagged out. Never random: the cart's wear raises it (engine: openCableReport).
-  { key: 'gpuCable', by: 'mech', fixer: 'elec', title: 'GPU cart cable insulation is cracked at the plug', said: 'the GPU cart cable insulation is cracked at the plug', back: 'the GPU cart cable is cracked at the plug again', puzzle: 'wireup', job: 'gpuCable', effect: 'gse', cost: 40, notice: 'GPU cart tagged out', auto: true },
+  // tagged out. Never random: the cart's wear raises it (engine: openCableReport). Its words
+  // follow what is wrong with it (CABLE_REPORT: cracked insulation, or pitted, burnt contacts)
+  { key: 'gpuCable', by: 'mech', fixer: 'elec', title: CABLE_REPORT.cracked.title, said: CABLE_REPORT.cracked.said, back: CABLE_REPORT.cracked.back, puzzle: 'wireup', job: 'gpuCable', effect: 'gse', cost: 40, notice: 'GPU cart tagged out', auto: true },
   { key: 'vendorPrice', by: 'mech', fixer: 'fin', title: 'Parts vendor is billing list price, not our contract price', said: 'the parts vendor is billing list price, not our contract price', back: 'the parts vendor is still billing list price', puzzle: 'invoice', effect: 'leak', amount: 240, cost: 0, notice: 'Parts billed at list' },
   { key: 'avgas', by: 'mech', fixer: 'fin', title: 'Avgas went up $1.20/gal and charter prices never moved', said: 'avgas went up $1.20 a gallon and charter prices never moved', back: 'charter pricing still hasn’t caught up with avgas', puzzle: 'variance', effect: 'leak', amount: 200, cost: 0, notice: 'Charters priced on old fuel' },
   // the ground power fee is a pass-through the billing never picks up: the carts' power and
@@ -781,9 +870,10 @@ export const REPORTS: ReportDef[] = [
   { key: 'officeOutlets', by: 'fin', fixer: 'elec', title: 'Office outlets go dead and come back when the printer runs', said: 'the office outlets go dead and come back whenever the printer runs', back: 'the office outlets are dropping out again', puzzle: 'meter', job: 'office', effect: 'cap', cost: 50, notice: 'Office power keeps dropping' },
   // a fault the torque puzzle really fixes (a soft pedal is hydraulic: that is the 'van' row below)
   { key: 'vanWheel', by: 'fin', fixer: 'mech', title: 'Company van wheel is wobbling: lug nuts loose', said: 'the company van wheel is wobbling and the lug nuts are loose', back: 'the van wheel is wobbling again', puzzle: 'torque', effect: 'leak', amount: 160, cost: 60, notice: 'Van off the road' },
-  // a soft pedal is air in the brake lines: bleed them with DOT 3/4 brake fluid (glycol) and keep
-  // the reservoir from running dry. Mineral fluid (5606, ATF) swells a DOT system's rubber seals
-  { key: 'van', by: 'fin', fixer: 'mech', title: 'Company van brake pedal is soft', said: 'the company van brake pedal is soft and sinks toward the floor', back: 'the van brake pedal has gone soft again', puzzle: 'hydraulics', job: 'van', effect: 'leak', amount: 150, cost: 40, notice: 'Van parked: soft brakes' },
+  // a spongy pedal that firms up when you pump it is air in the brake lines (one that sinks under
+  // steady pressure would be the master cylinder bypassing): bleed them with DOT 3/4 brake fluid
+  // (glycol) and keep the reservoir from running dry. Mineral fluid (5606, ATF) swells a DOT system's rubber seals
+  { key: 'van', by: 'fin', fixer: 'mech', title: 'Company van brake pedal is spongy', said: 'the company van brake pedal is spongy: it goes most of the way down, and firms up when you pump it', back: 'the van brake pedal has gone spongy again', puzzle: 'hydraulics', job: 'van', effect: 'leak', amount: 150, cost: 40, notice: 'Van parked: spongy brakes' },
 ];
 
 export const REPORT_BY_KEY: Record<string, ReportDef> = Object.fromEntries(REPORTS.map((r) => [r.key, r]));
@@ -801,14 +891,28 @@ export const CHAIN = {
   minTier: 2,
   /** chance an eligible job finds a part it can't finish without (one open chain at a time) */
   chance: 0.3,
+  /**
+   * On a plane that carries an alteration, the trouble is mostly where the alteration is
+   * (its ICA parts wear, and nobody stocks them): a job on the altered assembly finds a part
+   * this often, a job elsewhere on that plane this share of `chance`. So about 4 in 10 chains
+   * are "not in the IPC": the logbooks and engineering, the A&P's own workflow.
+   */
+  plantedChance: 0.9,
+  offPlant: 0.3,
+  /** an electrical unit that "failed" but whose trouble is really in its wiring: the electrician's check at the airplane finds it */
+  wiringShare: 0.3,
+  /** a part that arrives without its 8130-3 (or with one whose S/N doesn't match the unit): quarantined until the vendor sends it */
+  noPaperwork: 0.12,
   /** weeks after a chain closes before another can open on the island */
   rest: 2,
-  /** share of the island's planes that carry one STC or field-approved alteration on an IPC assembly */
-  plantShare: 0.5,
-  /** of those, the share that went on under a field-approved Form 337 (the rest: an STC) */
-  fieldShare: 0.3,
-  /** the jobs that open a part chain, by the ATA they work on */
-  kinds: { tires: '32-40', corrosion: '32-40', prop: '61-10', wire: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, string>,
+  // Which planes carry an STC or field-approved alteration (half of them; 30% of those on a
+  // field-approved 337) is NOT tuning: it is frozen in src/sim/chain.ts (plantFor), because
+  // every live island's airplanes are rebuilt from it. Changing it is a data migration.
+  /**
+   * The jobs that open a part chain, by the ATA they work on. Not safety wiring: you don't
+   * find galled threads while wiring the bolts (the re-torque before it does).
+   */
+  kinds: { tires: '32-40', corrosion: '32-40', prop: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, string>,
   /** list price of the part at tier 1 (USD); 'sg' is the turbine's starter-generator exchange */
   price: { lining: 240, propBolt: 360, filter: 110, resCap: 130, radio: 950, generator: 760, sg: 1350 } as Record<string, number>,
   /** an STC holder's (ICA) part costs this much more than the OEM part */

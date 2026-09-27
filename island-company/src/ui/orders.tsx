@@ -1,6 +1,6 @@
 // Work-order cards: the universal container (same radius, shadow, grammar).
-import { defectRule, ECON, GSE, incidentText, ROLE_LABEL } from '../sim/data';
-import { deferralRisk, expectedDeferralCost, gseForStart } from '../sim/econ';
+import { CABLE_REPORT, defectRule, ECON, GSE, incidentText, ROLE_LABEL } from '../sim/data';
+import { deferralRisk, expectedDeferralCost, gseForStart, needsCart } from '../sim/econ';
 import { isEmergency, tracedTo } from '../sim/engine';
 import type { IslandState, Order, Role } from '../sim/types';
 import { ChainChip, ChainOrigin } from './chain';
@@ -74,9 +74,9 @@ function ReportEffect({ s, o }: { s: IslandState; o: Order }) {
   );
 }
 
-/** A ground power start: the cart it needs, or what's missing (the card says so before anyone starts it). */
+/** A ground power start (or radio work, its ops check on the bus): the cart it needs, or what's missing (the card says so before anyone starts it). */
 function GpuChip({ s, o }: { s: IslandState; o: Order }) {
-  if (o.kind !== 'gpustart' || o.status === 'done' || o.status === 'cancelled') return null;
+  if (!needsCart(o.kind) || !o.assetId || o.status === 'done' || o.status === 'cancelled') return null;
   const g = gseForStart(s, o);
   // short enough for one chip on a phone; the card's detail says it in full
   if (g.blocker) return <span class="chip rust">⚡ {g.cart && g.cart.charge < GSE.minStart ? 'Cart too low: charge it' : g.cart ? 'Cart tagged out' : 'Hook up a charged cart first'}</span>;
@@ -160,11 +160,13 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       </div>
       <Origin s={s} o={o} />
       <ChainOrigin s={s} o={o} me={role} />
-      {o.kind === 'gpustart' && o.status !== 'done' && o.status !== 'cancelled' && (
+      {needsCart(o.kind) && o.assetId && o.status !== 'done' && o.status !== 'cancelled' && (
         <p class={gseForStart(s, o).blocker ? 'fault' : 'muted'} style={{ margin: 0, fontWeight: 700 }}>
           {gseForStart(s, o).blocker
-            ? `${gseForStart(s, o).blocker}. A ground power start runs off a charged cart hooked up to the plane.`
-            : `${gseForStart(s, o).cart!.name} is hooked up at ${Math.round(gseForStart(s, o).cart!.charge)}%: a start takes about a quarter of it (a turbine nearly half).`}
+            ? `${gseForStart(s, o).blocker}.${o.kind === 'gpustart' ? ' A ground power start runs off a charged cart hooked up to the plane.' : /ops check/.test(gseForStart(s, o).blocker!) ? '' : ' The radio’s ops check runs the bus on ground power.'}`
+            : o.kind === 'gpustart'
+              ? `${gseForStart(s, o).cart!.name} is hooked up at ${Math.round(gseForStart(s, o).cart!.charge)}%: a start on ${s.assets.find((a) => a.id === o.assetId)?.model === 'cargo' ? 'the turbine takes nearly half of it' : 'a piston takes about a quarter of it'}. Put it back on the charger after.`
+              : `${gseForStart(s, o).cart!.name} is hooked up at ${Math.round(gseForStart(s, o).cart!.charge)}%: the ops check takes a little. Put it back on the charger after.`}
         </p>
       )}
       {o.status === 'pending' && !o.chain && (
@@ -279,7 +281,7 @@ function Origin({ s, o }: { s: IslandState; o: Order }) {
             {rep.effect === 'cap'
               ? `Until it's fixed, ${by} is held to ${capWords(rep.by).replace(' max', '')} a turn.`
               : rep.effect === 'gse'
-                ? `Until it's fixed, ${cartName(s, rep.cart)} is tagged out: no ground power starts on it. Cut the cable back past the crack and fit a new plug.`
+                ? `Until it's fixed, ${cartName(s, rep.cart)} is tagged out: no ground power starts on it. ${CABLE_REPORT[rep.band ?? 'cracked'].fix}`
                 : `Costs ${usd(rep.amount)} every week it stays open.`}
           </span>
         )}

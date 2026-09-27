@@ -4,8 +4,8 @@ import { rng } from '../sim/rng';
 import { C, backdrop, clamp, ease, fitLabel, label, loop, pointer, roundRect, settle, shade, stage } from './kit';
 import { result, type ManualCard, type PuzzleDef, type PuzzleResult } from './types';
 
-/** one torque value as the task card prints it */
-export type TorqueLine = { eff?: string; effText?: string; lo: number; hi: number; unit: string; note?: string; applies: boolean };
+/** one torque value as the task card prints it (on an altered assembly: the ICA's line, and the airframe manual's marked replaced) */
+export type TorqueLine = { eff?: string; effText?: string; lo: number; hi: number; unit: string; note?: string; applies: boolean; ica?: boolean; replaced?: string };
 
 export type TorqueModel = {
   bolts: number;
@@ -24,7 +24,7 @@ export type TorqueModel = {
    * this S/N and SB status. Tiers 0-2 mark it; from tier 3 the mechanic sets
    * the wrench to the line they judge applies (the plate and the records say).
    */
-  card?: { key: string; what: string; task: string; plate: string; sbs: string[]; lines: TorqueLine[]; right: number; marked: boolean };
+  card?: { key: string; what: string; task: string; plate: string; sbs: string[]; alteration?: string; lines: TorqueLine[]; right: number; marked: boolean };
 };
 
 /** the band a line's lo..hi makes: centre and half-width as a fraction */
@@ -72,7 +72,7 @@ export function generateTorque(seed: number, tier: number, tools: string[] = [],
     m.target = b.target;
     m.band = b.band;
     m.unit = lines[right].unit;
-    m.card = { key: tq.key, what: tq.what, task: card!.task, plate: `${card!.reg} · S/N ${card!.serial}`, sbs: card!.sbs, lines, right, marked: card!.marked };
+    m.card = { key: tq.key, what: tq.what, task: card!.task, plate: `${card!.reg} · S/N ${card!.serial}`, sbs: card!.sbs, ...(card!.alteration ? { alteration: card!.alteration } : {}), lines, right, marked: card!.marked };
   }
   return m;
 }
@@ -97,7 +97,7 @@ function summarize(m: TorqueModel, torques: number[], seqErrors: number, pick = 
   const parts = [`${inBand}/${m.bolts} bolts in band`];
   if (over) parts.push(`${over} overshoot`);
   if (seqErrors) parts.push(`${seqErrors} out of sequence`);
-  if (m.card && pick >= 0 && pick !== m.card.right) parts.push(`worked to the ${m.card.lines[pick].eff ?? 'wrong'} line, not ${m.card.lines[m.card.right].eff}`);
+  if (m.card && pick >= 0 && pick !== m.card.right) parts.push(`worked to the ${m.card.lines[pick].eff ?? 'wrong'} line, not ${m.card.lines[m.card.right].eff ?? 'this airplane’s'}`);
   return parts.join(', ');
 }
 
@@ -110,12 +110,17 @@ export function workedTo(m: TorqueModel, torques: number[], pick: number): numbe
   return hits[best] > m.bolts / 2 ? best : pick;
 }
 
-/** the result's data: which line the job was worked to, and the variant when it's the other effectivity's */
+/**
+ * the result's data: which line the job was worked to, and the variant when it
+ * isn't this airplane's: the other effectivity's ('eff:<key>'), or on an
+ * altered assembly the airframe manual's instead of the ICA's ('ica:<key>')
+ */
 export function torqueData(m: TorqueModel, torques: number[], pick: number): Record<string, unknown> | undefined {
   if (!m.card) return undefined;
   const w = workedTo(m, torques, pick);
   const line = w >= 0 ? m.card.lines[w] : undefined;
-  return { line: line?.eff ?? null, ...(w >= 0 && w !== m.card.right ? { defect: `eff:${m.card.key}` } : {}) };
+  const why = m.card.lines[m.card.right].ica ? 'ica' : 'eff';
+  return { line: line?.eff ?? null, ...(w >= 0 && w !== m.card.right ? { defect: `${why}:${m.card.key}` } : {}) };
 }
 
 export const torque: PuzzleDef = {
@@ -522,7 +527,7 @@ export const torque: PuzzleDef = {
     /** the task card strip: the plate, then one chip per line as the manual prints it */
     function drawCard(g: ReturnType<typeof geo>) {
       if (!cd) return;
-      const recs = [cd.sbs.length ? `SBs on record: ${cd.sbs.join(', ')}` : 'SBs on record: none'];
+      const recs = [`${cd.sbs.length ? `SBs on record: ${cd.sbs.join(', ')}` : 'SBs on record: none'}${cd.alteration ? ` · altered: ${cd.alteration}` : ''}`];
       fitLabel(ctx, `${cd.task} · ${cd.plate}`, 10, 10, g.w - 20, { size: 12, weight: 900, color: C.ink, align: 'left' });
       // the records: which SBs this airplane has had (the C/D lines turn on them)
       fitLabel(ctx, recs[0], 10, 25, g.w - 20, { size: 10.5, weight: 700, color: C.inkSoft, align: 'left' });
@@ -542,7 +547,7 @@ export const torque: PuzzleDef = {
         const mw = r.w - 16;
         fitLabel(ctx, `${l.eff ?? 'ALL'}${l.effText ? ` · ${l.effText}` : ''}`, x, r.y + 11, mw, { size: 10.5, weight: 800, color: C.inkSoft, align: 'left' });
         fitLabel(ctx, `${l.lo}–${l.hi} ${l.unit}`, x, r.y + 27, mw, { size: 15, weight: 900, color: C.ink, align: 'left' });
-        const note = mark ? '◀ this airplane' : dim ? 'not this airplane' : (l.note ?? '').split(';')[0];
+        const note = mark ? '◀ this airplane' : dim ? (l.replaced ? `not this airplane: ${l.replaced}` : 'not this airplane') : (l.note ?? '').split(';')[0];
         fitLabel(ctx, note, x, r.y + 42, mw, { size: 10, weight: mark ? 900 : 600, color: mark ? C.palm : C.inkSoft, align: 'left' });
         ctx.globalAlpha = 1;
       });

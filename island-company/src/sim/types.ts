@@ -66,6 +66,8 @@ export interface ReportInfo {
   owed?: number;
   /** effect 'gse': the ground power cart it is about (GseCart.id) */
   cart?: string;
+  /** effect 'gse': what is wrong with the cable, as reported (its words: CABLE_REPORT); older reports: cracked */
+  band?: CableBand;
 }
 
 /** What a look at a ground power cart's cable and plug shows (GSE bands in data.ts). */
@@ -145,8 +147,8 @@ export interface RepairInfo {
   foundIn?: string;
 }
 
-/** Where a part chain stands (see src/sim/chain.ts). */
-export type ChainStep = 'lookup' | 'research' | 'buy' | 'fee' | 'review' | 'transit' | 'install' | 'done';
+/** Where a part chain stands (see src/sim/chain.ts). 'check': the part is looked up, and waits on the electrician's check before it's bought. */
+export type ChainStep = 'lookup' | 'research' | 'check' | 'buy' | 'fee' | 'review' | 'transit' | 'install' | 'done';
 
 /**
  * The part chain: a job on a plane found a part gone, missing or damaged. The
@@ -203,6 +205,28 @@ export interface PartChain {
   closedWeek?: number;
   /** step 'done': the story, for that week's review */
   story?: string;
+  /** the part's price on the purchase order (what a return credits back, less restocking) */
+  price?: number;
+  /** how the part travels when the plane that would carry it is the one down: the AOG boat (on the PO), or next week's guest flight */
+  freight?: 'boat' | 'flight';
+  /** freight 'flight': the week whose resolve it rides in on */
+  ship?: number;
+  /** receiving quarantine: the part came without its paperwork; the vendor's documents arrive when this week resolves */
+  hold?: number;
+  /** when the current step's card appeared (a card that came after the analyst ended the turn goes through at resolve) */
+  stepAt?: number;
+  /** what the downtime has cost so far (USD, the weekly estimate at each resolve while grounded) */
+  downtime?: number;
+  /**
+   * An electrical unit (the com radio, the alternator or starter-generator): the
+   * electrician's check at the airplane, under the A&P's supervision (14 CFR
+   * 43.3(d)), before one is bought. `fault` is what is really wrong (hidden);
+   * `call` what the check said. A wrong call shows up later: a good unit bought
+   * (at the install), or a dead one left in service (as an incident).
+   */
+  bench?: { id: string; fault: 'unit' | 'wiring'; call?: 'unit' | 'wiring'; by?: string; week?: number; again?: boolean };
+  /** the bench found the wiring at fault: fixed, no part needed */
+  wired?: boolean;
 }
 
 export interface Order {
@@ -242,8 +266,8 @@ export interface Order {
   repair?: RepairInfo;
   /** the original job done again after its repair (cost 0, already paid): the sign-off it replaces, and what it cost then */
   redo?: { week: number; by: Role; name: string; cost: number };
-  /** part chain: the job it stopped ('job'), or one of its steps */
-  chain?: { id: string; step: 'job' | 'lookup' | 'research' | 'buy' | 'fee' };
+  /** part chain: the job it stopped ('job'), or one of its steps ('bench': the electrician's check at the airplane) */
+  chain?: { id: string; step: 'job' | 'lookup' | 'research' | 'buy' | 'fee' | 'bench' };
 }
 
 export interface Player {
@@ -273,6 +297,8 @@ export interface TurnState {
   endedAt: number | null;
   /** orders completed this week */
   done: number;
+  /** of those, the part chain's paperwork (it needs no hangar tools: the grid-down cap doesn't count it) */
+  paper?: number;
   coveredBy?: Role;
 }
 
@@ -377,6 +403,12 @@ export interface StoryCard {
 
 export interface IslandState {
   v: 1;
+  /**
+   * The engine version that last wrote this island (ENGINE_VERSION in engine.ts).
+   * An older build refuses to write it (it would drop or corrupt what it doesn't
+   * know about) and asks for a reload. Older islands: none.
+   */
+  engine?: number;
   id: string;
   name: string;
   createdAt: number;
@@ -446,6 +478,12 @@ export interface IslandState {
   chain?: PartChain | null;
   /** ground power carts (older islands: none stored yet, read through gseCarts() for the default) */
   gse?: GseCart[];
+  /**
+   * A flight day with a weak battery: this plane's first start of the week is on
+   * ground power. A charged cart hooked up to it when the week resolves starts it;
+   * otherwise its first flight is lost. Older islands: none.
+   */
+  weakBattery?: { assetId: string; week: number } | null;
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */
@@ -470,7 +508,8 @@ export type Action =
       /** the week this move was made in; a move queued offline across a deadline is rejected */
       week?: number;
     }
-  | { t: 'approve'; orderId: string; week?: number }
+  /** `ship`: a part chain's part, when the plane that would carry it is down: the AOG boat now, or next week's guest flight */
+  | { t: 'approve'; orderId: string; week?: number; ship?: 'boat' | 'flight' }
   | { t: 'defer'; orderId: string; reason: 'cash' | 'priority'; week?: number }
   | { t: 'counter'; orderId: string; week?: number }
   | { t: 'acceptCounter'; orderId: string; week?: number }
@@ -485,8 +524,11 @@ export type Action =
   | { t: 'story'; key: string; role: Role }
   | { t: 'tag'; role: Role; assetId: string; on: boolean; week?: number }
   | { t: 'squawk'; role: Role; assetId: string; kind: string; week?: number }
-  /** a ground power cart: on the charger, off it, hooked up to a plane (`assetId`), unhooked, or its cable inspected */
-  | { t: 'gse'; role: Role; cart: string; op: GseOp; assetId?: string; week?: number }
+  /**
+   * a ground power cart: on the charger, off it, hooked up to a plane (`assetId`), unhooked, or its
+   * cable inspected (`call`: the mechanic's call on the plug end, serviceable or tag it out; none: the band as it is)
+   */
+  | { t: 'gse'; role: Role; cart: string; op: GseOp; assetId?: string; call?: 'ok' | 'tag'; week?: number }
   | { t: 'post'; role: Role; text: string; to?: Role }
   | { t: 'pin'; role: Role; id: number; on: boolean }
   | { t: 'unpost'; role: Role; id: number }

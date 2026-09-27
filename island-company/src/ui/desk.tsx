@@ -1,9 +1,10 @@
 // The analyst's desk: a game, not a form. Swipe approvals, price against a
 // live demand curve, set repair budgets, buy parts, run the money hunts.
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { needsFreight, openChain } from '../sim/chain';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
-import { budgetCap, listPrice } from '../sim/engine';
-import { charterLoad, expectedDeferralCost, logistic, occupancy, openReports, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
+import { budgetCap, chainCardCost, listPrice } from '../sim/engine';
+import { charterLoad, downtimeOf, expectedDeferralCost, logistic, occupancy, openReports, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
 import type { Insurance, Order } from '../sim/types';
 import { fx } from './feedback';
 import { Btn, Icon, Seg, Sheet, TierDots, toast, usd } from './kit';
@@ -149,15 +150,23 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
   const next = queue[1];
   const [drag, setDrag] = useState({ x: 0, y: 0, on: false, leaving: '' as '' | 'left' | 'right' | 'up' });
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
+  // a grounded plane's part: the AOG boat now, or the guest flight a week later (the analyst's call)
+  const [ship, setShip] = useState<'boat' | 'flight'>('boat');
+  const chain = top?.chain ? openChain(s) : null;
+  const freight = !!chain && chain.stepId === top?.id && top?.chain?.step === 'buy' && needsFreight(s, chain);
+  // after End turn a grounded plane's card can still be approved (the plane shouldn't wait on play order)
+  const locked = disabled && !top?.chain;
+  // each card starts on the boat
+  useEffect(() => setShip('boat'), [top?.id]);
 
   const decide = async (dir: 'left' | 'right' | 'up') => {
-    if (!top || disabled) return;
+    if (!top || locked || (disabled && dir !== 'right')) return;
     fx.swipe();
     setDrag({ x: 0, y: 0, on: false, leaving: dir });
     await new Promise((r) => setTimeout(r, 180));
     const ok =
       dir === 'right'
-        ? await ctl.dispatch({ t: 'approve', orderId: top.id })
+        ? await ctl.dispatch({ t: 'approve', orderId: top.id, ...(freight ? { ship } : {}) })
         : dir === 'left'
           ? await ctl.dispatch({ t: 'defer', orderId: top.id, reason: s.cash - top.cost < ECON.freezeBelow + 1000 ? 'cash' : 'priority' })
           : await ctl.dispatch({ t: 'counter', orderId: top.id });
@@ -189,6 +198,9 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
 
   const exp = expectedDeferralCost(s, top);
   const asset = s.assets.find((a) => a.id === top.assetId);
+  // what the plane on the ground costs: a guest plane's week of revenue, or the cargo plane's kits by boat
+  const down = top.chain && asset ? downtimeOf(s, asset.id) : null;
+  const cost = top.chain ? chainCardCost(s, top, freight ? ship : undefined) : top.cost;
   // a part or an engineering fee has no cheaper fix
   const counterUsed = !!top.pushedBack || !!top.chain;
   const off = drag.leaving === 'right' ? 'translate(420px, 0) rotate(18deg)' : drag.leaving === 'left' ? 'translate(-420px, 0) rotate(-18deg)' : drag.leaving === 'up' ? 'translate(0, -320px)' : '';
@@ -197,7 +209,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
 
   return (
     <div class="col" style={{ gap: 8 }}>
-      <div class="swipe-stack">
+      <div class={`swipe-stack ${top.chain ? 'tall' : ''}`}>
         {next && (
           <div class="swipe-card behind" style={{ ['--tint' as string]: ROLE_TINT[next.role] }}>
             <b>{next.title}</b>
@@ -211,7 +223,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
             transition: drag.on ? 'none' : 'transform .22s cubic-bezier(.2,.8,.2,1)',
           }}
           onPointerDown={(e) => {
-            if (disabled) return;
+            if (locked) return;
             (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
             start.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
             setDrag({ x: 0, y: 0, on: true, leaving: '' });
@@ -233,7 +245,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
             setDrag({ x: 0, y: 0, on: false, leaving: '' });
           }}
           role="group"
-          aria-label={`Approval card: ${top.title}, ${usd(top.cost)}`}
+          aria-label={`Approval card: ${top.title}, ${usd(cost)}`}
         >
           <div class="row spread">
             <span class="row" style={{ gap: 6, minWidth: 0 }}>
@@ -253,19 +265,28 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
             {asset?.name} · health {Math.round(asset?.health ?? 0)}
             {top.parts ? ` · needs ${top.parts} kit` : ''}
           </span>
-          <div class="row" style={{ gap: 16, marginTop: 'auto' }}>
+          <div class="row approve-row" style={{ gap: 16, marginTop: 'auto' }}>
             <div class="col" style={{ gap: 0 }}>
               <span class="label">Approve</span>
-              <b class="num" style={{ fontSize: 24 }}>{usd(top.cost)}</b>
+              <b class="num" style={{ fontSize: 24 }}>{usd(cost)}</b>
+              {/* the freight is on the PO: the analyst sees what the boat adds */}
+              {freight && <span class="label num">{ship === 'boat' ? `part ${usd(top.cost)} + boat ${usd(ECON.boatKit)}` : `part ${usd(top.cost)}, no boat`}</span>}
             </div>
             {top.chain ? (
               // a grounded plane's part never rolls an incident: what deferring costs is the plane on the ground
-              <div class="col" style={{ gap: 0 }}>
+              <div class="col grow" style={{ gap: 0, minWidth: 0 }}>
                 <span class="label">If it waits</span>
-                <b class="fault" style={{ fontSize: 17, lineHeight: 1.2 }}>
+                <b class="fault" style={{ fontSize: 15, lineHeight: 1.2 }}>
                   {asset?.name ?? 'The plane'} stays grounded
                 </b>
-                <span class="label">{top.chain.step === 'fee' ? 'engineering answers a week after it’s paid' : 'no flights until the part is on'}</span>
+                <span class="label wrap-text">
+                  {down?.cargo
+                    ? `${down.flights} cargo flights/wk off: ${s.parts.inTransit ? `kits come by boat (${usd(ECON.boatKit)} each)` : 'no kits waiting on it now'}`
+                    : down
+                      ? `${down.flights} flights/wk ≈ ${usd(down.usd)} of revenue lost`
+                      : 'no flights until the part is on'}
+                  {top.chain.step === 'fee' ? '. Engineering answers a week after it’s paid' : ''}
+                </span>
               </div>
             ) : (
               <div class="col" style={{ gap: 0 }}>
@@ -277,6 +298,11 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               </div>
             )}
           </div>
+          {chain && (chain.spent > 0 || chain.aogWeeks > 0) && (
+            <span class="label num">
+              This part so far: {usd(chain.spent)} spent · {chain.aogWeeks ? `${chain.aogWeeks} wk down${chain.downtime ? ` (≈ ${usd(chain.downtime)} of downtime)` : ''}` : 'down since this week'}
+            </span>
+          )}
           {top.repair && <span class="chip rust">Known defect{top.repair.via === 'incident' ? ' · failed in service' : ' · found by an inspection'}</span>}
           {top.squawk && <span class="chip">✎ Written up by {top.squawk}: their call that it needs this</span>}
           {top.pushedBack && <span class="chip ink">Owner pushed back on the cheap fix</span>}
@@ -301,8 +327,25 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
           )}
         </div>
       </div>
+      {freight && (
+        <div class="col" style={{ gap: 4 }}>
+          <Seg<'boat' | 'flight'>
+            value={ship}
+            options={[
+              { v: 'boat', label: `AOG boat +${usd(ECON.boatKit)}` },
+              { v: 'flight', label: 'Guest flight, +1 wk' },
+            ]}
+            onChange={(v) => setShip(v)}
+          />
+          <span class="label">
+            {down?.cargo
+              ? `The cargo plane is the one down. The boat brings it at the resolve; the guest flight carries it free, a week later${s.parts.inTransit ? ` (kits waiting meanwhile come by boat, ${usd(ECON.boatKit)} each)` : ''}.`
+              : `The boat brings it at the resolve; the guest flight carries it free, a week later (≈ ${usd(down?.usd ?? 0)} more downtime).`}
+          </span>
+        </div>
+      )}
       <div class="swipe-hint">
-        <span>← defer</span>
+        <span>{disabled ? '' : '← defer'}</span>
         <span>{counterUsed ? '' : '↑ counter-offer'}</span>
         <span>approve →</span>
       </div>
@@ -313,12 +356,13 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
         <Btn kind="soft" small block disabled={disabled || counterUsed} onClick={() => decide('up')}>
           Counter
         </Btn>
-        <Btn small block disabled={disabled} onClick={() => decide('right')}>
+        <Btn small block disabled={locked} onClick={() => decide('right')}>
           Approve
         </Btn>
       </div>
+      {disabled && top.chain && <span class="label center">Your turn is over, but a grounded plane's card can still go through.</span>}
       <span class="label center">
-        {queue.length} waiting · {usd(queue.reduce((n, o) => n + o.cost, 0))} total
+        {queue.length} waiting · {usd(queue.reduce((n, o) => n + (o === top ? cost : o.chain ? chainCardCost(s, o, 'boat') : o.cost), 0))} total
       </span>
     </div>
   );

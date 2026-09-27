@@ -971,6 +971,9 @@ function stcPool(model: PlaneModel): StcDef[] {
 const OFFICES = ['CH', 'WI', 'SW', 'NM', 'LA', 'CE', 'SE', 'AT', 'NE'];
 const stcNumber = (r: Rng) => `SA0${r.int(1000, 4999)}${r.pick(OFFICES)}`;
 
+/** A torque as an ICA prints it: the AMM torque key it stands in for. */
+export type IcaTorque = { key: string; what: string; lo: number; hi: number; unit: 'in-lb' | 'ft-lb'; note?: string };
+
 /** One STC that swaps an IPC assembly for the STC holder's parts. */
 type PlantDef = {
   holder: string;
@@ -982,6 +985,14 @@ type PlantDef = {
   tag: string;
   rows: R[];
   icaNotes: string[];
+  /**
+   * The ICA's own values for the fasteners of the assembly it replaced (by the
+   * AMM torque key they stand in for): on this airplane they govern, not the
+   * airframe manual's.
+   */
+  icaTorques: IcaTorque[];
+  /** the ICA's approved hydraulic fluid (a hydraulic kit), by specification */
+  icaFluids?: string[];
   weightLb: number;
   /** why an AD on the old assembly no longer applies: "Beaumont propeller removed" */
   removed: string;
@@ -1015,6 +1026,7 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
           { item: '7', pn: `KA-${k}36`, ind: 1, nomen: 'BOLT, BACK PLATE', upa: 6, v, att: '2', tag: 'backPlateBolt' },
         ],
         icaNotes: ['Back plate bolts: 110–120 in-lb (ICA value, not the airframe MM)', 'Replace linings at 0.125 in minimum thickness', 'Condition new metallic linings: 2 firm stops from 30–35 kt'],
+        icaTorques: [{ key: 'backPlateBolt', what: 'Brake back plate bolts (dual-piston brake)', lo: 110, hi: 120, unit: 'in-lb', note: 'Dry threads' }],
         weightLb: 2.4,
         removed: 'OEM brakes removed',
         off: off(['brake', 'disc'], 'main brake assemblies and discs'),
@@ -1040,6 +1052,10 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
           { item: '7', pn: 'MS29513-240', ind: 1, nomen: 'O-RING, HUB TO FLANGE', upa: 1, att: '2', tag: 'hubOring' },
         ],
         icaNotes: ['Mounting bolts: 80–85 ft-lb, threads lubricated (ICA value)', 'Blade track within 1/8 in', 'Composite blades: erosion shield inspection each 100 hr'],
+        icaTorques: [
+          { key: 'propBolt', what: 'Propeller mounting bolts (long)', lo: 80, hi: 85, unit: 'ft-lb', note: 'Threads lubricated; cross pattern in 3 stages; then safety wire' },
+          { key: 'spinnerScrew', what: 'Spinner dome screws', lo: 20, hi: 25, unit: 'in-lb' },
+        ],
         weightLb: -6.8,
         removed: 'Beaumont propeller removed',
         off: off(['propeller'], twin ? 'LH and RH propellers' : 'propeller', 'propeller'),
@@ -1064,6 +1080,11 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
           { item: '6', pn: 'MH-300-IS', ind: 1, nomen: 'ISOLATOR, SHOCK MOUNT', upa: 3, v, att: '2' },
         ],
         icaNotes: ['Fluid MIL-PRF-5606 only; reservoir 1.1 qt', 'Filter bowl: 70–80 in-lb, safety wired', 'Gear-up pump run time 6–9 s'],
+        icaTorques: [
+          { key: 'filterBowl', what: 'Filter bowl', lo: 70, hi: 80, unit: 'in-lb', note: 'Safety wire after torque' },
+          { key: 'mountBolt', what: 'Power pack mounting bolts (through the shock isolators)', lo: 40, hi: 50, unit: 'in-lb' },
+        ],
+        icaFluids: ['MIL-PRF-5606'],
         weightLb: -1.6,
         removed: 'Delmar power pack removed',
         off: off(['powerPack'], 'hydraulic power pack'),
@@ -1088,6 +1109,10 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
           { item: '6', pn: 'NX-ANT-7', ind: 1, nomen: 'ANTENNA, GPS', upa: 1, v },
         ],
         icaNotes: ['Cam lock: seat the unit, then 1/4 turn more; 12 in-lb max', 'Check the navigation database is current before return to service'],
+        icaTorques: [
+          { key: 'lockScrew', what: 'Unit cam-lock screw (seat, then 1/4 turn more)', lo: 9, hi: 12, unit: 'in-lb', note: '12 in-lb max' },
+          { key: 'trayScrew', what: 'Mounting tray screws', lo: 10, hi: 12, unit: 'in-lb' },
+        ],
         weightLb: 1.3,
         removed: 'Tern com removed',
         off: off(['radio', 'tray'], 'VHF com and mounting tray'),
@@ -1112,6 +1137,10 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
             { item: '5', pn: `VM-VB-${k}`, ind: 1, nomen: 'CLAMP, V-BAND', upa: 1, v, tag: 'vband' },
           ],
           icaNotes: ['V-band clamp: 55–60 in-lb, tap around and re-torque (ICA value)', 'No brushes: omit brush-wear inspection; check GCU fault log'],
+          icaTorques: [
+            { key: 'vband', what: 'V-band clamp nut', lo: 55, hi: 60, unit: 'in-lb', note: 'Tap the clamp all round with a soft mallet and re-torque' },
+            { key: 'qadNut', what: 'Quick-attach adapter nuts', lo: 110, hi: 130, unit: 'in-lb' },
+          ],
           weightLb: -4.1,
           removed: 'Halden starter-generator removed',
           off: off(['generator'], 'starter-generator'),
@@ -1132,6 +1161,11 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
           { item: '5', pn: `VM-${k}-BR`, ind: 1, nomen: 'BRACKET, MOUNTING', upa: 1, v },
         ],
         icaNotes: ['Internally regulated: the external regulator is removed and placarded INOP', 'Pulley nut 450–550 in-lb (ICA value)'],
+        icaTorques: [
+          { key: 'pulleyNut', what: 'Alternator pulley nut', lo: 450, hi: 550, unit: 'in-lb' },
+          { key: 'beltNew', what: 'Belt tension, new belt (slip torque at pulley nut)', lo: 11, hi: 13, unit: 'ft-lb' },
+          { key: 'beltUsed', what: 'Belt tension, used belt (slip torque at pulley nut)', lo: 7, hi: 9, unit: 'ft-lb' },
+        ],
         weightLb: -3.2,
         removed: 'Halden alternator removed',
         off: off(['generator'], twin ? 'LH and RH alternators' : 'alternator', 'alternator'),
@@ -1149,6 +1183,66 @@ function plantDef(model: PlaneModel, ata: Ata): PlantDef {
 export function plantPart(model: PlaneModel, ata: Ata): { holder: string; title: string; ica: string; item: string; tag: string; pn: string; kit: string } {
   const d = plantDef(model, ata);
   return { holder: d.holder, title: d.title, ica: d.icaDoc, item: d.item, tag: d.tag, pn: d.rows.find((x) => x.tag === d.tag)!.pn, kit: d.rows[0].pn };
+}
+
+/**
+ * The ICA for the alteration that replaced this assembly on this airplane (an
+ * STC, or the same kit on a field-approved 337): who holds it, the document and
+ * its revision, what it approves, and its own values. Where the airframe
+ * manual's task card and the ICA differ, the ICA governs. Undefined when the
+ * assembly is the manufacturer's (or only a PMA part went on).
+ */
+export type IcaCard = {
+  ata: Ata;
+  holder: string;
+  /** "Seaboard ICA SPC-61-4, Rev B" */
+  doc: string;
+  /** "STC SA02971SE", "Form 337 dated 04/10/2023 (field approval)" */
+  approval: string;
+  title: string;
+  /** "Beaumont propeller removed" */
+  removed: string;
+  torques: IcaTorque[];
+  fluids?: string[];
+  notes: string[];
+};
+
+export function icaCardFor(ac: Pick<Aircraft, 'model' | 'plant'>, ata: Ata): IcaCard | undefined {
+  const p = ac.plant;
+  if (!p || p.via === 'pma' || p.ata !== ata) return undefined;
+  const d = plantDef(ac.model, ata);
+  return { ata, holder: d.holder, doc: d.icaDoc, approval: p.ref, title: d.title, removed: d.removed, torques: d.icaTorques, ...(d.icaFluids ? { fluids: d.icaFluids } : {}), notes: d.icaNotes };
+}
+
+/**
+ * The external power placard by the receptacle, as the flight manual's ground
+ * power start (AFM / POH Section 4) has it for this airplane: 28 V DC on all
+ * three types; the turbine placards its start current limit; a high wing's
+ * battery master closes the external power relay, so it is ON for the start.
+ * The amphibian sits on its float wheels on the ramp. Derived from the seed.
+ */
+export type ExternalPower = {
+  volts: 28;
+  /** turbine: maximum start current, amps; 0 = not placarded */
+  ampMax: number;
+  battery: 'on' | 'off';
+  wing: 'high' | 'low';
+  turbine: boolean;
+  floats: boolean;
+  /** "AFM Section 4", "POH Section 4" */
+  manual: string;
+  /** as the placard reads */
+  placard: string;
+};
+
+export function externalPower(ac: Pick<Aircraft, 'model' | 'islandSeed' | 'assetId'>): ExternalPower {
+  if (ac.model === 'cargo') {
+    const ampMax = rng(hashSeed('ext-power', ac.islandSeed, ac.assetId)).pick([800, 900, 1000]);
+    return { volts: 28, ampMax, battery: 'on', wing: 'high', turbine: true, floats: false, manual: 'AFM Section 4', placard: `EXTERNAL POWER 28 V DC · ${ampMax} A MAX · BATTERY SWITCH ON` };
+  }
+  if (ac.model === 'float')
+    return { volts: 28, ampMax: 0, battery: 'on', wing: 'high', turbine: false, floats: true, manual: 'POH Section 4', placard: 'EXTERNAL POWER 28 VOLTS DC · BATTERY MASTER ON' };
+  return { volts: 28, ampMax: 0, battery: 'on', wing: 'low', turbine: false, floats: false, manual: 'POH Section 4', placard: 'EXTERNAL POWER 28 VOLTS DC · BATTERY MASTER ON' };
 }
 
 /** The STC holder's ICA parts list for the kit that replaces this assembly (same row format as the IPC). */

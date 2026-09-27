@@ -6,8 +6,8 @@ import { generateHydraulics, prechargeOther } from '../src/puzzles/hydraulics';
 import { generateTorque, torqueData, workedTo } from '../src/puzzles/torque';
 import { ammTaskFor, ipcFor, rowFor, type Ata } from '../src/sim/aircraft';
 import { simulate, TEAMS } from '../src/sim/bots';
-import { chainMove, engineeringFee, islandAircraft, judgePart, manualCard, openChain, plantedOn, plantFor, rightPn, wrongPn } from '../src/sim/chain';
-import { CHAIN, DEFECT_RULES, defectRule, defectVariant } from '../src/sim/data';
+import { chainMove, engineeringFee, islandAircraft, judgePart, manualCard, openChain, plantedOn, plantFor, restockFee, rightPn, wrongPn } from '../src/sim/chain';
+import { CHAIN, DEFECT_RULES, ECON, defectRule, defectVariant } from '../src/sim/data';
 import { capOf, outOfService } from '../src/sim/econ';
 import { apply, chainWouldOpen, createIsland, isEmergency } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
@@ -116,6 +116,33 @@ describe('the island planes and their alterations', () => {
     for (let seed = 1; seed <= 300; seed++) expect(plantFor(seed, 'p2', 'cargo').plant).not.toBe('29-10');
   });
 
+  it("the island's airplane is never written to: deep-frozen, seasons of chains, manuals and launches play through it", () => {
+    const freeze = (o: unknown): void => {
+      if (!o || typeof o !== 'object' || Object.isFrozen(o)) return;
+      Object.freeze(o);
+      for (const v of Object.values(o)) freeze(v);
+    };
+    let frozen = 0;
+    let launched = 0;
+    for (const seed of [2, 5, 9]) {
+      simulate(TEAMS['all average'], 26, seed, (s) => {
+        for (const a of s.assets) {
+          if (a.kind !== 'plane') continue;
+          freeze(islandAircraft(s.seed, a));
+          frozen++;
+        }
+        // every screen's reads: the launch (manual card, chain context, placard) for each ready order
+        for (const o of s.orders) {
+          if (o.status !== 'ready' || o.role === 'fin') continue;
+          launchFor(s, o, o.role);
+          launched++;
+        }
+      });
+    }
+    expect(frozen).toBeGreaterThan(100);
+    expect(launched).toBeGreaterThan(100);
+  });
+
   it("the island's airplane is built once, with its alteration, and never stored in the island doc", () => {
     const ac = islandAircraft(PLANTED, CARGO);
     expect(islandAircraft(PLANTED, CARGO)).toBe(ac);
@@ -203,12 +230,16 @@ describe('in the IPC: lookup → buy → delivery → install', () => {
     expect(isEmergency(s, buy)).toBe(true);
     expect(apply(s, { t: 'counter', orderId: buy.id, week: s.week }, NOW).error).toMatch(/no cheaper fix/);
     const cash = s.cash;
+    // the cargo plane is the one down: the part goes on the AOG boat, and the boat is on the PO
     s = approve(s, buy.id);
-    expect(s.cash).toBe(cash - buy.cost);
-    expect(s.chain!.step).toBe('transit');
+    expect(s.cash).toBe(cash - buy.cost - ECON.boatKit);
+    expect(s.chain!).toMatchObject({ step: 'transit', freight: 'boat', price: buy.cost, spent: buy.cost + ECON.boatKit });
     s = resolve(s);
     // the flights: the grounded plane flew nothing this week
     expect(lastLines(s).some((l) => /Cargo C-7 AOG/.test(l))).toBe(true);
+    expect(lastLines(s)).toContain('The AOG boat brought the brake linings for Cargo C-7.');
+    // receiving: the paperwork, then the P/N
+    expect(lastLines(s).some((l) => l.startsWith(`Receiving on Cargo C-7: P/N ${pn} (`) && /8130-3 in the box, matches the PO/.test(l))).toBe(true);
     expect(s.chain!.aogWeeks).toBe(1);
     // receiving: the right part is in; the job is the install now
     const job = s.orders.find((o) => o.id === s.chain!.orderId)!;
@@ -242,7 +273,8 @@ describe('in the IPC: lookup → buy → delivery → install', () => {
     // nothing says so when it's ordered
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: wrong } });
     expect(s.feed[s.feed.length - 1].text).not.toMatch(/not effective|wrong/i);
-    s = approve(s, step(s).id);
+    const buy = step(s);
+    s = approve(s, buy.id);
     const cash = s.cash;
     s = resolve(s);
     expect(s.chain!.returns).toBe(1);
@@ -250,8 +282,14 @@ describe('in the IPC: lookup → buy → delivery → install', () => {
     expect(step(s).status).toBe('ready');
     const line = lastLines(s).find((l) => l.startsWith('Receiving on Cargo C-7'))!;
     expect(line).toMatch(new RegExp(`P/N ${wrong} is not effective for`));
-    expect(line).toMatch(/Returned, restocking fee \$\d+/);
-    expect(s.cash).toBeLessThan(cash);
+    // it goes back for a credit: the price, less the restocking fee (the boat is spent)
+    const fee = restockFee(buy.cost);
+    expect(line).toContain(`Returned: $${(buy.cost - fee).toLocaleString('en-US')} credited ($${fee} restocking)`);
+    expect(s.chain!.spent).toBe(fee + ECON.boatKit);
+    // the cash at the end of the week: its own flows, plus the credit (the next week's petty-cash approvals come after)
+    const h = s.history.at(-1)!;
+    const c = h.costs;
+    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0)));
     // the banner says why it's back at the IPC, until the new lookup is handed in
     expect(s.chain!.back).toMatch(new RegExp(`^Sent back at receiving: P/N ${wrong} is not effective for`));
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: rightPn(ac, '32-40', 'lining') } });
@@ -332,8 +370,13 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     s = approve(s, step(s).id);
     s = resolve(s);
     expect(s.chain!.returns).toBe(1);
-    expect(s.chain!.step).toBe('lookup');
-    expect(lastLines(s).find((l) => l.startsWith('Receiving'))).toMatch(/doesn't fit .* the IPC doesn't list/);
+    // receiving already says the IPC doesn't list it: straight to the records, not the book again
+    expect(s.chain!.step).toBe('research');
+    const line = lastLines(s).find((l) => l.startsWith('Receiving'))!;
+    expect(line).toMatch(/doesn't fit .* the IPC doesn't list/);
+    expect(line).toMatch(/research the records for the part that goes on it/);
+    // grammar: the linings are
+    expect(line).toMatch(/the brake linings for it are /);
   });
 
   it('an ICA part signed on with a logbook entry (no engineering) goes on, and a full inspection later finds it', () => {
@@ -351,7 +394,7 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     expect(s.chain!.story).not.toMatch(/unapproved|authoriz/i);
     const d = s.defects!.find((x) => x.variant === 'unapproved')!;
     expect(d).toMatchObject({ puzzle: 'ipc', job: 'records', assetId: 'p2', severity: 1 });
-    expect(defectRule(d.puzzle, d.role, d.orderKind, d.variant).found).toMatch(/no engineering authorization/);
+    expect(defectRule(d.puzzle, d.role, d.orderKind, d.variant).found).toMatch(/without the engineering authorization GMM 4\.7\(c\) requires/);
     // the next 100-hr inspection finds it: a repair (the paperwork), no redo
     s = resolve(s);
     const insp: Order = { ...s.orders[0], id: 'insp', kind: 'inspect100', title: '100-hr inspection', puzzle: 'crack', assetId: 'p2', status: 'ready', role: 'mech', tier: 2, cost: 180, gain: 10, chain: undefined, repair: undefined, redo: undefined, report: undefined };
@@ -360,7 +403,7 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     const rep = s.orders.find((o) => o.kind === 'repair' && o.repair?.defect.variant === 'unapproved')!;
     expect(rep.puzzle).toBe('logbook');
     expect(rep.repair!.defect.redo).toBe(false);
-    expect(s.feed.some((f) => /found an ICA part installed with no engineering authorization/.test(f.text))).toBe(true);
+    expect(s.feed.some((f) => /found an ICA part installed without the engineering authorization GMM 4\.7\(c\) requires/.test(f.text))).toBe(true);
   });
 });
 
@@ -504,6 +547,57 @@ describe('the manual drives the numbers', () => {
     expect(prechargeOther(m, m.precharge!.target)).toBe(false);
     expect(prechargeOther(m, m.precharge!.others![0])).toBe(true);
     expect(DEFECT_RULES['hydraulics:eff'].sure).toBe(true);
+  });
+
+  it('an assembly an STC replaced: the ICA line is this airplane\'s, the airframe manual\'s lines are printed but marked not this airplane', () => {
+    const seed = Array.from({ length: 800 }, (_, i) => i + 1).find((x) => {
+      const p = plantFor(x, 'p1', 'twin');
+      return p.plant === '61-10' && p.via === 'stc';
+    })!;
+    const twin = islandAircraft(seed, { id: 'p1', model: 'twin' });
+    const card = manualCard(twin, 'prop', 'torque', true)!;
+    expect(card.alteration).toMatch(/^STC SA\w+, /);
+    const tq = card.torque!;
+    expect(tq.key).toBe('propBolt');
+    const ica = tq.lines.filter((l) => l.ica);
+    expect(ica).toHaveLength(1);
+    expect(ica[0]).toMatchObject({ eff: 'ICA', lo: 80, hi: 85, unit: 'ft-lb', applies: true });
+    expect(ica[0].effText).toMatch(/ICA .* · STC SA/);
+    expect(ica[0].note).toMatch(/lubricated/i);
+    // the OEM lines stay on the card, none of them this airplane's
+    const oem = tq.lines.filter((l) => !l.ica);
+    expect(oem.length).toBeGreaterThan(0);
+    expect(oem.every((l) => !l.applies && l.replaced === twin.plant!.ref)).toBe(true);
+    // the puzzle works to the ICA, and the airframe manual's value is the ICA defect (sure)
+    const m = generateTorque(5, 2, [], card);
+    expect(m.card!.lines[m.card!.right].ica).toBe(true);
+    expect(m.target).toBe(82.5);
+    const oemAt = m.card!.lines.findIndex((l) => !l.ica);
+    const l = m.card!.lines[oemAt];
+    const data = torqueData(m, new Array(m.bolts).fill((l.lo + l.hi) / 2), oemAt)!;
+    expect(data.defect).toBe('ica:propBolt');
+    expect(defectVariant('torque', data)).toBe('ica:propBolt');
+    expect(DEFECT_RULES['torque:ica:propBolt'].sure).toBe(true);
+    expect(torqueData(m, new Array(m.bolts).fill(m.target), m.card!.right)!.defect).toBeUndefined();
+    // an unaltered twin's prop card has no ICA line
+    const clean = islandAircraft(CLEAN, { id: 'p1', model: 'twin' });
+    if (!plantedOn(clean, '61-10')) expect(manualCard(clean, 'prop', 'torque', true)!.torque!.lines.some((x) => x.ica)).toBe(false);
+  });
+
+  it("a power pack an STC replaced: its ICA's fluid is the one on the card (5606 only); the accumulator precharge stays the airframe manual's", () => {
+    const seed = Array.from({ length: 800 }, (_, i) => i + 1).find((x) => {
+      const p = plantFor(x, 'p1', 'twin');
+      return p.plant === '29-10' && p.via === 'stc';
+    })!;
+    const twin = islandAircraft(seed, { id: 'p1', model: 'twin' });
+    const card = manualCard(twin, 'hydraulics', 'hydraulics', true)!;
+    const icaFluid = card.fluid!.lines.find((x) => x.ica)!;
+    expect(icaFluid).toMatchObject({ eff: 'ICA', applies: true, fluids: ['MIL-PRF-5606'] });
+    expect(card.fluid!.lines.filter((x) => !x.ica).every((x) => !x.applies && !!x.replaced)).toBe(true);
+    expect(card.precharge!.lines.some((x) => x.applies)).toBe(true);
+    const m = generateHydraulics(9, 2, [], undefined, card);
+    expect(m.approved).toContain('mil5606');
+    expect(m.approved).not.toContain('mil83282');
   });
 
   it('launchFor hands the card to card-driven jobs on planes and the chain context to its steps', () => {

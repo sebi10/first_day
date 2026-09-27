@@ -262,6 +262,10 @@ describe('paper-sim exit tests (spec phase 0)', () => {
       }
     }
   });
+  it('pacing guard: three friends reach tier 5 by week 26 in at least 75% of seeds 1-30', () => {
+    const reached = Array.from({ length: 30 }, (_, i) => simulate(TEAMS['three friends'], 26, i + 1).final.stats.tierReachedWeek[5]).filter((w) => w !== undefined && w <= 26).length;
+    expect(reached / 30).toBeGreaterThanOrEqual(0.75);
+  }, 120_000);
   it('every tier is reachable within 26 weeks of normal play', () => {
     const tiers = seeds.map((seed) => simulate(TEAMS['all average'], 26, seed).final.tier);
     expect(Math.max(...tiers)).toBe(5);

@@ -2,13 +2,23 @@
 // Drag the V and COM probes onto terminals, read the meter (120/240 V
 // split-phase), half-split the run like a real tech, then call the bad
 // connection. Fewer readings and no wrong calls = a clean diagnosis.
+//
+// The same meter on an airplane's 28 V DC circuit (the part chain's check, under
+// the A&P's supervision): the alternator or starter-generator field circuit, or
+// the com radio's power and ground. The run ends at the unit itself: good
+// readings all the way to it, and it still doesn't work, means the unit is bad;
+// a dead or sagging point on the way means the wiring. No non-contact tester
+// there: it only senses AC.
 import { hashSeed, rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, settle as settleResult, shade, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
 
 export type Cond = 'H' | 'N' | 'G';
-export type FaultKind = 'openHot' | 'openNeutral' | 'looseHot' | 'looseNeutral' | 'mwbcNeutral';
-export type ItemKind = 'recep' | 'jbox' | 'light';
+export type FaultKind = 'openHot' | 'openNeutral' | 'looseHot' | 'looseNeutral' | 'mwbcNeutral' | 'unit';
+export type ItemKind = 'recep' | 'jbox' | 'light' | 'term' | 'unit';
+
+/** An aircraft DC circuit's words: its title, the bus row, the load switch, the column heads, the conductors. */
+export type DcProfile = { circuit: string; bus: string; load: { on: string; off: string; sub: string }; heads: Record<Cond, string>; words: Record<'H' | 'N', string> };
 
 export type MeterItem = {
   name: string;
@@ -44,6 +54,10 @@ export type MeterModel = {
   /** teaching lines (expected readings). Tiers 0–2 only: from tier 3 the tech
    *  must know split-phase readings; nothing in the model gives the answer away. */
   hints: string[];
+  /** what a healthy point reads: hot (supply) to neutral (return) and to ground in [lo, hi], neutral to ground under `ng` */
+  band: { lo: number; hi: number; ng: number };
+  /** an aircraft 28 V DC circuit (the part chain's check): its words. The last item is the unit */
+  dc?: DcProfile;
 };
 
 export type Reading = { a: number; b: number; load: boolean };
@@ -61,11 +75,144 @@ export const FAULT_TERM: Record<FaultKind, string> = {
   looseHot: 'loose hot (backstab)',
   looseNeutral: 'loose neutral (backstab)',
   mwbcNeutral: 'lost shared neutral (MWBC)',
+  unit: 'the unit itself',
 };
+/** the same faults on an aircraft DC circuit */
+const DC_TERM: Record<FaultKind, string> = {
+  openHot: 'open supply wire',
+  openNeutral: 'open ground wire',
+  looseHot: 'loose supply connection',
+  looseNeutral: 'loose ground connection',
+  mwbcNeutral: 'lost return',
+  unit: 'the unit itself (wiring good)',
+};
+export const faultTerm = (m: Pick<MeterModel, 'dc' | 'fault'>) => (m.dc ? DC_TERM : FAULT_TERM)[m.fault.kind];
 
-export const faultConductor = (k: FaultKind): 'H' | 'N' => (k === 'openHot' || k === 'looseHot' ? 'H' : 'N');
+export const faultConductor = (k: FaultKind): 'H' | 'N' => (k === 'openHot' || k === 'looseHot' || k === 'unit' ? 'H' : 'N');
 
-const SYMPTOMS: Record<FaultKind, string[]> = {
+/** a house branch circuit's healthy band, and an aircraft 28 V DC circuit's */
+const AC_BAND = { lo: OK_LO, hi: OK_HI, ng: NG_MAX };
+const DC_BAND = { lo: 26.5, hi: 29.5, ng: 0.8 };
+
+type DcPlace = { run: { name: string; kind: ItemKind }[]; unit: string; symptom: string; loose: boolean; profile: DcProfile };
+const DC_HEADS: Record<Cond, string> = { H: '+', N: '−', G: 'GND' };
+/**
+ * The part chain's circuit checks: the run from the bus (powered from the GPU
+ * cart) to the unit. `loose`: the radio's trouble is a sag under the transmit
+ * load (a loose pin), not an open (it still receives).
+ */
+const DC_PLACES: Record<string, DcPlace> = {
+  // (names short enough for a 390 px phone's row: about 20 characters)
+  altField: {
+    run: [
+      { name: 'ALT FLD breaker', kind: 'term' },
+      { name: 'Master switch, ALT', kind: 'term' },
+      { name: 'Regulator IN', kind: 'term' },
+      { name: 'Regulator FIELD out', kind: 'term' },
+      { name: 'Firewall connector', kind: 'jbox' },
+    ],
+    unit: 'Alternator (field)',
+    symptom: 'No output on the ground run: low-voltage light, ammeter discharging.',
+    loose: false,
+    profile: { circuit: '28 V DC · alternator field', bus: 'Bus (GPU cart on)', load: { on: 'Field on', off: 'Field off', sub: 'ALT switch' }, heads: DC_HEADS, words: { H: '+ supply', N: '− ground' } },
+  },
+  sgField: {
+    run: [
+      { name: 'GEN FIELD breaker', kind: 'term' },
+      { name: 'GEN switch', kind: 'term' },
+      { name: 'GCU field input', kind: 'term' },
+      { name: 'GCU field output', kind: 'term' },
+      { name: 'Firewall connector', kind: 'jbox' },
+    ],
+    unit: 'Starter-gen (field)',
+    symptom: 'GEN OFF light after the start: the starter works, no output.',
+    loose: false,
+    profile: { circuit: '28 V DC · generator field', bus: 'Bus (GPU cart on)', load: { on: 'Field on', off: 'Field off', sub: 'GEN switch' }, heads: DC_HEADS, words: { H: '+ supply', N: '− ground' } },
+  },
+  comPower: {
+    run: [
+      { name: 'COM 1 breaker', kind: 'term' },
+      { name: 'Avionics master relay', kind: 'term' },
+      { name: 'Harness splice', kind: 'jbox' },
+      { name: 'Radio rack terminals', kind: 'term' },
+      { name: 'Tray connector', kind: 'jbox' },
+    ],
+    unit: 'Com 1 radio',
+    symptom: 'Com 1 is dead on transmit, and receive is weak.',
+    loose: true,
+    profile: { circuit: '28 V DC · com 1 power and ground', bus: 'Avionics bus (GPU)', load: { on: 'Keyed', off: 'Not keyed', sub: 'transmit' }, heads: DC_HEADS, words: { H: '+ power', N: '− ground' } },
+  },
+};
+export const DC_JOBS: readonly string[] = Object.keys(DC_PLACES);
+
+const DC_HINTS: string[][] = [
+  ['Drag V onto +, COM onto − (or tap them)', '~28 V = healthy. Now try a point further down', 'The first dead point is the fault. Good all the way? Tap the unit'],
+  ['Healthy: +–− ≈28 · +–GND ≈28 · −–GND ≈0', 'Split the run in half, then half again', 'Good all the way to the unit, and no output: the unit'],
+  ['Healthy: +–− ≈28 · +–GND ≈28 · −–GND ≈0', 'A loose connection only sags under load: switch it on', 'Good all the way to the unit, and it still won’t work: the unit'],
+];
+
+/** The part chain's circuit check: the bus to the unit, and a fault in the unit or on the way (the chain says which). */
+function generateDc(seed: number, tier: number, place: DcPlace, bench?: { fault: 'unit' | 'wiring' }): MeterModel {
+  const r = rng(hashSeed('dc', seed));
+  const t = clamp(Math.round(tier), 0, 5);
+  const n = t <= 1 ? 4 : t === 2 ? 5 : 6;
+  // a few of the points on the way (in order), then the unit itself
+  const pickIdx = r.shuffle(place.run.map((_, i) => i)).slice(0, n - 1).sort((a, b) => a - b);
+  const items: MeterItem[] = [...pickIdx.map((i) => ({ name: place.run[i].name, kind: place.run[i].kind, leg: 0 as const, switchedOff: false })), { name: place.unit, kind: 'unit', leg: 0, switchedOff: false }];
+  const fault = bench?.fault ?? (r.chance(0.5) ? 'unit' : 'wiring');
+  let kind: FaultKind;
+  let at: number;
+  if (fault === 'unit') {
+    kind = 'unit';
+    at = n - 1;
+  } else {
+    kind = place.loose ? (t >= 2 && r.chance(0.5) ? 'looseNeutral' : 'looseHot') : t >= 3 && r.chance(0.5) ? 'looseHot' : 'openHot';
+    at = r.int(1, n - 2);
+  }
+  const drop = kind === 'looseHot' || kind === 'looseNeutral' ? r.range(4, 8) : 0;
+  const supply = Math.round(r.range(27.9, 28.4) * 10) / 10;
+  const points: TestPoint[] = [
+    { item: -1, cond: 'H', leg: 0 },
+    { item: -1, cond: 'N', leg: 0 },
+    { item: -1, cond: 'G', leg: 0 },
+  ];
+  items.forEach((_, i) => points.push({ item: i, cond: 'H', leg: 0 }, { item: i, cond: 'N', leg: 0 }, { item: i, cond: 'G', leg: 0 }));
+  const askConductor = t >= 2;
+  return {
+    seed,
+    tier: t,
+    items,
+    points,
+    fault: { kind, at, drop },
+    anomaly: -1,
+    mwbc: false,
+    supply,
+    loadable: true,
+    askConductor,
+    par: Math.ceil(Math.log2(n)) + 1 + (askConductor ? 1 : 0),
+    maxCalls: t === 0 ? 5 : 3,
+    symptom: place.symptom,
+    hints: DC_HINTS[t] ?? [],
+    band: DC_BAND,
+    dc: place.profile,
+  };
+}
+
+/**
+ * The circuit check's call, for the part chain: the unit, or the wiring (fixed
+ * where it was called, if that is where the fault is). The last call counts; a
+ * found fault wins over the wrong calls before it.
+ */
+export function benchCall(m: MeterModel, calls: Call[]): { call: 'unit' | 'wiring'; fixed: boolean; where?: string } {
+  const unitAt = m.items.length - 1;
+  const hit = calls.find((c) => c.item === m.fault.at);
+  const c = hit ?? calls[calls.length - 1];
+  if (!c) return { call: 'unit', fixed: false };
+  if (c.item === unitAt) return { call: 'unit', fixed: !!hit };
+  return { call: 'wiring', fixed: !!hit, where: m.items[c.item].name };
+}
+
+const SYMPTOMS: Record<Exclude<FaultKind, 'unit'>, string[]> & Partial<Record<FaultKind, string[]>> = {
   openHot: ['Half the kitchen is out. Breaker is on.', 'Half the outlets on this circuit are dead.', 'Outlets dead, breaker never tripped.'],
   openNeutral: [
     'Half the kitchen is out. Breaker is on.',
@@ -138,7 +285,9 @@ function pickFault(r: ReturnType<typeof rng>, tier: number): FaultKind {
   return 'mwbcNeutral';
 }
 
-export function generateMeter(seed: number, tier: number, _tools: string[] = [], job?: string): MeterModel {
+export function generateMeter(seed: number, tier: number, _tools: string[] = [], job?: string, bench?: { fault: 'unit' | 'wiring' }): MeterModel {
+  const dcPlace = job ? DC_PLACES[job] : undefined;
+  if (dcPlace) return generateDc(seed, tier, dcPlace, bench);
   const place = job ? PLACES[job] : undefined;
   const r = rng(seed);
   const t = clamp(Math.round(tier), 0, 5);
@@ -197,8 +346,9 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [],
     askConductor,
     par,
     maxCalls: t === 0 ? 5 : 3,
-    symptom: r.pick(place?.symptoms[kind] ?? SYMPTOMS[kind]),
+    symptom: r.pick(place?.symptoms[kind] ?? SYMPTOMS[kind] ?? SYMPTOMS.openHot),
     hints: HINTS[t] ?? [],
+    band: AC_BAND,
   };
 }
 
@@ -209,8 +359,8 @@ export function pointVolts(m: MeterModel, p: TestPoint, load: boolean, ignoreSwi
   const s = p.leg === 0 ? 1 : -1;
   if (p.item < 0) return p.cond === 'H' ? s * E : 0;
   const i = p.item;
-  // ordinary voltage drop along the run (bigger under load), split hot / neutral
-  const d = (load ? 0.42 : 0.03) * (i + 1);
+  // ordinary voltage drop along the run (bigger under load), split hot / neutral (a DC run's is a few tenths)
+  const d = (load ? 0.42 : 0.03) * (i + 1) * (m.dc ? 0.25 : 1);
   let h = s * (E - d / 2);
   let n = s * (d / 2);
   const f = m.fault;
@@ -236,6 +386,9 @@ export function pointVolts(m: MeterModel, p: TestPoint, load: boolean, ignoreSwi
         n = E - 2 * E * ratio;
         break;
       }
+      case 'unit':
+        // the fault is inside the unit: its terminals read like any healthy point
+        break;
     }
   }
   if (m.items[i].switchedOff && !ignoreSwitch) h = 0; // wall switch off: the switched hot is dead, harmlessly
@@ -252,7 +405,7 @@ export function readVolts(m: MeterModel, a: number, b: number, load: boolean): n
   const lo = Math.min(a, b);
   const hi = Math.max(a, b);
   const j = (hashSeed(m.seed, lo, hi, load ? 1 : 0) % 1000) / 1000;
-  const shown = v < 1 ? v + 0.1 + j * 0.5 : v + (j - 0.5) * 0.3;
+  const shown = m.dc ? (v < 0.5 ? v + 0.01 + j * 0.05 : v + (j - 0.5) * 0.06) : v < 1 ? v + 0.1 + j * 0.5 : v + (j - 0.5) * 0.3;
   return Math.round(Math.max(0, shown) * 10) / 10;
 }
 
@@ -273,7 +426,8 @@ export function itemHealthy(m: MeterModel, i: number, load = true): boolean {
   const hn = readVolts(m, h, n, load);
   const hg = readVolts(m, h, g, load);
   const ng = readVolts(m, n, g, load);
-  return hn >= OK_LO && hn <= OK_HI && hg >= OK_LO && hg <= OK_HI && ng < NG_MAX;
+  const b = m.band;
+  return hn >= b.lo && hn <= b.hi && hg >= b.lo && hg <= b.hi && ng < b.ng;
 }
 
 /** Does this reading, on its own, say the item it was taken on is sick? */
@@ -285,8 +439,8 @@ function readingVerdict(m: MeterModel, rd: Reading): { item: number; bad: boolea
   if (m.items[i].switchedOff) return null;
   const v = readVolts(m, rd.a, rd.b, rd.load);
   const pair = [pa.cond, pb.cond].sort().join('');
-  const inBand = v >= OK_LO && v <= OK_HI;
-  if (pair === 'GN') return { item: i, bad: v >= NG_MAX, good: false };
+  const inBand = v >= m.band.lo && v <= m.band.hi;
+  if (pair === 'GN') return { item: i, bad: v >= m.band.ng, good: false };
   // H-N under load is the proof of health; unloaded reads can hide a loose splice
   const loadMatters = m.fault.kind === 'looseHot' || m.fault.kind === 'looseNeutral';
   return { item: i, bad: !inBand, good: pair === 'HN' && inBand && (rd.load || !loadMatters) };
@@ -296,7 +450,8 @@ function readingVerdict(m: MeterModel, rd: Reading): { item: number; bad: boolea
 export function narrowing(m: MeterModel, readings: Reading[]): number {
   const n = m.items.length;
   let lo = -1;
-  let hi = n;
+  // a fault inside the unit shows no bad reading: once the run is good all the way to it, it is what's left
+  let hi = m.fault.kind === 'unit' ? n - 1 : n;
   for (const rd of readings) {
     const v = readingVerdict(m, rd);
     if (!v) continue;
@@ -312,13 +467,15 @@ const uniq = (rs: Reading[]) => new Set(rs.map((r) => `${Math.min(r.a, r.b)}-${M
 export function tallyCalls(m: MeterModel, calls: Call[]) {
   const hit = calls.findIndex((c) => c.item === m.fault.at);
   const wrong = hit < 0 ? calls.length : hit;
-  const condOk = hit >= 0 && (!m.askConductor || calls[hit].cond === faultConductor(m.fault.kind));
+  const condOk = hit >= 0 && (!m.askConductor || m.fault.kind === 'unit' || calls[hit].cond === faultConductor(m.fault.kind));
   return { found: hit >= 0, wrong, condOk };
 }
 
 /** Did the readings prove which conductor failed (not just where)? */
 export function conductorProven(m: MeterModel, readings: Reading[]): boolean {
+  if (m.fault.kind === 'unit') return true;
   const hot = faultConductor(m.fault.kind) === 'H';
+  const { lo: OK_LO, hi: OK_HI, ng: NG_MAX } = m.band;
   let hgBad = false;
   let ngBad = false;
   let ngOk = false;
@@ -361,8 +518,8 @@ export function summarizeMeter(m: MeterModel, readings: Reading[], calls: Call[]
   const n = uniq(readings);
   const where = m.items[m.fault.at].name;
   const parts: string[] = [];
-  if (found) parts.push(`${condOk ? FAULT_TERM[m.fault.kind] : 'right box, wrong wire'} at ${where}`);
-  else parts.push(`Not found (${FAULT_TERM[m.fault.kind]} at ${where})`);
+  if (found) parts.push(m.fault.kind === 'unit' ? `${where}: ${faultTerm(m)}` : `${condOk ? faultTerm(m) : 'right box, wrong wire'} at ${where}`);
+  else parts.push(m.fault.kind === 'unit' ? `Not found (${faultTerm(m)})` : `Not found (${faultTerm(m)} at ${where})`);
   parts.push(`${n} reading${n === 1 ? '' : 's'} (par ${m.par})`);
   if (wrong) parts.push(`${wrong} wrong call${wrong === 1 ? '' : 's'}`);
   return parts.join(', ');
@@ -381,10 +538,16 @@ export const meter: PuzzleDef = {
   gesture: 'Drag two probes + tap',
   howTo: 'Probe terminals, find the first bad reading, tap that item.',
   term: 'Open neutral: the return path is broken, so power has nowhere to go.',
+  // an airplane's circuit: + to − reads the bus all the way to the unit, or the break is where it stops
+  termFor: (context) =>
+    context?.job && DC_JOBS.includes(context.job) ? 'On 28 V DC the first dead point is the break; good all the way and no output: the unit.' : undefined,
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 10,
   mount(host, p) {
-    const m = generateMeter(p.seed, p.tier, p.tools, p.context?.job);
-    const hasPen = p.tools.includes('nonContact');
+    const m = generateMeter(p.seed, p.tier, p.tools, p.context?.job, p.context?.bench);
+    // a non-contact tester senses AC only: no use on an airplane's DC circuit
+    const hasPen = p.tools.includes('nonContact') && !m.dc;
+    const code = (c: Cond) => (m.dc ? m.dc.heads[c] : CODE[c]);
+    const unitAt = m.dc ? m.items.length - 1 : -1;
     const st = stage(host.el);
     const { ctx } = st;
     const n = m.items.length;
@@ -462,7 +625,7 @@ export const meter: PuzzleDef = {
     const ptName = (i: number) => {
       const pt = m.points[i];
       const where = pt.item < 0 ? 'P' : String(pt.item + 1);
-      const c = m.mwbc && pt.cond === 'H' && pt.item < 0 ? (pt.leg ? 'B' : 'A') : CODE[pt.cond];
+      const c = m.mwbc && pt.cond === 'H' && pt.item < 0 ? (pt.leg ? 'B' : 'A') : code(pt.cond);
       return { where, c };
     };
     const probeTip = (g: G, k: number) => {
@@ -507,7 +670,7 @@ export const meter: PuzzleDef = {
       log.unshift(`${pair}${load ? '*' : ''}  ${v.toFixed(1)}`);
       log.length = Math.min(log.length, 3);
       if (na.where === nb.where && na.where !== 'P') rowNote.set(Number(na.where) - 1, `${na.c}–${nb.c} ${v.toFixed(1)} V${load ? ' loaded' : ''}`);
-      if (v < OK_LO && na.c !== 'G' && nb.c !== 'G') sawBad = true;
+      if (v < m.band.lo && m.points[a].cond !== 'G' && m.points[b].cond !== 'G') sawBad = true;
       settle = { t0: performance.now(), v, snapped: !!p.reducedMotion };
       if (p.reducedMotion) host.fx.snap();
       // a same-device pair is a deliberate reading; a cross-device pair counts only
@@ -536,6 +699,8 @@ export const meter: PuzzleDef = {
         par: m.par,
         calls: calls.length,
         fault: m.fault.kind,
+        // the part chain's check: the unit, or the wiring (and whether the call found it)
+        ...(m.dc ? { chain: benchCall(m, calls) } : {}),
       });
       if (res.perfect && !blind) {
         flourishT = performance.now();
@@ -563,11 +728,18 @@ export const meter: PuzzleDef = {
       const list: { x: number; w: number; id: 'H' | 'N' | 'X'; text: string }[] = [];
       let x = g.w - g.pad - 48;
       list.push({ x, w: 48, id: 'X', text: '✕' });
-      if (m.askConductor) {
-        x -= 96;
-        list.push({ x, w: 90, id: 'N', text: 'Neutral' });
-        x -= 78;
-        list.push({ x, w: 72, id: 'H', text: 'Hot' });
+      if (selected === unitAt && unitAt >= 0) {
+        // the unit itself: no conductor to name
+        x -= 118;
+        list.push({ x, w: 112, id: 'H', text: 'The unit' });
+      } else if (m.askConductor) {
+        const words = m.dc ? m.dc.words : { H: 'Hot', N: 'Neutral' };
+        const wN = m.dc ? 98 : 90;
+        const wH = m.dc ? 92 : 72;
+        x -= wN + 6;
+        list.push({ x, w: wN, id: 'N', text: words.N });
+        x -= wH + 6;
+        list.push({ x, w: wH, id: 'H', text: words.H });
       } else {
         x -= 102;
         list.push({ x, w: 96, id: 'H', text: 'Call it' });
@@ -784,22 +956,26 @@ export const meter: PuzzleDef = {
       const R = lh * 2.45;
       const a0 = -Math.PI / 2 - 0.4;
       const a1 = -Math.PI / 2 + 0.4;
-      const toA = (v: number) => a0 + (clamp(v, 0, 250) / 250) * (a1 - a0);
+      // the range the meter autoranges to: 0-250 V AC on a house circuit, 0-40 V DC on an airplane's
+      const full = m.dc ? 40 : 250;
+      const toA = (v: number) => a0 + (clamp(v, 0, full) / full) * (a1 - a0);
       ctx.globalAlpha = 0.35;
       ctx.strokeStyle = C.ink;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(cx, cy, R, a0, a1);
       ctx.stroke();
-      for (let v = 0; v <= 250; v += 10) {
+      const tick = m.dc ? 2 : 10;
+      const major = m.dc ? 14 : 60;
+      for (let v = 0; v <= full; v += tick) {
         const a = toA(v);
-        const len = v % 60 === 0 ? 7 : 3;
+        const len = v % major === 0 ? 7 : 3;
         ctx.beginPath();
         ctx.moveTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
         ctx.lineTo(cx + Math.cos(a) * (R + len), cy + Math.sin(a) * (R + len));
         ctx.stroke();
       }
-      for (const v of [0, 120, 240]) {
+      for (const v of m.dc ? [0, 14, 28] : [0, 120, 240]) {
         const a = toA(v);
         label(ctx, String(v), cx + Math.cos(a) * (R - 10), cy + Math.sin(a) * (R - 10), { size: 8.5, weight: 700 });
       }
@@ -837,7 +1013,7 @@ export const meter: PuzzleDef = {
         if (ch !== ' ') ctx.fillText(ch, mx, base);
         cxr -= cw;
       }
-      label(ctx, 'V AC', lx + lw - 10, ly + 11, { size: 10, weight: 800, align: 'right' });
+      label(ctx, m.dc ? 'V DC' : 'V AC', lx + lw - 10, ly + 11, { size: 10, weight: 800, align: 'right' });
       label(ctx, load ? 'LOADED' : 'AUTO', lx + 8, ly + 11, { size: 9, weight: 800, align: 'left', color: shade(C.ink, 0.2) });
       // side panel: log + jacks
       const sx = lx + lw + 10;
@@ -877,10 +1053,10 @@ export const meter: PuzzleDef = {
       ctx.strokeStyle = C.sandDeep;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      const heads = m.mwbc ? ['A', 'B', 'N', 'G'] : ['H', 'N', 'G'];
+      const heads = m.mwbc ? ['A', 'B', 'N', 'G'] : [code('H'), code('N'), code('G')];
       const hy = Math.max(top + 12, g.rowY(0) - g.rowH / 2 - 4);
       heads.forEach((hd, k) => label(ctx, hd, g.colX(k), hy, { size: 10.5, weight: 800, color: C.inkSoft }));
-      label(ctx, m.mwbc ? 'MWBC · shared neutral' : '20 A branch circuit', g.pad + 8, hy, {
+      label(ctx, m.dc ? m.dc.circuit : m.mwbc ? 'MWBC · shared neutral' : '20 A branch circuit', g.pad + 8, hy, {
         size: 10.5,
         weight: 700,
         align: 'left',
@@ -932,7 +1108,7 @@ export const meter: PuzzleDef = {
         ctx.stroke();
         ctx.setLineDash([]);
         drawIcon(g.pad + 20, y, it, gleam, r === 0);
-        const name = r === 0 ? (m.mwbc ? 'Panel · 2-pole 20 A' : 'Panel · 20 A breaker') : `${r}  ${it!.name}`;
+        const name = r === 0 ? (m.dc ? m.dc.bus : m.mwbc ? 'Panel · 2-pole 20 A' : 'Panel · 20 A breaker') : `${r}  ${it!.name}`;
         const nameW = g.colX(0) - 22 - (g.pad + 40);
         ctx.save();
         ctx.beginPath();
@@ -945,12 +1121,12 @@ export const meter: PuzzleDef = {
         let sub = '';
         let subColor: string = C.inkSoft;
         if (isFault) {
-          sub = FAULT_TERM[m.fault.kind];
+          sub = faultTerm(m);
           subColor = C.rust;
-        } else if (chk) sub = '✓ tight · not here';
-        else if (r === 0) sub = 'breaker ON';
+        } else if (chk) sub = i === unitAt ? '✓ the unit checks good · not here' : '✓ tight · not here';
+        else if (r === 0) sub = m.dc ? 'bus powered' : 'breaker ON';
         else if (rowNote.has(i)) sub = rowNote.get(i)!;
-        else if (i === 0 && m.tier === 0 && readings.length === 0) sub = 'start here: H to N';
+        else if (i === 0 && m.tier === 0 && readings.length === 0) sub = `start here: ${code('H')} to ${code('N')}`;
         if (sub) label(ctx, sub, g.pad + 40, y + 10, { size: 11, weight: 600, align: 'left', color: subColor });
         ctx.restore();
       }
@@ -1023,6 +1199,32 @@ export const meter: PuzzleDef = {
         ctx.arc(0, 0, 5, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+      } else if (it!.kind === 'term') {
+        // a terminal: a small block with two screws
+        roundRect(ctx, -11, -9, 22, 18, 3);
+        ctx.fillStyle = shade(C.inkSoft, 0.6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.mech;
+        for (const ox of [-5, 5]) {
+          ctx.beginPath();
+          ctx.arc(ox, 0, 3.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      } else if (it!.kind === 'unit') {
+        // the unit itself: a boxy case with cooling slots
+        roundRect(ctx, -13, -14, 26, 28, 4);
+        ctx.fillStyle = gleam > 0 ? shade(C.elec, 0.5) : shade(C.ink, 0.72);
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = C.ink;
+        for (const oy of [-6, 0, 6]) {
+          ctx.beginPath();
+          ctx.moveTo(-7, oy);
+          ctx.lineTo(7, oy);
+          ctx.stroke();
+        }
       } else if (it!.kind === 'light') {
         ctx.fillStyle = gleam > 0 ? shade(C.elec, 0.2) : C.paper;
         if (gleam > 0) {
@@ -1078,13 +1280,14 @@ export const meter: PuzzleDef = {
         ctx.beginPath();
         ctx.arc(kx, L.y + 23, 17, 0, Math.PI * 2);
         ctx.fill();
-        label(ctx, load ? 'Load ON' : 'Load off', load ? L.x + 48 : L.x + L.w - 44, L.y + 16, { size: 13, weight: 800 });
-        label(ctx, 'kettle + heater', load ? L.x + 48 : L.x + L.w - 44, L.y + 32, { size: 9.5, weight: 600, color: C.inkSoft });
+        const { on, off, sub } = m.dc ? m.dc.load : { on: 'Load ON', off: 'Load off', sub: 'kettle + heater' };
+        label(ctx, load ? on : off, load ? L.x + 48 : L.x + L.w - 44, L.y + 16, { size: 13, weight: 800 });
+        label(ctx, sub, load ? L.x + 48 : L.x + L.w - 44, L.y + 32, { size: 9.5, weight: 600, color: C.inkSoft });
       }
       // row 2: call chips or a prompt
       const ry = y + 72;
       if (selected >= 0 && !finished) {
-        label(ctx, `${m.askConductor ? 'Bad wire here?' : 'Fault here?'}${blind ? ' (final)' : ''}`, g.pad + 4, ry + 23, { size: 13, weight: 800, align: 'left' });
+        label(ctx, `${selected === unitAt ? 'The unit itself?' : m.askConductor ? 'Bad wire here?' : 'Fault here?'}${blind ? ' (final)' : ''}`, g.pad + 4, ry + 23, { size: 13, weight: 800, align: 'left' });
         for (const c of chips(g)) {
           roundRect(ctx, c.x, c.y, c.w, c.h, 23);
           ctx.fillStyle = c.id === 'X' ? C.paper : C.sea;
@@ -1185,7 +1388,7 @@ export const meter: PuzzleDef = {
       timeUp(): PuzzleResult {
         if (pending) return pending;
         finished = true;
-        return result(scoreMeter(m, readings, calls), summarizeMeter(m, readings, calls), { readings: readings.length, par: m.par });
+        return result(scoreMeter(m, readings, calls), summarizeMeter(m, readings, calls), { readings: readings.length, par: m.par, ...(m.dc ? { chain: benchCall(m, calls) } : {}) });
       },
       destroy() {
         stop();

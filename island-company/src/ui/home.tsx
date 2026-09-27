@@ -4,13 +4,13 @@ import { useEffect, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
-import { gseForStart, powered, startCart, tierDef, urgency } from '../sim/econ';
+import { gseCarts, gseForStart, hangarJobs, needsCart, powered, startCart, tierDef, urgency } from '../sim/econ';
 import { ROLES, type IslandState, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
 import { ChainBanner } from './chain';
 import { Desk } from './desk';
-import { GseSheet } from './gse';
+import { GseSheet, weakBatteryNow } from './gse';
 import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
 import { unreadBoard } from './crewboard';
@@ -484,12 +484,17 @@ function Dock({
   const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready' && !gseForStart(s, o).blocker).sort((a, b) => urgency(s, b) - urgency(s, a));
   const ready = readyList.length;
   const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week).length : 0;
-  const gridCapped = (r === 'mech' && powered(s).gridDown && (turn?.done ?? 0) >= 1) || !!capNow(s, r)?.full;
+  const gridCapped = (r === 'mech' && powered(s).gridDown && !!turn && hangarJobs(turn) >= 1) || !!capNow(s, r)?.full;
   // jobs this seat could still start this turn (none once a per-turn limit is used up)
   const playable = gridCapped ? 0 : ready;
   // a crewmate waiting on this seat (a report to fix, the part chain's next step): ending the turn says so first
   const owed = owedBy(s, r);
-  const ask = playable > 0 || owed.length > 0;
+  // the mechanic's carts: this week's weak-battery plane needs a charged one on it; any other one left on a plane
+  // sits off the charger (it runs down) until someone plugs it back in
+  const weak = r === 'mech' ? weakBatteryNow(s) : null;
+  const weakUnready = !!weak && !weak.ready;
+  const leftOn = r === 'mech' ? gseCarts(s).filter((c) => c.hookedTo && c.hookedTo !== s.weakBattery?.assetId && !s.orders.some((o) => o.status === 'ready' && needsCart(o.kind) && o.assetId === c.hookedTo)) : [];
+  const ask = playable > 0 || owed.length > 0 || weakUnready || leftOn.length > 0;
   // a report or a chain step carried over never rolls an incident: only the other jobs pick up deferral risk
   const risky = readyList.filter((o) => o.kind !== 'report' && !o.chain).length;
   // the next useful thing, always under the thumb
@@ -579,6 +584,16 @@ function Dock({
           {owed.map((m) => (
             <span key={m.key} class="fault" style={{ fontWeight: 700 }}>
               {s.players[m.waits]?.name ?? ROLE_LABEL[m.waits]} is waiting on you: {m.text}.
+            </span>
+          ))}
+          {weakUnready && (
+            <span class="fault" style={{ fontWeight: 700 }}>
+              {weak!.name}'s battery is weak this week and no charged cart is hooked up to it: its first flight will be lost.
+            </span>
+          )}
+          {leftOn.map((c) => (
+            <span key={c.id} class="muted">
+              {c.name} is still on {s.assets.find((a) => a.id === c.hookedTo)?.name ?? 'a plane'} ({Math.round(c.charge)}%), off the charger: plug it back in.
             </span>
           ))}
           {ready > 0 && (

@@ -176,6 +176,18 @@ export function Island({
   const motion = !reduceMotion;
   const svgRef = useRef<SVGSVGElement>(null);
   const still = useStill(svgRef);
+  // the drawing's width on screen (CSS px): a cart's tap target is sized to stay at least 44 px, zoomed or not
+  const [cssW, setCssW] = useState(360);
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const read = () => el.clientWidth > 0 && setCssW(el.clientWidth);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const dev = developmentOf(s);
   const has = (f: Flourish) => dev.flourishes.includes(f);
   const pw = powered(s);
@@ -197,6 +209,8 @@ export function Island({
   const booked = rentable.length;
   const z = focus ? focusBox(focus, s.tier) : null;
   const bscale = z ? 1.3 / zoomK(z) : 1;
+  // 44 CSS px in drawing units, under the zoom (never smaller than the cart's own 44-unit box)
+  const cartHit = Math.max(44, (44 * W) / (Math.max(1, cssW) * zoomK(z)));
   const newIds = new Set(dev.justBuilt ? TIERS[dev.justBuilt - 1].adds.map((a) => a.id) : []);
   const paved = has('paved-paths');
   const carrying = pw.gridDown && pw.genOK;
@@ -306,6 +320,7 @@ export function Island({
           tagged={tagged}
           label={`${c.name}: ${where}, ${Math.round(c.charge)}% charge${tagged ? ', tagged out' : ''}. Open ground power`}
           onTap={onCart ? () => onCart(c.id) : undefined}
+          hit={cartHit}
         />
       ),
     });

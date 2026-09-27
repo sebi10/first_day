@@ -4,12 +4,14 @@
 // (black screw) takes the source hot and the brass screws take the travelers;
 // on a GFCI the source goes on LINE. Tiers 0–2 label every terminal; from
 // tier 3 you get only the screw colours, like a real device.
-// A crewmate's ground power cart (job 'gpuCable'): its cable is cracked at the
-// plug, so it is cut back past the damage and a new 28 V DC plug goes on:
-// red to the + pin, black to the − pin, and the small lead to the short pin
-// (the interlock that lets the aircraft's external power relay close only
-// once the plug is fully home). Each conductor is stripped to the depth of
-// its pin's barrel and clamped: no hook, and no bare copper past the barrel.
+// A crewmate's ground power cart (job 'gpuCable'): its cable is worn at the
+// plug, so it is cut back past the damage and a new 28 V DC plug goes on. The
+// cart's plug has sockets (the pins are on the airplane's AN2551 receptacle):
+// the red 2/0 AWG lead to the + socket, the black 2/0 to the − socket, and the
+// small lead, fed from +, to the interlock (small) socket: it mates with the
+// receptacle's short pin, so the airplane's external power relay closes only
+// once the plug is fully seated. Each conductor is stripped to the depth of its
+// socket's barrel and clamped: no hook, and no bare copper past the barrel.
 import { rng } from '../sim/rng';
 import { C, backdrop, clamp, label, loop, pointer, roundRect, settle, stage } from './kit';
 import { result, type PuzzleDef, type PuzzleResult } from './types';
@@ -17,7 +19,7 @@ import { result, type PuzzleDef, type PuzzleResult } from './types';
 type Term = {
   id: string;
   label: string;
-  /** 'nut': a splice (twisted, no hook); 'pin': a plug pin's set-screw barrel (clamped, no hook) */
+  /** 'nut': a splice (twisted, no hook); 'pin': a plug socket's set-screw barrel (clamped, no hook) */
   color: 'brass' | 'silver' | 'green' | 'dark' | 'nut' | 'pin';
   x: number;
   y: number;
@@ -26,7 +28,7 @@ type Term = {
   stamp?: string;
   /** moulded into the device, always readable (a plug's + and −) */
   mark?: string;
-  /** a plug pin's size on the drawing (the interlock pin is the small, short one) */
+  /** a plug socket's size on the drawing (the interlock socket is the small one) */
   r?: number;
 };
 type Wire = { id: string; color: 'black' | 'white' | 'bare' | 'red'; cable: string; target: string[]; label: string };
@@ -72,18 +74,18 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
   let title = '';
   if (device === 'gpuplug') {
     title = 'GPU plug: new plug on the cut-back cable';
-    // the insert face: two big pins marked + and −, and the short interlock pin (on the + side)
+    // the insert face: two big sockets marked + and −, and the small interlock socket (on the + side, fed from +)
     const flip = r.chance(0.5);
     terms = [
       { id: 'pos', label: 'POS +', color: 'pin', x: flip ? 0.72 : 0.28, y: 0.42, mark: '+', r: 14 },
       { id: 'neg', label: 'NEG −', color: 'pin', x: flip ? 0.28 : 0.72, y: 0.42, mark: '−', r: 14 },
-      { id: 'ilk', label: 'SHORT PIN', color: 'pin', x: flip ? 0.64 : 0.36, y: 0.78, r: 8 },
+      { id: 'ilk', label: 'INTERLOCK', color: 'pin', x: flip ? 0.64 : 0.36, y: 0.78, r: 8 },
     ];
     cables = [{ id: 'A', label: 'from the cart', x: 0.5 }];
     wires = [
-      { id: 'A-red', color: 'red', cable: 'A', target: ['pos'], label: t <= 2 ? 'red (+, 2 AWG)' : 'red (2 AWG)' },
-      { id: 'A-blk', color: 'black', cable: 'A', target: ['neg'], label: t <= 2 ? 'black (−, 2 AWG)' : 'black (2 AWG)' },
-      { id: 'A-ilk', color: 'white', cable: 'A', target: ['ilk'], label: t <= 2 ? 'white (interlock, 16 AWG)' : 'white (16 AWG)' },
+      { id: 'A-red', color: 'red', cable: 'A', target: ['pos'], label: t <= 2 ? 'red (+, 2/0 AWG)' : 'red (2/0 AWG)' },
+      { id: 'A-blk', color: 'black', cable: 'A', target: ['neg'], label: t <= 2 ? 'black (−, 2/0 AWG)' : 'black (2/0 AWG)' },
+      { id: 'A-ilk', color: 'white', cable: 'A', target: ['ilk'], label: t <= 2 ? 'white (interlock, fed from +)' : 'white (16 AWG)' },
     ];
   } else if (device === 'receptacle' || device === 'passthrough') {
     title = device === 'receptacle' ? 'Duplex receptacle' : 'Receptacle, power passing through';
@@ -425,7 +427,7 @@ export const wireup: PuzzleDef = {
       for (const t of m.terms) {
         const tp = termPos(t);
         if (t.color === 'pin') {
-          // a pin's barrel, with its set screw
+          // a socket's barrel, with its set screw
           const pr = t.r ?? 11;
           ctx.fillStyle = SCREW.pin;
           ctx.beginPath();
@@ -501,7 +503,7 @@ export const wireup: PuzzleDef = {
       // wire tray
       label(
         ctx,
-        m.device === 'gpuplug' ? 'Swipe a tip left to strip (barrels 3/4 in deep), drag each to its pin' : 'Swipe a tip left to strip (gauge 3/4 in), drag the wire to a screw',
+        m.device === 'gpuplug' ? 'Swipe to strip (3/4 in barrels), drag each to its socket' : 'Swipe a tip left to strip (gauge 3/4 in), drag the wire to a screw',
         14,
         g.tray.y - 10,
         { size: 10, weight: 700, color: C.inkSoft, align: 'left' },

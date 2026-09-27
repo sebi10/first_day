@@ -16,6 +16,7 @@ import {
   aircraftOf,
   ammTaskFor,
   figSb,
+  icaCardFor,
   fmtDate,
   ipcFor,
   planeModel,
@@ -23,7 +24,6 @@ import {
   plantRows,
   rowFor,
   taskKeyFor,
-  IPC_ATAS,
   MAKER,
   VENDORS,
   type Aircraft,
@@ -34,19 +34,28 @@ import {
   type IpcFigure,
   type IpcRow,
 } from './aircraft';
-import { CATALOG_BY_KIND, CHAIN, ROLE_LABEL } from './data';
+import { CHAIN, ECON, ROLE_LABEL } from './data';
 import { hashSeed, rng, type Rng } from './rng';
 import type { Asset, IslandState, Order, PartChain, Role } from './types';
 
 // ---------------------------------------------------------------------------
 // The island's airplanes
 
-/** The ATAs a job on this model can open a chain on (the cargo single has no brake hydraulics job). */
-function reachable(model: string): Ata[] {
-  const atas = new Set<Ata>();
-  for (const [kind, ata] of Object.entries(CHAIN.kinds)) if (CATALOG_BY_KIND[kind]?.targets.includes(model)) atas.add(ata as Ata);
-  return IPC_ATAS.filter((a) => atas.has(a));
-}
+/**
+ * The assemblies an alteration can sit on, per model: the ones a job on that
+ * model can open a chain on (the cargo single has no brake hydraulics job).
+ * A fixed list, NOT derived from the catalog: every live island's airplanes are
+ * rebuilt from this, so a catalog or tuning change must never re-roll them
+ * (tests/aircraft-golden.test.ts pins the result; changing it is a data migration).
+ */
+const PLANT_ATAS: Record<string, readonly Ata[]> = {
+  twin: ['32-40', '61-10', '29-10', '23-10', '24-30'],
+  cargo: ['32-40', '61-10', '23-10', '24-30'],
+  float: ['32-40', '61-10', '29-10', '23-10', '24-30'],
+};
+/** frozen with PLANT_ATAS: the share of planes with an alteration, and of those the field-approved share (CHAIN keeps the names, these the values) */
+const PLANT_SHARE = 0.5;
+const FIELD_SHARE = 0.3;
 
 /**
  * About half the island's planes carry one alteration that replaced an IPC
@@ -56,9 +65,9 @@ function reachable(model: string): Ata[] {
 export function plantFor(islandSeed: number, assetId: string, model: string): AircraftOpts {
   const m = planeModel(model);
   const r = rng(hashSeed('island-plant', islandSeed, assetId, m));
-  if (!r.chance(CHAIN.plantShare)) return {};
-  const ata = r.pick(reachable(m));
-  return { plant: ata, via: r.chance(CHAIN.fieldShare) ? 'field' : 'stc' };
+  if (!r.chance(PLANT_SHARE)) return {};
+  const ata = r.pick([...PLANT_ATAS[m]]);
+  return { plant: ata, via: r.chance(FIELD_SHARE) ? 'field' : 'stc' };
 }
 
 const fleet = new Map<string, Aircraft>();
@@ -70,11 +79,15 @@ const fleet = new Map<string, Aircraft>();
 export function islandAircraft(seed: number, asset: Pick<Asset, 'id' | 'model'>): Aircraft {
   const key = `${seed}|${asset.id}|${asset.model}`;
   let ac = fleet.get(key);
-  if (!ac) {
-    // a device only ever sees a few islands: a small cap keeps a long session bounded
-    if (fleet.size >= 12) fleet.clear();
-    fleet.set(key, (ac = aircraftOf(seed, asset.id, asset.model, plantFor(seed, asset.id, asset.model))));
+  if (ac) {
+    // most recently used last: the one evicted is the one least recently looked at
+    fleet.delete(key);
+    fleet.set(key, ac);
+    return ac;
   }
+  // a device only ever sees a few islands: a small cap keeps a long session bounded
+  if (fleet.size >= 12) fleet.delete(fleet.keys().next().value!);
+  fleet.set(key, (ac = aircraftOf(seed, asset.id, asset.model, plantFor(seed, asset.id, asset.model))));
   return ac;
 }
 
@@ -91,17 +104,50 @@ const TAGS: Record<Ata, string[]> = { '32-40': ['lining'], '61-10': ['propBolt']
 /** the assembly the part is in: what the mechanic sees on the airplane */
 const ASSY: Record<string, string> = { lining: 'brake', propBolt: 'propeller', filter: 'powerPack', resCap: 'powerPack', radio: 'radio', generator: 'generator' };
 
-type ItemDef = { name: (model: string) => string; how: PartChain['how']; found: string; sided?: 'wheel' | 'engine' };
+type ItemDef = { name: (model: string) => string; how: PartChain['how']; found: (model: string) => string; sided?: 'wheel' | 'engine' };
+/**
+ * What the job found, in the words of the squawk. The electrical units (the com
+ * radio, the alternator or starter-generator) are found by their symptom: the
+ * electrician's check at the airplane says whether the unit or its wiring is at
+ * fault (the chain's bench step).
+ */
 const ITEMS: Record<string, ItemDef> = {
-  lining: { name: () => 'brake linings', how: 'damaged', found: 'worn below minimum, rivets exposed', sided: 'wheel' },
-  propBolt: { name: () => 'prop mounting bolts', how: 'damaged', found: 'damaged: two with galled threads, and the AMM calls for a new set', sided: 'engine' },
-  filter: { name: () => 'hydraulic filter element', how: 'damaged', found: 'damaged: bypass button extended, the element loaded with metal' },
-  resCap: { name: () => 'hydraulic reservoir filler cap', how: 'missing', found: 'missing: the reservoir was left open under the panel' },
-  radio: { name: () => 'com radio', how: 'gone', found: 'gone: dead on transmit, and the avionics shop calls it beyond economical repair' },
-  generator: { name: (m) => (m === 'cargo' ? 'starter-generator' : 'alternator'), how: 'gone', found: 'gone: no output, armature open', sided: 'engine' },
+  lining: { name: () => 'brake linings', how: 'damaged', found: () => 'worn below minimum, rivets exposed', sided: 'wheel' },
+  propBolt: {
+    name: () => 'prop mounting bolts',
+    how: 'damaged',
+    found: () => 'damaged: two turned rough at the re-torque (galled threads), and the AMM calls for a new set',
+    sided: 'engine',
+  },
+  // a new element is the whole fix for a clogged one; metal in it would mean a pump coming apart, and a flush
+  filter: { name: () => 'hydraulic filter element', how: 'damaged', found: () => 'clogged: bypass indicator extended at the scheduled change; the element cut open shows fine sludge, no metal' },
+  resCap: { name: () => 'hydraulic reservoir filler cap', how: 'missing', found: () => 'missing: the reservoir was left open under the panel' },
+  radio: { name: () => 'com radio', how: 'gone', found: () => 'is dead on transmit, and receive is weak' },
+  generator: {
+    name: (m) => (m === 'cargo' ? 'starter-generator' : 'alternator'),
+    how: 'gone',
+    found: (m) => (m === 'cargo' ? 'gives no output on the ground run (GEN OFF light; the starter works)' : 'gives no output on the ground run (low-voltage light on, the ammeter shows a discharge)'),
+    sided: 'engine',
+  },
 };
 
 export const itemName = (tag: string, model: string) => ITEMS[tag]?.name(model) ?? 'part';
+/** "the brake linings are", "the alternator is" */
+export const isAre = (item: string) => (item.endsWith('s') ? 'are' : 'is');
+/** the chain items an electrician checks at the airplane before one is bought (the unit, or its wiring?) */
+export const BENCH_TAGS: ReadonlySet<string> = new Set(['radio', 'generator']);
+/** the circuit the electrician meters for an item (the meter puzzle's DC scenarios) */
+export const benchJob = (tag: string, model: string) => (tag === 'radio' ? 'comPower' : model === 'cargo' ? 'sgField' : 'altField');
+
+/**
+ * The plane that would carry the part is the one that's down (or there is no
+ * cargo plane): the part needs freight, the AOG boat now or next week's guest
+ * flight. Otherwise it rides the cargo plane for free.
+ */
+export function needsFreight(s: Pick<IslandState, 'assets'>, c: Pick<PartChain, 'assetId'>): boolean {
+  const cargo = s.assets.find((a) => a.model === 'cargo');
+  return !cargo || cargo.id === c.assetId;
+}
 
 const CAGE_NAME: Record<string, string> = Object.fromEntries(Object.values(VENDORS).map((v) => [v.cage, v.name]));
 const lc = (x: string) => x.charAt(0).toLowerCase() + x.slice(1).toLowerCase();
@@ -124,7 +170,7 @@ export function chainFind(ac: Aircraft, ata: Ata, r: Rng): { tag: string; item: 
     maker = assy?.vendor ? (CAGE_NAME[assy.vendor] ?? MAKER) : MAKER;
   }
   const plate = assy ? ` On the airplane: ${lc(assy.nomen.split(',')[0])} P/N ${assy.pn} (${maker}).` : '';
-  const said = `${side}${name} ${d.found}.${plate}`;
+  const said = `${side}${name} ${d.found(ac.model)}.${plate}`;
   const found = said.charAt(0).toUpperCase() + said.slice(1);
   return { tag, item: name, how: d.how, found };
 }
@@ -163,18 +209,17 @@ export function judgePart(ac: Aircraft, ata: Ata, tag: string, pn: string): Part
     if (pn === p.neededPn) return { ok: true, text: `${pn} is the ${p.holder} part` };
     const oem = ipcFor(ac, ata).rows.some((x) => x.pn === pn);
     const assy = plantRows(ac.model, ata).find((x) => x.tag === ASSY[tag]) ?? plantRows(ac.model, ata)[1];
-    return oem
-      ? {
-          ok: false,
-          why: 'displaced',
-          text: `P/N ${pn} doesn't fit ${ac.registration}: its ${lc(assy.nomen.split(',')[0])} is ${p.holder} P/N ${assy.pn}, and the ${name} for it is ${p.neededPn}, a part the IPC doesn't list`,
-        }
-      : { ok: false, why: 'wrong', text: `P/N ${pn} isn't the ${name} on ${ac.registration}` };
+    // the unit itself (a radio, an alternator) or a part in an assembly (linings in a brake)
+    const text =
+      assy.pn === p.neededPn
+        ? `P/N ${pn} doesn't fit ${ac.registration}: the installed unit is ${p.holder} P/N ${p.neededPn}, which the IPC doesn't list`
+        : `P/N ${pn} doesn't fit ${ac.registration}: its ${lc(assy.nomen.split(',')[0])} is ${p.holder} P/N ${assy.pn}, and the ${name} for it ${isAre(name)} ${p.neededPn}, a part the IPC doesn't list`;
+    return oem ? { ok: false, why: 'displaced', text } : { ok: false, why: 'wrong', text: `P/N ${pn} isn't the ${name} on ${ac.registration}` };
   }
   const fig = ipcFor(ac, ata);
   const row = fig.rows.find((x) => x.pn === pn);
   if (!row) return { ok: false, why: 'unlisted', text: `P/N ${pn} isn't in IPC Fig ${fig.fig} for ${ac.registration}` };
-  if (row.tag !== tag) return { ok: false, why: 'wrong', text: `P/N ${pn} is the ${lc(row.nomen)}, not the ${name}` };
+  if (row.tag !== tag) return { ok: false, why: 'wrong', text: `P/N ${pn} is the ${lc(row.nomen.split(',')[0])}, not the ${name}` };
   if (row.np) return { ok: false, why: 'wrong', text: `P/N ${pn} is not procurable (NP): the vendor sent back the next higher assembly's quote` };
   if (row.applies || row.alt) return { ok: true, text: `${pn} is effective for ${ac.registration}` };
   // new for old (INTCHG code 1 or 2) from a part in force is legal; a code-3 part only with its SB set
@@ -241,34 +286,48 @@ export function chainMove(s: IslandState, c: PartChain): ChainMove {
       return wait('mech', 'IPC lookup', `look up the ${c.item} in the IPC`);
     case 'research':
       return wait('mech', 'logbook research', `research the ${c.item} in ${asset?.name ?? 'the plane'}'s logbooks`);
-    case 'buy':
-      return wait('fin', 'approve the part', `approve the part${c.pn ? ` (${c.pn}${step ? `, ${usd(step.cost)}` : ''})` : ''}`);
+    case 'check':
+      return wait('elec', 'meter the circuit', `meter the ${c.item} circuit on ${asset?.name ?? 'the plane'}: the unit, or its wiring? It's bought once that's known`);
+    case 'buy': {
+      const boat = step && needsFreight(s, c) ? ` + ${usd(ECON.boatKit)} boat, or a guest flight a week later` : '';
+      return wait('fin', 'approve the part', `approve the part${c.pn ? ` (${c.pn}${step ? `, ${usd(step.cost)}${boat}` : ''})` : ''}`);
+    }
     case 'fee':
       return wait('fin', 'approve the engineering fee', `approve the engineering review fee${step ? ` (${usd(step.cost)})` : ''}`);
     case 'review':
       return { who: null, text: 'engineering is reviewing the request: the answer comes when the week resolves', short: 'engineering review', chip: 'Engineering review: answer next week' };
     case 'transit': {
-      const cargo = s.assets.find((a) => a.model === 'cargo');
-      const carrier = cargo ? 'cargo' : 'guest';
-      // the plane that would carry it is the one that's down: a boat brings it
-      const boat = cargo ? cargo.id === c.assetId : true;
-      return {
-        who: null,
-        text: boat ? `the part comes by boat when the week resolves` : `the part rides the next ${carrier} flight`,
-        short: 'delivery',
-        chip: boat ? 'Part on the boat: arrives when the week resolves' : `Part on the next ${carrier} flight`,
-      };
+      if (c.hold !== undefined)
+        return {
+          who: null,
+          text: "the part is in quarantine: it came without its paperwork, and the vendor's 8130-3 comes when the week resolves",
+          short: 'quarantine',
+          chip: 'Part in quarantine: its 8130-3 comes next week',
+        };
+      if (c.freight === 'flight' && (c.ship ?? 0) > s.week)
+        return { who: null, text: "the part rides next week's guest flight", short: 'delivery', chip: "Part on next week's guest flight" };
+      if (c.freight === 'flight') return { who: null, text: 'the part rides a guest flight when the week resolves', short: 'delivery', chip: 'Part on a guest flight: arrives when the week resolves' };
+      if (c.freight === 'boat') return { who: null, text: 'the part comes on the AOG boat when the week resolves', short: 'delivery', chip: 'Part on the AOG boat: arrives when the week resolves' };
+      return { who: null, text: 'the part rides the next cargo flight', short: 'delivery', chip: 'Part on the next cargo flight' };
     }
     case 'install':
-      return wait('mech', 'install the part', `install ${c.pn}, then finish ${c.title}`);
+      return c.wired ? wait('mech', 'finish the job', `finish ${c.title}: the fault was in the wiring`) : wait('mech', 'install the part', `install ${c.pn}, then finish ${c.title}`);
     case 'done':
       return { who: null, text: 'installed', short: 'installed', chip: 'Part installed' };
   }
 }
 
-/** The steps as the stepper draws them (the research and engineering steps only when the IPC didn't have it). */
+/** The electrician's check, while it runs beside the lookup or the research (the chain's own move is the other seat's). */
+export function benchMove(s: IslandState, c: PartChain): ChainMove | null {
+  if (!c.bench || c.bench.call || c.step === 'check' || c.step === 'done') return null;
+  const name = s.players.elec?.name ?? ROLE_LABEL.elec;
+  const asset = s.assets.find((a) => a.id === c.assetId);
+  return { who: 'elec', text: `meter the ${c.item} circuit on ${asset?.name ?? 'the plane'}: the unit, or its wiring?`, short: 'meter the circuit', chip: `Waiting on ${name}: meter the circuit` };
+}
+
+/** The steps as the stepper draws them (the research and engineering steps only when the IPC didn't have it, the check only on an electrical unit). */
 export function chainSteps(c: PartChain): { key: string; label: string; state: 'done' | 'now' | 'todo' }[] {
-  const research = c.step === 'research' || c.step === 'fee' || c.step === 'review' || c.src === 'eng' || c.src === 'entry' || c.rejects > 0;
+  const research = c.step === 'research' || c.step === 'fee' || c.step === 'review' || c.src === 'eng' || c.src === 'entry' || c.rejects > 0 || (c.step === 'check' && !!c.request);
   const keys: [string, string][] = [
     ['found', 'Found'],
     ['lookup', 'IPC'],
@@ -278,13 +337,26 @@ export function chainSteps(c: PartChain): { key: string; label: string; state: '
           ['review', 'Engineering'],
         ] as [string, string][])
       : []),
-    ['buy', 'Buy'],
-    ['transit', 'Delivery'],
-    ['install', 'Install'],
+    ...(c.bench ? ([['bench', 'Check']] as [string, string][]) : []),
+    ...(c.wired
+      ? []
+      : ([
+          ['buy', 'Buy'],
+          ['transit', 'Delivery'],
+        ] as [string, string][])),
+    ['install', c.wired ? 'Finish' : 'Install'],
   ];
-  const at: Record<string, number> = { lookup: 1, research: 2, fee: research ? 3 : 2, review: 3, buy: research ? 4 : 2, transit: research ? 5 : 3, install: research ? 6 : 4, done: 99 };
-  const now = at[c.step];
-  return keys.map(([key, label], i) => ({ key, label, state: i < now ? 'done' : i === now ? 'now' : 'todo' }));
+  // where each step sits in the chain's order (the check runs beside the lookup and the research; the buy waits for it)
+  const rank: Record<string, number> = { found: 0, lookup: 1, research: 2, fee: 3, review: 3, check: 4, buy: 5, transit: 6, install: 7, done: 99 };
+  const now = rank[c.step];
+  return keys.map(([key, label]) => {
+    if (key === 'bench') {
+      const done = !!c.bench?.call;
+      return { key, label, state: done ? 'done' : c.step === 'check' || c.step === 'lookup' || c.step === 'research' || c.step === 'fee' || c.step === 'review' ? 'now' : 'todo' };
+    }
+    const at = key === 'review' ? 3 : rank[key];
+    return { key, label, state: at < now ? 'done' : at === now || (key === 'review' && c.step === 'fee') ? 'now' : 'todo' };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,10 +380,16 @@ export function taskCardFor(ac: Aircraft, job: string): AmmTask | undefined {
   return ammTaskFor(ac, job);
 }
 
-/** The card's numbers for a card-driven puzzle (torque, hydraulic servicing), both effectivities as printed. */
+/**
+ * The card's numbers for a card-driven puzzle (torque, hydraulic servicing),
+ * both effectivities as printed. On an assembly an STC or a field approval
+ * replaced, the alteration's ICA line is this airplane's (it governs), and the
+ * airframe manual's lines stay printed, marked replaced.
+ */
 export function manualCard(ac: Aircraft, job: string, puzzle: string, marked: boolean): ManualCard | undefined {
   const t = taskCardFor(ac, job);
   if (!t) return undefined;
+  const ica = plantedOn(ac, t.ata) ? icaCardFor(ac, t.ata) : undefined;
   const card: ManualCard = {
     reg: ac.registration,
     serial: ac.serial,
@@ -322,18 +400,44 @@ export function manualCard(ac: Aircraft, job: string, puzzle: string, marked: bo
       .filter((x) => x.ipcAta)
       .sort((a, b) => Number(b.ipcAta === t.ata) - Number(a.ipcAta === t.ata))
       .map((x) => x.id),
+    ...(ica ? { alteration: `${ica.approval}, ${ica.holder}` } : {}),
   };
+  const icaText = ica ? `${ica.doc} · ${ica.approval}` : '';
   if (puzzle === 'torque') {
     const key = TORQUE_STEP[t.key](ac.model);
-    const lines = t.torques.filter((q) => q.key === key);
-    if (!lines.length) return undefined;
-    card.torque = { key, what: lines[0].what, lines: lines.map((q) => ({ eff: q.eff, effText: q.effText, lo: q.lo, hi: q.hi, unit: q.unit, note: q.note, applies: q.applies })) };
+    const oem = t.torques.filter((q) => q.key === key);
+    const it = ica?.torques.find((q) => q.key === key);
+    if (!oem.length && !it) return undefined;
+    const lines: NonNullable<ManualCard['torque']>['lines'] = oem.map((q) => ({
+      eff: q.eff,
+      effText: q.effText,
+      lo: q.lo,
+      hi: q.hi,
+      unit: q.unit,
+      note: q.note,
+      applies: it ? false : q.applies,
+      ...(it ? { replaced: ica!.approval } : {}),
+    }));
+    if (it) lines.push({ eff: 'ICA', effText: icaText, lo: it.lo, hi: it.hi, unit: it.unit, note: it.note, applies: true, ica: true });
+    card.torque = { key, what: (it ?? oem[0]).what, lines };
   } else if (puzzle === 'hydraulics') {
+    // the accumulator isn't part of a power pack kit: its precharge is the airframe manual's
     const pc = t.servicing.filter((x) => x.key === 'precharge');
     const fl = t.servicing.filter((x) => x.key === 'fluid');
+    const icaFluids = ica?.fluids;
     if (pc.length) card.precharge = { what: pc[0].what, lines: pc.map((x) => ({ eff: x.eff, effText: x.effText, psi: x.psi!, refTemp: x.refTemp!, applies: x.applies })) };
-    if (fl.length) card.fluid = { lines: fl.map((x) => ({ eff: x.eff, effText: x.effText, fluids: x.fluids!, applies: x.applies })) };
-    if (!pc.length && !fl.length) return undefined;
+    if (fl.length || icaFluids) {
+      const lines: NonNullable<ManualCard['fluid']>['lines'] = fl.map((x) => ({
+        eff: x.eff,
+        effText: x.effText,
+        fluids: x.fluids!,
+        applies: icaFluids ? false : x.applies,
+        ...(icaFluids ? { replaced: ica!.approval } : {}),
+      }));
+      if (icaFluids) lines.push({ eff: 'ICA', effText: icaText, fluids: icaFluids, applies: true, ica: true });
+      card.fluid = { lines };
+    }
+    if (!pc.length && !fl.length && !icaFluids) return undefined;
   } else return undefined;
   return card;
 }
@@ -353,9 +457,17 @@ export function sbStatus(ac: Aircraft, ata: Ata): string {
  * "not in the IPC"), the research's engineering request. Right with a chance
  * that grows with skill; the wrong answers are the ones people really make.
  */
-export function botChainData(ac: Aircraft, c: PartChain, step: 'lookup' | 'research', skill: number, r: Rng): Record<string, unknown> {
+export function botChainData(ac: Aircraft, c: PartChain, step: 'lookup' | 'research' | 'bench', skill: number, r: Rng): Record<string, unknown> {
   const ata = c.ata as Ata;
-  const right = r.chance(Math.min(0.97, Math.max(0.2, 0.25 + 0.7 * skill)));
+  // a request engineering sent back, or a part sent back at receiving, says what was wrong: the next try uses it
+  const told = step === 'bench' ? 0 : 0.25 * (c.rejects + c.returns);
+  const right = r.chance(Math.min(0.97, Math.max(0.2, 0.25 + 0.7 * skill + told)));
+  if (step === 'bench') {
+    const fault = c.bench?.again ? 'wiring' : (c.bench?.fault ?? 'unit');
+    // the call that people get wrong: blaming the unit for its wiring, or the other way round
+    const call = right ? fault : fault === 'unit' ? 'wiring' : 'unit';
+    return { chain: { call, fixed: right && call === 'wiring', ...(call === 'wiring' ? { where: 'firewall connector' } : {}) } };
+  }
   const p = plantedOn(ac, ata);
   if (step === 'lookup') {
     if (right) return { chain: p ? { outcome: 'notipc' } : { outcome: 'pn', pn: rightPn(ac, ata, c.tag) } };

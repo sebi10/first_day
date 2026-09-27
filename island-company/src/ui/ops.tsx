@@ -1,7 +1,8 @@
 // Mechanic hangar / electrician cottages: assets, work orders, covering.
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
-import { gseForStart, houseBlocker, isAog, orderCost, orderTier, planeCapacity, powered, startCart } from '../sim/econ';
+import { isChainStep } from '../sim/chain';
+import { gseForStart, hangarJobs, houseBlocker, isAog, orderCost, orderTier, planeCapacity, powered, startCart } from '../sim/econ';
 import { squawkable } from '../sim/engine';
 import type { Asset, Order, Role } from '../sim/types';
 import { GroundPowerCard } from './gse';
@@ -19,16 +20,17 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
   const turn = s.turns[role];
   const canWrite = s.week >= 1 && !turn?.ended && s.squawked?.[role] !== s.week;
   const pw = powered(s);
-  const gridCapped = role === 'mech' && pw.gridDown && (turn?.done ?? 0) >= 1;
+  // grid down: one hangar job a turn (the part chain's paperwork needs no hangar tools, so it never counts or waits)
+  const gridCapped = role === 'mech' && pw.gridDown && !!turn && hangarJobs(turn) >= 1;
   // a crewmate hasn't fixed what this seat reported: fewer jobs per turn
   const cap = capNow(s, role);
-  const capped = gridCapped || !!cap?.full;
+  const cappedFor = (o: Order) => !!cap?.full || (gridCapped && !isChainStep(o));
 
   // a repair, a redo or a crewmate's report opens its story first (why it exists), with a Start button;
   // a job on a plane opens its manual (the task card) first; a ground power start with no charged
   // cart hooked up opens its card first: it says what's missing
   const open = (o: Order) => {
-    if (o.status === 'ready' && !turn?.ended && !capped && !hasOrigin(o) && !hasManual(s, o) && !gseForStart(s, o).blocker) onPlay(o);
+    if (o.status === 'ready' && !turn?.ended && !cappedFor(o) && !hasOrigin(o) && !hasManual(s, o) && !gseForStart(s, o).blocker) onPlay(o);
     else setSel(o);
   };
 
@@ -103,7 +105,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
 
       {gridCapped && (
         <div class="card" style={{ borderLeft: '6px solid var(--rust)' }}>
-          <b class="fault">Grid down:</b> hangar tools offline, 1 order max this week.
+          <b class="fault">Grid down:</b> hangar tools offline, 1 hangar job max this week (the part chain's paperwork still goes through).
         </div>
       )}
       {cap && <CapNotice cap={cap} />}
@@ -114,7 +116,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
       </div>
       {orders.length === 0 && <div class="card muted">Queue clear. Nice.</div>}
       {orders.map((o) => (
-        <OrderCard key={o.id} s={s} o={o} onOpen={open} held={capped || !!turn?.ended} me={role} />
+        <OrderCard key={o.id} s={s} o={o} onOpen={open} held={cappedFor(o) || !!turn?.ended} me={role} />
       ))}
 
       <CoverSection ctl={ctl} role={role} onPlay={onPlay} />
@@ -156,7 +158,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                 </div>
               </>
             )}
-            {sel.status === 'ready' && (turn?.ended || capped) && (
+            {sel.status === 'ready' && (turn?.ended || cappedFor(sel)) && (
               <p class="muted" style={{ margin: 0 }}>
                 {turn?.ended ? 'Your turn is over; this carries to next week.' : gridCapped ? 'Hangar tools offline until the grid is back.' : cap?.text}
               </p>
@@ -173,7 +175,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                 <Icon name="bolt" size={18} /> Ground power carts ▸
               </Btn>
             )}
-            {sel.status === 'ready' && sel.role === role && !turn?.ended && !capped && !gseForStart(s, sel).blocker && (
+            {sel.status === 'ready' && sel.role === role && !turn?.ended && !cappedFor(sel) && !gseForStart(s, sel).blocker && (
               <Btn
                 block
                 onClick={() => {

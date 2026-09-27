@@ -1,6 +1,6 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
 import { CATALOG_BY_KIND, DEFECT, ECON, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
-import type { Asset, CableBand, GseCart, IslandState, Order, Role, Weather } from './types';
+import type { Asset, CableBand, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round10 = (v: number) => Math.round(v / 10) * 10;
@@ -134,6 +134,9 @@ export function orderCost(kind: string, tier: number) {
   return round10(c.cost * (1 + 0.2 * (tier - c.tier)));
 }
 
+/** Hangar jobs done this turn: the part chain's paperwork needs no hangar tools, so the grid-down cap doesn't count it. */
+export const hangarJobs = (t?: Pick<TurnState, 'done' | 'paper'>) => (t?.done ?? 0) - (t?.paper ?? 0);
+
 /** A pass (60%) signs off an inspection, same as the puzzles' PASS. */
 export const SIGNOFF = 0.6;
 
@@ -257,6 +260,22 @@ export function projectWeek(s: IslandState, rates = s.rates) {
   };
 }
 
+/**
+ * What a week with this plane down costs, as an analyst would put it on the
+ * card: the guests and charters it would have flown (the week's revenue with
+ * it flying, less without), or, for the cargo plane, the boat the kits wait for
+ * while it's down. `flights`: what it flies in a week when it's up.
+ */
+export function downtimeOf(s: IslandState, assetId: string): { flights: number; usd: number; cargo: boolean } {
+  const p = s.assets.find((a) => a.id === assetId);
+  if (!p) return { flights: 0, usd: 0, cargo: false };
+  const flights = planeCapacity({ ...p, health: Math.max(p.health, 60) }, s.tier, 'clear');
+  if (MODELS[p.model].cargo) return { flights, usd: s.parts.inTransit > 0 ? ECON.boatKit : 0, cargo: true };
+  const up = projectWeek({ ...s, chain: s.chain?.assetId === assetId ? null : s.chain, tags: { ...(s.tags ?? {}), [assetId]: undefined as never } }).revenue;
+  const down = projectWeek({ ...s, tags: { ...(s.tags ?? {}), [assetId]: 'mech' }, chain: s.chain }).revenue;
+  return { flights, usd: Math.max(0, up - down), cargo: false };
+}
+
 // ---------------------------------------------------------------------------
 // Ground power carts
 
@@ -285,21 +304,33 @@ export const cableReport = (s: IslandState, cartId: string) => openReports(s).fi
 /** The cart hooked up to this plane, if any. */
 export const cartOn = (s: IslandState, assetId: string | null) => (assetId ? gseCarts(s).find((c) => c.hookedTo === assetId) : undefined);
 
+/** The jobs that run off a ground power cart hooked up to the plane: a start, and the radio work (its ops check needs the bus powered). */
+export const needsCart = (kind: string) => kind === 'gpustart' || kind === 'avionics';
+
 /**
  * A ground power start needs a charged cart hooked up to that plane, with a
- * cable that isn't tagged out. `blocker` says what is missing (the card shows
- * it, and the engine refuses the start with it).
+ * cable that isn't tagged out; so does avionics work (the radio's ops check
+ * runs the bus on ground power, not on a battery that sags). `blocker` says
+ * what is missing (the card shows it, and the engine refuses the job with it).
  */
 export function gseForStart(s: IslandState, o: Pick<Order, 'kind' | 'assetId'>): { cart: GseCart | null; blocker: string | null } {
-  if (o.kind !== 'gpustart') return { cart: null, blocker: null };
+  if (!needsCart(o.kind)) return { cart: null, blocker: null };
   const plane = s.assets.find((a) => a.id === o.assetId)?.name ?? 'the plane';
+  const why = o.kind === 'avionics' ? ": the radio's ops check runs the bus on ground power" : '';
   const cart = cartOn(s, o.assetId) ?? null;
   if (!cart) {
     // the only charged cart may be sitting on another plane (one that's AOG for a part isn't going anywhere): say where
     const away = startCart(s, o.assetId);
     const at = away?.hookedTo ? s.assets.find((a) => a.id === away.hookedTo) : undefined;
     const down = at ? (isAog(s, at.id) ? ', AOG for a part' : isTagged(s, at.id) ? ', grounded this week' : '') : '';
-    return { cart, blocker: `Hook a charged cart up to ${plane} first${at ? `: ${away!.name} is on ${at.name}${down}` : ''}` };
+    // no cart could do it: a tagged-out one says who has it
+    const out = away ? undefined : gseCarts(s).map((c) => ({ c, rep: cableReport(s, c.id) })).find((x) => x.rep);
+    const note = at
+      ? `: ${away!.name} is on ${at.name}${down}`
+      : out
+        ? `: ${out.c.name} is tagged out until ${s.players[out.rep!.role]?.name ?? ROLE_LABEL[out.rep!.role]} fixes its cable`
+        : why;
+    return { cart, blocker: `Hook a charged cart up to ${plane} first${note}` };
   }
   const rep = cableReport(s, cart.id);
   if (rep) return { cart, blocker: `${cart.name} is tagged out until ${s.players[rep.role]?.name ?? ROLE_LABEL[rep.role]} fixes its cable: hook up another cart` };

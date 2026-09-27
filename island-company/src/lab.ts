@@ -7,8 +7,10 @@
 //   &isl=7  the island seed the plane (and its card) comes from
 //   &charge=25  the ground power cart's charge (%): a low cart sags under the start
 //   &job=boom / &job=van  the hydraulic bench's crewmate vehicles; &job=gpuCable (wire-up), hangar (meter), gpu (variance)
+//   p=gpu&asset=Float%20F-3  the start on the island's own plane (its placard; the amphibian on its float wheels)
+//   p=meter&job=altField|sgField|comPower&fault=unit|wiring  the part chain's circuit check on the airplane
 import type { PuzzleContext, PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
-import { aircraftOf, type Ata, type PlantVia } from './sim/aircraft';
+import { aircraftOf, externalPower, type Ata, type PlantVia } from './sim/aircraft';
 import { chainFind, manualCard } from './sim/chain';
 import { rng } from './sim/rng';
 import { fx } from './ui/feedback';
@@ -65,13 +67,17 @@ const model = asset.includes('cargo') ? 'cargo' : asset.includes('float') ? 'flo
 const plant = q.get('plant') as Ata | null;
 const ac = aircraftOf(Number(q.get('isl') ?? 7), model === 'twin' ? 'p1' : model === 'cargo' ? 'p2' : 'p3', model, plant ? { plant, via: (q.get('via') ?? 'stc') as PlantVia } : {});
 if (q.has('card')) context.card = manualCard(ac, job ?? (id === 'hydraulics' ? 'hydraulics' : 'tires'), id, tier <= 2);
+// a ground power start on the island's plane (&asset=Float%20F-3 or Cargo%20C-7): its own airframe and placard
+if (id === 'gpu' && q.has('asset')) context.plane = { name: context.assetName!, reg: ac.registration, designation: ac.designation, ...externalPower(ac) };
+// the part chain's circuit check (&job=altField|sgField|comPower): &fault=wiring|unit
+if (id === 'meter' && q.has('fault')) context.bench = { fault: q.get('fault') === 'wiring' ? 'wiring' : 'unit' };
 const chainStep = q.get('chain');
 if (chainStep === 'lookup' || chainStep === 'research') {
   const ata = (plant ?? ({ tires: '32-40', prop: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, Ata>)[job ?? 'tires'] ?? '32-40') as Ata;
   const f = chainFind(ac, ata, rng(seed));
   context.aircraft = ac;
   context.job = job ?? { '32-40': 'tires', '61-10': 'prop', '29-10': 'hydraulics', '23-10': 'avionics', '24-30': 'alternator' }[ata];
-  context.chain = { step: chainStep, tag: q.get('tag') ?? f.tag, item: f.item, found: f.found };
+  context.chain = { step: chainStep, tag: q.get('tag') ?? f.tag, item: f.item, found: f.found, from: { tires: 'Replace main tires', prop: 'Re-torque the prop bolts', hydraulics: 'Brake hydraulic service', avionics: 'Swap the com radio', alternator: 'Alternator belt and brushes' }[context.job ?? 'tires'] ?? 'Replace main tires', by: 'Seb', week: 8 };
 }
 
 const inst = def.mount(
@@ -88,7 +94,7 @@ const inst = def.mount(
   { seed, tier, tools, reducedMotion: false, context, blind },
 );
 
-const total = def.seconds(tier) * 1000;
+const total = def.seconds(tier, context) * 1000;
 const t0 = performance.now();
 const bar = document.getElementById('bar')!;
 if (tier > 0 && !q.has('notimer')) {

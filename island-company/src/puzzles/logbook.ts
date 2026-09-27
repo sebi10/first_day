@@ -152,7 +152,8 @@ export const FIELD_LABEL: Record<FieldId, string> = {
   date: 'Form 337 date',
 };
 
-export type LbJob = { wo: string; title: string; squawk: string };
+/** `from` (the part chain): the job that found it, who and when, and what the IPC lookup said */
+export type LbJob = { wo: string; title: string; squawk: string; from?: string };
 
 /** one logbook as the shop keeps it: the airframe's, and one per engine and per propeller */
 export type LbBook = { key: string; book: LogBook; pos?: Pos; name: string; entries: LogEntry[] };
@@ -264,8 +265,8 @@ type JobText = {
   check: string;
 };
 
-/** work order text, the work statements (imperative for the WO, past tense for the entry) */
-function jobText(model: PlaneModel, tag: string, insp: string): JobText {
+/** work order text, the work statements (imperative for the WO, past tense for the entry); `side`: a twin's engine-side job */
+function jobText(model: PlaneModel, tag: string, insp: string, side: Pos = 'LH'): JobText {
   const twin = model === 'twin';
   switch (tag) {
     case 'lining':
@@ -298,7 +299,7 @@ function jobText(model: PlaneModel, tag: string, insp: string): JobText {
     case 'propBolt':
       return {
         title: 'Propeller mounting bolts',
-        squawk: `Propeller off for spinner bulkhead repair${twin ? ' (LH)' : ''}. Two mounting bolts with galled threads. New bolt set at reinstallation.`,
+        squawk: `Propeller off for spinner bulkhead repair${twin ? ` (${side})` : ''}. Two mounting bolts with galled threads. New bolt set at reinstallation.`,
         work: [
           'Replace propeller mounting bolts (full set) at reinstallation',
           'Replace the propeller assembly',
@@ -314,11 +315,11 @@ function jobText(model: PlaneModel, tag: string, insp: string): JobText {
           'The work order calls for a new set: galling on two bolts makes the set suspect.',
         ],
         past: [
-          (pn) => `Replaced ${twin ? 'LH ' : ''}propeller mounting bolts (full set; two galled) with P/N ${pn} at reinstallation`,
-          (pn) => `Replaced the ${twin ? 'LH ' : ''}propeller assembly, P/N ${pn}`,
+          (pn) => `Replaced ${twin ? `${side} ` : ''}propeller mounting bolts (full set; two galled) with P/N ${pn} at reinstallation`,
+          (pn) => `Replaced the ${twin ? `${side} ` : ''}propeller assembly, P/N ${pn}`,
           (pn) => `Installed four-blade propeller conversion, P/N ${pn}`,
-          (pn) => `Chased the threads and reused the ${twin ? 'LH ' : ''}propeller mounting bolts, P/N ${pn}`,
-          (pn) => `Replaced the two galled ${twin ? 'LH ' : ''}propeller mounting bolts with P/N ${pn}`,
+          (pn) => `Chased the threads and reused the ${twin ? `${side} ` : ''}propeller mounting bolts, P/N ${pn}`,
+          (pn) => `Replaced the two galled ${twin ? `${side} ` : ''}propeller mounting bolts with P/N ${pn}`,
         ],
         check: 'Bolts torqued in 3 stages and safety wired; track within limits, ground run normal.',
       };
@@ -406,12 +407,12 @@ function jobText(model: PlaneModel, tag: string, insp: string): JobText {
     default: {
       const sg = model === 'cargo';
       const unit = sg ? 'starter-generator' : 'alternator';
-      const who = twin ? 'LH alternator' : sg ? 'starter-generator' : 'alternator';
+      const who = twin ? `${side} alternator` : sg ? 'starter-generator' : 'alternator';
       return {
         title: sg ? 'Starter-generator' : 'Alternator',
-        squawk: `${twin ? 'LH alternator' : sg ? 'Starter-generator' : 'Alternator'} no output on the ground run. Replace with an exchange unit.`,
+        squawk: `${twin ? `${side} alternator` : sg ? 'Starter-generator' : 'Alternator'} no output on the ground run. Replace with an exchange unit.`,
         work: [
-          `Replace ${twin ? 'LH ' : ''}${unit} with exchange unit (no output)`,
+          `Replace ${twin ? `${side} ` : ''}${unit} with exchange unit (no output)`,
           `Install ${unit} conversion`,
           sg ? 'Replace the generator control unit' : 'Replace the voltage regulator',
           'Replace the drive belt only',
@@ -585,11 +586,22 @@ export function generateLogbook(seed: number, tier: number, _tools: string[] = [
   const rows = ipc.rows.filter((x) => x.tag === tag);
   const ipcRow = rowFor(ipc, tag)!;
   const insp = model === 'cargo' ? 'phase inspection' : '100-hour';
-  const jt = jobText(model, tag, insp);
+  // the part chain: the work order is the finding of the job that found it (its words, its side), and says who and where
+  const chain = context?.chain?.step === 'research' ? context.chain : undefined;
+  const side: Pos | undefined = chain?.found.startsWith('R/H') ? 'RH' : chain?.found.startsWith('L/H') ? 'LH' : undefined;
+  const jt = jobText(model, tag, insp, side);
   const woNo = `WO ${ac.asOf.slice(2, 4)}-${String(r.int(120, 980)).padStart(4, '0')}`;
-  const job: LbJob = { wo: woNo, title: jt.title, squawk: jt.squawk };
-  // a twin's propeller and alternator jobs are on the LH side (the work order says so)
-  const jobPos: Pos | undefined = model === 'twin' && bookFor(ata) !== 'airframe' ? 'LH' : undefined;
+  const finding = chain?.found.replace(/\s*On the airplane:.*$/, '').trim();
+  const job: LbJob = {
+    wo: woNo,
+    title: jt.title,
+    squawk: finding || jt.squawk,
+    ...(chain
+      ? { from: `Found${chain.from ? ` on “${chain.from}”` : ''}${chain.by ? ` by ${chain.by}` : ''}${chain.week ? `, week ${chain.week}` : ''}. IPC lookup: not in the IPC.` }
+      : {}),
+  };
+  // a twin's propeller and alternator jobs are on one side: the chain's, else LH (the work order says so)
+  const jobPos: Pos | undefined = model === 'twin' && bookFor(ata) !== 'airframe' ? (side ?? 'LH') : undefined;
 
   // what came off the airplane, what the answer entry is, and what else points at it
   let found = ipcRow.pn;
@@ -1259,6 +1271,7 @@ function css(): string {
 .lb-wo{padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .lb-wo h2{margin:0;font-size:21px;line-height:1.15}
 .lb-sq{font-style:italic;font-weight:600;color:#253d6e;font-size:15px;line-height:1.35}
+.lb-from{margin-top:6px;font-size:12.5px;color:#5b6475;line-height:1.35}
 .lb-path{display:flex;flex-direction:column;gap:8px;padding:12px 14px}
 .lb-pi{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start;font-size:14px;line-height:1.35}
 .lb-pi i{font-style:normal;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:14px;background:rgba(31,42,48,.08)}
@@ -1545,7 +1558,13 @@ export const logbook: PuzzleDef = {
     intro.className = 'lb-scr lb-intro';
     main.appendChild(intro);
     // tiers 0–2 say what the IPC shows; from tier 3 the mechanic has the part in hand, the stores slip, and the figure
-    const ipcLine = bare
+    // the part chain: nothing came from stores; the IPC lookup sent it here (tiers 3+: check the figure yourself)
+    const chained = !!p.context?.chain;
+    const ipcLine = chained
+      ? bare
+        ? `Sent here from the IPC lookup as “not in the IPC”. On the airplane: <span class="lb-pn">${esc(m.found)}</span>${m.kase === 'pma' ? ', marked FAA-PMA' : ''}. Check Fig ${m.ipc.fig}, then: what do the records say?`
+        : `Sent here from the IPC lookup as “not in the IPC”. Fig ${m.ipc.fig} lists <span class="lb-pn">${esc(m.ipcRow.pn)}</span> (item ${esc(m.ipcRow.item)}). On the airplane: <span class="lb-pn">${esc(m.found)}</span>${m.kase === 'pma' ? ', marked FAA-PMA' : ''}. What do the records say?`
+      : bare
       ? `The part that came off is stamped <span class="lb-pn">${esc(m.found)}</span>. Stores pulled <span class="lb-pn">${esc(m.stores)}</span> per Fig ${m.ipc.fig}. Check the figure before it goes on.`
       : oem
         ? `Sent here from the IPC lookup as “not in the IPC”. Fig ${m.ipc.fig} lists <span class="lb-pn">${esc(m.ipcRow.pn)}</span> (item ${esc(m.ipcRow.item)}). On the airplane: <span class="lb-pn">${esc(m.found)}</span>. What do the records say?`
@@ -1556,7 +1575,7 @@ export const logbook: PuzzleDef = {
 <div class="lb-card lb-wo">
   <div class="lb-lbl">${esc(m.job.wo)} · ${esc(ac.registration)} · ${esc(ac.designation)}</div>
   <h2>${esc(m.job.title)}</h2>
-  <div class="lb-sq">“${esc(m.job.squawk)}”</div>
+  <div class="lb-sq">“${esc(m.job.squawk)}”</div>${m.job.from ? `\n  <div class="lb-from">${esc(m.job.from)}</div>` : ''}
 </div>
 <div class="lb-card lb-path">
   <div class="lb-pi"><i class="ok">✓</i><div><b>Manual.</b> ${esc(m.task.ref.replace('IAW ', ''))}: ${esc(m.task.title)}. <span style="color:${C.inkSoft}">“${esc(m.task.notes[1])}”</span></div></div>
@@ -1595,7 +1614,9 @@ export const logbook: PuzzleDef = {
     if (m.teach.hint) wrap.appendChild(note);
     logs.append(books, clue, wrap);
     clue.innerHTML =
-      bare || sbLike
+      chained
+        ? `<span>On the airplane: <span class="lb-pn">${esc(m.found)}</span> · IPC lookup: not in the IPC · Fig ${m.ipc.fig} ▸</span>`
+        : bare || sbLike
         ? `<span>Removed: <span class="lb-pn">${esc(m.found)}</span> · stores: <span class="lb-pn">${esc(m.stores)}</span> · Fig ${m.ipc.fig} ▸</span>`
         : `<span>On the airplane: <span class="lb-pn">${esc(m.found)}</span> · IPC Fig ${m.ipc.fig}: <span class="lb-pn">${esc(m.ipcRow.pn)}</span> ▸</span>`;
     clue.addEventListener('click', () => {

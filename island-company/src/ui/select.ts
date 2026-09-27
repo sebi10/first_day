@@ -1,9 +1,10 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
 import type { PuzzleId } from '../puzzles/types';
-import { chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
-import { ECON, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
+import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
+import { externalPower } from '../sim/aircraft';
+import { CABLE_REPORT, ECON, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
-import { cartOn, flightsAvailable, flightsPerPlane, gseCarts, houses, housesRentable, isBlind, isRework, launchTier, openReports, planes, powered, reportCap } from '../sim/econ';
+import { cartOn, flightsAvailable, flightsPerPlane, gseCarts, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap } from '../sim/econ';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
 import { ROLES, type Action, type IslandState, type Order, type Role } from '../sim/types';
@@ -50,14 +51,19 @@ export function crossMoves(s: IslandState): CrossMove[] {
   const out: CrossMove[] = [];
   const ch = openChain(s);
   if (ch) {
-    const m = chainMove(s, ch);
     const asset = s.assets.find((a) => a.id === ch.assetId);
-    const waits: Role | null = m.who === 'fin' ? 'mech' : m.who === 'mech' ? 'fin' : null;
     // "look up the brake linings in the IPC (Cargo C-7 is AOG)", "approve the part (066-22500, $310; Cargo C-7 is AOG)"
     const aog = `${asset?.name ?? 'a plane'} is AOG`;
-    const text = m.text.endsWith(')') ? `${m.text.slice(0, -1)}; ${aog})` : `${m.text} (${aog})`;
-    if (m.who && waits && s.players[m.who] && s.players[waits])
-      out.push({ key: `chain:${ch.id}:${ch.step}:${ch.stepId ?? ''}`, kind: 'chain', who: m.who, waits, text, what: `${asset?.name ?? 'A plane'} AOG: ${ch.item}`, short: m.short });
+    const add = (m: ReturnType<typeof chainMove>, key: string) => {
+      // the analyst waits on the mechanic's paperwork (nothing to buy yet); the mechanic on the analyst and on the electrician's check
+      const waits: Role | null = m.who === 'fin' ? 'mech' : m.who === 'mech' ? 'fin' : m.who === 'elec' ? 'mech' : null;
+      const text = m.text.endsWith(')') ? `${m.text.slice(0, -1)}; ${aog})` : `${m.text} (${aog})`;
+      if (m.who && waits && s.players[m.who] && s.players[waits]) out.push({ key, kind: 'chain', who: m.who, waits, text, what: `${asset?.name ?? 'A plane'} AOG: ${ch.item}`, short: m.short });
+    };
+    add(chainMove(s, ch), `chain:${ch.id}:${ch.step}:${ch.stepId ?? ''}`);
+    // the electrician's check on an electrical unit runs beside the lookup and the research
+    const b = benchMove(s, ch);
+    if (b) add(b, `chain:${ch.id}:bench:${ch.bench!.id}`);
   }
   for (const o of openReports(s)) {
     const rep = o.report!;
@@ -109,6 +115,12 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
     const who = m.who ? name(m.who) : null;
     push(`${after.name}: ${plane} AOG`, who ? `${plane} is grounded for ${ca.item}. ${who}, your move: ${m.text}.` : `${plane} is grounded for ${ca.item}: ${m.text}.`);
   } else if (cb && !ca && after.chain?.step === 'done' && after.chain.story) push(`${after.name}: back in service`, after.chain.story);
+  // the electrician's check came up beside it (a new chain on an electrical unit, or the new unit made no difference)
+  const ba = ca ? benchMove(after, ca) : null;
+  if (ca && ba && (!cb || cb.id !== ca.id || !benchMove(before, cb))) {
+    const plane = after.assets.find((x) => x.id === ca.assetId)?.name ?? 'A plane';
+    push(`${after.name}: ${plane} AOG`, `${plane} is grounded for ${ca.item}. ${name('elec')}, your move: ${ba.text}`);
+  }
   if (a.t === 'endTurn') {
     const waiting = ROLES.filter((r) => !after.turns[r]?.ended).map(name);
     if (waiting.length) push(after.name, `${name(a.role)} ended their turn. Waiting on ${waiting.join(' and ')}.`);
@@ -127,6 +139,8 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
 
 /** "the hangar work lights are dead": what the reporter said, for mid-sentence use */
 export function reportSaid(o: Order) {
+  // a cart's cable: in the words of what's wrong with it (cracked insulation, or burnt contacts)
+  if (o.report?.key === 'gpuCable' && o.report.band) return CABLE_REPORT[o.report.band].said;
   const def = o.report ? REPORT_BY_KEY[o.report.key] : undefined;
   return def?.said ?? o.title.replace(/ \(again\)$/, '');
 }
@@ -202,22 +216,36 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   if (o.puzzle === 'forecast') Object.assign(context, forecastContext(s));
   // paperwork on a plane: the island's own airplane (twin / cargo / float), its records as they are
   if (asset?.kind === 'plane' && READS_AIRCRAFT.has(o.puzzle)) context.aircraft = islandAircraft(s.seed, asset);
-  // the part chain's lookup and research: this part, as the job found it
+  // the part chain's lookup and research: this part, as the job found it (and which job, who, when)
   const ch = openChain(s);
   if (ch && o.chain && o.chain.id === ch.id && (o.chain.step === 'lookup' || o.chain.step === 'research'))
-    context.chain = { step: o.chain.step, tag: ch.tag, item: ch.item, found: ch.found ?? '' };
+    context.chain = { step: o.chain.step, tag: ch.tag, item: ch.item, found: ch.found ?? '', from: ch.title, by: ch.by, week: ch.week };
+  // the chain's circuit check on the airplane: what is really wrong (the meter's readings follow it)
+  if (ch && o.chain && o.chain.id === ch.id && o.chain.step === 'bench' && ch.bench) context.bench = { fault: ch.bench.again ? 'wiring' : ch.bench.fault };
   // the manual: torque and servicing values come from the plane's own task card (marked while the game teaches)
   if (asset?.kind === 'plane' && o.role === 'mech' && CARD_DRIVEN.has(o.puzzle)) {
     const card = manualCard(islandAircraft(s.seed, asset), o.job ?? o.kind, o.puzzle, tier <= 2);
     if (card) context.card = card;
   }
-  // a ground power start runs off the cart hooked up to that plane, as charged as it is
+  // a ground power start runs off the cart hooked up to that plane, as charged as it is, on that
+  // plane's own airframe and placard (the cargo single is the turbine; the amphibian sits on its floats)
   const cart = o.puzzle === 'gpu' ? cartOn(s, o.assetId) : undefined;
   if (cart) context.cart = { name: cart.name, charge: cart.charge };
+  if (o.puzzle === 'gpu' && asset?.kind === 'plane') {
+    const ac = islandAircraft(s.seed, asset);
+    const ep = externalPower(ac);
+    context.job = ep.turbine ? 'gpuTurbine' : 'gpuPiston';
+    context.plane = { name: asset.name, reg: ac.registration, designation: ac.designation, turbine: ep.turbine, floats: ep.floats, ampMax: ep.ampMax, wing: ep.wing, battery: ep.battery };
+  }
+  // a start (or radio work) leaves its cart on the plane, off the charger: say so on the result
+  const hooked = needsCart(o.kind) && asset ? cartOn(s, asset.id) : undefined;
+  const drain = o.kind === 'gpustart' ? (asset?.model === 'cargo' ? GSE.drain.turbine : GSE.drain.piston) : GSE.avionicsDrain;
+  const after = hooked && asset && !assist ? `${hooked.name} is still on ${asset.name} (${Math.round(Math.max(0, hooked.charge - drain))}%): plug it back in on the charger.` : undefined;
   return {
     puzzle: o.puzzle,
     seed: hashSeed(o.seed, role),
     tier,
+    ...(after ? { after } : {}),
     tools: p && !assist ? toolsFor(role, p.xp) : [],
     title: assist ? `Lending a hand · ${o.title}` : o.title,
     expert: assist,
@@ -238,7 +266,9 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
               ? 'What you ordered shows when it arrives; a part sent for research, when engineering answers.'
               : o.chain?.step === 'research'
                 ? 'Engineering answers when the week resolves (after the analyst approves the review fee).'
-                : asset
+                : o.chain?.step === 'bench'
+                  ? 'Your call shows when the plane runs: a unit bought that makes no difference, or one left in service that still doesn’t work.'
+                  : asset
             ? `How good it was shows up later: in ${asset.name}'s health, an inspection, or an incident.`
             : o.report
               ? `How good it was shows up later: if the fix doesn't hold, ${reporter} will be back.`
@@ -252,6 +282,7 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
 
 /** How each trade closes a job: an A&P's logbook entry, an electrician's work order, the analyst's file. */
 function signoffWords(o: Order, role: Role): { header: string; stamp: string } {
+  if (o.chain?.step === 'bench') return { header: 'Circuit check', stamp: 'Handed in' };
   if (role === 'fin') return { header: 'Filed', stamp: o.report ? 'Corrected' : 'Posted' };
   if (role === 'elec') return { header: 'Work order closed', stamp: o.kind === 'codeprep' ? 'Ready for inspection' : 'Work complete' };
   const kind = o.repair?.defect.job ?? o.kind;

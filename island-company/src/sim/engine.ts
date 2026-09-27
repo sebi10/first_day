@@ -6,6 +6,7 @@ import {
   CATALOG_BY_KIND,
   CHAIN,
   CABLE_BAND,
+  CABLE_REPORT,
   DEFECT,
   defectRule,
   defectVariant,
@@ -30,7 +31,6 @@ import {
   cableBand,
   cableReport,
   capOf,
-  cartOn,
   charterLoad,
   clamp,
   isAog,
@@ -49,6 +49,9 @@ import {
   grid,
   gseCarts,
   gseForStart,
+  downtimeOf,
+  hangarJobs,
+  needsCart,
   startCart,
   houseBlocker,
   houseRentable,
@@ -68,16 +71,24 @@ import {
 } from './econ';
 import { levelOf, orderXp, tierUnlocked } from './progression';
 import {
+  BENCH_TAGS,
+  benchJob,
   chainAtaOf,
   chainFind,
+  chainMove,
   engineeringFee,
+  isAre,
+  isChainStep,
   islandAircraft,
   judgePart,
+  needsFreight,
   nomenOf,
   openChain,
   partPrice,
   plantedOn,
+  plantFor,
   restockFee,
+  rightPn,
 } from './chain';
 import type { Ata } from './aircraft';
 import { hashSeed, rng, type Rng } from './rng';
@@ -86,6 +97,7 @@ import {
   ROLES,
   type Action,
   type Asset,
+  type CableBand,
   type Defect,
   type FeedEvent,
   type GseCart,
@@ -98,10 +110,20 @@ import {
   type Player,
   type ReportLine,
   type Role,
+  type TurnState,
   type WeekReport,
 } from './types';
 
 export type ApplyResult = { s: IslandState; error?: string };
+
+/**
+ * The engine version this build writes. An island a newer build has written is
+ * never written by an older one (it would drop or undo what it doesn't know
+ * about): apply() refuses and asks for a reload. Bump it with any change to
+ * what the island doc means; firestore.rules keeps builds from before this
+ * existed out (they write v:1).
+ */
+export const ENGINE_VERSION = 2;
 
 const OPS: OpsRole[] = ['mech', 'elec'];
 
@@ -315,12 +337,25 @@ export function canResolve(s: IslandState, now: number) {
 // Reducer
 
 export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
+  const fail = (error: string): ApplyResult => ({ s: prev, error });
+  // written by a newer build: this one would lose what it doesn't know about
+  if ((prev.engine ?? 0) > ENGINE_VERSION) return fail('This island was saved by a newer version of Island Company. Reload the app to keep playing.');
   const s = structuredClone(prev);
   s.updatedAt = now;
-  const fail = (error: string): ApplyResult => ({ s: prev, error });
+  s.engine = ENGINE_VERSION;
+  // an older build (or a second device) may have cancelled a chain step's order or moved its job: put back what's missing
+  const chain = openChain(s);
+  if (chain) healChain(s, chain, now);
   // a move made in an earlier week (queued offline, or a puzzle still open at the deadline)
-  if (a.t !== 'resolve' && 'week' in a && typeof a.week === 'number' && a.week !== s.week)
+  if (a.t !== 'resolve' && 'week' in a && typeof a.week === 'number' && a.week !== s.week) {
+    // the part chain's paperwork and checks wait for a person: they are still open in the new week
+    const o = a.t === 'complete' ? s.orders.find((x) => x.id === a.orderId) : undefined;
+    if (o && isChainStep(o) && o.status === 'ready') {
+      const what = o.chain!.step === 'lookup' ? 'IPC lookup' : o.chain!.step === 'research' ? 'logbook research' : 'circuit check';
+      return fail(`Week ${a.week} closed before that synced. The ${what} is still waiting in week ${s.week} (autopilot doesn't do it): hand it in again.`);
+    }
     return fail(`Week ${a.week} closed before that synced; autopilot covered what was left. You're in week ${s.week} now.`);
+  }
 
   switch (a.t) {
     case 'join': {
@@ -379,13 +414,15 @@ export function apply(prev: IslandState, a: Action, now: number): ApplyResult {
       const o = s.orders.find((x) => x.id === a.orderId);
       if (!o || o.status !== 'pending') return fail('That card is no longer waiting.');
       const urgent = isEmergency(s, o);
+      // a part chain's part: the AOG boat goes on the PO when it takes one
+      const cost = chainCardCost(s, o, a.ship);
       if (s.cash < ECON.freezeBelow && !urgent) return fail(`Cash under ${usd(ECON.freezeBelow)}: only safety-critical work can be approved.`);
-      if (s.cash - o.cost < 0) return fail('Not enough cash.');
+      if (s.cash - cost < 0) return fail('Not enough cash.');
       if (s.receivership > 0 && o.cost > 800 && !urgent) return fail('Receivership: the receiver blocks spend over $800 except safety-critical work.');
       markApproved(s, o, false);
       gainXp(s, 'fin', 10);
-      feed(s, 'fin', 'good', `Approved ${o.title} (${usd(o.cost)}).`, now);
-      chainApproved(s, o, now);
+      feed(s, 'fin', 'good', `Approved ${o.title} (${cost === o.cost ? usd(o.cost) : `${usd(o.cost)} + ${usd(cost - o.cost)} AOG boat`}).`, now);
+      chainApproved(s, o, now, a.ship);
       return { s };
     }
     case 'defer': {
@@ -609,16 +646,25 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   const fail = (error: string): ApplyResult => ({ s: prev, error });
   if (s.week < 1) return fail('The week has not started yet.');
   const o = s.orders.find((x) => x.id === a.orderId);
+  // a job the part chain holds says what it waits on
+  const holds = o?.status === 'waiting_part' && o.chain?.step === 'job' ? chainOf(s, o) : null;
+  if (holds) return fail(`Waiting on the part chain: ${chainMove(s, holds).text}.`);
   if (!o || o.status !== 'ready') return fail('That order is not ready.');
   const turn = (s.turns[a.role] ??= { ended: false, endedAt: null, done: 0 });
   if (turn.ended) return fail('Your turn is over for this week.');
   const player = s.players[a.role];
   if (!player) return fail('Join first.');
-  // a ground power start needs a charged cart hooked up to that plane (lending a hand too: it's the same cart)
+  // a ground power start (and avionics work: the radio's ops check) needs a charged cart hooked up
+  // to that plane (lending a hand too: it's the same cart)
   const gpu = gseForStart(s, o);
   if (gpu.blocker) return fail(`${gpu.blocker}.`);
   // the start happened whatever came of it: the cart gave up its charge and its cable some wear
-  const cableBefore = gpu.cart ? useCart(s, gpu.cart, o, a.data) : 0;
+  const cableBefore = gpu.cart && o.kind === 'gpustart' ? useCart(s, gpu.cart, o, a.data) : 0;
+  // the radio work ran the bus off the cart: a little charge, and a plug-in's worth of wear
+  if (gpu.cart && o.kind !== 'gpustart') {
+    gpu.cart.charge = Math.max(0, gpu.cart.charge - GSE.avionicsDrain);
+    gpu.cart.wear = Math.min(100, gpu.cart.wear + GSE.busWear);
+  }
 
   // Lend a hand: anyone may try another trade's job once a week, at expert
   // difficulty. Real trade knowledge is the gate: no tools come with you, and
@@ -636,7 +682,8 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     player.covers += 1;
     covered = true;
     if (a.score < 0.6) {
-      const asset = assetOf(s, o);
+      // the chain's paperwork and the electrician's check are done on paper or with a meter: a botch damages nothing
+      const asset = isChainStep(o) ? undefined : assetOf(s, o);
       if (asset) {
         asset.health = clamp(asset.health - 6, 0, 100);
         asset.touchedWeek = s.week;
@@ -646,7 +693,8 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
       return { s };
     }
   }
-  if (a.role === 'mech' && !covered && powered(s).gridDown && turn.done >= 1)
+  // the grid is down: hangar tools offline, one hangar job (the part chain's paperwork needs no tools)
+  if (a.role === 'mech' && !covered && powered(s).gridDown && hangarJobs(turn) >= 1 && !isChainStep(o))
     return fail('Grid down: hangar tools offline, 1 order max.');
   // a crewmate's unfixed problem slows this seat down (the hangar lights are out)
   const cap = covered ? null : reportCap(s, a.role);
@@ -680,8 +728,16 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     return { s };
   }
   // the part is here and on: this is the job itself, under its own title again
-  const installing = !!o.chain && o.chain.step === 'job' && s.chain?.id === o.chain.id;
-  if (installing) o.title = s.chain!.title;
+  const chain = o.chain?.step === 'job' ? chainOf(s, o) : null;
+  // (a job the chain still holds is never finished early: an older build could have made it 'ready')
+  if (chain && chain.step !== 'install') return fail(`Waiting on the part chain: ${chainMove(s, chain).text}.`);
+  const installing = !!chain;
+  // the electrician called the unit, but the fault is in the wiring: the new one makes no difference
+  if (chain && chain.bench?.fault === 'wiring' && chain.bench.call === 'unit' && !chain.wired) {
+    missedWiring(s, chain, o, player.name, turn, now);
+    return { s };
+  }
+  if (installing) o.title = chain!.title;
 
   const cr = covered ? credit(a.score, 0) : credit(a.score, player.perfects);
   // Blind: a fixed stand-in lands now (health, XP), the same whatever the score.
@@ -748,16 +804,8 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   // hidden consequences: a passed inspection finds what an earlier job left; this job may leave something
   if (asset && INSPECTS[o.kind] && a.score >= DEFECT.detectAt) detectDefects(s, o, asset, player.name, now);
   if (defectable(o)) rollDefect(s, o, a.role, player.name, a.score, defectVariant(o.puzzle, a.data));
-  // a start through pitted plug pins can arc into the plane's receptacle, however well it was done
-  if (gpu.cart && asset) cableArc(s, o, asset, a.role, player.name, cableBefore);
-  // avionics work on ground power: the radio is checked on a steady bus, not a sagging battery
-  if (o.kind === 'avionics' && asset && !covered) {
-    const c = cartOn(s, asset.id);
-    if (c && c.charge >= GSE.minStart && !cableReport(s, c.id)) {
-      asset.health = clamp(asset.health + GSE.avionicsBonus, 0, 100);
-      c.charge = Math.max(0, c.charge - GSE.avionicsDrain);
-    }
-  }
+  // a start through pitted plug contacts can arc into the plane's receptacle, however well it was done
+  if (gpu.cart && asset && o.kind === 'gpustart') cableArc(s, o, asset, a.role, player.name, cableBefore);
   if (o.repair) spawnRedo(s, o, now);
   if (installing) closeChain(s, o, player.name, now);
   return { s };
@@ -805,7 +853,7 @@ function gseMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'gse
       const other = carts.find((x) => x.id !== c.id && x.hookedTo === p.id);
       if (other) return fail(`${other.name} is already hooked up to ${p.name}.`);
       const rep = cableReport(s, c.id);
-      if (rep) return fail(`${c.name} is tagged out: its cable is cracked at the plug. ${s.players[rep.role]?.name ?? ROLE_LABEL[rep.role]} has to fix it first.`);
+      if (rep) return fail(`${c.name} is tagged out: ${CABLE_REPORT[rep.report?.band ?? 'cracked'].tag}. ${s.players[rep.role]?.name ?? ROLE_LABEL[rep.role]} has to fix it first.`);
       // off the charger (you can't tow it plugged in), and onto the plane's external power receptacle
       const was = c.charging ? ' off the charger' : c.hookedTo ? ` from ${planeOf(c.hookedTo)?.name ?? 'the other plane'}` : '';
       c.charging = false;
@@ -821,12 +869,28 @@ function gseMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'gse
       return { s };
     }
     case 'inspect': {
-      if (c.inspected?.week === s.week && !c.inspected.fixed) return fail(`${c.name}'s cable was already inspected this week.`);
+      // once a week; and a cable re-terminated this week is left to settle (the next week's look is what counts)
+      if (c.inspected?.week === s.week)
+        return fail(c.inspected.fixed ? `${c.name}'s cable was re-terminated this week: look it over next week.` : `${c.name}'s cable was already inspected this week.`);
+      if (cableReport(s, c.id)) return fail(`${c.name} is already tagged out for its cable.`);
       const band = cableBand(c.wear);
+      // the mechanic's call on the plug end (serviceable, or tag it out); without one, the band as it is
+      const call = a.call ?? (band === 'good' ? 'ok' : 'tag');
+      if (call === 'ok') {
+        // called serviceable: it stays in service as it is (a worn one wears on, and a start through
+        // pitted contacts can arc into a plane's receptacle later)
+        c.inspected = { week: s.week, band: 'good', by: who };
+        feed(s, 'mech', 'info', `${who} inspected ${c.name}'s cable and plug: serviceable.`, now);
+        return { s };
+      }
       c.inspected = { week: s.week, band, by: who };
-      feed(s, 'mech', band === 'good' ? 'info' : 'bad', `${who} inspected ${c.name}'s cable: ${CABLE_BAND[band]}.`, now);
-      // a cracked cable is tagged out and written up for the electrician on the spot
-      if (band !== 'good' && !cableReport(s, c.id)) openCableReport(s, c, now);
+      feed(s, 'mech', 'bad', `${who} tagged ${c.name} out at the inspection: ${band === 'good' ? CABLE_REPORT.good.said.replace(/^the GPU cart /, 'its ') : CABLE_BAND[band]}.`, now);
+      // a fix that is about to come back is the same trouble: it comes back now, found at the inspection
+      const pending = (s.defects ?? []).find((d) => d.report?.key === 'gpuCable' && d.report.cart === c.id);
+      if (pending) {
+        s.defects = s.defects!.filter((d) => d !== pending);
+        openCableReport(s, c, now, band, pending.week);
+      } else openCableReport(s, c, now, band);
       return { s };
     }
   }
@@ -835,14 +899,15 @@ function gseMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'gse
 /**
  * A start on a cart: it gives up charge (a turbine takes more), and its cable
  * some wear (more if the plug went in or came out live). Returns the wear it
- * had before. The puzzle says which airframe it started (`data.ac`); without
- * that (autopilot, the paper sim) the order's tier does, as in the puzzle.
+ * had before. The plane decides the airframe: the cargo single is the turbine,
+ * the others are pistons (the puzzle draws the same one).
  */
-function useCart(_s: IslandState, c: GseCart, o: Order, data?: Record<string, unknown>) {
+function useCart(s: IslandState, c: GseCart, o: Order, data?: Record<string, unknown>) {
   const before = c.wear;
   const errors = Array.isArray(data?.errors) ? (data!.errors as unknown[]) : [];
   const arced = data?.defect === 'arc' || errors.includes('arcIn') || errors.includes('arcOut');
-  const turbine = typeof data?.ac === 'string' ? data.ac === 'turbine' : o.tier >= 4;
+  const model = s.assets.find((a) => a.id === o.assetId)?.model;
+  const turbine = model ? model === 'cargo' : data?.ac === 'turbine';
   c.charge = Math.max(0, c.charge - (turbine ? GSE.drain.turbine : GSE.drain.piston));
   c.wear = Math.min(100, c.wear + GSE.wear + (arced ? GSE.arcWear : 0));
   return before;
@@ -884,11 +949,11 @@ function cableArc(s: IslandState, o: Order, asset: Asset, by: Role, name: string
   });
 }
 
-/** The electrician's card for a cart's cracked cable: the cart is tagged out until it's fixed. */
-function openCableReport(s: IslandState, c: GseCart, now: number, again?: number) {
+/** The electrician's card for a cart's worn cable (cracked insulation, or pitted contacts): the cart is tagged out until it's fixed. */
+function openCableReport(s: IslandState, c: GseCart, now: number, band: CableBand, again?: number) {
   const def = REPORT_BY_KEY.gpuCable;
   if (!def) return;
-  openReport(s, def, now, again, c.id);
+  openReport(s, def, now, again, c.id, band);
 }
 
 /** Resolve: carts on the charger charge if the hangar has power (a small electricity bill); the rest self-discharge. */
@@ -1094,7 +1159,8 @@ const blindXpFloor = (tier: number) => orderXp(tier, workCredit(0), false);
 export function chainWouldOpen(s: IslandState, o: Order, role: Role): boolean {
   if (s.week < CHAIN.fromWeek || s.tier < CHAIN.minTier) return false;
   if (o.role !== 'mech' || role !== 'mech' || o.chain || o.repair || o.redo || o.report || o.kind === 'project') return false;
-  if (!chainAtaOf(o.kind)) return false;
+  const ata = chainAtaOf(o.kind);
+  if (!ata) return false;
   const asset = s.assets.find((a) => a.id === o.assetId);
   if (asset?.kind !== 'plane') return false;
   // the island's only guest plane keeps its spares on the shelf: grounding it would stop every guest
@@ -1106,18 +1172,22 @@ export function chainWouldOpen(s: IslandState, o: Order, role: Role): boolean {
   // one at a time, and a breather after one closes
   if (openChain(s)) return false;
   if (s.chain?.closedWeek !== undefined && s.week < s.chain.closedWeek + CHAIN.rest) return false;
-  return rng(hashSeed(o.seed, 'chain', s.week)).chance(CHAIN.chance);
+  // an altered plane's trouble is mostly on the altered assembly (its ICA parts wear, and nobody stocks them)
+  const plant = plantFor(s.seed, asset.id, asset.model).plant;
+  const chance = !plant ? CHAIN.chance : plant === ata ? CHAIN.plantedChance : CHAIN.chance * CHAIN.offPlant;
+  return rng(hashSeed(o.seed, 'chain', s.week)).chance(chance);
 }
 
 /** the only plane that brings guests (grounding it would empty every house) */
 const soleGuestPlane = (s: IslandState, asset: Asset) =>
   !MODELS[asset.model].cargo && !s.assets.some((a) => a.kind === 'plane' && a.id !== asset.id && !MODELS[a.model].cargo);
-const isAre = (item: string) => (item.endsWith('s') ? 'are' : 'is');
 const chainOf = (s: IslandState, o: Order): PartChain | null => (o.chain && s.chain?.id === o.chain.id && s.chain.step !== 'done' ? s.chain : null);
 const nameOfRole = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
+/** the part is looked up, but the electrician hasn't said yet whether the unit is really bad */
+const waitsOnBench = (c: PartChain) => !!c.bench && !c.bench.call;
 
 /** the order for a chain step: paperwork for the mechanic (ready), or a card for the analyst (pending) */
-function chainOrder(s: IslandState, c: PartChain, step: 'lookup' | 'research' | 'buy' | 'fee', title: string, cost = 0) {
+function chainOrder(s: IslandState, c: PartChain, step: 'lookup' | 'research' | 'buy' | 'fee', title: string, now: number, cost = 0) {
   const job = s.orders.find((x) => x.id === c.orderId);
   const paper = step === 'lookup' || step === 'research';
   const o = newOrder(s, {
@@ -1138,28 +1208,59 @@ function chainOrder(s: IslandState, c: PartChain, step: 'lookup' | 'research' | 
   });
   c.step = step;
   c.stepId = o.id;
+  c.stepAt = now;
   return o;
 }
 
-function lookupStep(s: IslandState, c: PartChain) {
+function lookupStep(s: IslandState, c: PartChain, now: number) {
   const asset = s.assets.find((a) => a.id === c.assetId)!;
   const ac = islandAircraft(s.seed, asset);
-  return chainOrder(s, c, 'lookup', `Look up the ${c.item} in the IPC: ${ac.registration} S/N ${ac.serial}`);
+  return chainOrder(s, c, 'lookup', `Look up the ${c.item} in the IPC: ${ac.registration} S/N ${ac.serial}`, now);
 }
 
-function researchStep(s: IslandState, c: PartChain) {
+function researchStep(s: IslandState, c: PartChain, now: number) {
   const asset = s.assets.find((a) => a.id === c.assetId)!;
   const ac = islandAircraft(s.seed, asset);
-  return chainOrder(s, c, 'research', `Research the ${c.item} in ${ac.registration}'s logbooks`);
+  return chainOrder(s, c, 'research', `Research the ${c.item} in ${ac.registration}'s logbooks`, now);
 }
 
-function buyStep(s: IslandState, c: PartChain, pn: string, src: NonNullable<PartChain['src']>) {
+function buyStep(s: IslandState, c: PartChain, pn: string, src: NonNullable<PartChain['src']>, now: number) {
   const asset = s.assets.find((a) => a.id === c.assetId)!;
   const ac = islandAircraft(s.seed, asset);
   c.pn = pn;
   c.src = src;
   const price = partPrice(s.tier, ac, c.ata as Ata, c.tag, pn);
-  return chainOrder(s, c, 'buy', `Buy ${pn} ${nomenOf(ac, c.ata as Ata, pn)} for ${ac.registration}`, price);
+  return chainOrder(s, c, 'buy', `Buy ${pn} ${nomenOf(ac, c.ata as Ata, pn)} for ${ac.registration}`, now, price);
+}
+
+function feeStep(s: IslandState, c: PartChain, now: number) {
+  const asset = s.assets.find((a) => a.id === c.assetId)!;
+  const ac = islandAircraft(s.seed, asset);
+  return chainOrder(s, c, 'fee', `Engineering review: ${c.item} for ${ac.registration}`, now, engineeringFee(s.tier));
+}
+
+/** The electrician's check at the airplane: the unit, or its wiring? (a meter job on that plane's circuit) */
+function benchOrder(s: IslandState, c: PartChain, again = false) {
+  const asset = s.assets.find((a) => a.id === c.assetId)!;
+  const radio = c.tag === 'radio';
+  return newOrder(s, {
+    role: 'elec',
+    kind: 'bench',
+    assetId: c.assetId,
+    title: radio
+      ? `Meter the com radio's power and ground on ${asset.name}${again ? ' again' : ''}`
+      : `Meter the ${c.item} field circuit on ${asset.name}${again ? ' again' : ''}`,
+    puzzle: 'meter',
+    tier: clamp(1 + Math.floor(s.tier / 2), 1, 5),
+    cost: 0,
+    parts: 0,
+    gain: 0,
+    status: 'ready',
+    job: benchJob(c.tag, asset.model),
+    chain: { id: c.id, step: 'bench' },
+    approvedWeek: s.week,
+    autoApproved: true,
+  });
 }
 
 /** A job found a part: it stops, the plane is grounded, and the IPC lookup is the mechanic's next job. */
@@ -1189,11 +1290,18 @@ function openPartChain(s: IslandState, o: Order, name: string, now: number) {
   s.chain = c;
   o.status = 'waiting_part';
   o.chain = { id: c.id, step: 'job' };
-  lookupStep(s, c);
-  feed(s, 'mech', 'bad', `${name} stopped ${o.title} on ${asset.name}: ${f.found} ${asset.name} is grounded until the part is on. Next: look it up in the IPC.`, now);
+  // an electrical unit is checked at the airplane before one is bought: is it the unit, or its wiring?
+  let elec = '';
+  if (BENCH_TAGS.has(f.tag)) {
+    const fault: 'unit' | 'wiring' = rng(hashSeed(o.seed, 'bench', s.week)).chance(CHAIN.wiringShare) ? 'wiring' : 'unit';
+    c.bench = { id: benchOrder(s, c).id, fault };
+    elec = ` ${nameOfRole(s, 'elec')} meters its circuit at the airplane before one is bought.`;
+  }
+  lookupStep(s, c, now);
+  feed(s, 'mech', 'bad', `${name} stopped ${o.title} on ${asset.name}: ${f.found} ${asset.name} is grounded until it's fixed. Next: look it up in the IPC.${elec}`, now);
 }
 
-/** The lookup or the research is handed in: what it says moves the chain on (right or wrong shows later). */
+/** The lookup, the research or the electrician's check is handed in: what it says moves the chain on (right or wrong shows later). */
 function chainStep(
   s: IslandState,
   o: Order,
@@ -1201,38 +1309,55 @@ function chainStep(
   name: string,
   covered: boolean,
   blind: boolean,
-  turn: { done: number },
+  turn: TurnState,
   now: number,
 ): ApplyResult {
   const c = chainOf(s, o);
-  const step = o.chain!.step as 'lookup' | 'research';
-  const data = (a.data?.chain ?? {}) as { outcome?: string; pn?: string; route?: string | null; verdict?: string; reason?: string; cite?: string };
+  const step = o.chain!.step as 'lookup' | 'research' | 'bench';
+  const data = (a.data?.chain ?? {}) as { outcome?: string; pn?: string; route?: string | null; verdict?: string; reason?: string; cite?: string; call?: string; fixed?: boolean; where?: string };
   turn.done += 1;
+  // paperwork needs no hangar tools (the grid-down cap doesn't count it)
+  if (step !== 'bench') turn.paper = (turn.paper ?? 0) + 1;
   // teaching tiers show the verdict: a lookup or research that failed its own check isn't sent on
   if (!blind && !covered && a.score < SIGNOFF && c) {
     o.seed = hashSeed(o.seed, `rework${s.week}`);
-    feed(s, 'mech', 'bad', `${name}: ${o.title} didn't pass its check (${Math.round(a.score * 100)}%). Still open.`, now);
+    feed(s, o.role, 'bad', `${name}: ${o.title} didn't pass its check (${Math.round(a.score * 100)}%). Still open.`, now);
     return { s };
   }
   const cr = credit(a.score, 0);
   o.status = 'done';
-  o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, ...(blind ? { blind: true } : { summary: a.summary }) };
+  // blind: the XP floor now, the rest when the week resolves (settleBlind); the order has no gain, so no health moves
+  o.result = { score: a.score, perfect: a.perfect, credit: cr, by: a.role, week: s.week, covered, ...(blind ? { blind: true, provisional: DEFECT.provisional } : { summary: a.summary }) };
   gainXp(s, a.role, blind ? blindXpFloor(o.tier) : Math.round(orderXp(o.tier, cr, a.perfect) * (covered ? 0.5 : 1)));
   if (!c) return { s };
+  if (step === 'bench') {
+    benchDone(s, c, data, name, now);
+    return { s };
+  }
   delete c.back;
   const asset = s.assets.find((x) => x.id === c.assetId)!;
   const ac = islandAircraft(s.seed, asset);
   const fin = nameOfRole(s, 'fin');
+  const elec = nameOfRole(s, 'elec');
+  // the part is known; if the electrician hasn't checked the unit yet, it's bought once they have
+  const ready = (then: () => string) => {
+    if (!waitsOnBench(c)) return then();
+    c.step = 'check';
+    delete c.stepId;
+    return `It's bought once ${elec} has metered the circuit and says the ${c.item} ${isAre(c.item)} really bad.`;
+  };
   if (step === 'lookup') {
     if (data.outcome === 'pn' && data.pn) {
-      const b = buyStep(s, c, String(data.pn), 'ipc');
-      feed(s, 'mech', 'info', `${name} looked up the ${c.item} for ${asset.name}: ordered P/N ${c.pn}. Waiting on ${fin} to approve the part (${usd(b.cost)}).`, now);
+      c.pn = String(data.pn);
+      c.src = 'ipc';
+      const next = ready(() => `Waiting on ${fin} to approve the part (${usd(buyStep(s, c, c.pn!, 'ipc', now).cost)}).`);
+      feed(s, 'mech', 'info', `${name} looked up the ${c.item} for ${asset.name}: ordered P/N ${c.pn}. ${next}`, now);
     } else if (data.outcome === 'notipc') {
-      researchStep(s, c);
+      researchStep(s, c, now);
       feed(s, 'mech', 'info', `${name}: the ${c.item} on ${asset.name} isn't in the IPC. Next: research ${ac.registration}'s logbooks for how it got there.`, now);
     } else {
       // nothing ordered: the lookup is still to do
-      lookupStep(s, c);
+      lookupStep(s, c, now);
       feed(s, 'mech', 'bad', `${name} ran out of time on the IPC lookup: nothing ordered. ${asset.name} stays down.`, now);
     }
     return { s };
@@ -1243,20 +1368,92 @@ function chainStep(
     const ok = data.verdict === 'approved' || data.verdict === 'costly';
     c.request = { ok, reason: String(data.reason ?? (ok ? '' : 'Request incomplete.')), ...(data.cite ? { cite: String(data.cite) } : {}), ...(data.verdict === 'costly' ? { costly: true } : {}) };
     if (data.pn) c.pn = String(data.pn);
-    const f = chainOrder(s, c, 'fee', `Engineering review: ${c.item} for ${ac.registration}`, engineeringFee(s.tier));
-    feed(s, 'mech', 'info', `${name} sent engineering a request for the ${c.item} on ${ac.registration}. Waiting on ${fin} to approve the review fee (${usd(f.cost)}).`, now);
+    const next = ready(() => `Waiting on ${fin} to approve the review fee (${usd(feeStep(s, c, now).cost)}).`);
+    feed(s, 'mech', 'info', `${name} wrote engineering a request for the ${c.item} on ${ac.registration}. ${next}`, now);
   } else if ((route === 'ipc' || route === 'pma') && data.pn) {
-    const b = buyStep(s, c, String(data.pn), 'entry');
-    feed(s, 'mech', 'info', `${name} researched the ${c.item} on ${ac.registration}: ordering P/N ${c.pn} to go on with a logbook entry. Waiting on ${fin} (${usd(b.cost)}).`, now);
+    c.pn = String(data.pn);
+    c.src = 'entry';
+    const next = ready(() => `Waiting on ${fin} (${usd(buyStep(s, c, c.pn!, 'entry', now).cost)}).`);
+    feed(s, 'mech', 'info', `${name} researched the ${c.item} on ${ac.registration}: ordering P/N ${c.pn} to go on with a logbook entry. ${next}`, now);
   } else {
-    researchStep(s, c);
+    researchStep(s, c, now);
     feed(s, 'mech', 'bad', `${name}'s research on ${ac.registration} was never handed in: still to do.`, now);
   }
   return { s };
 }
 
+/**
+ * The electrician's check is in. "The unit": the part is bought (if the lookup
+ * already has it, now). "The wiring": the fault is fixed at the airplane, no
+ * part needed, and the mechanic finishes the job. What the check really found
+ * shows later: a good unit bought (the new one makes no difference at the
+ * install), or a dead one left in service (an incident).
+ */
+function benchDone(s: IslandState, c: PartChain, data: { call?: string; fixed?: boolean; where?: string }, name: string, now: number) {
+  const b = c.bench;
+  if (!b) return;
+  const asset = s.assets.find((x) => x.id === c.assetId)!;
+  const mech = nameOfRole(s, 'mech');
+  const where = data.where ? ` at the ${data.where.charAt(0).toLowerCase()}${data.where.slice(1)}` : '';
+  // the second check (the new unit made no difference): with the unit ruled out, it's the wiring
+  const call: 'unit' | 'wiring' = b.again || data.call === 'wiring' ? 'wiring' : 'unit';
+  b.call = call;
+  b.by = name;
+  b.week = s.week;
+  if (call === 'unit') {
+    feed(s, 'all', 'info', `${name} metered the ${c.item} circuit on ${asset.name}: the wiring checks good, it's the ${c.item}.${c.step === 'check' ? ' The part can be bought.' : ''}`, now);
+    if (c.step === 'check') {
+      if (c.request) feeStep(s, c, now);
+      else if (c.pn && c.src) buyStep(s, c, c.pn, c.src, now);
+      else lookupStep(s, c, now);
+    }
+    return;
+  }
+  // the wiring: fixed where the check found it. No part: whatever step the chain was on is cancelled
+  const right = b.fault === 'wiring' && (b.again || !!data.fixed);
+  const step = c.stepId ? s.orders.find((o) => o.id === c.stepId) : undefined;
+  if (step && open(step) && step.status !== 'waiting_part') step.status = 'cancelled';
+  c.wired = true;
+  c.step = 'install';
+  delete c.stepId;
+  delete c.request;
+  const job = s.orders.find((o) => o.id === c.orderId);
+  if (job) {
+    job.status = 'ready';
+    job.title = `Finish ${c.title}: the fault was in the wiring`;
+  }
+  // a wrong call: the plane goes back to service with a dead unit (or with the break in its wiring still there,
+  // when the check fixed the wrong spot), and the flight it fails on says so
+  if (!right) {
+    const r = rng(hashSeed(c.id, 'bench-miss', s.week));
+    const dead = b.fault === 'unit';
+    (s.defects ??= []).push({
+      id: `d${s.nextId++}`,
+      orderKind: 'bench',
+      job: c.tag === 'radio' ? 'avionics' : 'alternator',
+      log: `${c.item} circuit check`,
+      puzzle: 'meter',
+      variant: dead ? (c.tag === 'radio' ? 'radio' : 'unit') : 'wiring',
+      title: `Meter the ${c.item} circuit`,
+      assetId: asset.id,
+      // the airplane's trade owns the repair (a new unit, or the wire spliced); the electrician signed the check off
+      role: 'mech',
+      by: 'elec',
+      name,
+      week: s.week,
+      dueWeek: s.week + r.int(1, 2),
+      severity: 1,
+      cost: partPrice(s.tier, islandAircraft(s.seed, asset), c.ata as Ata, c.tag, rightPn(islandAircraft(s.seed, asset), c.ata as Ata, c.tag)),
+      tier: clamp(1 + Math.floor(s.tier / 2), 1, 5),
+      gain: 0,
+      redo: false,
+    });
+  }
+  feed(s, 'all', 'good', `${name} metered the ${c.item} circuit on ${asset.name} and fixed the fault${where}: no part needed. ${mech}, finish ${c.title}.`, now);
+}
+
 /** The analyst approved a chain card: the part goes on the next delivery, or engineering gets the request. */
-function chainApproved(s: IslandState, o: Order, now: number) {
+function chainApproved(s: IslandState, o: Order, now: number, ship?: 'boat' | 'flight') {
   const c = chainOf(s, o);
   if (!c || c.stepId !== o.id) return;
   c.spent += o.cost;
@@ -1264,8 +1461,22 @@ function chainApproved(s: IslandState, o: Order, now: number) {
   if (o.chain!.step === 'buy') {
     o.status = 'waiting_part';
     c.step = 'transit';
-    const cargo = s.assets.find((a) => a.model === 'cargo');
-    feed(s, 'all', 'info', `The ${c.item} for ${asset?.name ?? 'the plane'} ${isAre(c.item)} on order: ${cargo && cargo.id !== c.assetId ? 'it rides the next cargo flight' : cargo || !asset ? 'it comes by boat' : 'it comes by boat (the plane that would carry it is the one that is down)'}.`, now);
+    c.price = o.cost;
+    // the plane that would carry it is the one that's down: the AOG boat (on the PO), or next week's guest flight
+    if (needsFreight(s, c)) {
+      c.freight = ship ?? 'boat';
+      if (c.freight === 'boat') {
+        s.cash -= ECON.boatKit;
+        c.spent += ECON.boatKit;
+      } else c.ship = s.week + 1;
+    }
+    const how =
+      c.freight === 'boat'
+        ? `the AOG boat brings it when the week resolves (${usd(ECON.boatKit)})`
+        : c.freight === 'flight'
+          ? "it rides next week's guest flight (no boat, one more week down)"
+          : 'it rides the next cargo flight';
+    feed(s, 'all', 'info', `The ${c.item} for ${asset?.name ?? 'the plane'} ${isAre(c.item)} on order: ${how}.`, now);
   } else if (o.chain!.step === 'fee') {
     o.status = 'waiting_part';
     c.step = 'review';
@@ -1274,7 +1485,45 @@ function chainApproved(s: IslandState, o: Order, now: number) {
   }
 }
 
-/** The part is on and the job signed off: the plane is back in service. */
+/** What a chain card costs on approval: the part (or the fee), plus the AOG boat when it takes one. */
+export function chainCardCost(s: IslandState, o: Order, ship?: 'boat' | 'flight'): number {
+  const c = chainOf(s, o);
+  if (!c || c.stepId !== o.id || o.chain?.step !== 'buy' || !needsFreight(s, c)) return o.cost;
+  return o.cost + ((ship ?? 'boat') === 'boat' ? ECON.boatKit : 0);
+}
+
+/**
+ * At the install: the electrician called the unit, but the fault is in the
+ * wiring. The new unit goes on, and the ground run shows no output still: the
+ * removed unit tests good on the bench, the one bought goes back (a credit,
+ * less restocking), and the electrician meters the circuit again. The job waits.
+ */
+function missedWiring(s: IslandState, c: PartChain, o: Order, name: string, turn: TurnState, now: number) {
+  const asset = s.assets.find((x) => x.id === c.assetId)!;
+  const price = c.price ?? partPrice(s.tier, islandAircraft(s.seed, asset), c.ata as Ata, c.tag, c.pn ?? '');
+  const fee = restockFee(price);
+  s.cash += price - fee;
+  c.spent -= price - fee;
+  c.returns += 1;
+  turn.done += 1;
+  gainXp(s, 'mech', blindXpFloor(o.tier));
+  o.status = 'waiting_part';
+  o.title = c.title;
+  c.bench = { ...c.bench!, call: undefined, again: true, id: benchOrder(s, c, true).id };
+  c.step = 'check';
+  delete c.stepId;
+  const elec = nameOfRole(s, 'elec');
+  c.back = `The new ${c.item} made no difference: the fault is in the wiring.`;
+  feed(
+    s,
+    'all',
+    'bad',
+    `${name} installed ${c.pn} on ${asset.name}: ground run, still no output. The removed ${c.item} tests good on the bench, so it's the wiring. ${c.pn} goes back: ${usd(price - fee)} credited (${usd(fee)} restocking). ${elec}, meter the circuit again.`,
+    now,
+  );
+}
+
+/** The part is on (or the wiring fixed) and the job signed off: the plane is back in service. */
 function closeChain(s: IslandState, o: Order, name: string, now: number) {
   const c = chainOf(s, o);
   if (!c) return;
@@ -1283,8 +1532,8 @@ function closeChain(s: IslandState, o: Order, name: string, now: number) {
   const ac = islandAircraft(s.seed, asset);
   const p = plantedOn(ac, c.ata);
   // an STC holder's part put on with a logbook entry: the right part, no engineering authorization.
-  // Nothing breaks; the records are wrong, and a ramp check or the next full inspection finds it.
-  if (c.src === 'entry' && p && c.pn === p.neededPn) {
+  // Nothing breaks; the records are wrong, and the company's records audit or the next full inspection finds it.
+  if (!c.wired && c.src === 'entry' && p && c.pn === p.neededPn) {
     const r = rng(hashSeed(o.seed, 'unapproved', s.week));
     (s.defects ??= []).push({
       id: `d${s.nextId++}`,
@@ -1310,25 +1559,108 @@ function closeChain(s: IslandState, o: Order, name: string, now: number) {
   }
   const weeks = c.aogWeeks;
   const sat = weeks > 0 ? `${asset.name} sat ${weeks} week${weeks > 1 ? 's' : ''} for ${c.item}` : `${asset.name} was back the same week after ${c.item}`;
-  const how =
-    c.src === 'eng'
+  const how = c.wired
+    ? `no part needed, ${c.bench?.by ?? 'the electrician'}'s check found the fault in the wiring${c.returns ? ` (after a new ${c.item} made no difference and went back)` : ''}`
+    : c.src === 'eng'
       ? `${c.cite ?? 'the alteration'} found in the logbooks, engineering approved week ${c.approvedWeek}${c.rejects ? ` (after ${c.rejects} request${c.rejects > 1 ? 's' : ''} came back)` : ''}`
       : c.src === 'entry'
         ? `P/N ${c.pn} put on with a logbook entry`
         : `P/N ${c.pn} from the IPC${c.returns ? `, after ${c.returns} wrong part${c.returns > 1 ? 's' : ''} went back` : ''}`;
-  c.story = `${sat}: ${how}. ${usd(c.spent)} in parts and fees.`;
+  const down = c.downtime ? `, and about ${usd(c.downtime)} of downtime` : '';
+  c.story = `${sat}: ${how}. ${usd(c.spent)} in parts, fees and freight${down}.`;
   c.step = 'done';
   c.closedWeek = s.week;
   delete c.stepId;
-  feed(s, 'all', 'good', `${name} put the ${c.item} on ${asset.name} and signed off ${c.title}: back in service. ${c.story}`, now);
+  feed(s, 'all', 'good', `${name} ${c.wired ? `finished ${c.title}` : `put the ${c.item} on ${asset.name} and signed off ${c.title}`}: back in service. ${c.story}`, now);
+}
+
+/**
+ * The chain's own orders, as the engine left them: an older build (or two
+ * devices at once) can cancel a step's order or sign its job off early. Put back
+ * what's missing, so a grounded plane never waits on an order nobody can see.
+ * Returns what it fixed, for tests.
+ */
+function healChain(s: IslandState, c: PartChain, now: number): string[] {
+  const fixed: string[] = [];
+  const job = s.orders.find((o) => o.id === c.orderId);
+  if (!job || job.status === 'cancelled') {
+    // the job itself is gone: nothing to put the part on, so the chain ends here
+    c.step = 'done';
+    c.closedWeek = s.week;
+    delete c.stepId;
+    c.story = `${c.title} was closed without the ${c.item}.`;
+    return ['job'];
+  }
+  if (job.status === 'done') return fixed;
+  // the job waits for the part until the chain is at the install
+  if (c.step !== 'install' && job.status !== 'waiting_part') {
+    job.status = 'waiting_part';
+    fixed.push('job');
+  }
+  if (c.step === 'install' && job.status !== 'ready') {
+    job.status = 'ready';
+    fixed.push('job');
+  }
+  const step = c.stepId ? s.orders.find((o) => o.id === c.stepId) : undefined;
+  const alive = (o: Order | undefined, want: Order['status'][]) => !!o && want.includes(o.status);
+  switch (c.step) {
+    case 'lookup':
+      if (!alive(step, ['ready'])) {
+        lookupStep(s, c, now);
+        fixed.push('lookup');
+      }
+      break;
+    case 'research':
+      if (!alive(step, ['ready'])) {
+        researchStep(s, c, now);
+        fixed.push('research');
+      }
+      break;
+    case 'buy':
+    case 'fee': {
+      if (alive(step, ['pending', 'countered'])) break;
+      if (step && step.approvedWeek !== undefined && step.status !== 'cancelled') {
+        // paid for (an older build approved it without moving the chain on): move it on, as an approval here would
+        const was = c.step;
+        chainApproved(s, step, now);
+        fixed.push(`${was}:paid`);
+        break;
+      }
+      if (c.step === 'buy' && c.pn && c.src) buyStep(s, c, c.pn, c.src, now);
+      else if (c.step === 'fee') feeStep(s, c, now);
+      else lookupStep(s, c, now);
+      fixed.push(c.step);
+      break;
+    }
+    case 'check':
+      // waiting on the electrician: the check's order has to be there
+      if (c.bench && !c.bench.call && !s.orders.some((o) => o.id === c.bench!.id && o.status === 'ready')) {
+        c.bench.id = benchOrder(s, c, !!c.bench.again).id;
+        fixed.push('bench');
+      }
+      break;
+  }
+  // an electrical unit's check still to do, beside the lookup or the research
+  if (c.bench && !c.bench.call && c.step !== 'check' && !s.orders.some((o) => o.id === c.bench!.id && o.status === 'ready')) {
+    c.bench.id = benchOrder(s, c, !!c.bench.again).id;
+    fixed.push('bench');
+  }
+  return fixed;
+}
+
+/** Test hook: heal the open chain as openWeek does. */
+export function healOpenChain(s: IslandState, now: number): string[] {
+  const c = openChain(s);
+  return c ? healChain(s, c, now) : [];
 }
 
 /**
  * Week resolution, after the carry-over: the part that arrived goes through
- * receiving (a wrong one goes back), and engineering answers a request it
- * has had for the week. `arrived`: the part came in this week.
+ * receiving (its paperwork, then the P/N: a wrong one goes back for a credit),
+ * and engineering answers a request it has had for the week. `arrived`: the
+ * part came in this week.
  */
-function resolveChain(s: IslandState, W: number, arrived: boolean, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void) {
+function resolveChain(s: IslandState, W: number, arrived: boolean, now: number, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void) {
   const c = openChain(s);
   if (!c) return;
   const asset = s.assets.find((x) => x.id === c.assetId);
@@ -1339,10 +1671,24 @@ function resolveChain(s: IslandState, W: number, arrived: boolean, line: (role: 
   const ac = islandAircraft(s.seed, asset);
   const mech = nameOfRole(s, 'mech');
   const step = c.stepId ? s.orders.find((o) => o.id === c.stepId) : undefined;
-  if (c.step === 'transit' && arrived && c.pn) {
-    // receiving at the airplane: only what the paperwork can tell
+  const released = c.step === 'transit' && c.hold !== undefined && c.hold <= W;
+  if (c.step === 'transit' && c.pn && (arrived || released)) {
+    // receiving: the paperwork first. Now and then a part comes without its 8130-3 (or with a S/N that doesn't
+    // match it): no tag, no install. It sits in quarantine until the vendor sends the documents
+    if (!released && rng(hashSeed(c.id, 'paperwork', c.pn, c.returns)).chance(CHAIN.noPaperwork)) {
+      c.hold = W + 1;
+      const sn = BENCH_TAGS.has(c.tag) && rng(hashSeed(c.id, 'sn', c.pn)).chance(0.5);
+      line(
+        'mech',
+        'bad',
+        `Receiving on ${asset.name}: P/N ${c.pn} came ${sn ? 'with an 8130-3 whose S/N doesn’t match the unit’s data plate' : 'without its 8130-3'}. No tag, no install: it's in quarantine until the vendor sends the paperwork (next week).`,
+      );
+      return;
+    }
+    delete c.hold;
     const chk = judgePart(ac, c.ata as Ata, c.tag, c.pn);
     if (step) step.status = 'done';
+    const nomen = nomenOf(ac, c.ata as Ata, c.pn).toLowerCase();
     if (chk.ok) {
       const job = s.orders.find((o) => o.id === c.orderId);
       if (job) {
@@ -1351,17 +1697,23 @@ function resolveChain(s: IslandState, W: number, arrived: boolean, line: (role: 
       }
       c.step = 'install';
       delete c.stepId;
-      line('mech', 'good', `The ${c.item} for ${asset.name} arrived: ${mech}, install ${c.pn} and finish ${c.title}.`);
+      line('mech', 'good', `Receiving on ${asset.name}: P/N ${c.pn} (${nomen}), ${released ? "the vendor's 8130-3 came" : '8130-3 in the box'}, matches the PO. ${mech}, install it and finish ${c.title}.`);
     } else {
-      const fee = restockFee(step?.cost ?? partPrice(s.tier, ac, c.ata as Ata, c.tag, c.pn));
-      s.cash -= fee;
-      c.spent += fee;
+      // it goes back: the price credited, less the restocking fee (the freight is spent)
+      const price = c.price ?? step?.cost ?? partPrice(s.tier, ac, c.ata as Ata, c.tag, c.pn);
+      const fee = restockFee(price);
+      s.cash += price - fee;
+      c.spent -= price - fee;
       c.returns += 1;
-      const back = c.src === 'ipc' ? 'look it up again' : 'research it again';
-      line('mech', 'bad', `Receiving on ${asset.name}: ${chk.text}. Returned, restocking fee ${usd(fee)}. ${mech}, ${back}.`);
+      // a part the IPC doesn't list for this airplane: the records say what goes on, not the book
+      const research = chk.why === 'displaced' || c.src !== 'ipc';
+      line('mech', 'bad', `Receiving on ${asset.name}: ${chk.text}. Returned: ${usd(price - fee)} credited (${usd(fee)} restocking). ${mech}, ${research ? 'research the records for the part that goes on it' : 'look it up again'}.`);
       c.back = `Sent back at receiving: ${chk.text}.`;
-      if (c.src === 'ipc') lookupStep(s, c);
-      else researchStep(s, c);
+      delete c.price;
+      delete c.freight;
+      delete c.ship;
+      if (research) researchStep(s, c, now);
+      else lookupStep(s, c, now);
     }
   } else if (c.step === 'review' && (c.due ?? W) <= W) {
     if (step) step.status = 'done';
@@ -1370,7 +1722,7 @@ function resolveChain(s: IslandState, W: number, arrived: boolean, line: (role: 
       const p = plantedOn(ac, c.ata)!;
       c.approvedWeek = W;
       c.cite = req.cite ?? p.ref;
-      const b = buyStep(s, c, p.neededPn, 'eng');
+      const b = buyStep(s, c, p.neededPn, 'eng', now);
       line('mech', 'good', `Engineering approved ${p.neededPn} for ${ac.registration} on ${c.cite}${req.costly ? ' (the approved data was on file after all)' : ''}: EA issued. ${nameOfRole(s, 'fin')}: approve the part (${usd(b.cost)}).`);
     } else {
       c.rejects += 1;
@@ -1379,10 +1731,10 @@ function resolveChain(s: IslandState, W: number, arrived: boolean, line: (role: 
       // the part was in the IPC all along: back to the book; otherwise back to the logbooks
       if (!plantedOn(ac, c.ata)) {
         line('mech', 'bad', `Engineering returned the request for ${ac.registration}: ${reason} ${mech}, back to the IPC.`);
-        lookupStep(s, c);
+        lookupStep(s, c, now);
       } else {
         line('mech', 'bad', `Engineering returned the request for ${ac.registration}: ${reason} ${mech}, research it again.`);
-        researchStep(s, c);
+        researchStep(s, c, now);
       }
     }
   }
@@ -1391,8 +1743,11 @@ function resolveChain(s: IslandState, W: number, arrived: boolean, line: (role: 
 // ---------------------------------------------------------------------------
 // Cross-trade reports
 
-/** Open a report: the fixer's card (ready, no approval; the small cost is paid now). `cart`: the ground power cart it tags out. */
-function openReport(s: IslandState, def: ReportDef, now: number, again?: number, cart?: string) {
+/** Open a report: the fixer's card (ready, no approval; the small cost is paid now). `cart`: the ground power cart it tags out, `band` what's wrong with its cable. */
+function openReport(s: IslandState, def: ReportDef, now: number, again?: number, cart?: string, band?: CableBand) {
+  // a cart's cable: its words follow what's wrong with it (a fix that came back on its own: the plug end is burnt again)
+  const cband: CableBand | undefined = cart ? (band ?? (again ? 'pitted' : 'cracked')) : undefined;
+  const words = cband ? CABLE_REPORT[cband] : undefined;
   const amount = def.effect === 'leak' ? round10((def.amount ?? 0) * (1 + REPORT.leakPerTier * (s.tier - 1))) : 0;
   const tier = def.fixer === 'fin' ? finTier(s) : clamp(1 + Math.floor(s.tier / 2), 1, 5);
   // a leak that came back was never really stopped: the weeks it only looked fixed are owed too
@@ -1401,7 +1756,7 @@ function openReport(s: IslandState, def: ReportDef, now: number, again?: number,
     role: def.fixer,
     kind: 'report',
     assetId: null,
-    title: again ? `${def.title} (again)` : def.title,
+    title: again ? `${words?.title ?? def.title} (again)` : (words?.title ?? def.title),
     puzzle: def.puzzle,
     tier,
     cost: def.cost,
@@ -1411,11 +1766,19 @@ function openReport(s: IslandState, def: ReportDef, now: number, again?: number,
     // the analyst's puzzle scales its numbers to what's at stake
     ...(def.fixer === 'fin' ? { leak: amount } : {}),
     ...(def.job ? { job: def.job } : {}),
-    report: { key: def.key, by: def.by, effect: def.effect, amount, ...(again ? { again } : {}), ...(owed ? { owed } : {}), ...(cart ? { cart } : {}) },
+    report: {
+      key: def.key,
+      by: def.by,
+      effect: def.effect,
+      amount,
+      ...(again ? { again } : {}),
+      ...(owed ? { owed } : {}),
+      ...(cart ? { cart, band: cband } : {}),
+    },
   });
   const c = cart ? s.gse?.find((x) => x.id === cart) : undefined;
-  // a cable fix that didn't hold: the plug end is burnt again
-  if (c && again) c.wear = Math.max(c.wear, GSE.autoReport - 5);
+  // a cable fix that didn't hold, come back on its own: the plug end is burnt again (found at an inspection: as it is)
+  if (c && again && !band) c.wear = Math.max(c.wear, GSE.autoReport - 5);
   if (o.cost > 0) {
     s.cash -= o.cost;
     o.approvedWeek = s.week;
@@ -1429,8 +1792,8 @@ function openReport(s: IslandState, def: ReportDef, now: number, again?: number,
     def.fixer,
     'bad',
     again
-      ? `${who}: ${def.back}${c ? ` (${c.name})` : ''}. The ${fix.replace('%w', String(again))}.${owed ? ` It cost ${usd(owed)} while it looked fixed.` : ''} ${fixer}, it's back on your list.`
-      : `${who} reports: ${def.said}${c ? ` (${c.name}, tagged out)` : ''}. ${fixer}, it's yours.`,
+      ? `${who}: ${words?.back ?? def.back}${c ? ` (${c.name})` : ''}. The ${fix.replace('%w', String(again))}.${owed ? ` It cost ${usd(owed)} while it looked fixed.` : ''} ${fixer}, it's back on your list.`
+      : `${who} reports: ${words?.said ?? def.said}${c ? ` (${c.name}, tagged out)` : ''}. ${fixer}, it's yours.`,
     now,
   );
   return o;
@@ -1439,6 +1802,8 @@ function openReport(s: IslandState, def: ReportDef, now: number, again?: number,
 /** A report fix: the reporter is back to normal. A botched (or sloppy) fix comes back 1-2 weeks later. */
 function closeReport(s: IslandState, o: Order, by: Role, name: string, q: number, now: number) {
   const rep = o.report!;
+  // a new plug on the cart: whatever an earlier fix on it left to come back is gone with the old end
+  if (rep.cart) s.defects = (s.defects ?? []).filter((d) => !(d.report?.key === rep.key && d.report.cart === rep.cart));
   const r = rng(hashSeed(o.seed, 'again', s.week));
   const chance = q < SIGNOFF ? 1 : defectChance(q);
   if (r.chance(chance)) {
@@ -1461,10 +1826,11 @@ function closeReport(s: IslandState, o: Order, by: Role, name: string, q: number
       report: { key: rep.key, by: rep.by, effect: rep.effect, amount: rep.amount, ...(rep.cart ? { cart: rep.cart } : {}) },
     });
   }
-  // a new plug on a cut-back cable: the wear goes with the old end (what's left is the fix's own quality)
+  // a new plug on a cut-back cable: the wear goes with the old end. A sloppy one looks like any new plug (the
+  // botch shows when it comes back, and the comeback burns the plug end again), it just wears in sooner
   const cart = rep.cart ? s.gse?.find((x) => x.id === rep.cart) : undefined;
   if (cart) {
-    cart.wear = q >= DEFECT.clean ? 0 : Math.round(clamp((DEFECT.clean - q) * 120, 0, GSE.pitted));
+    cart.wear = q >= DEFECT.clean ? 0 : Math.round(clamp((DEFECT.clean - q) * 120, 0, GSE.cracked - 1));
     cart.inspected = { week: s.week, band: 'good', by: name, fixed: true };
   }
   const who = s.players[rep.by]?.name ?? ROLE_LABEL[rep.by];
@@ -1485,14 +1851,18 @@ function generateReports(s: IslandState, now: number) {
     s.defects = s.defects!.filter((d) => !due.includes(d));
     for (const d of due) {
       const def = REPORT_BY_KEY[d.report!.key];
-      if (def) openReport(s, def, now, d.week, d.report!.cart);
+      if (!def) continue;
+      // a cart re-terminated since (or tagged out again already): that fix's comeback went with its plug
+      const cart = d.report!.cart ? s.gse?.find((x) => x.id === d.report!.cart) : undefined;
+      if (cart && ((cart.inspected?.fixed && cart.inspected.week > d.week) || cableReport(s, cart.id))) continue;
+      openReport(s, def, now, d.week, d.report!.cart);
     }
   }
   // a cable this far gone can't be missed: the mechanic tags the cart out and writes it up
   for (const c of s.gse ?? []) {
     if (c.wear < GSE.autoReport || cableReport(s, c.id)) continue;
     if ((s.defects ?? []).some((d) => d.report?.cart === c.id)) continue;
-    openCableReport(s, c, now);
+    openCableReport(s, c, now, cableBand(c.wear));
   }
   if (W < REPORT.fromWeek) return;
   const r = rng(hashSeed(s.seed, 'report', W));
@@ -1594,6 +1964,10 @@ function openWeek(s: IslandState, now: number) {
   generateFinTasks(s, r);
   generateReports(s, now);
   autoApprove(s);
+  // the part chain's orders as they should be (an older build may have cancelled a step's order)
+  const ch = openChain(s);
+  if (ch) healChain(s, ch, now);
+  rollWeakBattery(s, now);
 
   s.deadline = nextDeadline(now, s.creatorTz, s.resolveHour);
   const wx = s.weather === 'clear' ? 'Clear skies' : s.weather === 'wind' ? 'Wind: flight risk up' : 'Storm: the electrician’s week';
@@ -1718,10 +2092,10 @@ function autoRun(s: IslandState, role: Role) {
     let n = 0;
     for (const o of pend) {
       if (n >= 2) break;
-      // a grounded plane's part (or its engineering fee) goes through whenever the cash is there
-      if ((s.cash - o.cost >= ECON.autopilotFloor && s.receivership === 0) || (o.chain && s.cash - o.cost >= 0)) {
+      // a grounded plane's part (or its engineering fee) goes through whenever the cash is there (the part on the AOG boat)
+      if ((s.cash - o.cost >= ECON.autopilotFloor && s.receivership === 0) || (o.chain && s.cash - chainCardCost(s, o, 'boat') >= 0)) {
         markApproved(s, o, true);
-        chainApproved(s, o, s.updatedAt);
+        chainApproved(s, o, s.updatedAt, 'boat');
         n++;
       }
     }
@@ -1744,6 +2118,17 @@ function autoRun(s: IslandState, role: Role) {
     // crew projects wait for the crew; a part chain's IPC lookup and logbook research wait for a person
     .filter((o) => o.role === role && o.status === 'ready' && o.kind !== 'project' && !(o.chain && o.chain.step !== 'job'))
     .sort((a, b) => urgency(s, b) - urgency(s, a));
+  // the electrician's check on a chain: autopilot doesn't meter an airplane. The mechanic goes by the
+  // symptom (the unit), so the plane never waits on an empty seat; a wiring fault shows up at the install
+  const ch = openChain(s);
+  if (role === 'elec' && ch?.bench && !ch.bench.call) {
+    const b = s.orders.find((o) => o.id === ch.bench!.id);
+    if (b && open(b)) {
+      b.status = 'done';
+      b.result = { score: 0.5, perfect: false, credit: 0.5, by: role, week: s.week, auto: true };
+    }
+    benchDone(s, ch, { call: 'unit' }, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, s.updatedAt);
+  }
   // two jobs at 50%, plus a quick patch on a crewmate's cap report or a tagged-out cart's cable (it won't hold; a leak waits for a person).
   // A ground power start needs a charged cart when its turn comes (an earlier start may have used it up): autopilot
   // tows one over (off the charger, or off a plane that isn't flying), and puts it back on the charger after. No cart, no start
@@ -1751,16 +2136,27 @@ function autoRun(s: IslandState, role: Role) {
   let jobs = 0;
   for (const o of [...ready.filter((x) => x.kind !== 'report'), ...(report ? [report] : [])]) {
     if (o.kind !== 'report' && jobs >= 2) continue;
-    const cart = o.kind === 'gpustart' ? autoCart(s, o) : null;
-    if (o.kind === 'gpustart' && !cart) continue;
+    const cart = needsCart(o.kind) ? autoCart(s, o) : null;
+    if (needsCart(o.kind) && !cart) continue;
+    // a job the part chain holds: the new unit made no difference (the fault is the wiring), and the electrician looks again
+    const held = o.chain?.step === 'job' ? chainOf(s, o) : null;
+    if (held && held.bench?.fault === 'wiring' && held.bench.call === 'unit' && !held.wired) {
+      jobs++;
+      missedWiring(s, held, o, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, s.turns[role] ?? { ended: false, endedAt: null, done: 0 }, s.updatedAt);
+      continue;
+    }
     if (o.kind !== 'report') jobs++;
-    const wear = cart ? useCart(s, cart, o) : 0;
+    const wear = cart && o.kind === 'gpustart' ? useCart(s, cart, o) : 0;
+    if (cart && o.kind !== 'gpustart') {
+      cart.charge = Math.max(0, cart.charge - GSE.avionicsDrain);
+      cart.wear = Math.min(100, cart.wear + GSE.busWear);
+    }
     o.status = 'done';
     o.result = { score: 0.5, perfect: false, credit: 0.5, by: role, week: s.week, auto: true };
     const asset = assetOf(s, o);
     if (cart && asset) {
       // the manual is kept, but a worn cable is a worn cable
-      cableArc(s, o, asset, role, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, wear);
+      if (o.kind === 'gpustart') cableArc(s, o, asset, role, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, wear);
       cart.hookedTo = null;
       cart.charging = true;
     }
@@ -1775,6 +2171,35 @@ function autoRun(s: IslandState, role: Role) {
     // the part is here: autopilot puts it on and finishes the job
     if (o.chain) closeChain(s, o, `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`, s.updatedAt);
   }
+  // a weak battery on the flight line: autopilot hooks a charged cart up to that plane for its first start
+  if (role === 'mech') hookForFlightDay(s);
+}
+
+/**
+ * A flight day on a weak battery: tow the best charged cart over to that plane
+ * (autopilot). A cart left on a plane from an earlier week goes back on the
+ * charger first: autopilot covers the obvious.
+ */
+export function hookForFlightDay(s: IslandState) {
+  const wb = s.weakBattery?.week === s.week ? s.weakBattery : null;
+  for (const c of ensureGse(s)) {
+    if (c.hookedTo && c.hookedTo !== wb?.assetId) {
+      c.hookedTo = null;
+      c.charging = true;
+    }
+  }
+  if (!wb) return;
+  const pick = startCart(s, wb.assetId);
+  if (!pick || pick.hookedTo === wb.assetId) return;
+  const carts = ensureGse(s);
+  const c = carts.find((x) => x.id === pick.id)!;
+  const on = carts.find((x) => x.hookedTo === wb.assetId);
+  if (on && on !== c) {
+    on.hookedTo = null;
+    on.charging = true;
+  }
+  c.charging = false;
+  c.hookedTo = wb.assetId;
 }
 
 /**
@@ -1796,6 +2221,86 @@ function autoCart(s: IslandState, o: Order): GseCart | null {
   c.charging = false;
   c.hookedTo = o.assetId;
   return c;
+}
+
+/**
+ * Resolve: a part chain's card that came in after the analyst had ended the
+ * turn (the mechanic handed the lookup in later) goes through on the standing
+ * AOG approval when the cash covers it, and the review says so. A card the
+ * analyst saw and deferred waits, as any deferral does.
+ */
+function leftoverChainCard(s: IslandState, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void) {
+  const c = openChain(s);
+  const t = s.turns.fin;
+  if (!c || (c.step !== 'buy' && c.step !== 'fee') || !c.stepId || !t?.ended || t.endedAt === null || (c.stepAt ?? 0) <= t.endedAt) return;
+  const o = s.orders.find((x) => x.id === c.stepId);
+  if (!o || o.status !== 'pending' || o.lastDeferredWeek === s.week) return;
+  const cost = chainCardCost(s, o, 'boat');
+  if (s.cash - cost < 0) return;
+  const asset = s.assets.find((a) => a.id === c.assetId);
+  markApproved(s, o, true);
+  chainApproved(s, o, s.updatedAt, 'boat');
+  line(
+    'fin',
+    'info',
+    `${nameOfRole(s, 'fin')} had ended the turn when the ${o.chain!.step === 'buy' ? 'part' : 'engineering fee'} for ${asset?.name ?? 'the plane'} came in: it went through on the standing AOG approval (${usd(cost)}).`,
+  );
+}
+
+/**
+ * A flight day on a weak battery: the pilot starts the plane on the cart hooked
+ * up to it (the drain and the wear of a start, and through pitted contacts the
+ * chance of an arc into the receptacle). No charged cart in service on it: the
+ * first flight is lost. Returns the flights lost.
+ */
+function flightDayStart(s: IslandState, p: Asset, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void): number {
+  const cart = ensureGse(s).find((c) => c.hookedTo === p.id);
+  const tagged = !!cart && !!cableReport(s, cart.id);
+  if (!cart || tagged || cart.charge < GSE.minStart) {
+    const why = !cart ? 'no cart was hooked up to it' : tagged ? `${cart.name} on it is tagged out` : `${cart.name} on it was down to ${Math.round(cart.charge)}%`;
+    line('mech', 'bad', `${p.name}'s battery was weak and ${why}: its first flight was lost.`);
+    return 1;
+  }
+  const before = cart.wear;
+  cart.charge = Math.max(0, cart.charge - (p.model === 'cargo' ? GSE.drain.turbine : GSE.drain.piston));
+  cart.wear = Math.min(100, cart.wear + GSE.wear);
+  line('mech', 'info', `${p.name}'s weak battery: the pilot started it on ${cart.name} (${Math.round(cart.charge)}% left on the cart).`);
+  const tier = orderTier('gpustart', p, s.tier);
+  const start: Order = {
+    id: `fd${s.week}`,
+    role: 'mech',
+    kind: 'gpustart',
+    assetId: p.id,
+    title: 'Ground power start on the flight line',
+    puzzle: 'gpu',
+    tier,
+    cost: orderCost('gpustart', tier),
+    parts: 0,
+    gain: 0,
+    createdWeek: s.week,
+    deferrals: 0,
+    lastDeferredWeek: null,
+    status: 'done',
+    seed: hashSeed(s.seed, 'flight-day', s.week),
+  };
+  // the mechanic hooked the worn cable up to it
+  cableArc(s, start, p, 'mech', nameOfRole(s, 'mech'), before);
+  return 0;
+}
+
+/** Week open: now and then a plane's battery is weak for its first start of the week (a cart has to be hooked up to it). */
+function rollWeakBattery(s: IslandState, now: number) {
+  const W = s.week;
+  s.weakBattery = null;
+  if (W < GSE.weakFrom) return;
+  const r = rng(hashSeed(s.seed, 'weak-battery', W));
+  if (!r.chance(GSE.weakChance)) return;
+  // a plane that will fly this week (not down for a part, not worn out)
+  const cands = planes(s).filter((p) => !isAog(s, p.id) && p.health >= 40);
+  if (!cands.length) return;
+  const p = r.pick(cands);
+  s.weakBattery = { assetId: p.id, week: W };
+  feed(s, 'mech', 'info', `${p.name}'s battery is weak this week: its first start is on ground power. Hook a charged cart up to it before the week resolves, or it loses a flight.`, now);
 }
 
 const GRADE_VALUE: Record<Grade, number> = { A: 4, B: 3, C: 2, D: 1 };
@@ -1826,6 +2331,9 @@ export function resolveWeek(s: IslandState, now: number) {
       line(role, 'info', `${p?.name ?? role} was covered by autopilot (50%).`);
     } else if (p) p.missedStreak = 0;
   }
+  // 1b. a part chain's card that came in after the analyst had ended the turn goes through on the standing
+  // AOG approval (cash permitting): a plane shouldn't sit a week longer only because of the order the crew played in
+  leftoverChainCard(s, line);
 
   // 2. flights
   let passenger = 0;
@@ -1835,15 +2343,18 @@ export function resolveWeek(s: IslandState, now: number) {
   const perPlane = flightsPerPlane(s.tier);
   const guestSlots: { plane: Asset; n: number }[] = [];
   for (const p of planes(s)) {
-    // on-time is judged against what the weather allows, not against a clear sky
-    scheduled += planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
     const grounded = isTagged(s, p.id);
-    // waiting on a part (the part chain): not airworthy, no flights
+    // waiting on a part (the part chain): not airworthy, no flights. Its flights were cancelled when it went
+    // down, so they're off the schedule (the on-time grade judges the fleet that could fly)
     const aog = !grounded && isAog(s, p.id);
+    // on-time is judged against what the weather allows, not against a clear sky
+    if (!aog) scheduled += planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
     const healthCap = grounded || aog ? 0 : planeCapacity(p, s.tier, 'clear');
-    const cap = capOf(s, p);
+    let cap = capOf(s, p);
+    // a flight day on a weak battery: the first start is on the cart hooked up to it, or the first flight is lost
+    if (cap > 0 && s.weakBattery?.week === W && s.weakBattery.assetId === p.id) cap -= flightDayStart(s, p, line);
     if (grounded) line('mech', 'info', `${p.name} grounded by the mechanic this week (safety call).`);
-    else if (aog) line('mech', 'bad', `${p.name} AOG: grounded until the ${s.chain!.item} ${isAre(s.chain!.item)} on (${perPlane} flight${perPlane > 1 ? 's' : ''} lost).`);
+    else if (aog) line('mech', 'bad', `${p.name} AOG: grounded until the ${s.chain!.item} ${isAre(s.chain!.item)} ${s.chain!.wired ? 'fixed' : 'on'} (${perPlane} flight${perPlane > 1 ? 's' : ''} cancelled).`);
     else if (healthCap < perPlane)
       line('mech', 'bad', `${perPlane - healthCap} flight${perPlane - healthCap > 1 ? 's' : ''} lost on ${p.name}: airworthiness ${Math.round(p.health)}`);
     if (cap < healthCap) line('all', 'info', `${healthCap - cap} flight${healthCap - cap > 1 ? 's' : ''} lost on ${p.name}: ${s.weather}`);
@@ -1871,25 +2382,45 @@ export function resolveWeek(s: IslandState, now: number) {
   // 3. parts delivery (tier 1: guest flights carry 1 kit in the hold)
   const flew = hasCargo(s) ? cargoFlights * ECON.partsPerCargoFlight : passenger;
   let carry = flew;
-  // a part chain's AOG part rides first; if nothing flew, the boat brings it
+  // a part chain's AOG part: on the AOG boat (paid on the PO), in a guest flight's hold from the week it
+  // ships (freight 'flight'), or on a cargo flight (it rides first). Nothing carried it: a boat, at a price
   const ch = openChain(s);
-  const chainPart = ch?.step === 'transit';
-  if (chainPart && carry > 0) carry -= 1;
+  const due = !!ch && ch.step === 'transit' && ch.hold === undefined && (ch.freight !== 'flight' || (ch.ship ?? 0) <= W);
+  const aogBoat = due && ch!.freight === 'boat';
+  let chainPart = aogBoat;
+  if (due && !aogBoat && (ch!.freight === 'flight' ? passenger > 0 : carry > 0)) {
+    chainPart = true;
+    if (ch!.freight !== 'flight') carry -= 1;
+  }
   const delivered = Math.min(s.parts.inTransit, carry);
   s.parts.inTransit -= delivered;
   s.parts.stock += delivered;
   if (delivered) line('mech', 'good', `${delivered} parts kit${delivered > 1 ? 's' : ''} delivered.`);
-  if ((s.parts.inTransit > 0 || chainPart) && flew === 0) {
-    // nothing flew: a mainland boat brings the AOG part and the most urgent kit, at a price
-    const kit = s.parts.inTransit > 0;
+  const onPlane = ch ? (s.assets.find((a) => a.id === ch.assetId)?.name ?? 'the plane') : '';
+  if (aogBoat) {
+    // the AOG boat brings the most urgent kit too, when nothing flew one in
+    const kit = s.parts.inTransit > 0 && flew === 0;
+    if (kit) {
+      s.parts.inTransit -= 1;
+      s.parts.stock += 1;
+    }
+    line('mech', 'info', `The AOG boat brought the ${ch!.item} for ${onPlane}${kit ? ', and 1 kit' : ''}.`);
+  } else if ((s.parts.inTransit > 0 && flew === 0) || (due && !chainPart)) {
+    // nothing carried them: a mainland boat brings the AOG part and the most urgent kit, at a price
+    const kit = s.parts.inTransit > 0 && flew === 0;
+    const part = due && !chainPart;
     if (kit) {
       s.parts.inTransit -= 1;
       s.parts.stock += 1;
     }
     s.cash -= ECON.boatKit;
-    if (chainPart) ch!.spent += ECON.boatKit;
-    const what = [chainPart ? `the ${ch!.item}` : '', kit ? '1 kit' : ''].filter(Boolean).join(' and ');
-    line('mech', 'bad', `No ${hasCargo(s) ? 'cargo' : 'guest'} flights carried parts: a mainland boat brought ${what} (${usd(ECON.boatKit)}).`);
+    if (part) {
+      ch!.spent += ECON.boatKit;
+      chainPart = true;
+    }
+    const what = [part ? `the ${ch!.item}` : '', kit ? '1 kit' : ''].filter(Boolean).join(' and ');
+    const carrier = part && ch!.freight === 'flight' ? 'guest' : hasCargo(s) ? 'cargo' : 'guest';
+    line('mech', 'bad', `No ${carrier} flights carried ${part && !kit ? 'the part' : 'parts'}: a mainland boat brought ${what} (${usd(ECON.boatKit)}).`);
   }
   // (a part chain waits for its own part, not a kit from stock)
   const waiting = s.orders.filter((o) => o.status === 'waiting_part' && !o.chain).sort((a, b) => urgency(s, b) - urgency(s, a));
@@ -2078,9 +2609,12 @@ export function resolveWeek(s: IslandState, now: number) {
   s.orders = s.orders.filter((o) => open(o) || projectIds.has(o.id) || (o.result?.week ?? o.createdWeek) >= W - 1);
   // a surfaced defect goes to its trade as a repair (pending the analyst), after the carry-over so it starts fresh
   for (const { d, inc } of surfaced) inc.from!.repairId = addRepair(s, d, 'incident', { incident: inc.title }).id;
-  // the part chain: another week on the ground, then receiving and engineering's answer (new steps start fresh too)
-  if (ch) ch.aogWeeks += 1;
-  resolveChain(s, W, chainPart, line);
+  // the part chain: another week on the ground (and what that cost), then receiving and engineering's answer (new steps start fresh too)
+  if (ch) {
+    ch.aogWeeks += 1;
+    ch.downtime = (ch.downtime ?? 0) + downtimeOf(s, ch.assetId).usd;
+  }
+  resolveChain(s, W, chainPart, now, line);
   if (s.chain?.step === 'done' && s.chain.closedWeek === W && s.chain.story) line('all', 'good', `Back in service: ${s.chain.story}`);
 
   // 9. decay + storm

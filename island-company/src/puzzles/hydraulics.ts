@@ -35,7 +35,7 @@
 //   cylinder rod is normal; an old dry weep upstream of the holding valve can't
 //   let the boom down), replace that seal, then top up with the oil on the
 //   truck's decal: ISO 32 anti-wear hydraulic oil, not aviation 5606.
-// - 'van', the company van: a soft pedal is air in the brake lines. Bleed it at
+// - 'van', the company van: a spongy pedal that firms up when pumped is air in the brake lines. Bleed it at
 //   the wheel with the pedal (bleeder open, press, close), keep the master
 //   cylinder from running dry, then fill to MAX with DOT 3/4 brake fluid, a
 //   glycol. Mineral oil (5606, ATF) swells a DOT system's rubber seals, and
@@ -212,7 +212,9 @@ export type HydCard = {
   plate: string;
   marked: boolean;
   sbs: string[];
-  fluid: { eff?: string; effText?: string; fluids: FluidId[]; applies: boolean }[];
+  /** the alteration whose ICA governs the fluid (its line is this airplane's) */
+  alteration?: string;
+  fluid: { eff?: string; effText?: string; fluids: FluidId[]; applies: boolean; ica?: boolean; replaced?: string }[];
   precharge: { eff?: string; effText?: string; psi: number; refTemp: number; applies: boolean }[];
 };
 
@@ -330,6 +332,7 @@ export function generateHydraulics(seed: number, tier: number, _tools: string[] 
           plate: `${manual.reg} · S/N ${manual.serial}`,
           marked: manual.marked,
           sbs: manual.sbs,
+          ...(manual.alteration ? { alteration: manual.alteration } : {}),
           fluid: (manual.fluid?.lines ?? []).map((l) => ({ ...l, fluids: l.fluids.map((f) => FLUID_OF[f]).filter(Boolean) })),
           precharge: (manual.precharge?.lines ?? []).map((l) => ({ ...l })),
         }
@@ -515,7 +518,7 @@ function generateVehicle(seed: number, tier: number, system: 'boom' | 'van'): Hy
     native: 'dot4',
     marks: ['MAX', 'MIN'],
     gauge: false,
-    squawk: 'SQUAWK: BRAKE PEDAL SOFT, SINKS',
+    squawk: 'SQUAWK: BRAKE PEDAL SPONGY, FIRMS UP WHEN PUMPED',
     leak: null,
     holdPsi: 0,
     approved: dot4only ? ['dot4'] : ['dot3', 'dot4'],
@@ -1756,7 +1759,7 @@ export const hydraulics: PuzzleDef = {
     function drawCardLines(r: R, x: number, mw: number) {
       const cd = m.card!;
       fitLabel(ctx, `${cd.task} · ${cd.plate}`, x, r.y + 14, mw, { size: 10, weight: 900, color: C.ink, align: 'left' });
-      fitLabel(ctx, cd.sbs.length ? `SBs on record: ${cd.sbs.join(', ')}` : 'SBs on record: none', x, r.y + 28, mw, { size: 9, weight: 700, color: C.inkSoft, align: 'left' });
+      fitLabel(ctx, `${cd.sbs.length ? `SBs on record: ${cd.sbs.join(', ')}` : 'SBs on record: none'}${cd.alteration ? ` · altered: ${cd.alteration}` : ''}`, x, r.y + 28, mw, { size: 9, weight: 700, color: C.inkSoft, align: 'left' });
       let y = r.y + 45;
       const row = (applies: boolean, text: string) => {
         const mark = cd.marked && applies;
@@ -1767,7 +1770,9 @@ export const hydraulics: PuzzleDef = {
       };
       // the placard's shorthand for the manual's lines: "S/N 310R0001–310R0759", "5606 or 83282"
       const short = (x = '') => x.replace(/ THRU /, '–').replace(/ AND ON$/, ' and on');
-      for (const l of cd.fluid) row(l.applies, `FLUID ${l.eff ?? ''} · ${short(l.effText)}: ${l.fluids.map((f) => FLUIDS[f].name.replace(/^MIL-PRF-/, '')).join(' or ')}${l.fluids.length === 1 ? ' only' : ''}`);
+      const fluids = (l: (typeof cd.fluid)[number]) => `${l.fluids.map((f) => FLUIDS[f].name.replace(/^MIL-PRF-/, '')).join(' or ')}${l.fluids.length === 1 ? ' only' : ''}`;
+      // the alteration's ICA line: its value first (its document and approval are long, and the card's width is not)
+      for (const l of cd.fluid) row(l.applies, l.ica ? `FLUID ICA: ${fluids(l)} · ${l.effText ?? ''}` : `FLUID ${l.eff ?? ''} · ${short(l.effText)}: ${fluids(l)}`);
       if (m.precharge) for (const l of cd.precharge) row(l.applies, `N₂ ${l.eff ?? ''} · ${short(l.effText)}: ${fmt(l.psi)} PSI @ ${l.refTemp}°F`);
       if (m.squawk) fitLabel(ctx, m.squawk, x, y, mw, { size: 10.5, weight: 900, color: C.rust, align: 'left' });
     }

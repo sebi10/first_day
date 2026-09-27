@@ -1171,6 +1171,18 @@ h3 {
   height: 250px;
   touch-action: none;
 }
+/* a grounded plane's card: its downtime and what the part has cost so far */
+.swipe-stack.tall {
+  height: 310px;
+}
+.approve-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.wrap-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .swipe-card {
   position: absolute;
   inset: 0;
@@ -1628,8 +1640,9 @@ code,
 }
 .eff-head {
   display: flex;
-  gap: 8px;
+  gap: 4px 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .eff-val {
   padding-left: 2px;
@@ -1650,8 +1663,31 @@ code,
   padding: 2px 8px;
 }
 .eff-off {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 11.5px;
+}
+/* an SB on an assembly the alteration removed, on the data plate */
+.sb-na {
+  color: var(--rust);
+  font-weight: 800;
+}
+/* the alteration's ICA values: this airplane's on the assembly it replaced */
+.ica-block {
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(78, 138, 90, 0.1);
+  box-shadow: inset 4px 0 0 var(--palm);
+}
+/* the external power placard by the receptacle */
+.ep-placard {
+  background: #1f2a30;
+  color: #f4efe3;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
 }
 .amm-warn,
 .amm-caut {
@@ -1674,7 +1710,7 @@ code,
 .amm-steps summary {
   cursor: pointer;
   font-weight: 800;
-  min-height: 36px;
+  min-height: 44px;
   display: flex;
   align-items: center;
 }
@@ -1685,6 +1721,20 @@ code,
   gap: 4px;
   font-size: 14px;
   line-height: 1.35;
+}
+
+/* ---- Ground power: the plug end up close at an inspection ---- */
+.plug-look {
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+.plug-call {
+  background: var(--paper);
+  border-radius: 12px;
+  padding: 8px;
 }
 
 /* ---- The part chain ---- */

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
 import { chainAtaOf, islandAircraft, openChain, plantFor, rightPn } from '../src/sim/chain';
-import { CHAIN, GSE, REPORT_BY_KEY } from '../src/sim/data';
+import { CABLE_REPORT, CHAIN, GSE, REPORT_BY_KEY } from '../src/sim/data';
 import { gseCarts, gseForStart, isAog, startCart } from '../src/sim/econ';
 import { apply, chainWouldOpen, createIsland } from '../src/sim/engine';
 import { hashSeed, rng } from '../src/sim/rng';
@@ -118,7 +118,8 @@ describe('a chain on a plane that also needs a ground power start', () => {
     expect(gseForStart(s, start).blocker).toBeNull();
     s = complete(s, start);
     expect(s.orders.find((o) => o.id === start.id)!.status).toBe('done');
-    expect(cart(s)).toMatchObject({ hookedTo: 'p2', charging: false, charge: 100 - GSE.drain.piston });
+    // Cargo C-7 is the turbine: a turbine start draws the cart down harder than a piston one
+    expect(cart(s)).toMatchObject({ hookedTo: 'p2', charging: false, charge: 100 - GSE.drain.turbine });
     // the chain goes on regardless: IPC lookup, the analyst's purchase, delivery, install
     const ac = islandAircraft(s.seed, CARGO);
     s = complete(s, stepOf(s), { chain: { outcome: 'pn', pn: rightPn(ac, '32-40', s.chain!.tag) } });
@@ -128,7 +129,7 @@ describe('a chain on a plane that also needs a ground power start', () => {
     s = endAll(s);
     expect(s.chain!.step).toBe('install');
     // the cart is still on the grounded plane: off the charger, it lost a little charge, and the install doesn't care
-    expect(cart(s)).toMatchObject({ hookedTo: 'p2', charging: false, charge: 100 - GSE.drain.piston - GSE.idleDrain });
+    expect(cart(s)).toMatchObject({ hookedTo: 'p2', charging: false, charge: 100 - GSE.drain.turbine - GSE.idleDrain });
     s = complete(s, s.orders.find((o) => o.id === job.id)!);
     expect(s.chain!.step).toBe('done');
     expect(isAog(s, 'p2')).toBe(false);
@@ -145,7 +146,7 @@ describe('a chain on a plane that also needs a ground power start', () => {
     s = tagOut(s, 'gpu1');
     const rep = s.orders.find((o) => o.report?.key === 'gpuCable')!;
     expect(rep).toMatchObject({ role: 'elec', status: 'ready' });
-    expect(gseForStart(s, start).blocker).toBe('Hook a charged cart up to Cargo C-7 first');
+    expect(gseForStart(s, start).blocker).toBe('Hook a charged cart up to Cargo C-7 first: GPU cart 1 is tagged out until Ben fixes its cable');
     expect(gse(s, 'hook', 'gpu1', 'p2').error).toMatch(/tagged out/);
     // the chain runs through without a cart
     const ac = islandAircraft(s.seed, CARGO);
@@ -272,7 +273,7 @@ describe('the paper-sim bots play both', () => {
     for (const c of s.gse!) expect(c.charging && c.hookedTo).toBeFalsy();
   });
 
-  it('over whole seasons: every chain closes within a few weeks, starts happen on grounded planes too, no cart is left hooked up', () => {
+  it('over whole seasons: every chain closes within a few weeks, starts happen on grounded planes too, no cart is left hooked up but for flight day', () => {
     let chains = 0;
     let startsAog = 0;
     for (const team of ['three friends', 'all average']) {
@@ -288,7 +289,9 @@ describe('the paper-sim bots play both', () => {
             expect(s.week - c.week, `${team} seed ${seed}: ${c.item} open since week ${c.week}`).toBeLessThanOrEqual(6);
           }
           for (const o of s.orders) if (o.kind === 'gpustart' && o.result?.week === s.week - 1 && prev && isAog(prev, o.assetId!)) startsAog++;
-          for (const x of s.gse ?? []) expect(x.hookedTo).toBeNull();
+          // the only cart left on a plane at the week's end is the one the weak-battery plane started on, on flight day
+          // (the mechanic, or autopilot for an empty seat, puts the others back on the charger)
+          for (const x of s.gse ?? []) if (x.hookedTo) expect(x.hookedTo, `${team} seed ${seed} week ${s.week}`).toBe(prev?.weakBattery?.assetId);
           prev = s;
         });
       }
@@ -405,6 +408,7 @@ describe('whose move is it: reports and chain steps count the same way', () => {
     const [p] = pushes(before, s, { t: 'endTurn', role: 'fin' });
     expect(p.title).toBe('Hangar Isle: week 5 resolved');
     expect(p.body).toMatch(/ Cargo C-7 AOG: Waiting on Ana: IPC lookup\./);
-    expect(p.body).toMatch(new RegExp(` Ana reports ${REPORT_BY_KEY.gpuCable.said}: Ben's move\\.$`));
+    // a botched fix that comes back has burnt the plug end: the push says so in those words
+    expect(p.body).toMatch(new RegExp(` Ana reports ${CABLE_REPORT.pitted.said}: Ben's move\\.$`));
   });
 });

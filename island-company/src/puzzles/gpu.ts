@@ -40,7 +40,16 @@ export type GpuAircraft = {
   battV: number;
   /** charging-system switch label */
   gen: 'ALT' | 'GEN';
+  /** an amphibian: it sits on its float wheels on the ramp */
+  floats?: boolean;
 };
+
+/**
+ * The island's own plane, as its external power placard reads (launchFor hands
+ * it over): the start is on this airframe, whatever the order's tier. The tier
+ * only sets the checklist, the hints and the clock.
+ */
+export type GpuPlane = { name: string; reg: string; designation: string; turbine: boolean; floats: boolean; ampMax: number; wing: 'high' | 'low'; battery: 'on' | 'off' };
 
 // Pistons cover every placard combination, so the placard has to be read.
 // High-wing (Cessna-style) ships need the battery master ON to pull in the
@@ -123,13 +132,20 @@ export type GpuModel = {
 /** current-limit knob range, amps */
 export const AMP_KNOB = { min: 0, max: 1600, detent: 50 } as const;
 
-export function generateGpu(seed: number, tier: number, tools: string[] = [], kind?: GpuKind, charge = 100): GpuModel {
+export function generateGpu(seed: number, tier: number, tools: string[] = [], kind?: GpuKind, charge = 100, plane?: GpuPlane): GpuModel {
   const t = clamp(Math.round(tier), 0, 5);
   const r = rng(hashSeed('gpu', seed, t));
-  const k: GpuKind = kind ?? (t >= 4 ? 'turbine' : 'piston');
+  const k: GpuKind = plane ? (plane.turbine ? 'turbine' : 'piston') : (kind ?? (t >= 4 ? 'turbine' : 'piston'));
   let ac: GpuAircraft;
+  const named = plane ? `${plane.name} · ${plane.reg} ${plane.designation}` : undefined;
   if (k === 'turbine') {
-    ac = { id: 'turbine', name: 'Turbine cargo single', kind: 'turbine', wing: 'high', volts: 28, master: 'on', ampMax: r.pick([800, 900, 1000]), battV: 23.4, gen: 'GEN' };
+    const amp = r.pick([800, 900, 1000]);
+    ac = { id: 'turbine', name: named ?? 'Turbine cargo single', kind: 'turbine', wing: 'high', volts: 28, master: 'on', ampMax: plane?.ampMax || amp, battV: 23.4, gen: 'GEN' };
+  } else if (plane) {
+    // the island's piston plane, by its own placard (the IC-185F amphibian: high wing, 28 V, battery master ON)
+    r.next();
+    const master = plane.battery;
+    ac = { id: plane.wing === 'high' ? 'high28' : 'low28', name: named!, kind: 'piston', wing: plane.wing, volts: 28, master, ampMax: 0, battV: 23.2, gen: 'ALT', ...(plane.floats ? { floats: true } : {}) };
   } else {
     // the tutorial is the common 28 V, master-ON single; tier 1 adds the 14 V single
     const pool = t === 0 ? PISTONS.slice(0, 1) : t === 1 ? PISTONS.slice(0, 2) : PISTONS;
@@ -862,12 +878,16 @@ export const gpu: PuzzleDef = {
   gesture: 'Flip switches, drag the plug',
   howTo: 'Read the placard, set the cart, plug in, check the volts, start, unplug.',
   term: 'GPU: a ground power cart that starts the aircraft instead of its weak battery. Tap a meter for a close reading.',
-  seconds: (tier) => (tier >= 4 ? 110 + (tier - 4) * 10 : 70 + clamp(tier, 0, 3) * 8),
+  // a turbine start (abort, dry motoring, a second try) gets more time than a piston one at any tier
+  seconds: (tier, ctx) => {
+    const turbine = ctx?.plane ? ctx.plane.turbine : ctx?.job === 'gpuTurbine' || (ctx?.job !== 'gpuPiston' && tier >= 4);
+    return turbine ? 110 + Math.max(0, tier - 4) * 10 : 70 + clamp(tier, 0, 3) * 8;
+  },
   mount(host, p) {
     const job = p.context?.job;
     const kind: GpuKind | undefined = job === 'gpuTurbine' ? 'turbine' : job === 'gpuPiston' ? 'piston' : undefined;
-    // the island's cart, as it was left: a run-down one sags under the start
-    const m = generateGpu(p.seed, p.tier, p.tools, kind, p.context?.cart?.charge ?? 100);
+    // the island's cart, as it was left: a run-down one sags under the start; the island's plane, by its placard
+    const m = generateGpu(p.seed, p.tier, p.tools, kind, p.context?.cart?.charge ?? 100, p.context?.plane);
     const { ac } = m;
     const tb = ac.kind === 'turbine';
     const high = ac.wing === 'high';
@@ -1802,20 +1822,23 @@ export const gpu: PuzzleDef = {
       ctx.beginPath();
       ctx.ellipse(w * 0.6, g.groundY + 2, w * 0.42, 5, 0, 0, Math.PI * 2);
       ctx.fill();
-      // gear legs + wheels (a low wing hangs its mains from the wing)
-      const nwX = w * (tb ? 0.2 : 0.18);
-      const mwX = high ? w * 0.74 : wx + chord * 0.55;
-      const wr = clamp(fh * 0.17, 8, 14);
-      ctx.strokeStyle = '#56646b';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(nwX, bot - 4);
-      ctx.lineTo(nwX, g.groundY - wr);
-      ctx.moveTo(mwX, bot - 4);
-      ctx.lineTo(mwX + 10, g.groundY - wr);
-      ctx.stroke();
-      wheel(nwX, g.groundY - wr, wr);
-      wheel(mwX + 10, g.groundY - wr, wr * 1.15);
+      // gear legs + wheels (a low wing hangs its mains from the wing); an amphibian stands on its float wheels
+      if (ac.floats) drawFloat(g, noseX, bot);
+      else {
+        const nwX = w * (tb ? 0.2 : 0.18);
+        const mwX = high ? w * 0.74 : wx + chord * 0.55;
+        const wr = clamp(fh * 0.17, 8, 14);
+        ctx.strokeStyle = '#56646b';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(nwX, bot - 4);
+        ctx.lineTo(nwX, g.groundY - wr);
+        ctx.moveTo(mwX, bot - 4);
+        ctx.lineTo(mwX + 10, g.groundY - wr);
+        ctx.stroke();
+        wheel(nwX, g.groundY - wr, wr);
+        wheel(mwX + 10, g.groundY - wr, wr * 1.15);
+      }
       // fuselage
       ctx.fillStyle = skin;
       ctx.beginPath();
@@ -2040,6 +2063,72 @@ export const gpu: PuzzleDef = {
       ctx.fillStyle = '#b9c1c4';
       ctx.fill();
       drawPlacard(g, tag);
+    }
+
+    /**
+     * The amphibian's near float, seen from the side: an upswept bow, the long
+     * forebody, the step, the afterbody rising to the stern; struts up to the
+     * fuselage, and its retractable wheels down for the ramp (a nose wheel near
+     * the bow, a main wheel just aft of the step).
+     */
+    function drawFloat(g: Geo, noseX: number, bot: number) {
+      const { w } = g;
+      const legs = g.groundY - bot;
+      const wr = clamp(legs * 0.2, 4, 8);
+      const keel = g.groundY - wr * 1.6;
+      const deck = bot + Math.max(4, legs * 0.22);
+      const h = Math.max(6, keel - deck);
+      const x0 = noseX + 2;
+      const x1 = w * 0.95;
+      const step = x0 + (x1 - x0) * 0.5;
+      ctx.lineCap = 'round';
+      // struts from the fuselage down to the float
+      ctx.strokeStyle = '#b9b3a4';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      for (const f of [0.3, 0.6]) {
+        ctx.moveTo(w * f, bot - 2);
+        ctx.lineTo(w * f + 6, deck + 1);
+      }
+      ctx.stroke();
+      // the wheels, down, on short legs out of the keel
+      const nx = x0 + h * 1.7;
+      const mx = step + 10;
+      ctx.strokeStyle = '#56646b';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(nx, keel - 2);
+      ctx.lineTo(nx, g.groundY - wr);
+      ctx.moveTo(mx - 2, keel - 2);
+      ctx.lineTo(mx, g.groundY - wr);
+      ctx.stroke();
+      wheel(nx, g.groundY - wr, wr);
+      wheel(mx, g.groundY - wr, wr * 1.1);
+      // the float
+      ctx.beginPath();
+      ctx.moveTo(x0, deck + h * 0.12);
+      ctx.quadraticCurveTo(x0 + h * 0.4, deck - h * 0.08, x0 + h * 1.4, deck);
+      ctx.lineTo(x1 - h * 0.8, deck + h * 0.04);
+      ctx.quadraticCurveTo(x1, deck + h * 0.08, x1, deck + h * 0.34);
+      ctx.lineTo(step + 3, keel - h * 0.18);
+      ctx.lineTo(step, keel - h * 0.18);
+      ctx.lineTo(step, keel);
+      ctx.lineTo(x0 + h * 1.3, keel);
+      ctx.quadraticCurveTo(x0 + h * 0.15, keel, x0, deck + h * 0.12);
+      ctx.closePath();
+      const fg = ctx.createLinearGradient(0, deck, 0, keel);
+      fg.addColorStop(0, '#f4f0e6');
+      fg.addColorStop(1, '#d6cfbd');
+      ctx.fillStyle = fg;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(31,42,48,.4)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      // a painted stripe along the forebody, and the step's shadow
+      ctx.fillStyle = 'rgba(46,124,147,.6)';
+      ctx.fillRect(x0 + h * 1.3, deck + h * 0.42, step - x0 - h * 1.3, Math.max(1.5, h * 0.12));
+      ctx.fillStyle = 'rgba(31,42,48,.18)';
+      ctx.fillRect(step - 1, keel - h * 0.18, 3, h * 0.18);
     }
 
     function drawPlacard(g: Geo, tag: Rect) {
@@ -2427,7 +2516,7 @@ export const gpu: PuzzleDef = {
           ctx.fill();
           label(ctx, 'list ☰', g.w - 41, 24, { size: 12, weight: 800, color: C.seaDeep });
         }
-        fitLabel(ctx, tb ? 'Turbine start on ground power' : `${ac.name}: ground power start`, 14, 16, room, { size: 15, weight: 800, align: 'left' });
+        fitLabel(ctx, tb && !p.context?.plane ? 'Turbine start on ground power' : `${ac.name}: ground power start`, 14, 16, room, { size: 15, weight: 800, align: 'left' });
         const sub = showToast ? toast.text : s.everRunning ? 'Running. Finish the job' : teach ? 'Checklist on the card: list ☰' : 'No checklist on the ramp: from memory';
         fitLabel(ctx, sub, 14, 37, room, { size: 12, weight: showToast ? 800 : 600, color: showToast ? (toast.bad ? C.rust : C.seaDeep) : C.inkSoft, align: 'left' });
       }

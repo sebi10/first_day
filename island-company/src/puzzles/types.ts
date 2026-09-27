@@ -49,23 +49,34 @@ export interface PuzzleContext {
   aircraft?: Aircraft;
   /** the task card's values for this airplane (card-driven torque and hydraulic servicing) */
   card?: ManualCard;
-  /** launched by the part chain (src/sim/chain.ts): the IPC lookup or the logbook research for this part */
-  chain?: { step: 'lookup' | 'research'; tag: string; item: string; found: string };
+  /**
+   * launched by the part chain (src/sim/chain.ts): the IPC lookup or the logbook research for this
+   * part; `found` is what the job found (the squawk), `from` the job that found it, `by` and `week` who and when
+   */
+  chain?: { step: 'lookup' | 'research'; tag: string; item: string; found: string; from?: string; by?: string; week?: number };
   /**
    * ground power start: the cart hooked up to the plane (the island's GSE state).
    * `charge` 0..100: a low cart's output sags under the start load.
    */
   cart?: { name: string; charge: number };
+  /** ground power start: the island's plane, by its external power placard (the airframe the start is on) */
+  plane?: { name: string; reg: string; designation: string; turbine: boolean; floats: boolean; ampMax: number; wing: 'high' | 'low'; battery: 'on' | 'off' };
+  /** the part chain's circuit check (the meter on the airplane): what is really wrong, the unit or its wiring */
+  bench?: { fault: 'unit' | 'wiring' };
 }
 
 /** One value as the manual prints it, with the effectivity it applies to. */
 export type CardLine = {
-  /** effectivity code (A/B by S/N, C/D by SB); none = all */
+  /** effectivity code (A/B by S/N, C/D by SB; 'ICA': the alteration's own value); none = all */
   eff?: string;
-  /** "S/N 310R0001 THRU 310R0519", "POST Beaumont SB 219" */
+  /** "S/N 310R0001 THRU 310R0519", "POST Beaumont SB 219", "Seaboard ICA SPC-61-4, Rev B · STC SA02971SE" */
   effText?: string;
-  /** true on the line for this airplane's S/N and SB status */
+  /** true on the line for this airplane's S/N and SB status (on an altered assembly: the ICA's line) */
   applies: boolean;
+  /** the ICA's line for an assembly an alteration replaced (it governs over the airframe manual's) */
+  ica?: boolean;
+  /** an airframe-manual line for an assembly an alteration replaced: what replaced it ("STC SA02971SE") */
+  replaced?: string;
 };
 
 /**
@@ -81,6 +92,8 @@ export type ManualCard = {
   marked: boolean;
   /** SBs complied with on this airplane (the records the card's C/D lines depend on) */
   sbs: string[];
+  /** the alteration that replaced this card's assembly, as the records name it ("STC SA02971SE, Seaboard Propeller Conversions"); its ICA line governs */
+  alteration?: string;
   torque?: { key: string; what: string; lines: (CardLine & { lo: number; hi: number; unit: string; note?: string })[] };
   precharge?: { what: string; lines: (CardLine & { psi: number; refTemp: number })[] };
   fluid?: { lines: (CardLine & { fluids: string[] })[] };
@@ -143,8 +156,10 @@ export interface PuzzleDef {
   howTo: string;
   /** plain-language tooltip for the real term, max ~15 words */
   term: string;
-  /** time budget in seconds for a tier (tier 0 is untimed and ignored) */
-  seconds(tier: number): number;
+  /** the job's own term when the context changes the scenario (an airplane's 28 V DC circuit on the meter) */
+  termFor?(context?: PuzzleContext): string | undefined;
+  /** time budget in seconds for a tier (tier 0 is untimed and ignored); the context when the job changes it (a turbine start) */
+  seconds(tier: number, context?: PuzzleContext): number;
   mount(host: PuzzleHost, params: PuzzleParams): PuzzleInstance;
 }
 

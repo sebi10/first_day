@@ -1,9 +1,9 @@
 // Scripted players for the paper sim (scripts/balance.ts) and tests.
 // They call the same reducer as real phones, so balance numbers are real.
-import { botChainData, islandAircraft, openChain } from './chain';
-import { ECON, TIERS } from './data';
+import { botChainData, islandAircraft, needsFreight, openChain } from './chain';
+import { ECON, GSE, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
-import { charterLoad, expectedDeferralCost, gseCarts, logistic, occupancy, startCart, urgency } from './econ';
+import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
 import { ROLES, type Action, type GseCart, type IslandState, type Order, type Role } from './types';
 
@@ -79,19 +79,30 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
   // the crew backs the analyst's story call (bots agree; people may not)
   if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role }, now);
   for (const o of s.orders.filter((x) => x.role === role && x.status === 'countered')) s = step(s, { t: 'acceptCounter', orderId: o.id }, now);
-  // the mechanic looks the ground power cables over about once a month (a cracked one gets written up)
-  if (role === 'mech')
-    for (const c of gseCarts(s)) if (!c.inspected || s.week - c.inspected.week >= 4) s = step(s, { t: 'gse', role, cart: c.id, op: 'inspect' }, now);
+  const skill0 = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
+  if (role === 'mech') {
+    // last week's flight-day cart comes back off the plane and onto the charger
+    for (const c of gseCarts(s)) if (c.hookedTo) s = step(s, { t: 'gse', role, cart: c.id, op: 'charge' }, now);
+    // the ground power cables get a look about once a month. A plug end well inside its band is an easy call
+    // (a clean boot, or burnt pins); near the edge of cracked it is right by skill
+    for (const c of gseCarts(s)) {
+      if (c.inspected && s.week - c.inspected.week < 4) continue;
+      const worn = cableBand(c.wear) !== 'good';
+      const clear = Math.abs(c.wear - GSE.cracked) >= 10;
+      const right = r.chance(clear ? 0.97 : Math.min(0.97, Math.max(0.2, 0.25 + 0.7 * skill0)));
+      s = step(s, { t: 'gse', role, cart: c.id, op: 'inspect', call: worn === right ? 'tag' : 'ok' }, now);
+    }
+  }
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
   // a crewmate's report is a favour done on top of the usual jobs (people make time when a friend is stuck);
   // repairs and redos are real jobs and take a slot. A ground power start with no charged cart to hand when
   // its turn comes (an earlier start may have used it up) waits, and the slot goes to the next job.
   const play = (o: (typeof ready)[number]): boolean => {
-    // tow a charged cart over for a start (off the charger, or off a plane that isn't flying; a flat or
-    // tagged-out one on that plane goes back on the charger first), and put it back on the charger after
-    const cart = o.kind === 'gpustart' ? botCart(s, o) : null;
-    if (o.kind === 'gpustart' && !cart) return false;
+    // tow a charged cart over for a start or radio work (off the charger, or off a plane that isn't flying;
+    // a flat or tagged-out one on that plane goes back on the charger first), and put it back on the charger after
+    const cart = needsCart(o.kind) ? botCart(s, o) : null;
+    if (needsCart(o.kind) && !cart) return false;
     if (cart && cart.hookedTo !== o.assetId) {
       const on = gseCarts(s).find((c) => c.hookedTo === o.assetId);
       if (on) s = step(s, { t: 'gse', role, cart: on.id, op: 'charge' }, now);
@@ -110,17 +121,32 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
   for (let guard = 0; guard < 3 && extra > 0; guard++) {
     const c = openChain(s);
     const o = c?.stepId ? s.orders.find((x) => x.id === c.stepId && x.role === role && x.status === 'ready') : undefined;
-    if (!o) break;
-    play(o);
+    // the electrician's check on an electrical unit
+    const b = !o && c?.bench && !c.bench.call ? s.orders.find((x) => x.id === c.bench!.id && x.role === role && x.status === 'ready') : undefined;
+    if (!o && !b) break;
+    play((o ?? b)!);
     extra--;
   }
+  // a flight day on a weak battery: a charged cart goes on that plane before the turn ends
+  if (role === 'mech') s = hookFlightDay(s, now);
   return s;
 }
 
-/** A part chain's lookup or research: what the bot hands in, by its skill (src/sim/chain.ts). */
+/** The weak-battery plane gets the best charged cart hooked up to it (off the charger, or off a plane that isn't flying). */
+function hookFlightDay(s: IslandState, now: number): IslandState {
+  const wb = s.weakBattery;
+  if (!wb || wb.week !== s.week) return s;
+  const pick = startCart(s, wb.assetId);
+  if (!pick || pick.hookedTo === wb.assetId) return s;
+  const on = gseCarts(s).find((c) => c.hookedTo === wb.assetId);
+  if (on) s = step(s, { t: 'gse', role: 'mech', cart: on.id, op: 'charge' }, now);
+  return step(s, { t: 'gse', role: 'mech', cart: pick.id, op: 'hook', assetId: wb.assetId }, now);
+}
+
+/** A part chain's lookup, research or circuit check: what the bot hands in, by its skill (src/sim/chain.ts). */
 function chainData(s: IslandState, o: IslandState['orders'][number], skill: number, r: Rng): Record<string, unknown> | undefined {
   const c = openChain(s);
-  if (!c || !o.chain || c.id !== o.chain.id || (o.chain.step !== 'lookup' && o.chain.step !== 'research')) return undefined;
+  if (!c || !o.chain || c.id !== o.chain.id || (o.chain.step !== 'lookup' && o.chain.step !== 'research' && o.chain.step !== 'bench')) return undefined;
   const asset = s.assets.find((a) => a.id === c.assetId);
   if (!asset) return undefined;
   return botChainData(islandAircraft(s.seed, asset), c, o.chain.step, skill, r);
@@ -146,9 +172,13 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     const worth = exp >= o.cost * 0.6 || critical;
     // like a person would: cheap safety-critical work gets approved even when cash is tight
     const cheapCritical = critical && o.cost <= 600 && s.cash - o.cost >= ECON.freezeBelow;
-    // the part for a grounded plane is what gets the revenue back: find the money
-    const aog = !!o.chain && s.cash - o.cost >= 0;
-    if ((worth && s.cash - o.cost >= reserve) || cheapCritical || aog) s = step(s, { t: 'approve', orderId: o.id }, now);
+    // the part for a grounded plane is what gets the revenue back: find the money. Its freight, when the plane
+    // that would carry it is the one down: the AOG boat if a week of downtime costs more than the boat, else the guest flight
+    const c = o.chain ? openChain(s) : null;
+    const freight = !!c && o.chain!.step === 'buy' && needsFreight(s, c);
+    const ship: 'boat' | 'flight' | undefined = freight ? (downtimeOf(s, c!.assetId).usd > ECON.boatKit ? 'boat' : 'flight') : undefined;
+    const aog = !!o.chain && s.cash - o.cost - (ship === 'boat' ? ECON.boatKit : 0) >= 0;
+    if ((worth && s.cash - o.cost >= reserve) || cheapCritical || aog) s = step(s, { t: 'approve', orderId: o.id, ...(ship ? { ship } : {}) }, now);
     else if (o.lastDeferredWeek !== s.week) s = step(s, { t: 'defer', orderId: o.id, reason: s.cash - o.cost < reserve ? 'cash' : 'priority' }, now);
   }
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);

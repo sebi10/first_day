@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ntfy } from '../net/notify';
 import { sessions, storeFor, type IslandRef } from '../net/session';
 import type { SyncStatus } from '../net/store';
-import { canResolve, seatOf } from '../sim/engine';
+import { ENGINE_VERSION, canResolve, seatOf } from '../sim/engine';
 import { WEEK_BOUND, type Action, type IslandState, type Role } from '../sim/types';
 import { fx } from './feedback';
 import { toast, useNow } from './kit';
@@ -38,6 +38,10 @@ export function useIsland(ref: IslandRef) {
     window.addEventListener('ic:dropped', on);
     return () => window.removeEventListener('ic:dropped', on);
   }, [ref.id]);
+  // saved by a newer engine than this build: the engine refuses every move, so reload to the new version (src/main.tsx)
+  useEffect(() => {
+    if (s && (s.engine ?? 0) > ENGINE_VERSION) window.dispatchEvent(new CustomEvent('ic:stale'));
+  }, [s?.engine]);
   // a session re-created after it died has a new id: follow it
   useEffect(() => store.onUid?.(setUid), [ref.mode]);
   useEffect(() => {

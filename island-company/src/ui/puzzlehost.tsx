@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { PUZZLES } from '../puzzles';
 import { markInput, suspendLoops } from '../puzzles/kit';
 import { PASS, type PuzzleContext, type PuzzleId, type PuzzleInstance, type PuzzleResult } from '../puzzles/types';
+import { TOOLS } from '../sim/data';
 import { REWORK_BELOW, workCredit } from '../sim/econ';
 import { fx, type Fx } from './feedback';
 import { Btn, Icon, TierDots } from './kit';
@@ -38,9 +39,19 @@ export type PuzzleLaunch = {
   blind?: boolean;
   /** blind: the entry the sealed job shows (a logbook entry, a closed work order, a filed task) */
   signoff?: { by: string; week: number; header: string; stamp: string; later: string; /** the part chain opened: the job stopped for a part */ stopped?: boolean };
+  /** a reminder the result screen shows after the job ("GPU cart 1 is still on Cargo C-7 (75%): plug it back in") */
+  after?: string;
 };
 
 const SEEN = 'ic.seen.';
+
+/** The how-to's tools: only this puzzle's, by the names the Me tab shows (never the ids). */
+const TOOL_NAME = new Map(Object.values(TOOLS).flat().map((x) => [x.id, x]));
+export const toolNames = (puzzle: PuzzleId, tools: string[]) =>
+  tools
+    .map((id) => TOOL_NAME.get(id))
+    .filter((x): x is NonNullable<typeof x> => !!x && x.puzzle === puzzle)
+    .map((x) => x.name);
 
 export function PuzzleHost({
   launch,
@@ -79,7 +90,7 @@ export function PuzzleHost({
   const startedRef = useRef(false);
   const hiddenAt = useRef<number | null>(null);
   const timed = launch.tier > 0;
-  const total = def.seconds(launch.tier) * (settings.get().timerBoost ? 1.5 : 1) * 1000;
+  const total = def.seconds(launch.tier, launch.context) * (settings.get().timerBoost ? 1.5 : 1) * 1000;
   const [left, setLeft] = useState(1);
   const shownLeft = useRef(1);
   const elapsed = useRef(0);
@@ -293,11 +304,11 @@ export function PuzzleHost({
               <span class="chip ink">{def.gesture}</span>
               <h2>{def.howTo}</h2>
               <p class="muted" style={{ margin: 0, maxWidth: 320 }}>
-                {launch.expert ? 'Outside your trade: no hints. Under 60% is a botch.' : def.term}
+                {launch.expert ? 'Outside your trade: no hints. Under 60% is a botch.' : (def.termFor?.(launch.context) ?? def.term)}
               </p>
-              {launch.tools.length > 0 && (
+              {toolNames(launch.puzzle, launch.tools).length > 0 && (
                 <p class="label" style={{ margin: 0 }}>
-                  Tools: {launch.tools.join(', ')}
+                  Tools: {toolNames(launch.puzzle, launch.tools).join(', ')}
                 </p>
               )}
               <span class="btn small" style={{ marginTop: 6 }}>
@@ -335,6 +346,7 @@ export function PuzzleHost({
                   </div>
                 </div>
                 <div class="label">{launch.signoff?.later ?? 'How good it was shows up later: in the asset’s health, an inspection, or an incident.'}</div>
+                {launch.after && <div style={{ fontWeight: 700 }}>{launch.after}</div>}
                 <Btn block onClick={onClose}>
                   Continue
                 </Btn>
@@ -358,6 +370,7 @@ export function PuzzleHost({
                   {res.perfect ? ' · perfect: +1% bonus, and it holds a week longer' : ''}
                   {launch.reward && !botched && !reworked ? ` · ${launch.reward}` : ''}
                 </div>
+                {launch.after && <div style={{ fontWeight: 700 }}>{launch.after}</div>}
                 <Btn block onClick={onClose}>
                   Continue
                 </Btn>
@@ -372,8 +385,11 @@ export function PuzzleHost({
 
 /** What a part chain step handed in (a fact, not a verdict): the P/N ordered, or where the request went. */
 function handedIn(r: PuzzleResult | null): string | null {
-  const c = r?.data?.chain as { outcome?: string; pn?: string | null; route?: string | null } | undefined;
+  const c = r?.data?.chain as { outcome?: string; pn?: string | null; route?: string | null; call?: string; where?: string } | undefined;
   if (!c) return null;
+  // the electrician's check: the call, never whether it was right
+  if (c.call === 'unit') return 'Called it: the unit (the wiring checks good)';
+  if (c.call === 'wiring') return `Called it: the wiring${c.where ? `, fixed at the ${c.where.charAt(0).toLowerCase()}${c.where.slice(1)}` : ''}`;
   if (c.outcome === 'notipc') return 'Not in the IPC: sent for research in the logbooks';
   if (c.outcome === 'pn' && c.pn) return `Ordered P/N ${c.pn}`;
   if (c.outcome === 'none') return 'Nothing ordered';

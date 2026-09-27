@@ -2,8 +2,8 @@
 // move it is), and the stepper on the job and its steps. What the chain knows
 // that the players don't (whether a P/N or a request is right) never shows:
 // that comes back at receiving, from engineering, or as an incident.
-import { chainMove, chainSteps, openChain } from '../sim/chain';
-import { ROLE_LABEL } from '../sim/data';
+import { benchMove, chainMove, chainSteps, isAre, needsFreight, openChain } from '../sim/chain';
+import { ECON, ROLE_LABEL } from '../sim/data';
 import type { IslandState, Order, PartChain, Role } from '../sim/types';
 import { Icon, usd } from './kit';
 import { C, ROLE_TINT } from './theme';
@@ -43,6 +43,8 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
   const asset = s.assets.find((a) => a.id === c.assetId);
   const m = chainMove(s, c);
   const mine = m.who === role;
+  // the electrician's check runs beside the lookup or the research: a second move, another seat's
+  const bm = benchMove(s, c);
   return (
     <div class="card col chain-banner" style={{ gap: 8, borderLeft: `6px solid ${mine ? C.rust : C.mech}` }}>
       <div class="row" style={{ gap: 8, alignItems: 'flex-start' }}>
@@ -53,7 +55,7 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
           </b>
           <span class="label">
             Found on {c.title} in week {c.week}
-            {c.aogWeeks ? ` · grounded ${c.aogWeeks} week${c.aogWeeks > 1 ? 's' : ''} so far` : ' · no flights until the part is on'}
+            {c.aogWeeks ? ` · grounded ${c.aogWeeks} week${c.aogWeeks > 1 ? 's' : ''} so far` : c.wired ? ' · no flights until the job is finished' : ' · no flights until the part is on'}
           </span>
         </span>
       </div>
@@ -72,6 +74,17 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
           <>{m.text.charAt(0).toUpperCase() + m.text.slice(1)}.</>
         )}
       </span>
+      {bm && (
+        <span style={{ fontSize: 15 }}>
+          {bm.who === role ? (
+            <b class="fault">Your move too: {bm.text}</b>
+          ) : (
+            <>
+              And <b>{nameOf(s, 'elec')}</b>: {bm.text}
+            </>
+          )}
+        </span>
+      )}
     </div>
   );
 }
@@ -83,20 +96,33 @@ export function ChainOrigin({ s, o, me }: { s: IslandState; o: Order; me?: Role 
   const asset = s.assets.find((a) => a.id === c.assetId);
   const m = chainMove(s, c);
   const done = c.step === 'done';
+  const step = o.chain!.step;
   const what =
-    o.chain!.step === 'job'
+    step === 'job'
       ? done
-        ? 'The part is on and the job signed off.'
+        ? c.wired
+          ? 'The fault was in the wiring: fixed, and the job signed off.'
+          : 'The part is on and the job signed off.'
         : c.step === 'install'
-          ? `The part is here: install ${c.pn}, then finish the job. It counts as the job itself.`
-          : `This job found a part it can't be finished without. ${asset?.name ?? 'The plane'} is grounded until it's on.`
-      : o.chain!.step === 'lookup'
+          ? c.wired
+            ? `${nameOf(s, 'elec')}'s check found the fault in the wiring and fixed it: no part needed. Finish the job.`
+            : `The part is here: install ${c.pn}, then finish the job. It counts as the job itself.`
+          : c.step === 'check'
+            ? `The part is looked up. It's bought once ${nameOf(s, 'elec')}'s check says the ${c.item} ${isAre(c.item)} really bad.`
+            : `This job found a part it can't be finished without. ${asset?.name ?? 'The plane'} is grounded until it's on.`
+      : step === 'lookup'
         ? 'Find the part in the IPC for this airplane (its S/N and SB status) and order it, or, if it isn’t in the IPC, send it for research.'
-        : o.chain!.step === 'research'
+        : step === 'research'
           ? 'The IPC doesn’t have the part on this airplane. Find in the logbooks how it got there, and ask engineering to approve it (or say what the records show).'
-          : o.chain!.step === 'buy'
-            ? `The part for ${asset?.name ?? 'the plane'}: it rides the next delivery once approved. The plane earns nothing until it's on.`
-            : 'Engineering reviews the request the mechanic sent: the answer comes a week later, when the week resolves.';
+          : step === 'bench'
+            ? c.bench?.again
+              ? `The new ${c.item} made no difference, so the unit is ruled out: meter the circuit again and find the fault in the wiring.`
+              : `Meter the ${c.item} circuit at the airplane, under the mechanic's supervision (14 CFR 43.3(d)): is the ${c.item} really bad, or is the fault in its wiring? The part waits on your call. Fix the wiring where you find it.`
+            : step === 'buy'
+              ? needsFreight(s, c)
+                ? `The part for ${asset?.name ?? 'the plane'}. The cargo plane is the one down: the AOG boat brings it when the week resolves (+${usd(ECON.boatKit)} on the PO), or the next guest flight carries it free a week later. The plane earns nothing until it's on.`
+                : `The part for ${asset?.name ?? 'the plane'}: it rides the next cargo flight once approved. The plane earns nothing until it's on.`
+              : 'Engineering reviews the request the mechanic sent: the answer comes a week later, when the week resolves.';
   return (
     <div class="card col" style={{ gap: 8, background: 'var(--sand)', boxShadow: 'none', borderLeft: `6px solid ${done ? C.palm : C.rust}` }}>
       <span class="label">Part chain · {c.item}</span>
