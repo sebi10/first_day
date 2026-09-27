@@ -5,6 +5,15 @@
 // Real rules: a small price variance inside tolerance is fine; a partial
 // delivery billed for what arrived is fine; "2/10 net 30" means 2% off if paid
 // within 10 days — worth taking when cash allows.
+//
+// On a real island the batch is the island's own payables (docs/JOBFLOW.md
+// 17.3, context.invoice): one invoice per PO received at the last resolve and
+// not yet paid (three lines to an invoice), its PO and receiving columns the
+// real P/Ns, quantities, prices and freight. The vendor's side carries the
+// seeded discrepancy, and what the match holds back stays out of this week's
+// payment run. These POs carry no sales tax, so a real batch has none; the
+// resort's other suppliers (linen, hardware, food) make up the rest of the
+// batch, and carry the duplicate. With no such PO, today's generated batch.
 import { rng, type Rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, loop, pointer, roundRect, settle, shade, stage, tnum } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
@@ -27,6 +36,8 @@ export const ROW_TAX = 91;
 
 export type InvLine = {
   item: string;
+  /** a real line: what the P/N is ("crush gasket"), printed under it */
+  sub?: string;
   poQty: number;
   poPrice: number;
   /** receiving report: what came off the cargo flight */
@@ -60,6 +71,8 @@ export type InvCard = {
   atStake: number;
   discount: number;
   windowOpen: boolean;
+  /** one of the island's own POs (its PO and receiving columns are real: nothing here may change them) */
+  real?: boolean;
 };
 
 export type InvModel = {
@@ -83,6 +96,8 @@ export type InvModel = {
   showWindow: boolean;
   /** tiers 0–2 teach: band printed, window countdown, agreed tax rate on the PO */
   teach: boolean;
+  /** the island's own payables are in the batch */
+  real?: boolean;
 };
 
 export type InvDecision = { action: 'pay' | 'early' | 'hold'; row?: number };
@@ -319,7 +334,7 @@ function retotal(c: InvCard, m: InvModel) {
 function rebalance(m: InvModel, leak: number) {
   const staked = () => sum(m.cards.map((c) => c.atStake));
   for (const k of ['dupe', 'qty', 'freight', 'price'] as InvIssue[]) {
-    const c = m.cards.find((x) => x.issue?.kind === k);
+    const c = m.cards.find((x) => x.issue?.kind === k && !x.real);
     const gap = leak - staked();
     if (!c || !c.issue || Math.abs(gap) <= leak * 0.08) continue;
     const target = Math.max(0, c.atStake + gap);
@@ -361,6 +376,7 @@ export function generateInvoice(seed: number, tier: number, tools: string[] = []
   const t = clamp(Math.round(tier), 0, 5);
   const r = rng(seed);
   const leak = clamp(Math.round(context?.leak ?? 500), 60, 100000);
+  if (context?.invoice?.pos.length) return realInvoice(r, t, tools, leak, context.invoice);
   const plan = planFor(r, t);
   const today = r.int(20, 27);
   const m: InvModel = {
@@ -406,6 +422,194 @@ export function generateInvoice(seed: number, tier: number, tools: string[] = []
   return m;
 }
 
+// ---------------------------------------------------------------- the island's own payables
+
+type RealPo = NonNullable<PuzzleContext['invoice']>['pos'][number];
+
+/** the resort's other suppliers: what the island buys outside the job flow (the parts and materials come from the real POs) */
+const RESORT = VENDORS.filter((v) => v.code === 'RL' || v.code === 'IH' || v.code === 'LF');
+
+/** "HA" for Harbor Aero Supply, "VO" for Voltbox */
+function vendorCode(name: string): string {
+  const w = name.replace(/\(.*\)/, '').trim().split(/\s+/).filter((x) => /^[A-Za-z]/.test(x));
+  return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] ?? 'XX').slice(0, 2)).toUpperCase();
+}
+
+/** a real invoice's scenario: its PO and receiving columns are the island's, so a duplicate or a tax error never lands on one */
+const realOk = (sc: InvScenario) => sc !== 'dupe' && sc !== 'tax';
+
+function buildRealCard(r: Rng, t: number, sc: InvScenario, po: RealPo, lines: RealPo['lines'], part: string, share: number, today: number, m: InvModel): InvCard {
+  const code = vendorCode(po.vendor);
+  const num = r.int(1100, 4899);
+  const poNum = Number(po.id.replace(/\D/g, '')) || r.int(20, 90);
+  const inv: InvLine[] = lines.map((l) => ({ item: l.pn, sub: l.nomen.split(',')[0].toLowerCase(), poQty: l.qty, poPrice: r2(l.unit), rcvd: l.got, qty: l.got, price: r2(l.unit) }));
+  const c: InvCard = {
+    scenario: sc,
+    vendor: po.vendor.replace(/\s*\(.*\)\s*$/, ''),
+    number: `${code}-${num}`,
+    po: part ? `${po.id} (${part})` : po.id,
+    day: today - r.int(3, 18),
+    discountTerms: false,
+    lines: inv,
+    // the AOG boat is on the PO: its freight is agreed
+    freightPo: po.freight > 0 ? po.freight : null,
+    freight: po.freight > 0 && !part.startsWith('2') && !part.startsWith('3') ? po.freight : 0,
+    taxRate: m.taxRate,
+    tax: 0,
+    total: 0,
+    last: { number: `${code}-${num - r.int(4, 60)}`, amount: r2(r.range(90, 900)), day: 1, po: `po${Math.max(1, poNum - r.int(2, 9))}` },
+    issue: null,
+    atStake: 0,
+    discount: 0,
+    windowOpen: false,
+    real: true,
+  };
+  if (!c.freight) c.freightPo = null;
+  c.last.day = clamp(c.day - r.int(2, 9), 1, today - 1);
+  const big = () => inv.reduce((bi, l, i) => (l.poPrice * l.rcvd > inv[bi].poPrice * inv[bi].rcvd ? i : bi), 0);
+  switch (sc) {
+    case 'tolerance': {
+      const L = inv[big()];
+      const over = allowedOver(m, L) * (t >= 5 ? r.range(0.7, 0.92) : r.range(0.3, 0.75));
+      L.price = r2(L.poPrice + Math.max(0.01, Math.floor((over / Math.max(1, L.qty)) * 100) / 100));
+      break;
+    }
+    case 'discount':
+    case 'discountCash':
+      c.discountTerms = true;
+      c.day = today - r.int(1, 8);
+      c.windowOpen = true;
+      break;
+    case 'discountLate':
+      c.discountTerms = true;
+      c.day = today - r.int(12, 19);
+      break;
+    case 'qty': {
+      // billed for units that never came: the line whose price comes closest to the money at stake
+      const j = inv.reduce((bi, l, i) => (Math.abs(l.price - share) < Math.abs(inv[bi].price - share) && l.rcvd > 0 ? i : bi), big());
+      const L = inv[j];
+      const extra = t >= 4 ? r.int(1, 2) : clamp(Math.round(share / Math.max(0.01, L.price)), 1, Math.max(1, L.rcvd));
+      L.qty = L.rcvd + extra;
+      c.issue = { kind: 'qty', row: j };
+      c.atStake = r2(extra * L.price);
+      break;
+    }
+    case 'price': {
+      const j = big();
+      const L = inv[j];
+      const allow = allowedOver(m, L);
+      let over = t >= 4 ? allow * r.range(1.15, 1.5) : Math.max(share, allow * r.range(1.6, 2.4));
+      over = Math.max(Math.min(over, 0.45 * L.poPrice * L.qty), allow * 1.15);
+      let d = Math.ceil((over / Math.max(1, L.qty)) * 100) / 100;
+      while (d * L.qty <= allow + 0.005) d = r2(d + 0.01);
+      L.price = r2(L.poPrice + d);
+      c.issue = { kind: 'price', row: j };
+      c.atStake = r2(d * L.qty);
+      break;
+    }
+    case 'freight': {
+      // freight the PO never agreed to (scheduled freight is free), or more than the boat it did
+      const extra = clamp(Math.round(share / 5) * 5, 25, 240);
+      c.freight = (c.freightPo ?? 0) + extra;
+      c.issue = { kind: 'freight', row: ROW_FREIGHT };
+      c.atStake = extra;
+      break;
+    }
+    default:
+      break;
+  }
+  retotal(c, m);
+  if (c.discountTerms) c.discount = r2(0.02 * c.total);
+  if (sc === 'discount') c.atStake = c.discount;
+  return c;
+}
+
+/** the batch for the island's own payables: every PO received at the last resolve, then the resort's other invoices for the rest of the tier's plan */
+function realInvoice(r: Rng, t: number, tools: string[], leak: number, inv: NonNullable<PuzzleContext['invoice']>): InvModel {
+  const today = r.int(20, 27);
+  const m: InvModel = {
+    tier: t,
+    month: MONTH,
+    today,
+    cash: 0,
+    floor: 1500,
+    // these POs carry no sales tax (docs/JOBFLOW.md 23): neither does the batch
+    taxRate: 0,
+    tolPct: 0.02,
+    tolAbs: 10,
+    cards: [],
+    money: 0,
+    band: t <= 2,
+    unitPrice: t <= 2 || tools.includes('poLookup'),
+    showWindow: t <= 2,
+    teach: t <= 2,
+    real: true,
+  };
+  // a PO of many lines comes as several invoices (three lines each); a line that never arrived isn't billed
+  const chunks: { po: RealPo; lines: RealPo['lines']; part: string }[] = [];
+  for (const po of inv.pos) {
+    const got = po.lines.filter((l) => l.got > 0);
+    const n = Math.ceil(got.length / 3);
+    for (let k = 0; k < n; k++) chunks.push({ po, lines: got.slice(k * 3, k * 3 + 3), part: n > 1 ? `${k + 1}/${n}` : '' });
+  }
+  // the tier's plan, with every real invoice in it (a big week's batch runs long), and no tax errors (no tax)
+  const plan: InvScenario[] = planFor(r, t).map((sc) => (sc === 'tax' ? 'price' : sc));
+  while (plan.length < Math.min(9, chunks.length)) plan.push('clean');
+  const cards: InvCard[] = [];
+  const issues = plan.filter(isIssue);
+  const badW = sum(issues.map((k) => WEIGHT[k]));
+  const shareOf = (sc: InvScenario) => (isIssue(sc) ? (leak * WEIGHT[sc]) / badW : 0);
+  const pool = [...plan];
+  // the real invoices take the issues they can carry first: the discrepancy is on the island's own POs
+  for (const ch of chunks.slice(0, 9)) {
+    let i = pool.findIndex((sc) => isIssue(sc) && realOk(sc));
+    if (i < 0) i = pool.findIndex((sc) => realOk(sc) && sc !== 'partial');
+    if (i < 0) i = pool.findIndex((sc) => realOk(sc));
+    if (i < 0) break;
+    let sc = pool.splice(i, 1)[0];
+    // a real delivery came whole: "billed as received" is a clean invoice; agreed freight needs a PO that paid for the boat
+    if (sc === 'partial' || (sc === 'freightOk' && !ch.po.freight)) sc = 'clean';
+    // a short-shipment only puts money at stake on a line priced near it: else the price is what's wrong
+    if (sc === 'qty' && ch.lines.every((l) => l.unit > 1.5 * shareOf('qty'))) sc = 'price';
+    cards.push(buildRealCard(r, t, sc, ch.po, ch.lines, ch.part, shareOf(sc), today, m));
+  }
+  const vendors = r.shuffle([...RESORT]);
+  pool.forEach((sc, k) => cards.push(buildCard(r, t, sc, vendors[k % vendors.length], shareOf(sc), today, m)));
+  // the tutorial teaches pay first, then hold
+  if (t > 0) r.shuffle(cards);
+  else cards.sort((a, b) => Number(!!a.issue) - Number(!!b.issue));
+  const lim = cards.findIndex((c) => c.scenario === 'discountCash');
+  const ok = cards.findIndex((c) => c.scenario === 'discount');
+  if (lim >= 0 && ok > lim) [cards[lim], cards[ok]] = [cards[ok], cards[lim]];
+  const early = sum(cards.filter((c) => c.scenario === 'discount').map(payNow));
+  const tight = cards.find((c) => c.scenario === 'discountCash');
+  const slack = tight ? payNow(tight) * r.range(0.3, 0.7) : r.range(250, 900);
+  m.cash = r2(m.floor + early + slack);
+  m.cards = cards;
+  rebalance(m, leak);
+  // a real invoice's discrepancy is on the vendor's side only: a price or freight overcharge sizes to what's left of the leak
+  const gap = leak - sum(cards.map((c) => c.atStake));
+  const flex = cards.find((c) => c.real && (c.issue?.kind === 'price' || c.issue?.kind === 'freight'));
+  if (flex?.issue && Math.abs(gap) > leak * 0.08) {
+    const target = Math.max(1, flex.atStake + gap);
+    if (flex.issue.kind === 'freight') {
+      const extra = clamp(Math.round(target / 5) * 5, 20, Math.max(300, leak * 0.5));
+      flex.freight = (flex.freightPo ?? 0) + extra;
+      flex.atStake = extra;
+    } else {
+      const L = flex.lines[flex.issue.row];
+      const allow = allowedOver(m, L);
+      let d = Math.ceil((Math.min(Math.max(target, allow * 1.15), 0.45 * L.poPrice * L.qty) / Math.max(1, L.qty)) * 100) / 100;
+      while (d * L.qty <= allow + 0.005) d = r2(d + 0.01);
+      L.price = r2(L.poPrice + d);
+      flex.atStake = r2(d * L.qty);
+    }
+    retotal(flex, m);
+  }
+  m.money = r2(sum(cards.map((c) => c.atStake)));
+  return m;
+}
+
 export function canTakeDiscount(m: InvModel, c: InvCard, cash: number): boolean {
   return c.discount > 0 && c.windowOpen && !c.issue && cash - payNow(c) >= m.floor - 0.005;
 }
@@ -416,7 +620,7 @@ export function issueText(m: InvModel, c: InvCard): string {
   switch (c.issue.kind) {
     case 'qty': {
       const l = c.lines[c.issue.row];
-      return `billed ${l.qty} ${l.item.toLowerCase()}, ${l.rcvd} arrived`;
+      return l.sub ? `billed ${l.qty} × ${l.item}, ${l.rcvd} arrived` : `billed ${l.qty} ${l.item.toLowerCase()}, ${l.rcvd} arrived`;
     }
     case 'price': {
       const l = c.lines[c.issue.row];
@@ -622,8 +826,10 @@ export const invoice: PuzzleDef = {
 
     const card = () => m.cards[idx];
 
+    // a batch with no sales tax (the island's own payables) prints no tax row
+    const taxRow = (c: InvCard) => m.taxRate > 0 || c.tax > 0;
     const cardLay = (c: InvCard, avail: number): CardLay => {
-      const natural = 50 + 26 + 20 + c.lines.length * 50 + (c.freight > 0 || c.freightPo ? 40 : 0) + 40 + 44 + (c.discountTerms ? 56 : 0) + 8;
+      const natural = 50 + 26 + 20 + c.lines.length * 50 + (c.freight > 0 || c.freightPo ? 40 : 0) + (taxRow(c) ? 40 : 0) + 44 + (c.discountTerms ? 56 : 0) + 8;
       const k = clamp(avail / natural, 0.86, 1);
       const rowH = Math.round(50 * k);
       const subH = Math.round(40 * k);
@@ -640,8 +846,10 @@ export const invoice: PuzzleDef = {
         rows.push({ id: ROW_FREIGHT, y, h: subH });
         y += subH;
       }
-      rows.push({ id: ROW_TAX, y, h: subH });
-      y += subH;
+      if (taxRow(c)) {
+        rows.push({ id: ROW_TAX, y, h: subH });
+        y += subH;
+      }
       const totalY = y;
       y += Math.round(44 * k);
       let toggle: Row | null = null;
@@ -872,12 +1080,13 @@ export const invoice: PuzzleDef = {
       const y = g.headY;
       const x = g.x0;
       const w = g.cw;
-      text(ctx, 'Cash', x, y + 14, { size: 11, weight: 700, color: C.inkSoft });
+      // the island's own POs: the run pays from its float, not the island's whole cash
+      text(ctx, m.real ? 'Float' : 'Cash', x, y + 14, { size: 11, weight: 700, color: C.inkSoft });
       const low = cash < m.floor;
       const cw = tnum(ctx, money(cash), x + 34, y + 14, { size: 17, weight: 800, color: low ? C.rust : C.ink });
       text(ctx, `keep ≥ ${money(m.floor, { cents: false })}`, x + 42 + cw, y + 14.5, { size: 11, weight: 600, color: C.inkSoft });
       text(ctx, `Today ${m.today} ${m.month}`, x + w, y + 14, { size: 12, weight: 700, color: C.ink, align: 'right' });
-      text(ctx, `Tolerance 2% or $10 · tax ${pct(m.taxRate)}`, x, y + 40, { size: 11, weight: 600, color: C.inkSoft });
+      text(ctx, m.taxRate > 0 ? `Tolerance 2% or $10 · tax ${pct(m.taxRate)}` : 'Tolerance 2% or $10 · no sales tax', x, y + 40, { size: 11, weight: 600, color: C.inkSoft });
       // progress dots
       const r = 5;
       const gap = 14;
@@ -983,7 +1192,11 @@ export const invoice: PuzzleDef = {
         rule(y);
         if (row.id >= 0 && row.id < c.lines.length) {
           const l = c.lines[row.id];
-          text(ctx, l.item, ip, mid, { size: 13, weight: 750, max: xPO - 40 - ip });
+          if (l.sub) {
+            // a real line: the P/N, and what it is under it
+            text(ctx, l.item, ip, mid - 7, { size: 12.5, weight: 800, max: xPO - 36 - ip });
+            text(ctx, l.sub, ip, mid + 9, { size: 10.5, weight: 650, color: C.inkSoft, max: xPO - 36 - ip });
+          } else text(ctx, l.item, ip, mid, { size: 13, weight: 750, max: xPO - 40 - ip });
           if (m.band) {
             tnum(ctx, `${l.poQty} × ${money(l.poPrice, { dollar: false })}`, xPO, mid - 8, { size: 12, weight: 750, align: 'center' });
             tnum(ctx, `≤ ${money(bandMax(m, l), { dollar: false })}`, xPO, mid + 9, { size: 10.5, weight: 750, color: C.sea, align: 'center' });
