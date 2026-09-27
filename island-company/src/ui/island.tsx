@@ -7,7 +7,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
-import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, planeCapacity, powered, restrictedBy } from '../sim/econ';
+import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, restrictedBy } from '../sim/econ';
 import { openBuild, pilotSeats, working } from '../sim/staff';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
@@ -306,6 +306,8 @@ export function Island({
     // the only guest plane past due on an airworthiness alert flies restricted: a placard
     else if (restrictedBy(s, p.id)) bub(p.id, x, y - 22, 'placard', 'warn');
     else if (p.health < 60) bub(p.id, x, y - 22, 'warn', 'warn');
+    // flying on an MEL C placard (an INOP item deferred through this week): a small placard, as a made-safe house gets a small tag
+    else if (melOn(s, p.id)) bub(p.id, x, y - 22, 'placard', 'warn', { small: true });
     if (newIds.has(p.id) && !onWater) {
       items.push({ y: y + 1, el: <Ribbon key={`rb${p.id}`} x={x} y={y - 6} /> });
       badges.push([x - 30, y - 12]);

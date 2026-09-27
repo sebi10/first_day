@@ -53,6 +53,8 @@ export function flagsOf(s: IslandState, a: Alert): Flag[] {
   if (a.mel && a.mel.until >= s.week) out.push({ text: `MEL C to wk ${a.mel.until}`, tone: 'sea' });
   else if (a.mel) out.push({ text: 'MEL ran out', tone: 'rust' });
   if (a.safe) out.push({ text: 'SAFE', tone: 'palm' });
+  // the analyst's nudge this week (the Stock tab's Needs): plan it so the parts come in time
+  if (a.status === 'open' && a.nudged === s.week) out.push({ text: `${nameOf(s, 'fin')} nudged`, tone: 'sea' });
   const asset = s.assets.find((x) => x.id === a.assetId);
   if (asset?.kind === 'plane') {
     if (alertAog(s, asset.id)?.id === a.id) out.push({ text: 'AOG', tone: 'rust' });

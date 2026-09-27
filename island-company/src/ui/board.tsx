@@ -65,9 +65,13 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
           {next.items.map((i) => (
             <div class="row" key={i.label}>
               <span style={{ color: i.ok ? C.palm : C.inkSoft }}>
-                <Icon name={i.ok ? 'check' : 'clock'} size={18} />
+                <Icon name={i.info ? 'hardhat' : i.ok ? 'check' : 'clock'} size={18} />
               </span>
-              <span class="num">{i.label}</span>
+              <span class="num">
+                {i.label}
+                {/* the builders' site work sets how the tier's new buildings start, never when it comes */}
+                {i.info && <span class="label"> · {i.ok ? 'done: the new buildings start in good shape' : 'if the tier comes first, its new buildings start up to 15 lower'}</span>}
+              </span>
             </div>
           ))}
           <span class="label">Autopilot weeks don't count. When you qualify, the tier is built as a crew project: one job each.</span>

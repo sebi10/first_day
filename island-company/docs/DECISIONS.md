@@ -676,6 +676,40 @@ The robust sweep shows the cost the 30-seed table hides: half a week (three frie
 
 **Knobs:** `STAFF` (wages 320 / 180 / 260, skill wage × 0.7 / 0.85 / 1 / 1.2 / 1.45, severance 2 weeks, duty 6, guest pilots skill 3+, charter 0.04, hard landings 0.8% / 0.5% / 0.3% / 0.2% / 0.1% a flight, −2 health, turnovers 2–6, reviews 0.025, builder output 0.6 / 0.8 / 1 / 1.25 / 1.5, rework 20% / 12% / 6% / 3% / 1%, the standard crews, the board 3 / 4 from tier 3, at most 10 staff); `BUILDS` as specified; `COTTAGE_SHELL` $17,000.
 
+### Integration: the four packages together
+
+The branches merged in order (engine, the technicians' screens, the analyst's desk, the staff) with one text conflict (`docs/ONBOARDING.md`: the analyst's calls and the section numbers). What the integration changed so the flows work across the seats, and why:
+
+- **The Dock's Start on a job-flow job goes through the ops panel's host** (`openTarget({ order })`), so the install check runs first and a stop shows its sheet, as *Your move*'s Start does; before, the Dock called the puzzle directly. Other orders keep today's direct start.
+- **The analyst's Dock says "2 to approve ▸"** (the legacy cards too). *"Review 1 card · 1 requisition ▸"* was cut to *"Review 1 card · 1 …"* on a 390 px phone; the desk and the End-turn check say what they are.
+- **MEL on the island and the board.** A plane flying on a placard gets a small placard bubble (the same glyph as the restricted plane's, small, as a made-safe house's tag is small beside the closed house's no-entry sign), and the week's review says it: *"Twin N-12 flew with com 1 dead on transmit placarded INOP (MEL C, to week 2, extended). Fix it by then, or it flies restricted."* (`melOn` in `econ.ts`). Make-safe already showed on both (the tag, *"rented at 75%"*).
+- **A card that comes in after the analyst ended the turn** says honestly whether it goes through tonight. The tech's toast and job view, and the analyst's push, compare it with the standing limit and the freeze (`standingWords` in `select.ts`); the review now says why a late card waited (*"over the standing limit ($1,000 left), so it waits for Cy"*). Before, the toast promised tonight for a $1,714 card over a $1,000 limit.
+- **The analyst's nudge shows on the tech's row** (*Cy nudged*, this week), beside the push and the feed line.
+- **Staff in the rest of the game.** The desk's Staff tab is D's desk alone (C's read-only fallback went). The tier checklist on the Board shows the builders' site work (*"Site work (builders): 2 of 3"*, with what it means for the new buildings); it is information and never gates the tier (`tierUnlocked` reads the unlock lines only). The review's *"Hire a pilot?"* / *"Hire a housekeeper?"* names the hire giving notice instead (*"Oskar H. starts week 7."*). The tier-3 project's analyst job reads *"Pay the contractor (three-way match)"*. The purchasing test's payroll case follows D's real payroll (the stub case is kept under `STAFF_TEST.stubs`).
+- **Wording.** `lowerFirst` keeps a side or an acronym as written mid-sentence (*"R/H brake pedal…"*, *"The fix: GFCI replacement"*; they read *"r/H"* and *"gfci"*), and *"1 weeks"* reads *"1 week"*. The write-up sheet says *"+ parts"* instead of the retired kit.
+- **Labour for a cheap fix under a dear kind is capped** at `LABOR.capX` = 4 × the book hours. A belt priced off the alternator's card was $1,080–1,270 of labour for a $38 belt, a com connector or a unit-less avionics write-up $1,020–1,100, which the A&P and the analyst would both call out. Now $360. The band test exempts exactly those causes (and a tube under the tire's card at the top tiers) and pins the list; every other job keeps today's card. The balance moved a little the right way (below).
+- **The auction's lot.** `launchFor` prices the lot's lines at the catalog's unit price (it priced them by the pack: a $65 can of 20 uses read $1,300) and passes the lot's own market (fair, and a cap at 92% of the lot at list or spendable less the freeze), which the puzzle's `lotMarket` takes as it is.
+- **Stock flags.** A slow line used in the last four weeks isn't flagged to stop; the stop text counts the ledger's own weeks (*"no use in 11 weeks"* on an 11-week island); the no-min/max flag names only a P/N that moved itself, never the near-miss beside it. The bots don't read these flags.
+- **Week 0's step survives a remount** (sessionStorage per island and seat, cleared when the seat finishes week 0): in the online run a sync blip once re-rendered Mia's week 0 from its first card.
+- **Tests and scripts.** `tests/tasks.test.ts` and `tests/consequences.test.ts` get the 30 s timeout the other whole-matrix runs have. `scripts/e2e.mjs` walks week 0's alert for the techs, then week 1 across the seats: the mechanic takes an alert through the flow and asks Stores for a line, the analyst finds the request on the desk at once and buys it (the run fails if not), approves the cards and hires, the electrician makes a hazard safe and plans; after the resolve the requested line reads one more on hand (the run fails if not). `scripts/e2e-online.mjs` does the same across devices on the emulator: the laptop's plan is seen on the phone, the request on the analyst's laptop, and the line on hand on the phone after the week resolves everywhere.
+
+Left as the packages recorded them: the three-way match books against the week's leak and doesn't hold a PO's payment (`PO.caught` stays unset); shelf life, cores and per-P/N forecasts are v2; the stores can go a bin or two over the cap after approvals (the desk shows it in rust); the staff's *"no new building below today's health in 90% of games"* is missed as D recorded.
+
+#### Balance after the integration (26 weeks × 30 seeds, medians)
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk | Payroll @26 |
+| --- | --- | --- | --- | --- | --- | --- |
+| All good | 5 / 9 / 16 / 21 | 99% | $6,739 | 0 | $11,507 | 104% |
+| All average | 7 / 12 / 16 / **22** | 95% | $5,783 | **0** | $9,469 | 104% |
+| **Three friends** | 8 / 12 / 16 / **23** | 92% | $5,882 | **0** | $9,189 | 103% |
+| Naive analyst | 5 / – (tier 2 at week 26) | 93% | −$1,174 | 2 | $4,444 | 173% |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 40% / 87% / 92% | −$2,067 / −$8,522 / −$82,076 | 6 / 36 / 31 | | 100% |
+| Every solo team, nobody | stay at tier 1 | | | | | 100% |
+
+The analyst-absent team's weeks below $0 went from 16 to 31 in the 30 seeds: one seed (24) now falls into receivership where it didn't (seed 15 falls either way). It is the absent analyst's known cliff (an early claim, cards the autopilot won't approve, then deferral incidents), not the cap: over 90 seeds the same team has 129 weeks below $0 with the cap and 148 without (seeds 50 and 89 no longer fall).
+
+Robust (90 seeds × 4 crews): three friends reach tier 5 at 24 / 24 / 25 / 25 and miss it in 31 / 27 / 30 / 30 games (118 of 360; D's run 122, A's stubbed 99), with 13 / 4 / 1 / 0 weeks below $0 (D: 18 / 4 / 1 / 1); all average 23 / 23 / 24 / 23, missing in 18 / 18 / 17 / 21 (74; D 79), 1 / 0 / 0 / 0 weeks below $0 (D 1 / 0 / 0 / 4). A 26-week sim takes 259 ms; the standard run 1 min 27 s, the robust sweep 4 min 52 s.
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
 Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; the current numbers are in *Phase B review fixes*.

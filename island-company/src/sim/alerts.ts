@@ -810,7 +810,13 @@ function fill(text: string, v: Record<string, string>): string {
   let out = text.replace(/\{(\w+)\}/g, (_, k: string) => v[k] ?? `{${k}}`);
   // "{Eng}the engine monitor …" on a single: the sentence starts with the rest
   out = out.charAt(0).toUpperCase() + out.slice(1);
-  return out;
+  // "due in {lead} weeks" a week out
+  return out.replace(/\b1 weeks\b/g, '1 week');
+}
+
+/** a sentence's first letter in lower case, mid-sentence: never an acronym or a side ("GFCI …", "R/H main tire", "N-12") */
+export function lowerFirst(t: string): string {
+  return /^([A-Z0-9]{2}|[A-Z]\/[A-Z]|[A-Z]-)/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1);
 }
 
 /** "L/H brake pedal soft; pulls right on the landing roll." (a pilot's squawk carries the pilot's name; a comeback says so) */
@@ -830,9 +836,9 @@ export function symptomText(s: IslandState, a: Alert): string {
   // "after the storm" only when the week before it was raised had one
   if (sym.alt && s.history.find((h) => h.week === a.week - 1)?.weather !== 'storm') raw = sym.alt;
   let text = fill(raw, v);
-  if (sym.writeUp) text = `Written up by ${a.who ?? 'the crew'}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
-  else if (a.who && sym.src === 'squawk') text = `Written up by ${a.who}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
-  if (a.again !== undefined) text = `Written up again: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+  if (sym.writeUp) text = `Written up by ${a.who ?? 'the crew'}: ${lowerFirst(text)}`;
+  else if (a.who && sym.src === 'squawk') text = `Written up by ${a.who}: ${lowerFirst(text)}`;
+  if (a.again !== undefined) text = `Written up again: ${lowerFirst(text)}`;
   return text;
 }
 
@@ -851,8 +857,7 @@ export function alertShort(s: IslandState, a: Alert): string {
   }
   t = t.replace(/^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm|Weekly test|Weekly generator run): /i, '');
   const first = t.split(/[;:]|\.(?=\s|$)/)[0].trim();
-  const lead = /^[A-Z0-9]{2}/.test(first) ? first : first.charAt(0).toLowerCase() + first.slice(1);
-  return lead + eng;
+  return lowerFirst(first) + eng;
 }
 
 /** the site of an electrical job (derived from the seed): room, circuit, AWG, run, protection upstream */
@@ -965,7 +970,7 @@ export function findingOf(s: IslandState, a: Alert, tier: number): { text: strin
     if (c.kind === 'wiring') text += ` It's the wiring: ask ${elec} to meter it.`;
     else if (sym.bench) text += ` It's the unit: ${t ? `${t.book} ${t.no}` : 'replace it'}.`;
     else if (c.neutral) text += " A branch breaker won't isolate a service neutral: leave the house closed until it's fixed.";
-    else if (t) text += ` The fix: ${t.short.toLowerCase()} (${t.book === 'REF' ? t.no : `${t.book} ${t.no}`}).`;
+    else if (t) text += ` The fix: ${lowerFirst(t.short)} (${t.book === 'REF' ? t.no : `${t.book} ${t.no}`}).`;
     if (site && (c.fix === 'ref:outlet' || c.fix === 'ref:gfci')) {
       const need = protectionNeeded(site);
       const up = site.upstream === 'gfci' ? ' (a GFCI upstream already protects it)' : '';

@@ -6,7 +6,7 @@
 import { figSb, ipcFor, planeModel, plantedFor, plantRows, rowFor, type Aircraft, type AnyAta, type Ata } from './aircraft';
 import { alertFlags, alertTier, causeOf, fixesOf, needsOf, protectionNeeded, siteOf, symptomOf } from './alerts';
 import { islandAircraft, judgePart, type PartCheck } from './chain';
-import { CATALOG_BY_KIND, DEFECT, defectRule, FREIGHT, kitValue, SUPPLIERS, type DefectRule } from './data';
+import { CATALOG_BY_KIND, DEFECT, defectRule, FREIGHT, kitValue, LABOR, SUPPLIERS, type DefectRule } from './data';
 import { alertAog, downtimeOf, hazardOn, houseWeekRevenue, orderCost, orderTier, restrictedBy, round10 } from './econ';
 import { buyUnits, itemById, lineValue, planeItemIds, priceAt } from './items';
 import { aogOk, cardBuyLines, etaOf, owned, reservedFor, uncovered, unitCost, vendorFor } from './stock';
@@ -464,7 +464,8 @@ export function cardToday(s: Pick<IslandState, 'tier'>, kind: string, asset: Pic
  */
 export function laborCost(s: IslandState, kind: string, task: Task, asset: Asset, site?: ElecSite | null, needs?: string[] | null): number {
   const std = bomValue(linesFor(s, asset, task, stdPick(s, asset, task, site, needs)));
-  return round10(Math.max(laborMin(task), cardToday(s, kind, asset) - std));
+  const min = laborMin(task);
+  return round10(Math.min(LABOR.capX * min, Math.max(min, cardToday(s, kind, asset) - std)));
 }
 
 /** a repair's pre-filled line: RPR-{job} when its fix rule carries parts (an ipc:noteff repair carries the effective part instead) */

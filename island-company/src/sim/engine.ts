@@ -96,6 +96,7 @@ import {
   fixedNow,
   hazardOn,
   isAog,
+  melOn,
   rentFactor,
   restrictedBy,
   isTagged,
@@ -174,6 +175,7 @@ import {
   type ItemId,
   type JobFlow,
   type Liner,
+  type NpcRole,
   type OpsRole,
   type Order,
   type PartChain,
@@ -2193,6 +2195,12 @@ export function chainWouldOpen(s: IslandState, o: Order, role: Role): boolean {
   return rng(hashSeed(o.seed, 'chain', s.week)).chance(chance);
 }
 
+/** a hire giving notice in that role: the review says when they start instead of asking for one */
+function hireComing(s: IslandState, role: NpcRole, W: number): string | null {
+  const n = (s.staff ?? []).filter((x) => x.role === role && x.start > W).sort((a, b) => a.start - b.start)[0];
+  return n ? `${n.name} starts week ${n.start}.` : null;
+}
+
 /** the only plane that brings guests (grounding it would empty every house) */
 const soleGuestPlane = (s: IslandState, asset: Asset) =>
   !MODELS[asset.model].cargo && !s.assets.some((a) => a.kind === 'plane' && a.id !== asset.id && !MODELS[a.model].cargo);
@@ -3373,8 +3381,13 @@ function standingApprovals(s: IslandState, line: Liner, now: number) {
     const card = cardOf(s, o);
     const cost = card.total;
     const safety = isSafetyJob(s, o);
-    if (cost > limit) continue;
-    if (spendable(s) - cost < (safety ? 0 : ECON.freezeBelow)) continue;
+    // what waits says why on the board: both seats see it (the tech was told it might go through tonight)
+    const over = cost > limit;
+    if (over || spendable(s) - cost < (safety ? 0 : ECON.freezeBelow)) {
+      const asset = assetOf(s, o);
+      line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, o.role)}'s card for ${o.title}${asset ? ` on ${asset.name}` : ''} came in (${usd(cost)}): ${over ? `over the standing limit (${usd(limit)} left)` : 'spendable cash is under the freeze'}, so it waits for ${fin}.`);
+      continue;
+    }
     approveFlow(s, o, false, { freight: card.freight.pick }, 'auto', now);
     limit -= cost;
     const asset = assetOf(s, o);
@@ -3550,7 +3563,7 @@ export function resolveWeek(s: IslandState, now: number) {
   // the pilots fly what their duty allows (D: pilotCap), cargo runs cut first so guests keep flying
   const capped = capFleet(s, fleet);
   const lostToPilots = fleet.reduce((n, c) => n + c.n, 0) - capped.reduce((n, c) => n + c.n, 0);
-  if (lostToPilots > 0) line('fin', 'bad', `${lostToPilots} flight${lostToPilots > 1 ? 's' : ''} lost: the pilots fly ${pilotCap(s).total} a week. Hire a pilot?`);
+  if (lostToPilots > 0) line('fin', 'bad', `${lostToPilots} flight${lostToPilots > 1 ? 's' : ''} lost: the pilots fly ${pilotCap(s).total} a week. ${hireComing(s, 'pilot', W) ?? 'Hire a pilot?'}`);
   for (const { plane: p, n: cap } of capped) {
     for (let i = 0; i < cap; i++) {
       if (p.health < 60 && r.chance(ECON.nearMissPerFlight)) {
@@ -3564,6 +3577,10 @@ export function resolveWeek(s: IslandState, now: number) {
       nearMisses += cap;
       line('mech', 'bad', `${p.name} flew ${cap} of ${perPlane} with ${shortText(s, rs)} (due week ${rs.due}): a near-miss on each flight. Fix it, or ground it (tag).`);
     }
+    // flying on an MEL C placard: the board says so (the placard's last week, and what comes after it)
+    const ml = !rs && cap > 0 ? melOn(s, p.id, W) : undefined;
+    if (ml)
+      line('mech', 'info', `${p.name} flew with ${shortText(s, ml)} placarded INOP (MEL C, to week ${ml.mel!.until}${ml.mel!.ext ? ', extended' : ''}). Fix it by then, or it ${soleGuestPlane(s, p) ? 'flies restricted' : 'is grounded'}.`);
     flown += cap;
     if (MODELS[p.model].cargo) cargoFlights += cap;
     else {
@@ -3644,7 +3661,7 @@ export function resolveWeek(s: IslandState, now: number) {
   const booked = rentable.slice(0, Math.min(arrivals, turnovers));
   if (Math.min(rentable.length, arrivals) > turnovers) {
     const empty = Math.min(rentable.length, arrivals) - turnovers;
-    line('fin', 'bad', `${empty} house${empty > 1 ? 's' : ''} empty: housekeeping turns over ${turnovers} a week. Hire a housekeeper?`);
+    line('fin', 'bad', `${empty} house${empty > 1 ? 's' : ''} empty: housekeeping turns over ${turnovers} a week. ${hireComing(s, 'housekeeper', W) ?? 'Hire a housekeeper?'}`);
   }
   if (rentable.length > arrivals) {
     const clearSky = planes(s)

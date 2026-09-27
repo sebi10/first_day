@@ -17,6 +17,7 @@ import { committed } from '../src/sim/ledger';
 import { addStarter, binsInUse, binsTotal, invoiceContext, invValue, newReq, placePo, receive } from '../src/sim/stock';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
 import { rng } from '../src/sim/rng';
+import { STAFF_TEST } from '../src/sim/staff';
 import {
   abcClasses,
   buyQuote,
@@ -437,14 +438,24 @@ describe('receiving and the Money tab (14.3, 9.4, 9.7)', () => {
   it('whole dollars that add up; the payroll names an open post of the standard crew the week charges for', () => {
     expect(splitWhole(1070, [0.35, 0.25, 0.15, 0.15, 0.1])).toEqual([375, 268, 160, 160, 107]);
     expect(splitWhole(1070, [0.35, 0.25, 0.15, 0.15, 0.1]).reduce((a, b) => a + b, 0)).toBe(1070);
-    // a new island hires the tier-1 crew (a pilot, a housekeeper, a builder); at tier 2 the standard crew has two pilots,
-    // and until the staff update the week charges the standard crew's payroll whoever is on the list
+    // a new island hires the tier-1 crew (a pilot, a housekeeper, a builder); at tier 2 the standard crew has two pilots.
+    // The staff's payroll charges who is on the list, so the lines are the crew's wages and add up to the week's charge
     const s = island();
     expect(s.staff!.map((n) => n.role).sort()).toEqual(['builder', 'housekeeper', 'pilot']);
     const pay = payrollLines(s);
-    expect(pay.lines.map((l) => l.label)).toEqual(['1 pilot', '1 housekeeper', '1 builder', 'Open post of the standard crew (1 pilot)']);
-    expect(pay.lines.at(-1)!.usd).toBe(320);
+    expect(pay.lines.map((l) => l.label)).toEqual(['1 pilot', '1 housekeeper', '1 builder']);
+    expect(pay.total).toBe(760);
     expect(pay.lines.reduce((n, l) => n + l.usd, 0)).toBe(pay.total);
+    // with the staff hooks stubbed (the standard crew's payroll whoever is on the list), the open post is named
+    STAFF_TEST.stubs = true;
+    try {
+      const stub = payrollLines(s);
+      expect(stub.lines.map((l) => l.label)).toEqual(['1 pilot', '1 housekeeper', '1 builder', 'Open post of the standard crew (1 pilot)']);
+      expect(stub.lines.at(-1)!.usd).toBe(320);
+      expect(stub.lines.reduce((n, l) => n + l.usd, 0)).toBe(stub.total);
+    } finally {
+      STAFF_TEST.stubs = false;
+    }
   });
 
   it('a PO due tonight on a grounded cargo plane slips a week, and the desk says so; MEL placards in words', () => {

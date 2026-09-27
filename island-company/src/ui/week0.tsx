@@ -15,7 +15,7 @@ import { AlertRow } from './flow/AlertRow';
 import { JobFlow } from './flow/JobFlow';
 import type { Preview } from './flow/steps';
 import { whatsNewKey } from './flow/WhatsNew';
-import { local } from './flow/words';
+import { local, session } from './flow/words';
 import { Island } from './island';
 import { settings } from './settings';
 import { Btn, Icon, usd } from './kit';
@@ -51,7 +51,15 @@ const NUMBER: Record<Role, string> = {
 
 export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
   const { s } = ctl;
-  const [step, setStep] = useState(0);
+  // the step survives a remount (online, a sync blip can re-render the screen from the top): a per-viewer convenience
+  const stepKey = `ic.w0.${s.id}.${role}`;
+  const [step, setStepState] = useState(() => Math.max(0, Math.min(4, session.get<number>(stepKey) ?? 0)));
+  const setStep = (x: number | ((y: number) => number)) =>
+    setStepState((prev) => {
+      const next = typeof x === 'function' ? x(prev) : x;
+      session.set(stepKey, next);
+      return next;
+    });
   const [playing, setPlaying] = useState<PuzzleId | null>(null);
   const [approved, setApproved] = useState(false);
   const [deferred, setDeferred] = useState(false);
@@ -241,6 +249,8 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
                 onClick={async () => {
                   fx.flourish();
                   await ctl.dispatch({ t: 'week0Done', role });
+                  // a later player in this seat (a hire mid-season) starts week 0 from the top
+                  session.del(stepKey);
                 }}
               >
                 Finish week 0

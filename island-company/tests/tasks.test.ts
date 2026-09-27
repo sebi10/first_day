@@ -1,7 +1,7 @@
 // Tasks (docs/JOBFLOW.md 4) and the money per job (8.3): what the Manual step
 // finds, what a plan draws, and the band that keeps a job's labour plus its
 // standard parts at today's card.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { aircraftOf, ipcFor, rowFor, type PlaneModel } from '../src/sim/aircraft';
 import { needsOf, siteOf, SYMPTOMS } from '../src/sim/alerts';
 import { plantFor } from '../src/sim/chain';
@@ -11,6 +11,9 @@ import { bomValue, cardToday, effectivePn, laborCost, linesFor, stdPick } from '
 import { itemById } from '../src/sim/items';
 import { benchFor, defaultTask, fixedFor, laborMin, plannable, slotQty, TASKS, taskOn, tasksFor } from '../src/sim/tasks';
 import type { Alert, Asset, OpsRole } from '../src/sim/types';
+
+// whole-matrix and whole-season runs: CI runners are about 1.5x slower
+vi.setConfig({ testTimeout: 30000 });
 
 const PLANES: PlaneModel[] = ['twin', 'cargo', 'float'];
 const NO_TASK = ['wb', 'gpustart', 'report', 'project'];
@@ -131,6 +134,7 @@ describe('money per job', () => {
   it('labour + the standard parts is 0.85-1.25 x today’s card for every task x model x cause x tier x health (ICA picks exempt)', () => {
     const out: string[] = [];
     const exempt = new Set<string>();
+    const cheap = new Set<string>();
     let n = 0;
     for (const sym of Object.values(SYMPTOMS)) {
       sym.causes.forEach((c, ci) => {
@@ -158,8 +162,11 @@ describe('money per job', () => {
                   const card = cardToday(s, task!.kind!, asset);
                   const ratio = (labor + std) / card;
                   const ica = pick.some((l) => itemById(l.item)?.ica);
+                  // a cheap fix under a dear kind (a belt under the alternator's card): its labour stops at LABOR.capX x the book
+                  const capped = labor >= LABOR.capX * laborMin(task!) && labor + std < 0.85 * card;
                   n++;
                   if (ica) exempt.add(`${task!.id} on ${model}, island seed ${seed}`);
+                  else if (capped) cheap.add(`${sym.key}#${ci} ${task!.id} on ${model}: labour ${labor} (the book ${laborMin(task!)}), card ${card}`);
                   else if (ratio < 0.85 || ratio > 1.25) out.push(`${sym.key}#${ci} ${task!.id} ${model} tier ${tier} health ${health}: ${ratio.toFixed(3)} (labour ${labor}, parts ${std.toFixed(0)}, card ${card})`);
                   expect(labor).toBeGreaterThanOrEqual(laborMin(task!));
                 }
@@ -170,8 +177,11 @@ describe('money per job', () => {
       });
     }
     // the exempt list: an altered airplane's ICA part is dearer by design (CHAIN.icaMult)
-    console.log(`band: ${n} combinations; ICA picks exempt:\n  ${[...exempt].sort().join('\n  ')}`);
+    console.log(`band: ${n} combinations; ICA picks exempt:\n  ${[...exempt].sort().join('\n  ')}\ncheap fixes under a dear kind (labour capped):\n  ${[...cheap].sort().join('\n  ')}`);
     expect(out).toEqual([]);
+    // only the cheap causes under a dear kind are capped (the belt, the com's connector or a write-up with no unit, a tube under the tire's card at the
+    // top tiers): every other job keeps today's card
+    expect([...new Set([...cheap].map((x) => `${x.split('#')[0]} ${x.split(' ')[1].split(':').pop()}`))].sort()).toEqual(['M_BELT_SQUEAL 24-30-02', 'M_COM_INTERMITTENT 23-10-01', 'M_LOW_VOLTS 24-30-02', 'M_TIRE_PRESSURE 32-40-01', 'W_avionics 23-10-01']);
     expect(n).toBeGreaterThan(1000);
   });
 });

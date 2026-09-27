@@ -1022,13 +1022,17 @@ export function stockFlags(s: IslandState): StockFlag[] {
       const minmax = f.items.some((id) => s.inv?.[id]?.rop !== undefined);
       if (c === 'slow' && !minmax) continue;
       if (f.items.some((id) => knownDemand(s, id).length)) continue;
-      const last = v.lastUsed === null ? 'no use in 26 weeks' : `last used week ${v.lastUsed}`;
+      // a slow line that moved in the last month isn't one to stop
+      if (v.lastUsed !== null && v.lastUsed >= W - 4) continue;
+      const last = v.lastUsed === null ? `no use in ${v.series.length} week${v.series.length === 1 ? '' : 's'}` : `last used week ${v.lastUsed}`;
       out.push({ fam: f.fam, kind: 'stop', urgent: false, text: `Stop stocking ${f.label}: ${last} (${usd(v.value)} on the shelf, a bin).` });
     }
-    // norop: a fast family's item with no reorder point
+    // norop: a fast family's item with no reorder point, that moved itself (never the near-miss P/N beside it)
+    const moved = new Set<ItemId>();
+    for (const r of s.ledger ?? []) for (const [id, q] of Object.entries(r.use ?? {})) if ((q ?? 0) > 0) moved.add(id);
     for (const f of families(s)) {
       if (moveClass(s, f.fam) !== 'fast') continue;
-      for (const id of f.items) if (s.inv?.[id] && s.inv[id].rop === undefined) out.push({ item: id, fam: f.fam, kind: 'norop', urgent: false, text: `${itemById(id)?.pn ?? id} moves fast and has no min/max.` });
+      for (const id of f.items) if (s.inv?.[id] && s.inv[id].rop === undefined && moved.has(id)) out.push({ item: id, fam: f.fam, kind: 'norop', urgent: false, text: `${itemById(id)?.pn ?? id} moves fast and has no min/max.` });
     }
     const free = binsTotal(s) - binsInUse(s);
     if (free < 3) out.push({ kind: 'bins', urgent: free <= 0, text: `Stores ${binsInUse(s)}/${binsTotal(s)} bins: ${free <= 0 ? 'full' : `${free} free`}.` });

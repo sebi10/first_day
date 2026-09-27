@@ -1,7 +1,7 @@
 // Consequences: blind sign-off, hidden defects → incidents, repair → redo,
 // and cross-trade reports. The engine hides the verdict from the player but
 // never from itself: the true score drives everything that happens later.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { generateCrack } from '../src/puzzles/crack';
 import { generateTeardown } from '../src/puzzles/teardown';
@@ -14,6 +14,9 @@ import { itemById } from '../src/sim/items';
 import { taskById } from '../src/sim/tasks';
 import { hashSeed } from '../src/sim/rng';
 import type { Alert, Defect, IslandState, Order, ReportInfo, Role } from '../src/sim/types';
+
+// whole-matrix and whole-season runs: CI runners are about 1.5x slower
+vi.setConfig({ testTimeout: 30000 });
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 

@@ -20,7 +20,7 @@ Short on time? Anyone can try the whole game alone first with *New island → 1 
 
 | | Mechanic | Electrician | Analyst |
 | --- | --- | --- | --- |
-| Your zone | Hangar, airstrip, 2 planes (1 at tier 1), the ground power carts | 4 cottages (2 at tier 1), the grid, later a generator | The office: cash, prices, approvals, parts |
+| Your zone | Hangar, airstrip, 2 planes (1 at tier 1), the ground power carts | 4 cottages (2 at tier 1), the grid, later a generator | The office: cash, prices, approvals, the stores, the island's staff |
 | Your number | Flights available | Houses rentable | Repairs approved |
 | If you slip | No flights → no guests, no parts | No power / closed houses → no revenue, hangar tools offline | Undecided cards become deferrals → incident risk for everyone |
 | Your jobs (puzzles) | Torque sequence, crack hunt (UV penetrant, one tap circles an indication), engine teardown, weight and balance, safety wire, hydraulic servicing, ground power start; when a part is missing: the IPC lookup and logbook research | Circuit trace, panel load, wire-up, multimeter diagnosis, conduit bending; when an electrical unit fails on a plane: the circuit check at the airplane | Variance find, parts auction, cash forecast, bank reconciliation, three-way match; when a plane is down: the part, its freight, the engineering fee |
@@ -94,6 +94,8 @@ The same five steps, with the electrician's books: the **Reference** (the code a
 
 Each job's puzzle shows what you picked (*Your pick: KG20-TR*): the wire-up prints the device's P/N on its face, the conduit puzzle labels your stick, connectors and wire, the panel puzzle names the panelboard.
 
+**Everyone sees it.** A plane flying on an MEL placard carries a small placard on the island, and a house made safe a small tag (a closed one the no-entry sign); the week's review says so (*Twin N-12 flew with com 1 dead on transmit placarded INOP (MEL C, to week 4)*, *Cottage 2 rented at 75%: a circuit is off and tagged until the fix*). What you send to the analyst is on the desk at once, and when the analyst nudges you about an alert, its row says so (*Cy nudged*). A card you send after the analyst has ended the turn goes through tonight on the standing limit if it fits; if it doesn't, the toast says it waits for the analyst, and the review says why.
+
 **Week 0** walks one alert through all five steps (a worn tire on the twin; a bathroom outlet that trips with the hair dryer) and writes nothing to the island.
 
 ## 6. Mechanic: the manual, and when a part is missing
@@ -143,7 +145,7 @@ The desk sits under the island: the cash card on top (**spendable** is cash less
 
 **Money.** Cash over 12 weeks; revenue against its budget and what went out, week by week (tap a week for its numbers, or *Table*); the runway (the weeks spendable cash covers overhead, payroll and insurance with no revenue); where it went (jobs and stock, capex, overhead and payroll, insurance and incidents, by category, trade and asset); the stock card (inventory, cash tied up in stock and open POs, the fill rate, jobs waiting on parts, stock received against used, the fast and slow movers). Then the **work budgets** (a job whose parts are all on the shelf goes ahead on its trade's budget with no card) and the **standing limit**, pricing, insurance, overhead and payroll.
 
-**Staff.** The island's payroll: pilots, housekeepers and builders. Hiring is your call once the staff update is in; until then the week pays the tier's standard crew.
+**Staff.** The island's payroll: pilots, housekeepers and builders (see *Analyst: the island's staff* in section 3). The crew and what each does this week, the hiring board, *Let go*, the builders' site work with its *Buy* buttons, and from tier 3 the extra cottages. Staff moves are yours any time that week, End turn or not.
 
 ## 8. Crewmates' problems (cross-trade reports)
 
@@ -157,7 +159,7 @@ The two vehicles use the hydraulic bench with their own rules. The bucket truck 
 
 A report lands on the fixer's list, ready, no approval. While it's open it either **slows the reporter down** (2 jobs a turn, or 1 desk task), **costs cash every week**, or (the GPU cable) **keeps that cart tagged out**. Tap it to see who's waiting on you, then *Start*. A fix that doesn't hold comes back a week or two later. A new plug looks like any new plug until then: a sloppy one isn't given away by the next inspection, and a clean fix after it wipes out the old one's comeback (it went with the old plug end). A money leak that comes back also charges the weeks it only looked fixed. Autopilot patches a slow-down and a cable, but a money leak waits for a person.
 
-**Whose move it is.** A report and the part chain's next step count the same way: the crew strip marks who's *waiting on you* and who's *blocking you*, the top of the island screen says what for, *End turn* asks first when a crewmate is waiting on you (*Seb is waiting on you: approve the part …*), and with ntfy set up the crew gets pinged when a report comes in or is closed out, and when the chain moves on to someone's move.
+**Whose move it is.** A report, the part chain's next step and the job flow's moves (a card or a request waiting on the analyst, a circuit the electrician has to meter, a ready job on a grounded plane or a closed house) count the same way: the crew strip marks who's *waiting on you* and who's *blocking you*, the top of the island screen says what for, *End turn* asks first when a crewmate is waiting on you (*Seb is waiting on you: approve the part …*), and with ntfy set up the crew gets pinged when a report comes in or is closed out, and when the chain moves on to someone's move.
 
 ## 9. Lend a hand
 

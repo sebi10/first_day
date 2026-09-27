@@ -293,8 +293,8 @@ function WriteUp({ ctl, role, asset, can, onDone }: { ctl: Ctl; role: Role; asse
             <span class="col grow" style={{ gap: 2 }}>
               <b>{c.title}</b>
               <span class="row wrap label" style={{ gap: 6 }}>
-                <TierDots tier={tier} /> {cost ? usd(cost) : 'no cost'} · +{c.gain}
-                {c.parts ? ` · ${c.parts} kit` : ''}
+                <TierDots tier={tier} /> {cost ? usd(cost) : 'no cost'}
+                {c.parts ? ' + parts' : ''} · +{c.gain}
               </span>
             </span>
             <Btn

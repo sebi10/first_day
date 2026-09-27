@@ -521,6 +521,9 @@ function Dock({
             const t = flowNext.target;
             if ('order' in t) {
               const o = s.orders.find((x) => x.id === t.order);
+              // a job-flow job starts through the ops panel's host: the install check first (a stop shows its sheet,
+              // never the puzzle), then the per-turn limits and the carts, as Your move's Start does
+              if (o?.flow) return openTarget(t);
               if (o && !gridCapped) return onPlay(o);
             }
             openTarget(t);
@@ -530,7 +533,7 @@ function Dock({
         }
       : approvals > 0
       ? {
-          label: `Review ${approvals} approval${approvals > 1 ? 's' : ''} ▸`,
+          label: `${approvals} to approve ▸`,
           go: () => document.getElementById('approvals')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
         }
       : ready > 0 && !gridCapped

@@ -7,10 +7,11 @@ import { CABLE_REPORT, ECON, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../s
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
 import { cartOn, flightsAvailable, flightsPerPlane, gseCarts, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap } from '../sim/econ';
 import { cardOf, flowStage } from '../sim/flow';
-import { itemById } from '../sim/items';
+import { itemById, priceAt } from '../sim/items';
 import { toolsFor } from '../sim/progression';
 import { hashSeed } from '../sim/rng';
 import { invoiceContext, reqValue, stockFlags, urgentJob } from '../sim/stock';
+import { spendable } from '../sim/ledger';
 import { taskById } from '../sim/tasks';
 import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Order, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
@@ -246,7 +247,9 @@ export function dockNext(s: IslandState, role: Role): { label: string; target: D
   if (role === 'fin') {
     const cards = s.orders.filter((o) => o.flow && o.status === 'pending' && o.lastDeferredWeek !== s.week).length;
     const reqs = (s.reqs ?? []).filter((r) => r.status === 'open' && r.deferredWeek !== s.week).length;
-    if (cards + reqs > 0) return { label: `Review ${[cards ? `${cards} card${cards > 1 ? 's' : ''}` : '', reqs ? `${reqs} requisition${reqs > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ')} ▸`, target: { desk: 'approvals' } };
+    // short enough for the Dock on a phone ("Review 1 card · 1 requisition" was cut at 390 px): the desk and the
+    // End-turn check say what they are
+    if (cards + reqs > 0) return { label: `${cards + reqs} to approve ▸`, target: { desk: 'approvals' } };
     const urgent = stockFlags(s).filter((f) => f.urgent).length;
     if (urgent > 0) return { label: `Stock: ${urgent} urgent ▸`, target: { desk: 'stock' } };
     return null;
@@ -291,6 +294,22 @@ export function endTurnChecks(s: IslandState, role: Role): { text: string; urgen
     if (a.status === 'open') out.push({ text: `Plan it now so the parts come in time: ${alertShort(s, a)} on ${name} (due wk ${a.due}).`, urgent: a.due <= s.week + 1 });
   }
   return out.sort((x, y) => Number(y.urgent) - Number(x.urgent));
+}
+
+/** the standing limit a week: late cards and requisitions approved at the resolve (8.5); absent, the work budgets' sum */
+export const standingLimit = (s: IslandState) => s.standing ?? (s.autoBudget.mech ?? 0) + (s.autoBudget.elec ?? 0);
+
+/**
+ * A card that comes in after the analyst ended the turn (8.5), in the tech's words: the standing approval takes it
+ * tonight when it fits the limit (and the cash), or it waits for the analyst. null while the analyst's turn is open.
+ */
+export function standingWords(s: IslandState, total: number, safety = false): string | null {
+  if (!s.turns.fin?.ended) return null;
+  const fin = nameOf(s, 'fin');
+  const limit = standingLimit(s);
+  if (total > limit) return `${fin} has ended the turn, and it's over the standing limit (${usdWords(limit)}): it waits for ${fin}'s approval.`;
+  if (spendable(s) - total < (safety ? 0 : ECON.freezeBelow)) return `${fin} has ended the turn, and spendable cash is under the freeze: it waits for ${fin}'s approval.`;
+  return `${fin} has ended the turn: it goes through tonight on the standing approval (up to ${usdWords(limit)}) unless deferred.`;
 }
 
 /** open a job-flow target: B's ops panel and C's desk listen for it */
@@ -345,7 +364,11 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
       const card = cardOf(after, o);
       const parts = card.total - card.labour;
       const where = after.assets.find((x) => x.id === o.assetId)?.name;
-      const late = after.turns.fin?.ended ? ' It goes through tonight on your standing approval unless you defer it.' : '';
+      const late = after.turns.fin?.ended
+        ? card.total <= standingLimit(after)
+          ? ' It goes through tonight on your standing approval unless you defer it.'
+          : ` It's over your standing limit (${usdWords(standingLimit(after))}): it waits for you.`
+        : '';
       push(`${after.name}: a card for ${name('fin')}`, `${name(o.role)} sent ${o.title}${where ? ` on ${where}` : ''}: ${usdWords(card.total)} (${parts > 0 ? `parts ${usdWords(parts)}, ` : ''}labour ${usdWords(card.labour)}).${late}`);
     }
   }
@@ -470,6 +493,13 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   if (o.kind === 'project' && o.puzzle === 'auction') {
     // floatplane deposit: same auction, bigger stakes
     context.market = { low: 3000, high: 7000, fair: 4800, cap: Math.min(5600, Math.max(0, s.cash - ECON.freezeBelow)) };
+  } else if (o.kind === 'auction' && o.lot) {
+    // the broker's real lot (17.3): fair is the lot at the broker's price x 0.85; the bid is capped at 92% of the lot
+    // at list, and never below the freeze line (the auction puzzle's lotMarket reads it as it is)
+    const fair = Math.max(20, o.lot.fair);
+    const low = Math.round(fair * 0.6);
+    const cap = Math.max(0, Math.min(Math.round(o.lot.list * 0.92), Math.round(spendable(s) - ECON.freezeBelow)));
+    context.market = { low, high: Math.round(Math.max(fair * 1.3, cap * 1.08, low + 60)), fair, cap };
   } else if (o.kind === 'auction') {
     const { low, high } = ECON.partMarket;
     const f = 1 + 0.1 * (s.tier - 1);
@@ -506,7 +536,8 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
       list: o.lot.list,
       lines: o.lot.lines.map((l) => {
         const x = itemById(l.item);
-        return { pn: x?.pn ?? l.item, nomen: x?.nomen ?? l.item, qty: l.qty, list: Math.round((x?.price ?? 0) * l.qty) };
+        // at list: the catalog's unit price (its price is the pack's) times the units in the lot
+        return { pn: x?.pn ?? l.item, nomen: x?.nomen ?? l.item, qty: l.qty, list: Math.round((x ? priceAt(x) : 0) * l.qty) };
       }),
     };
   }

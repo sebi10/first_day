@@ -462,6 +462,11 @@ export const LABOR = {
     'R-GENT': 1.5,
   } as Record<string, number>,
   minDefault: 50,
+  /**
+   * labour never runs past this many times the book hours: a cheap fix under a dear kind (a belt under the
+   * alternator's card, a connector under the com radio's) is priced as the job it is, not as the unit it isn't
+   */
+  capX: 4,
 };
 
 /** the money a job that needed a parts kit carried in today's card (the auction's fair value was 340 at tier 1; tuned: docs/DECISIONS.md, Real job flow · Balance) */
@@ -1431,7 +1436,7 @@ export const PROJECTS: Record<number, { title: string; jobs: Record<Role, { titl
     jobs: {
       mech: { title: 'First cargo load sheet', puzzle: 'balance' },
       elec: { title: 'Put cottages 3–4 on the panel', puzzle: 'panel' },
-      fin: { title: 'Pay the builders (three-way match)', puzzle: 'invoice' },
+      fin: { title: 'Pay the contractor (three-way match)', puzzle: 'invoice' },
     },
   },
   3: {

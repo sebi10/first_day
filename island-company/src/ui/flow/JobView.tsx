@@ -6,11 +6,11 @@ import { useState } from 'preact/hooks';
 import { SUPPLIERS } from '../../sim/data';
 import { cardOf, flowStage, installCheck } from '../../sim/flow';
 import { itemById } from '../../sim/items';
-import { jobLines, onOrderFor, owned, reservedFor, toolComing } from '../../sim/stock';
+import { isSafetyJob, jobLines, onOrderFor, owned, reservedFor, toolComing } from '../../sim/stock';
 import type { Action, Alert, IslandState, Order } from '../../sim/types';
 import { ChainOrigin } from '../chain';
 import { Btn, usd } from '../kit';
-import { flowMove } from '../select';
+import { flowMove, standingWords } from '../select';
 import { lineWords, taskFor } from './steps';
 import { landsWords, nameOf } from './words';
 
@@ -128,7 +128,7 @@ export function JobView({
           ))}
           <span>Labour {usd(card.labour)}</span>
           <b>Total {usd(card.total)}</b>
-          {s.turns.fin?.ended && <span class="label">{nameOf(s, 'fin')} has ended the turn: it goes through tonight on the standing approval (up to the limit) unless deferred.</span>}
+          {o.status === 'pending' && standingWords(s, card.total, isSafetyJob(s, o)) && <span class="label">{standingWords(s, card.total, isSafetyJob(s, o))}</span>}
         </div>
       )}
       {!card && lines.length > 0 && (

@@ -52,6 +52,10 @@ export function restrictedBy(s: Pick<IslandState, 'alerts' | 'assets'>, planeId:
   if (!soleGuest(s, planeId)) return undefined;
   return groundingAlert(s, planeId, week);
 }
+/** an open or planned alert on the plane placarded INOP under the MEL (category C) through `week`: it flies on the placard */
+export function melOn(s: Pick<IslandState, 'alerts'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
+  return (s.alerts ?? []).find((a) => a.assetId === planeId && a.status !== 'closed' && !!a.mel && a.mel.until >= week);
+}
 /** an open or planned hazard alert on a house (it closes the house until it's made safe or fixed) */
 export function hazardOn(s: Pick<IslandState, 'alerts'>, houseId: string): Alert | undefined {
   return (s.alerts ?? []).find((a) => a.assetId === houseId && a.status !== 'closed' && !!symptomOf(a)?.hazard);

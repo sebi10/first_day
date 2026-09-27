@@ -4,13 +4,12 @@
 // needs, receiving), Money (cash, where it went, the stock card, the budgets,
 // pricing, insurance, overhead and payroll) and Staff (the island's payroll:
 // package D's hiring desk). Flow cards and requests stay approvable after End turn.
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { needsFreight, openChain } from '../sim/chain';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
 import { chainCardCost } from '../sim/engine';
 import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, logistic, occupancy, openReports, projectWeek, rateBounds, season } from '../sim/econ';
 import { committed, spendable } from '../sim/ledger';
-import { NPC_ROLES, STAFF } from '../sim/staff';
 import { urgentJob } from '../sim/stock';
 import type { Insurance, IslandState, Order } from '../sim/types';
 import { fx } from './feedback';
@@ -19,7 +18,7 @@ import { StaffDesk } from './staff/StaffDesk';
 import { CapNotice, CoverSection, hasOrigin } from './ops';
 import { OrderCard, OrderDetail } from './orders';
 import { FlowCards } from './purchasing/ApprovalCard';
-import { deskCounts, deskTaskLine, flowQueue, legacyQueue, openingTab, openRoles, payrollLines, reqQueue, type DeskTab } from './purchasing/model';
+import { deskCounts, deskTaskLine, flowQueue, legacyQueue, openingTab, reqQueue, type DeskTab } from './purchasing/model';
 import { Money } from './purchasing/Money';
 import { ReqQueue } from './purchasing/ReqQueue';
 import { StockPlanner, type PlannerFocus } from './purchasing/StockPlanner';
@@ -260,65 +259,12 @@ function ApprovalsTab({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: bool
   );
 }
 
-/**
- * The Staff tab: package D's hiring desk (StaffDesk). Until it draws something,
- * the crew on the payroll, read-only, so the tab is never empty.
- */
+/** The Staff tab: package D's hiring desk (the payroll, the crew, the hiring board, the site work) */
 function StaffTab({ ctl }: { ctl: Ctl }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [empty, setEmpty] = useState(false);
-  useLayoutEffect(() => {
-    const e = !!box.current && box.current.childElementCount === 0;
-    if (e !== empty) setEmpty(e);
-  });
-  const { s } = ctl;
-  const staff = s.staff ?? [];
-  const open = openRoles(s);
-  const std = STAFF.standard[Math.max(1, Math.min(5, s.tier)) - 1];
-  const pay = payrollLines(s);
-  // what the week's payroll charges beyond the staff at work (an open post of the standard crew, today)
-  const beyond = pay.lines.length > NPC_ROLES.filter((r) => staff.some((n) => n.role === r && n.start <= s.week)).length ? pay.lines[pay.lines.length - 1] : null;
   return (
-    <>
-      <div ref={box} class="col" style={{ gap: 12 }}>
-        <StaffDesk ctl={ctl} />
-      </div>
-      {empty && (
-        <div class="card col" style={{ gap: 8 }}>
-          <div class="row spread">
-            <h3>The island's staff</h3>
-            <b class="num">{usd(pay.total)}/wk</b>
-          </div>
-          <span class="pd-note">Pilots fly the planes, housekeepers turn the houses over, builders do the site work for new buildings. They're on the island's payroll, and hiring is your call.</span>
-          {NPC_ROLES.map((r) => {
-            const of = staff.filter((n) => n.role === r);
-            return (
-              <div key={r} class="col" style={{ gap: 2 }}>
-                <span class="label">
-                  {r === 'pilot' ? 'Pilots' : r === 'housekeeper' ? 'Housekeepers' : 'Builders'} · {of.length} of the standard {std[r] ?? 0}
-                </span>
-                {of.map((n) => (
-                  <div class="pd-line" key={n.id}>
-                    <span>
-                      {n.name} <span class="pd-muted">· skill {'●'.repeat(n.skill)}{'○'.repeat(5 - n.skill)}</span>
-                    </span>
-                    <span class="v">{usd(n.wage)}/wk</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-          {beyond && (
-            <div class="pd-line">
-              <span>{beyond.label}</span>
-              <span class="v">{usd(beyond.usd)}/wk</span>
-            </div>
-          )}
-          {open > 0 && <span class="chip amber" style={{ alignSelf: 'flex-start' }}>{open} short of the standard crew</span>}
-          <span class="pd-note">Hiring opens with the staff update.</span>
-        </div>
-      )}
-    </>
+    <div class="col" style={{ gap: 12 }}>
+      <StaffDesk ctl={ctl} />
+    </div>
   );
 }
 

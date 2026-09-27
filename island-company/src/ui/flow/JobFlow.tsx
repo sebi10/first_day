@@ -7,6 +7,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { symptomText } from '../../sim/alerts';
 import { cardOf } from '../../sim/flow';
+import { isSafetyJob } from '../../sim/stock';
+import { standingWords } from '../select';
 import type { Action, Alert, Order } from '../../sim/types';
 import { fx } from '../feedback';
 import { Btn, Icon, toast, usd } from '../kit';
@@ -65,7 +67,8 @@ export function JobFlow({ ctl, alert: a, repick, onClose, onStart, demo }: JobFl
     if (job.status === 'ready') msg = 'Ready: start it now.';
     else if (job.status === 'pending') {
       const total = cardOf(s, job).total;
-      msg = `Card sent to ${fin}: ${usd(total)}.${s.turns.fin?.ended ? ` ${fin} has ended the turn: it goes through tonight on the standing approval unless deferred.` : ''}`;
+      const late = standingWords(s, total, isSafetyJob(s, job));
+      msg = `Card sent to ${fin}: ${usd(total)}.${late ? ` ${late}` : ''}`;
     } else if (job.flow?.research || job.flow?.queued) msg = job.flow.queued ? 'Research queued: it opens when the part chain in progress closes.' : "Research: next, the airplane's logbooks (your move).";
     else {
       const reqs = (s.reqs ?? []).filter((r) => r.order === job.id && r.status === 'open').length;
