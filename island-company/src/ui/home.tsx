@@ -5,7 +5,7 @@ import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
 import { gseCarts, gseForStart, hangarJobs, needsCart, powered, startCart, tierDef, urgency } from '../sim/econ';
-import { ROLES, type IslandState, type Order, type Role, type WeekReport } from '../sim/types';
+import { ROLES, type IslandState, type OpsRole, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
 import { ChainBanner } from './chain';
@@ -18,12 +18,14 @@ import { Island } from './island';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
-import { blocks, capNow, launchFor, mateStatus, owedBy, teamNumbers } from './select';
+import { blocks, capNow, dockNext, endTurnChecks, launchFor, mateStatus, openTarget, owedBy, teamNumbers } from './select';
 import { settings } from './settings';
 import { shareText } from './share';
 import { C, ROLE_TINT } from './theme';
 import { useIsland, type Ctl } from './useIsland';
 import { Week0 } from './week0';
+import { YourMove } from './flow/YourMove';
+import { BuildStatus } from './staff/BuildStatus';
 
 type Tab = 'island' | 'board' | 'me';
 
@@ -336,6 +338,12 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
           <Lobby ctl={ctl} onPass={onSeat} />
         ) : (
           <>
+            {/* the job flow's Your move comes first for the techs (B draws it; docs/JOBFLOW.md 17.2) */}
+            {r !== 'fin' && (
+              <div id="your-move">
+                <YourMove ctl={ctl} role={r as OpsRole} />
+              </div>
+            )}
             {/* the part chain's move is on its own banner below (with the stepper); the crew strip counts it with the rest */}
             {waitingOn.filter((b) => b.kind !== 'chain').map((b, i) => (
               <div class="card row" key={`w${i}`} style={{ gap: 10 }}>
@@ -367,6 +375,8 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
             )}
             <ChainBanner s={s} role={r} />
             <CrewProject ctl={ctl} onPlay={onPlay} />
+            {/* the builders' site work, the whole game (D draws it; docs/JOBFLOW.md 15.5) */}
+            <BuildStatus ctl={ctl} />
             {r === 'fin' ? <Desk ctl={ctl} onPlay={onPlay} /> : <OpsPanel ctl={ctl} role={r} onPlay={onPlay} onGse={onGse} />}
           </>
         )}
@@ -483,7 +493,11 @@ function Dock({
   // a ground power start waiting on a cart isn't something to start yet
   const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready' && !gseForStart(s, o).blocker).sort((a, b) => urgency(s, b) - urgency(s, a));
   const ready = readyList.length;
-  const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week).length : 0;
+  // legacy cards (no job flow) keep today's count; the flow's cards and requisitions come from dockNext
+  const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week && !o.flow).length : 0;
+  // the job flow's next move (docs/JOBFLOW.md 16): the first Your move row, or the analyst's cards and requisitions
+  const flowNext = dockNext(s, r);
+  const checks = turn?.ended ? [] : endTurnChecks(s, r);
   const gridCapped = (r === 'mech' && powered(s).gridDown && !!turn && hangarJobs(turn) >= 1) || !!capNow(s, r)?.full;
   // jobs this seat could still start this turn (none once a per-turn limit is used up)
   const playable = gridCapped ? 0 : ready;
@@ -494,13 +508,27 @@ function Dock({
   const weak = r === 'mech' ? weakBatteryNow(s) : null;
   const weakUnready = !!weak && !weak.ready;
   const leftOn = r === 'mech' ? gseCarts(s).filter((c) => c.hookedTo && c.hookedTo !== s.weakBattery?.assetId && !s.orders.some((o) => o.status === 'ready' && needsCart(o.kind) && o.assetId === c.hookedTo)) : [];
-  const ask = playable > 0 || owed.length > 0 || weakUnready || leftOn.length > 0;
+  const ask = playable > 0 || owed.length > 0 || weakUnready || leftOn.length > 0 || checks.length > 0;
   // a report or a chain step carried over never rolls an incident: only the other jobs pick up deferral risk
   const risky = readyList.filter((o) => o.kind !== 'report' && !o.chain).length;
   // the next useful thing, always under the thumb
   const next: { label: string; go(): void } | null = turn?.ended
     ? null
-    : approvals > 0
+    : flowNext
+      ? {
+          label: flowNext.label,
+          go: () => {
+            const t = flowNext.target;
+            if ('order' in t) {
+              const o = s.orders.find((x) => x.id === t.order);
+              if (o && !gridCapped) return onPlay(o);
+            }
+            openTarget(t);
+            const at = 'desk' in t ? 'approvals' : 'your-move';
+            document.getElementById(at)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          },
+        }
+      : approvals > 0
       ? {
           label: `Review ${approvals} approval${approvals > 1 ? 's' : ''} ▸`,
           go: () => document.getElementById('approvals')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
@@ -581,7 +609,12 @@ function Dock({
       <Sheet open={confirm} onClose={() => setConfirm(false)} label="End turn">
         <div class="col" style={{ gap: 12 }}>
           <h2>End your turn?</h2>
-          {owed.map((m) => (
+          {checks.map((c, i) => (
+            <span key={`c${i}`} class={c.urgent ? 'fault' : 'muted'} style={c.urgent ? { fontWeight: 700 } : undefined}>
+              {c.text}
+            </span>
+          ))}
+          {owed.filter((m) => m.kind !== 'flow').map((m) => (
             <span key={m.key} class="fault" style={{ fontWeight: 700 }}>
               {s.players[m.waits]?.name ?? ROLE_LABEL[m.waits]} is waiting on you: {m.text}.
             </span>

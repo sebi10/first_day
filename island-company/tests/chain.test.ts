@@ -5,11 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { generateHydraulics, prechargeOther } from '../src/puzzles/hydraulics';
 import { generateTorque, torqueData, workedTo } from '../src/puzzles/torque';
 import { ammTaskFor, ipcFor, rowFor, type Ata } from '../src/sim/aircraft';
+import { raiseAlert } from '../src/sim/alerts';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { chainMove, engineeringFee, islandAircraft, judgePart, manualCard, openChain, plantedOn, plantFor, restockFee, rightPn, wrongPn } from '../src/sim/chain';
 import { CHAIN, DEFECT_RULES, ECON, defectRule, defectVariant } from '../src/sim/data';
 import { capOf, outOfService } from '../src/sim/econ';
 import { apply, chainWouldOpen, createIsland, isEmergency } from '../src/sim/engine';
+import { fixTaskFor, flowStage, judgeSlot, repairTask, stdPickFor } from '../src/sim/flow';
+import { itemById } from '../src/sim/items';
 import { hashSeed } from '../src/sim/rng';
 import { ROLES, type Asset, type IslandState, type Order } from '../src/sim/types';
 import { launchFor } from '../src/ui/select';
@@ -292,7 +295,8 @@ describe('in the IPC: lookup → buy → delivery → install', () => {
     // the cash at the end of the week: its own flows, plus the credit (the next week's petty-cash approvals come after)
     const h = s.history.at(-1)!;
     const c = h.costs;
-    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0)));
+    // (the job flow's own outgoings too: the carrying charge on the stock, and any payment run)
+    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0) - (c.carry ?? 0) - (c.parts ?? 0) - (c.freight ?? 0)));
     // the banner says why it's back at the IPC, until the new lookup is handed in
     expect(s.chain!.back).toMatch(new RegExp(`^Sent back at receiving: P/N ${wrong} is not effective for`));
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: rightPn(ac, '32-40', 'lining') } });
@@ -372,6 +376,8 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: oem } });
     s = approve(s, step(s).id);
     s = resolve(s);
+    // now and then the paperwork comes a week late (a seeded roll on the chain's id): the check waits for it
+    if (s.chain!.step === 'transit') s = resolve(s);
     expect(s.chain!.returns).toBe(1);
     // receiving already says the IPC doesn't list it: straight to the records, not the book again
     expect(s.chain!.step).toBe('research');
@@ -403,9 +409,13 @@ describe('not in the IPC: research → engineering → buy → install', () => {
     const insp: Order = { ...s.orders[0], id: 'insp', kind: 'inspect100', title: '100-hr inspection', puzzle: 'crack', assetId: 'p2', status: 'ready', role: 'mech', tier: 2, cost: 180, gain: 10, chain: undefined, repair: undefined, redo: undefined, report: undefined };
     s.orders.push(insp);
     s = complete(s, insp);
-    const rep = s.orders.find((o) => o.kind === 'repair' && o.repair?.defect.variant === 'unapproved')!;
+    // the repair is an alert, planned like any: its job is the logbook research (the paperwork), no redo
+    const al = s.alerts!.find((a) => a.repair?.defect.variant === 'unapproved')!;
+    expect(al.repair!.defect.redo).toBe(false);
+    const planned = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: repairTask(s, al)!.id, pick: [], week: s.week }, NOW);
+    expect(planned.error).toBeUndefined();
+    const rep = planned.s.orders.find((o) => o.flow?.alert === al.id)!;
     expect(rep.puzzle).toBe('logbook');
-    expect(rep.repair!.defect.redo).toBe(false);
     expect(s.feed.some((f) => /found an ICA part installed without the engineering authorization GMM 4\.7\(c\) requires/.test(f.text))).toBe(true);
   });
 });
@@ -485,7 +495,8 @@ describe('the rules around it', () => {
         }
       });
     }
-    expect(total).toBeGreaterThan(4);
+    // chains open from the job flow's research branch only now (CHAIN.flowChance 0): fewer, but they do
+    expect(total).toBeGreaterThan(1);
     expect(opens).toBeGreaterThanOrEqual(closes);
   });
 });
@@ -630,5 +641,84 @@ describe('CHAIN tuning', () => {
     expect(CHAIN.minTier).toBe(2);
     expect(CHAIN.fromWeek).toBe(3);
     expect(Object.values(CHAIN.kinds).every((a) => ['32-40', '61-10', '29-10', '23-10', '24-30'].includes(a as Ata))).toBe(true);
+  });
+});
+
+describe('the part chain as a branch of the job flow (13)', () => {
+  /** a planned flow job on the island (the task that fixes the alert, the right pick unless one is given) */
+  function flowJob(s: IslandState, sym: string, cause: number, assetId: string, opts: { pick?: { item: string; qty: number }[]; research?: boolean; due?: number } = {}) {
+    const asset = s.assets.find((a) => a.id === assetId)!;
+    const al = raiseAlert(s, { role: 'mech', asset, sym, cause, ...(opts.due !== undefined ? { due: opts.due } : {}) }, NOW);
+    const task = fixTaskFor(s, al)!;
+    const r = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick: opts.pick ?? stdPickFor(s, al, task), research: opts.research, week: s.week }, NOW);
+    expect(r.error).toBeUndefined();
+    return { s: r.s, al, o: r.s.orders.find((o) => o.flow?.alert === al.id)! };
+  }
+
+  it('a plan with research opens the chain at the logbook research; it doesn’t ground the plane by itself', () => {
+    const { s, al, o } = flowJob(island(PLANTED), 'M_BRAKE_CHATTER', 0, 'p2', { research: true });
+    expect(s.chain).toMatchObject({ step: 'research', flow: true, assetId: 'p2', tag: 'lining', orderId: o.id });
+    expect(o.flow).toMatchObject({ research: true, researchSlot: 'lining' });
+    // the researched slot's part comes through the chain, not the pick
+    expect(o.flow!.pick.some((l) => itemById(l.item)?.slot === 'lining')).toBe(false);
+    expect(flowStage(s, s.alerts!.find((a) => a.id === al.id)!)).toBe('research');
+    expect(outOfService(s, 'p2')).toBe(false);
+    expect(capOf(s, s.assets.find((a) => a.id === 'p2')!)).toBeGreaterThan(0);
+    expect(step(s)).toMatchObject({ role: 'mech', status: 'ready' });
+    expect(apply(s, { t: 'plan', role: 'mech', alert: al.id, task: o.flow!.task, pick: [], research: true, week: s.week }, NOW).error).toBe('That alert is not open.');
+  });
+
+  it('research waits behind an open chain and opens when it closes', () => {
+    const first = flowJob(island(PLANTED), 'M_BRAKE_CHATTER', 0, 'p2', { research: true });
+    const second = flowJob(first.s, 'M_TIRE_WORN', 0, 'p1', { research: true, due: 9 });
+    let s = second.s;
+    expect(second.o.flow).toMatchObject({ research: true, queued: true });
+    expect(s.chain!.orderId).toBe(first.o.id);
+    expect(flowStage(s, s.alerts!.find((a) => a.id === second.al.id)!)).toBe('research');
+    // the first chain closes: the next resolve opens the queued research
+    s.chain!.step = 'done';
+    s.chain!.closedWeek = s.week;
+    s = resolve(s);
+    expect(s.chain).toMatchObject({ step: 'research', flow: true, orderId: second.o.id, assetId: 'p1' });
+    expect(s.orders.find((o) => o.id === second.o.id)!.flow!.queued).toBeUndefined();
+  });
+
+  it('the IPC part bought for an assembly an alteration replaced goes back at receiving, and the research opens', () => {
+    let s = island(PLANTED);
+    const ac = islandAircraft(s.seed, s.assets.find((a) => a.id === 'p2')!);
+    const ipcLining = rowFor(ipcFor({ ...ac, plant: undefined }, '32-40'), 'lining')!.pn;
+    expect(judgePart(ac, '32-40', 'lining', ipcLining)).toMatchObject({ ok: false, why: 'displaced' });
+    const al = raiseAlert(s, { role: 'mech', asset: s.assets.find((a) => a.id === 'p2')!, sym: 'M_BRAKE_CHATTER', cause: 0 }, NOW);
+    const task = fixTaskFor(s, al)!;
+    const pick = stdPickFor(s, al, task).map((l) => (itemById(l.item)?.slot === 'lining' ? { ...l, item: ipcLining } : l));
+    s = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick, week: s.week }, NOW).s;
+    const o = s.orders.find((x) => x.flow?.alert === al.id)!;
+    s = approve(s, o.id);
+    s = resolve(s);
+    const after = s.orders.find((x) => x.id === o.id)!;
+    expect(after.flow!.research).toBe(true);
+    expect(s.chain).toMatchObject({ step: 'research', flow: true, orderId: o.id });
+    expect(lastLines(s).some((t) => /^Receiving on Cargo C-7: .+ Research the records for the part that goes on it\.$/.test(t))).toBe(true);
+  });
+
+  it('an engineering authorization on file makes the ICA part approved for that airplane', () => {
+    const s = island(PLANTED);
+    const asset = s.assets.find((a) => a.id === 'p2')!;
+    const ac = islandAircraft(s.seed, asset);
+    const ica = rightPn(ac, '32-40', 'lining');
+    expect(judgeSlot(s, asset, '32-40', 'lining', ica)).toMatchObject({ ok: true, unapproved: true });
+    s.eas = [{ assetId: 'p2', ata: '32-40', tag: 'lining', pn: ica, ea: 'EA 26-123', week: s.week }];
+    const c = judgeSlot(s, asset, '32-40', 'lining', ica);
+    expect(c.ok).toBe(true);
+    expect(c.unapproved).toBeUndefined();
+    expect(c.text).toMatch(/EA 26-123/);
+    // on another airplane it's still unapproved
+    expect(judgeSlot({ ...s, eas: [{ ...s.eas[0], assetId: 'p9' }] }, asset, '32-40', 'lining', ica).unapproved).toBe(true);
+  });
+
+  it('no random chain on a flow job (the Parts step is the IPC lookup)', () => {
+    const { s, o } = flowJob(island(PLANTED), 'M_BRAKE_CHATTER', 0, 'p2');
+    for (let i = 0; i < 200; i++) expect(chainWouldOpen(s, { ...o, seed: hashSeed('flow', i) }, 'mech')).toBe(false);
+    expect(CHAIN.flowChance).toBe(0);
   });
 });

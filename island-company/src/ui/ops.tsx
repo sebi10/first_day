@@ -40,7 +40,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
         <div class="row spread">
           <h3>{role === 'mech' ? 'Hangar + airstrip' : 'Cottages + grid'}</h3>
           <span class="label">
-            <Icon name="box" size={14} /> parts {s.parts.stock} · {s.parts.inTransit} in transit
+            <Icon name="box" size={14} /> {(s.pos ?? []).filter((p) => p.status === 'open' || p.status === 'held').length} POs open
           </span>
         </div>
         {role === 'mech' &&

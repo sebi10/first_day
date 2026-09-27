@@ -8,8 +8,12 @@ import { generateTeardown } from '../src/puzzles/teardown';
 import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
 import { defectChance, defectSeverity, gseCarts, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
+import { protectionNeeded, raiseAlert, siteOf } from '../src/sim/alerts';
+import { fixTaskFor, judgeElecPick, judgeSlot, planTask, repairLabor, repairTask, stdPickFor } from '../src/sim/flow';
+import { itemById } from '../src/sim/items';
+import { taskById } from '../src/sim/tasks';
 import { hashSeed } from '../src/sim/rng';
-import type { Defect, IslandState, Order, ReportInfo, Role } from '../src/sim/types';
+import type { Alert, Defect, IslandState, Order, ReportInfo, Role } from '../src/sim/types';
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 
@@ -86,6 +90,42 @@ const complete = (s: IslandState, role: Role, o: Order, score: number) => apply(
 const complete2 = (s: IslandState, role: Role, o: Order, score: number, cover: boolean) => apply(s, { t: 'complete', role, orderId: o.id, score, perfect: score >= 0.95, cover }, NOW);
 const resolve = (s: IslandState) => apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
 const lastReport = (s: IslandState) => s.history[s.history.length - 1];
+/** every seat plays (and does nothing) and ends the turn: the week resolves with no autopilot */
+const endAll = (s: IslandState) => {
+  for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'endTurn', role: r, week: s.week }, NOW).s;
+  return s;
+};
+
+/**
+ * The repair a found or surfaced defect raised: an alert (planned like any), here planned as its trade
+ * would (the rule's task, its pre-filled line). Returns the job it made.
+ */
+function planRepair(s: IslandState, match: (a: Alert) => boolean = (a) => !!a.repair): { s: IslandState; o: Order; alert: Alert } {
+  const alert = s.alerts!.find((a) => a.status === 'open' && match(a))!;
+  expect(alert, 'a repair alert').toBeTruthy();
+  const task = repairTask(s, alert)!;
+  const r = apply(s, { t: 'plan', role: alert.role, alert: alert.id, task: task.id, pick: [], week: s.week }, NOW);
+  expect(r.error).toBeUndefined();
+  return { s: r.s, o: r.s.orders.find((o) => o.flow?.alert === alert.id)!, alert };
+}
+/** an approved job's lines land (the resolve would bring them): reserved to it, ready */
+function readyUp(s: IslandState, id: string): IslandState {
+  const o = s.orders.find((x) => x.id === id)!;
+  if (o.status !== 'waiting_part') return s;
+  for (const l of [...o.flow!.pick, ...o.flow!.bench]) {
+    const line = (s.inv![l.item] ??= { on: 0 });
+    const have = line.res?.[o.id] ?? 0;
+    if (have >= l.qty) continue;
+    line.on += l.qty - have;
+    line.res = { ...(line.res ?? {}), [o.id]: l.qty };
+  }
+  for (const po of s.pos ?? []) for (const l of po.lines) if (l.order === o.id) l.got = l.qty;
+  o.status = 'ready';
+  return s;
+}
+
+/** the card it goes to the analyst with: the labour, plus the rule's pre-filled line when the fix carries parts */
+const repairCost = (d: Defect, tier = 1) => repairLabor({ tier }, { cost: d.cost, puzzle: d.puzzle, role: d.role, orderKind: d.orderKind, variant: d.variant, job: d.job });
 
 describe('blind sign-off', () => {
   it('a real job at puzzle tier 2+ is blind; teaching tiers, lend-a-hand and new-crew grace are not', () => {
@@ -237,17 +277,20 @@ describe('hidden defects', () => {
     expect(complete(s, 'mech', insp, 0.5).s.defects!.some((x) => x.id === d.id)).toBe(true);
     const r = complete(s, 'mech', insp, 0.9).s;
     expect(r.defects).toHaveLength(0);
-    const rep = r.orders.find((o) => o.kind === 'repair')!;
+    // the repair is an alert on the trade's list (the finding, due now); planned, it is the rule's job
+    const { o: rep, alert } = planRepair(r);
+    expect(alert).toMatchObject({ role: 'mech', assetId: 'p1', kind: 'repair', src: 'finding', due: r.week });
     expect(rep).toMatchObject({
       role: 'mech',
       assetId: 'p1',
-      status: 'pending',
+      kind: 'repair',
       title: 'Pull the prop, replace the bolts, inspect the flange for fretting',
       puzzle: 'teardown',
       // the teardown shows the propeller, not a random assembly
       job: 'prop',
-      cost: round10(Math.max(280, DEFECT.minBase) * DEFECT.repairCost),
+      cost: repairCost(d),
     });
+    expect(['pending', 'ready']).toContain(rep.status);
     expect(rep.puzzle).not.toBe(d.puzzle);
     expect(rep.repair).toMatchObject({ via: 'inspection', foundBy: 'Ana', foundIn: '100-hr inspection', problem: 'prop bolts below torque, with fretting on the flange' });
     expect(r.feed.some((f) => /Ana's 100-hr inspection on Twin N-12 found prop bolts below torque, with fretting on the flange, left from week 3\..*Not airworthy until it’s repaired/.test(f.text))).toBe(true);
@@ -286,11 +329,13 @@ describe('hidden defects', () => {
     expect(rep.costs.incidents - lastReport(control).costs.incidents).toBe(Math.round(inc.cost * 0.5));
     expect(rep.components.safety).not.toBe('A');
     expect(r.defects).toHaveLength(0);
-    const repair = r.orders.find((o) => o.kind === 'repair')!;
-    expect(repair.repair!.via).toBe('incident');
-    expect(repair.repair!.incident).toBe(what);
-    expect(inc.from!.repairId).toBe(repair.id);
+    // the repair is an alert for next week (it starts fresh after the carry-over), traced from the incident
+    const alert = r.alerts!.find((a) => a.repair)!;
+    expect(alert.repair!.via).toBe('incident');
+    expect(alert.repair!.incident).toBe(what);
+    expect(inc.from!.repairId).toBe(alert.id);
     expect(inc.from!.redo).toBe(true);
+    const repair = planRepair(r).o;
     expect(repair.gain).toBeGreaterThanOrEqual(DEFECT.repairMinGain);
     // a severe one reads as a failure, not a write-up
     const sev = structuredClone(base);
@@ -361,11 +406,12 @@ describe('hidden defects', () => {
     plant(s, { week: 3, dueWeek: 9 });
     const insp = addOrder(s, { role: 'mech', kind: 'inspect100', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 180, gain: 10 });
     const r = complete(s, 'mech', insp, 0.9).s;
-    const flew = lastReport(resolve(structuredClone(r)));
+    // the crew ends the week without the repair (autopilot would plan it)
+    const flew = lastReport(endAll(structuredClone(r)));
     expect(flew.nearMisses).toBeGreaterThanOrEqual(1);
     expect(flew.lines.some((l) => /Twin N-12 flew with a known defect/.test(l.text))).toBe(true);
     const g = apply(structuredClone(r), { t: 'tag', role: 'mech', assetId: 'p1', on: true }, NOW).s;
-    expect(lastReport(resolve(g)).lines.some((l) => /known defect/.test(l.text))).toBe(false);
+    expect(lastReport(endAll(g)).lines.some((l) => /known defect/.test(l.text))).toBe(false);
   });
 
   it('the traced-to line reads as English for every kind of job', () => {
@@ -384,10 +430,23 @@ describe('repair, then the original task', () => {
     const s = atWeek(4);
     plant(s, { week: 3, dueWeek: 7 });
     const insp = addOrder(s, { role: 'mech', kind: 'inspect100', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 180, gain: 10 });
-    let r = complete(s, 'mech', insp, 0.9).s;
-    const rep = r.orders.find((o) => o.kind === 'repair')!;
-    r = apply(r, { t: 'approve', orderId: rep.id }, NOW).s;
-    return { s: r, rep: r.orders.find((o) => o.id === rep.id)! };
+    const found = complete(s, 'mech', insp, 0.9).s;
+    const p = planRepair(found);
+    let r = p.s;
+    // a card when it has something to buy; approved at once when everything is on the shelf (safety work)
+    if (p.o.status === 'pending') r = apply(r, { t: 'approve', orderId: p.o.id, week: r.week }, NOW).s;
+    // its pre-filled line arrives at the resolve: here it is on the shelf already
+    const o = r.orders.find((x) => x.id === p.o.id)!;
+    if (o.status === 'waiting_part') {
+      for (const l of [...o.flow!.pick, ...o.flow!.bench]) {
+        const line = (r.inv![l.item] ??= { on: 0 });
+        line.on += l.qty;
+        line.res = { ...(line.res ?? {}), [o.id]: (line.res?.[o.id] ?? 0) + l.qty };
+      }
+      for (const po of r.pos ?? []) for (const l of po.lines) if (l.order === o.id) l.got = l.qty;
+      o.status = 'ready';
+    }
+    return { s: r, rep: r.orders.find((x) => x.id === p.o.id)! };
   }
 
   it('the analyst approves the repair; finishing it spawns the redo (ready, already paid)', () => {
@@ -439,7 +498,7 @@ describe('repair, then the original task', () => {
     const r = resolve(s);
     const inc = lastReport(r).incidents.find((i) => i.kind === 'defect')!;
     expect(inc.cost).toBe(round10(DEFECT.minBase * DEFECT.incidentMult[0]));
-    const rep = r.orders.find((o) => o.kind === 'repair')!;
+    const rep = planRepair(r).o;
     expect(rep.title).toBe('Hard-landing inspection of the gear');
     expect(rep.puzzle).toBe('crack');
   });
@@ -556,7 +615,8 @@ describe('cross-trade reports', () => {
     const s = atWeek(5);
     reportOrder(s, 'hangarLights');
     plant(s, { orderKind: 'report', assetId: null, role: 'fin', report: { key: 'vendorPrice', by: 'mech', effect: 'leak', amount: 240 }, dueWeek: 9 });
-    const r = resolve(s);
+    // the crew ends the week (autopilot would patch the open report and make room)
+    const r = endAll(s);
     expect(r.orders.filter((o) => o.kind === 'report' && o.status !== 'done' && o.status !== 'cancelled')).toHaveLength(1);
   });
 
@@ -690,9 +750,14 @@ describe('hidden defects from hydraulic servicing and ground power starts', () =
     expect(inc.title).toBe(incidentText(DEFECT_RULES['gpu:hot'], 2, 'Twin N-12'));
     expect(inc.title).toMatch(/lost power on climb-out: turbine blades burnt in a hot start/);
     expect(inc.from!.traced).toBe('the ground power start Ana signed off in week 4');
-    const rep = r.orders.find((x) => x.kind === 'repair' && x.repair?.defect.id === d.id)!;
-    expect(rep).toMatchObject({ puzzle: 'crack', job: 'hotsection', title: DEFECT_RULES['gpu:hot'].fix.title, parts: 1, cost: round10(DEFECT.minBase * 3) });
-    r = apply(r, { t: 'approve', orderId: rep.id }, NOW).s;
+    const p = planRepair(r, (a) => a.repair?.defect.id === d.id);
+    const rep = p.o;
+    // the card: the labour plus the rule's pre-filled line (the hot-section kit), as today's repair and its kit
+    expect(rep).toMatchObject({ puzzle: 'crack', job: 'hotsection', title: DEFECT_RULES['gpu:hot'].fix.title, cost: repairCost(d, r.tier) });
+    expect(rep.flow!.pick).toHaveLength(1);
+    r = p.s;
+    if (rep.status === 'pending') r = apply(r, { t: 'approve', orderId: rep.id, week: r.week }, NOW).s;
+    r = readyUp(r, rep.id);
     r = complete(r, 'mech', r.orders.find((x) => x.id === rep.id)!, 0.9).s;
     expect(r.orders.find((x) => x.redo && x.kind === 'gpustart')).toMatchObject({ puzzle: 'gpu', title: 'Ground power start: weak battery (redo)', cost: 0, status: 'ready' });
   });
@@ -718,10 +783,145 @@ describe('hidden defects from hydraulic servicing and ground power starts', () =
     r = complete(r, 'mech', pen, 0.9).s;
     expect(r.defects ?? []).toHaveLength(0);
     expect(r.feed.some((f) => /wheel-half penetrant check on Twin N-12 found the wrong fluid in the brake system, its seals swelling, left from week 4/.test(f.text))).toBe(true);
-    const rep = r.orders.find((x) => x.kind === 'repair')!;
-    expect(rep).toMatchObject({ puzzle: 'teardown', job: 'brake', title: DEFECT_RULES['hydraulics:fluid'].fix.title, parts: 1, cost: round10(Math.max(260, DEFECT.minBase) * 1.5) });
-    r = apply(r, { t: 'approve', orderId: rep.id }, NOW).s;
+    const p = planRepair(r);
+    const rep = p.o;
+    expect(rep).toMatchObject({ puzzle: 'teardown', job: 'brake', title: DEFECT_RULES['hydraulics:fluid'].fix.title, cost: repairCost({ ...p.alert.repair!.defect }, r.tier) });
+    expect(rep.flow!.pick).toHaveLength(1);
+    r = p.s;
+    if (rep.status === 'pending') r = apply(r, { t: 'approve', orderId: rep.id, week: r.week }, NOW).s;
+    r = readyUp(r, rep.id);
     r = complete(r, 'mech', r.orders.find((x) => x.id === rep.id)!, 0.9).s;
     expect(r.orders.find((x) => x.redo)).toMatchObject({ kind: 'hydraulics', puzzle: 'hydraulics', title: 'Service the brake hydraulics (redo)' });
+  });
+});
+
+describe('the job flow’s wrong choices surface later (11)', () => {
+  /** a planned flow job on a started island in week `w`: the task that fixes it and the right pick unless told otherwise */
+  function flowJob(s: IslandState, sym: string, cause: number, assetId: string, over: { task?: string; pick?: { item: string; qty: number; slot?: string }[] } = {}) {
+    const asset = s.assets.find((a) => a.id === assetId)!;
+    const al = raiseAlert(s, { role: sym.startsWith('E_') ? 'elec' : 'mech', asset, sym, cause }, NOW);
+    const task = over.task ? planTask(s, al, over.task)! : fixTaskFor(s, al)!;
+    const r = apply(s, { t: 'plan', role: al.role, alert: al.id, task: task.id, pick: over.pick ?? stdPickFor(s, al, task), week: s.week }, NOW);
+    expect(r.error).toBeUndefined();
+    const o = r.s.orders.find((x) => x.flow?.alert === al.id)!;
+    return { s: r.s, al, o };
+  }
+
+  it('a wrong task: the job signs off, a sure defect, and the fault comes back with its own words (an incident, and the alert again)', () => {
+    let s = atWeek(6);
+    // the belt squeals (the fix is the belt, 24-30-02); the tech does the alternator (24-30-01) instead
+    s.inv!['HA-2419-4'] = { on: 1 };
+    s.inv!['HA-B38'] = { on: 1 };
+    const r = flowJob(s, 'M_BELT_SQUEAL', 0, 'p1', { task: 'amm:twin:24-30-01' });
+    s = r.s;
+    if (r.o.status === 'pending') s = apply(s, { t: 'approve', orderId: r.o.id, week: s.week }, NOW).s;
+    expect(s.orders.find((o) => o.id === r.o.id)!.status).toBe('ready');
+    s = complete(s, 'mech', s.orders.find((o) => o.id === r.o.id)!, 0.9).s;
+    const d = (s.defects ?? []).find((x) => x.puzzle === 'flow' && x.variant === 'task')!;
+    expect(d).toBeTruthy();
+    expect(d.alert).toMatchObject({ alert: r.al.id, sym: 'M_BELT_SQUEAL' });
+    expect(s.alerts!.find((a) => a.id === r.al.id)!.status).toBe('closed');
+    // it surfaces at its due week: an incident in the symptom's words, and the alert again, due now
+    for (let i = 0; i < 4 && s.alerts!.every((a) => a.src !== 'again'); i++) s = endAll(s);
+    const back = s.alerts!.find((a) => a.src === 'again' && a.sym === 'M_BELT_SQUEAL')!;
+    expect(back).toBeTruthy();
+    expect(back.due).toBe(back.week);
+    const inc = s.history.flatMap((h) => h.incidents).find((i) => i.kind === 'defect' && i.assetId === 'p1');
+    expect(inc?.title).toMatch(/the same fault is back|didn't fix|belt/i);
+  });
+
+  it('a part not effective for this airplane installs, and leaves a sure defect (ipc:noteff)', () => {
+    let s = atWeek(6);
+    const al = raiseAlert(s, { role: 'mech', asset: s.assets.find((a) => a.id === 'p1')!, sym: 'M_BRAKE_CHATTER', cause: 0 }, NOW);
+    const task = fixTaskFor(s, al)!;
+    const std = stdPickFor(s, al, task);
+    const lining = std.find((l) => itemById(l.item)?.slot === 'lining')!.item;
+    const twin = s.assets.find((a) => a.id === 'p1')!;
+    const near = Object.keys(s.inv!).find((id) => id !== lining && itemById(id)?.slot === 'lining' && judgeSlot(s, twin, '32-40', 'lining', id).why === 'noteff')!;
+    expect(near).toBeTruthy();
+    const r = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick: std.map((l) => (l.item === lining ? { ...l, item: near } : l)), week: s.week }, NOW);
+    s = r.s;
+    const o = s.orders.find((x) => x.flow?.alert === al.id)!;
+    if (o.status === 'pending') s = apply(s, { t: 'approve', orderId: o.id, week: s.week }, NOW).s;
+    s = complete(s, 'mech', s.orders.find((x) => x.id === o.id)!, 0.95).s;
+    expect(s.orders.find((x) => x.id === o.id)!.status).toBe('done');
+    const d = (s.defects ?? []).find((x) => x.puzzle === 'ipc' && x.variant === 'noteff');
+    expect(d).toMatchObject({ assetId: 'p1' });
+  });
+
+  it('every electrical variant, on a site built for it (the rule order: category stop, then 11.3)', () => {
+    const outlet = taskById('ref:outlet')!;
+    const threeway = taskById('ref:3way')!;
+    const spa = taskById('ref:spa')!;
+    const feeder = taskById('ref:feeder')!;
+    const l = (item: string, slot: string, qty = 1) => ({ item, qty, slot });
+    const cases: [string, ReturnType<typeof judgeElecPick>][] = [
+      ['nogfci', judgeElecPick(outlet, { room: 'bath', amps: 20, awg: 12 }, [l('KR20-TR', 'receptacle')])],
+      ['noafci', judgeElecPick(outlet, { room: 'bedroom', amps: 15, awg: 14 }, [l('KR15-TR', 'receptacle')])],
+      ['oversized', judgeElecPick(outlet, { room: 'bedroom', amps: 15, awg: 14 }, [l('KR15-TR', 'receptacle'), l('KP120AF', 'protection')])],
+      ['undersized', judgeElecPick(threeway, { room: 'hall', amps: 20, awg: 12 }, [l('KS3', 'switch', 2), l('NMB-14-3', 'cable', 25)])],
+      ['rating', judgeElecPick(outlet, { room: 'kitchen', amps: 20, awg: 12, single: true, upstream: 'df' }, [l('KR15S', 'receptacle')])],
+      ['notr', judgeElecPick(outlet, { room: 'living', amps: 15, awg: 14, upstream: 'afci' }, [l('KR15', 'receptacle')])],
+      ['nowr', judgeElecPick(outlet, { room: 'outdoor', amps: 20, awg: 12, upstream: 'gfci' }, [l('KR20-TR', 'receptacle')])],
+      ['boxfill', judgeElecPick(threeway, { room: 'hall', amps: 20, awg: 12 }, [l('KS3', 'switch', 2), l('NMB-12-3', 'cable', 25), l('BOX-NW1', 'box')])],
+      [
+        'raintight',
+        judgeElecPick(spa, { room: 'spa', amps: 50, awg: 8, wet: true, feet: 40 }, [
+          l('SPA-50GF', 'spa'),
+          l('KP250', 'feed'),
+          l('THWN-8', 'wire', 120),
+          l('THWN-10', 'egc', 40),
+          l('EMT-34', 'emt'),
+          l('EMT-C34SS', 'connectors', 2),
+          l('PVC40-1', 'pvc', 4),
+        ]),
+      ],
+      ['noburial', judgeElecPick(feeder, { room: 'panel', amps: 100, awg: 3, run: 'buried' }, [l('SPLIT-4', 'splice', 4)])],
+    ];
+    for (const [variant, v] of cases) expect(v, variant).toMatchObject({ ok: false, variant });
+    // a line in the wrong category stops the install instead (no defect)
+    expect(judgeElecPick(outlet, { room: 'living', amps: 15, awg: 14 }, [l('KS1', 'receptacle')])).toMatchObject({ stop: expect.stringMatching(/it doesn't go there\.$/) });
+    // and the right devices pass
+    expect(judgeElecPick(outlet, { room: 'bath', amps: 20, awg: 12 }, [l('KG20-TR', 'receptacle')])).toEqual({ ok: true });
+  });
+
+  it('the engine plants the electrician’s sure defect at the sign-off: a bath receptacle with no GFCI', () => {
+    let s = atWeek(6);
+    const house = s.assets.find((a) => a.kind === 'house')!;
+    // a dead outlet in a room the code wants GFCI protection in, nothing upstream: replaced with a plain TR receptacle
+    let pick: { item: string; qty: number; slot?: string }[] = [];
+    let al: Alert | undefined;
+    for (let i = 0; i < 60 && !al; i++) {
+      const a = raiseAlert(s, { role: 'elec', asset: house, sym: 'E_DEAD_OUTLET', cause: 0, seed: hashSeed('gfci-room', i) }, NOW);
+      const site = siteOf(s, a);
+      if (site && protectionNeeded(site).gfci && !site.upstream) {
+        al = a;
+        pick = [{ item: site.amps === 20 ? 'KR20-TR' : 'KR15-TR', qty: 1, slot: 'receptacle' }, { item: 'WN-ASST', qty: 1 }];
+      }
+    }
+    expect(al).toBeTruthy();
+    s.inv!['KR15-TR'] = { on: 10 };
+    s.inv!['KR20-TR'] = { on: 10 };
+    const r = apply(s, { t: 'plan', role: 'elec', alert: al!.id, task: 'ref:outlet', pick, week: s.week }, NOW);
+    expect(r.error).toBeUndefined();
+    s = r.s;
+    const o = s.orders.find((x) => x.flow?.alert === al!.id)!;
+    if (o.status === 'pending') s = apply(s, { t: 'approve', orderId: o.id, week: s.week }, NOW).s;
+    s = complete(s, 'elec', s.orders.find((x) => x.id === o.id)!, 0.95).s;
+    expect((s.defects ?? []).find((d) => d.puzzle === 'elec' && d.variant === 'nogfci')).toMatchObject({ assetId: house.id });
+  });
+
+  it('a service-neutral fault made safe at a branch breaker comes back as a shock and re-raises the alert, due now (elec:isolation)', () => {
+    let s = atWeek(6);
+    const house = s.assets.find((a) => a.kind === 'house')!;
+    const al = raiseAlert(s, { role: 'elec', asset: house, sym: 'E_SHOWER_TINGLE', cause: 2 }, NOW);
+    s = apply(s, { t: 'makeSafe', role: 'elec', alert: al.id, how: 'breaker', week: s.week }, NOW).s;
+    const d = s.defects!.find((x) => x.variant === 'isolation')!;
+    for (let w = s.week; w <= d.dueWeek; w++) s = endAll(s);
+    const back = s.alerts!.find((a) => a.id === al.id);
+    expect(back?.status).not.toBe('closed');
+    expect(back?.safe).toBeUndefined();
+    expect(back!.due).toBeLessThanOrEqual(s.week);
+    expect(s.history.flatMap((h) => h.incidents).some((i) => i.assetId === house.id && /tingle|shock/i.test(i.title))).toBe(true);
   });
 });

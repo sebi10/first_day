@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { needsFreight, openChain } from '../sim/chain';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
-import { budgetCap, chainCardCost, listPrice } from '../sim/engine';
-import { charterLoad, downtimeOf, expectedDeferralCost, logistic, occupancy, openReports, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
-import type { Insurance, Order } from '../sim/types';
+import { budgetCap, chainCardCost } from '../sim/engine';
+import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, logistic, occupancy, openReports, projectWeek, rateBounds, season, urgency } from '../sim/econ';
+import type { Insurance, IslandState, Order } from '../sim/types';
 import { fx } from './feedback';
-import { Btn, Icon, Seg, Sheet, TierDots, toast, usd } from './kit';
+import { Btn, Seg, Sheet, TierDots, toast, usd } from './kit';
+import { StaffDesk } from './staff/StaffDesk';
 import { CapNotice, CoverSection, hasOrigin } from './ops';
 import { OrderCard, OrderDetail } from './orders';
 import { capNow, openOrders } from './select';
@@ -42,7 +43,7 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           <span class={`chip num ${proj.revenue >= proj.budget ? 'palm' : ''}`}>
             {Math.round((proj.revenue / proj.budget) * 100)}% of {usd(proj.budget)} budget
           </span>
-          <span class="chip num">Fixed −{usd(tierDef(s.tier).fixed)}</span>
+          <span class="chip num">Fixed −{usd(fixedNow(s))}</span>
           {leakTotal > 0 && <span class="chip rust num">Open reports −{usd(leakTotal)}/wk</span>}
         </div>
         {leaks.map((o) => (
@@ -111,8 +112,9 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
       <h2 style={{ marginTop: 4 }}>Pricing</h2>
       <Pricing ctl={ctl} />
 
-      <h2 style={{ marginTop: 4 }}>Budgets, parts, insurance</h2>
+      <h2 style={{ marginTop: 4 }}>Budgets and insurance</h2>
       <Budgets ctl={ctl} />
+      <StaffDesk ctl={ctl} />
       <CoverSection ctl={ctl} role="fin" onPlay={onPlay} />
     </>
   );
@@ -281,7 +283,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
                 </b>
                 <span class="label wrap-text">
                   {down?.cargo
-                    ? `${down.flights} cargo flights/wk off: ${s.parts.inTransit ? `kits come by boat (${usd(ECON.boatKit)} each)` : 'no kits waiting on it now'}`
+                    ? `${down.flights} cargo flights/wk off: ${bulkWaiting(s) ? `${bulkWaiting(s)} PO${bulkWaiting(s) > 1 ? 's' : ''} waiting on it` : 'no POs waiting on it now'}`
                     : down
                       ? `${down.flights} flights/wk ≈ ${usd(down.usd)} of revenue lost`
                       : 'no flights until the part is on'}
@@ -339,7 +341,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
           />
           <span class="label">
             {down?.cargo
-              ? `The cargo plane is the one down. The boat brings it at the resolve; the guest flight carries it free, a week later${s.parts.inTransit ? ` (kits waiting meanwhile come by boat, ${usd(ECON.boatKit)} each)` : ''}.`
+              ? `The cargo plane is the one down. The boat brings it at the resolve; the guest flight carries it free, a week later${bulkWaiting(s) ? ` (the bulk POs waiting meanwhile slip, or come on the AOG boat for a job that grounds its asset)` : ''}.`
               : `The boat brings it at the resolve; the guest flight carries it free, a week later (≈ ${usd(down?.usd ?? 0)} more downtime).`}
           </span>
         </div>
@@ -487,42 +489,20 @@ function Pricing({ ctl }: { ctl: Ctl }) {
   );
 }
 
+/** bulk POs due and waiting for a cargo flight */
+const bulkWaiting = (s: IslandState) => (s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.carrier === 'bulk' && p.eta <= s.week).length;
+
 function Budgets({ ctl }: { ctl: Ctl }) {
   const { s } = ctl;
   const ended = !!s.turns.fin?.ended;
-  const room = ECON.maxParts - s.parts.stock - s.parts.inTransit;
-  const price = listPrice(s);
   return (
     <div class="card col" style={{ gap: 12 }}>
       {(['mech', 'elec'] as const).map((r) => (
         <BudgetRow key={r} ctl={ctl} role={r} disabled={ended} />
       ))}
       <div class="divider" />
-      <div class="row spread">
-        <span class="col" style={{ gap: 0 }}>
-          <b>Parts kits</b>
-          <span class="label num">
-            {s.parts.stock} in stock · {s.parts.inTransit} in transit · max {ECON.maxParts}
-          </span>
-        </span>
-        <Btn small kind="soft" disabled={ended || room <= 0} onClick={() => ctl.dispatch({ t: 'buyList' })}>
-          <Icon name="box" size={16} /> Buy at list {usd(price)}
-        </Btn>
-      </div>
-      <div class="row" style={{ gap: 4 }}>
-        {Array.from({ length: ECON.maxParts }, (_, i) => (
-          <i
-            key={i}
-            style={{
-              flex: 1,
-              height: 10,
-              borderRadius: 4,
-              background: i < s.parts.stock ? C.sea : i < s.parts.stock + s.parts.inTransit ? C.fin : 'rgba(31,42,48,.1)',
-            }}
-          />
-        ))}
-      </div>
-      <span class="label">Auctions beat list price. Kits ride the next {s.assets.some((a) => a.model === 'cargo') ? 'cargo flight (3 per flight)' : 'guest flight (1 per flight)'}.</span>
+      {/* the parts kits are gone (docs/JOBFLOW.md 17.3): stock and purchasing live on the Stock tab (package C) */}
+      <span class="label">Stock and purchase orders: {Object.keys(s.inv ?? {}).length} lines on the shelf, {(s.pos ?? []).filter((p) => p.status === 'open' || p.status === 'held').length} POs open.</span>
       <div class="divider" />
       <b>Insurance</b>
       <Seg<Insurance>

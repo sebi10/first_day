@@ -28,6 +28,7 @@ import { hashSeed, rng } from '../sim/rng';
 import {
   aircraftOf,
   ammTaskFor,
+  AMM_TASKS,
   fmtDate,
   ipcFor,
   orderFor,
@@ -405,7 +406,9 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
   const wantPlant = t >= 4 && plantRoll < (t >= 5 ? 0.5 : 0.35);
   // an FAA-PMA part is an approved replacement for the IPC part: that assembly is an ordinary IPC job
   const gp = given?.plant?.via === 'pma' ? undefined : given?.plant;
-  const key = ctx.job ? taskKeyFor(ctx.job) : undefined;
+  // the IPC lookup works on the five assemblies' cards (the job flow's short cards have no lookup case)
+  const k0 = ctx.job ? taskKeyFor(ctx.job) : undefined;
+  const key = k0 && (AMM_TASKS as string[]).includes(k0) ? k0 : undefined;
   const memo = new Map<Ata, ReturnType<typeof solveCases>>();
   const freeAt = (a: Ata) => memo.get(a) ?? memo.set(a, solveCases(ac, a, t).filter((x) => x.free)).get(a)!;
   const pickAta = (not?: Ata) => {
@@ -418,10 +421,10 @@ export function generateIpc(seed: number, tier: number, _tools: string[] = [], c
   const chainCase = ctx.chain?.step === 'lookup' && key ? CHAIN_CASE[ctx.chain.tag]?.(model) : undefined;
   if (chainCase && key) {
     // the part chain: this airplane, this assembly, this part. An alteration on it means "not in the IPC"
-    ata = ammTaskFor(ac, key).ata;
+    ata = ammTaskFor(ac, key).ata as Ata;
     planted = !!gp && gp.ata === ata;
   } else if (key) {
-    ata = ammTaskFor(ac, key).ata;
+    ata = ammTaskFor(ac, key).ata as Ata;
     if (gp?.ata === ata) {
       if (wantPlant || (t >= 4 && !freeAt(ata).length)) planted = true;
       else if (!freeAt(ata).length) ata = pickAta(ata);

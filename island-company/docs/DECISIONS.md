@@ -514,6 +514,70 @@ Before: three friends missed tier 5 in 22 / 29 / 25 / 18 games (now 75 of 360, b
 
 **Knobs:** `GSE.weakChance` (0.35), `GSE.weakFrom` (2), `GSE.avionicsDrain` / `busWear` (5 / 3); `CHAIN.plantedChance` (0.9), `offPlant` (0.3), `wiringShare` (0.3), `noPaperwork` (0.12).
 
+## Real job flow (docs/JOBFLOW.md)
+
+The trades' work comes from alerts now (a squawk, a trend, a due item, a guest's complaint, a code notice), each with a hidden cause. A tech finds the task in the manual and the parts in the IPC or the materials list; what's on the shelf is reserved and the trade's work budget approves it at once; anything to buy is a card for the analyst, who runs real stock (purchase orders, receiving, payment net 7, min/max, bins) instead of kits. Wrong tasks and wrong parts come back later. Four packages: A the engine and data, B the technicians' screens, C the analyst's desk, D the NPC staff.
+
+### Engine and data (A)
+
+What A delivers: the item catalog (every IPC row of every model, fig 79-20, the shop's consumables, the electrician's materials with their NEC basis, tools, building materials), the tasks, the search, the symptom tables, `stdPick` and the judges, the reducer's flow moves (`plan`, `nff`, `mel`, `melExtend`, `makeSafe`, `askBench`, `repick`, `dropJob`, `request`, `cancelReq`, `approve` on a flow card, `approveReq`, `deferReq`, `buy`, `setStock`, `scrap`, `nudge`, `setStanding`), the week's new steps (standing approvals, receiving, the payment run, replenishment, the ledger), `migrate()`, the staff constants and stubs, the flow selectors in `select.ts` (`flowMove`, `flowMoves`, `dueNow`, `yourMoves`, `dockNext`, `endTurnChecks`, `openTarget`), the bots and autopilot, and the tests. The UI still draws today's screens; B, C and D draw the new ones on this engine.
+
+Where A departs from the spec, and why:
+
+- **No-fault-found rate.** `ALERTS.nff` is 0.2 a week for the mechanic and 0.4 for the electrician (the spec: 0.125 and 0.25). The spec's own rates give an NFF share of 8%, under its 10–20% target; these give 12–13%. Alert volume stays within ±10% of the base engine's orders (mechanic −2.5%, electrician −4.6%; `tests/flow.test.ts`).
+- **The bots' misses.** A missed call turns into a wrong move at `BOT_MISS` (task 0.15, pick 0.15, a real fault closed NFF 0.1, 0.3 when it looks NFF), times (1 − hit), one roll for the whole pick. The spec's rates (1 − hit, 0.25, 0.6) doubled the three friends' hidden defects. The bots stand for players who search, and the search puts a fixing task and the book's line in the top three at the teaching tiers.
+- **The bots read a plain finding.** At alert tier 2 and below the finding of a radio or generator fault says which it is ("It's the unit."), so the mechanic bot plans the unit at once and asks the electrician only for the wiring. At tier 3 and up it always asks. The electrician bot does the check first thing in its turn (a plane waits on it).
+- **A placard running out is urgent.** The fin bot and autopilot approve a card whose MEL placard runs out within a week as they would one whose alert grounds a plane (`dueJob` in `stock.ts`); before, the card waited until the plane was down, and its part then landed a week late.
+- **Autopilot doesn't let the island rot.** An absent analyst's autopilot also approves a card that has waited three weeks, while spendable cash stays above the $2,000 freeze. The electrician's tier-1 jobs often need a tool or a lot, their cards are dear, and at the $4,000 floor they waited forever, failing 60% of weeks at 3 × their labour. The analyst-absent team went from 71 weeks below $0 to 16.
+- **The fin bot's first insurance spare** is at most $400 (`BOT_SPARE_MAX`): four linings or a tire, not a $950 radio or a $760 alternator. The placard and a lead-1 order cover those.
+- **Stock.** `STOCK.coverWeeks` 2 (a suggested max is the ROP plus two weeks of the family's use; the spec's four held too much cash), `STOCK.lotMaxUnit` $150 (the broker's lot is shop stock the island draws, never a rotable, a lot, a tool or a building material). The starter stock adds the cargo plane's linings at tier 2 (4 · 0/4), as the twin and the float have theirs.
+- **The teaching weeks give a week.** An alert raised in the first two weeks of the flow (a new island's weeks 1–2, a migrated island's first two) is due next week at the earliest. Otherwise a new crew opened week 1 to the twin flying restricted and a cottage closed for alerts nobody had yet been able to plan, and the first review was a D.
+- **MEL extension.** The analyst's one extension can be given in the week after the placard at the latest (`That placard has run out.` after that), so a placard from the mechanic's turn can still be extended before the next week's flights.
+- **Timing.** A replenishment is placed at the resolve, after receiving: its lines land at the next resolve (`eta` W + 1). A line received for a job resets that job's deferral clock (waiting on parts isn't a deferral).
+- **Nothing flew.** A week with no flight at all brings the PO of the job that has waited longest (safety work first) on a mainland boat at the AOG price, as the base engine's kit boat did; otherwise a fleet grounded for want of a part could never get one. The POs that wait a week are one review line per carrier.
+- **Doc size.** The week reports keep 26 weeks (was 40; every screen reads 12 at most), the ledger 26 rows with the week in progress, and a migrated island's backfill 25. A 52-week island peaks at about 110–125 KB (budget 150 KB; `tests/docsize.test.ts`). The spec's "today about 35 KB" was wrong: the base engine's doc is about 110 KB at week 52, almost all of it week reports.
+- **Fixes found by the new tests:** the memoized analytics (families, velocity, classes, flags) could be read part way through a move and go stale (`apply()` now forgets them before handing the state on); `mel`, `makeSafe` and `askBench` checked the alert's trade, not the mover's; a pending card's lines to buy raise the order flag (urgent, its one tap approves the card); a key set to `undefined` in the chain's bench record kept its place in memory but not through JSON, so the doc stringified differently after a round trip.
+- **Money per job.** `kitValue` is 300 at tier 1 (the spec: 340). The labour band test (0.85–1.25 × today's card, 7,558 combinations) exempts the ICA picks, dearer by design: cargo 23-10-01 (island seed 3), 24-30-01 (31), 32-40-02 (8); float 23-10-01 (14), 24-30-01 (6), 24-30-02 (6), 29-10-01 (17), 32-40-02 (19); twin 23-10-01 (3), 24-30-01 (9), 24-30-02 (9), 29-10-01 (8), 32-40-02 (27).
+- **Overhead.** `TIERS[].overhead` is $150 lower at tiers 2–5 (the spec's first lever), so `TIERS[].fixed` is 1,500 / 2,150 / 2,850 / 6,850 / 9,350 with the standard crew's payroll (760 / 1,080 / 1,080 / 1,260 / 1,320).
+
+#### Balance (26 weeks × 30 seeds, medians)
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk |
+| --- | --- | --- | --- | --- | --- |
+| All good | 5 / 8 / 16 / 21 | 99% | $6,740 | 0 | $11,583 |
+| All average | 7 / 12 / 16 / **22** | 94% | $5,554 | **0** | $9,575 |
+| **Three friends** | 8 / 12 / 16 / **22** | 92% | $5,792 | **0** | $9,105 |
+| Naive analyst | stays at tier 3 (dead stock, bins over the cap from returns) | 97% | $3,590 | 0 | $4,885 |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 40% / 86% / 94% | −$685 / −$9,034 / −$82,060 | 2 / 42 / 16 | |
+| Every solo team, nobody | stay at tier 1 | | | | |
+
+The three friends reach tier 5 by week 26 in 24 of 30 seeds (the pacing guard needs 23). Before the job flow: 22 / 22 / 21 for the three friends / all average / all good, $2,273 / $5,016 / $6,742 minimum.
+
+The job flow's numbers, three friends: weeks from an alert to its sign-off 0.68 (the base engine's order to sign-off: 0.64); plane-weeks AOG on an alert per game 3.2 (not stocked 1.9, waiting on approval 0.5, not planned 0.7, the carrier 0.1; the base engine's chain AOG: 3.2); the only guest plane restricted 0.7 weeks a game; fill rate by value 27% (weeks 8–26; the spec expected 45–80%: the fin bot stocks lean, a line gets a min/max only after three uses, and every dollar on the shelf is a dollar short of the $60,000 tier 5 needs); job-weeks waiting on parts 0.11 a week; stock at week 26 $9,711, 73% of the bins; payroll 100% of the standard crew's. A 26-week sim takes 230 ms.
+
+Robust (90 seeds × 4 crews):
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 24 / 24 / 24 / 24 | 25 / 27 / 24 / 23 | 18 / 1 / 0 / 1 | −$39,804 / −$5,850 / $3,079 / −$1,742 |
+| All average | – / a / b / c | 22 / 23 / 23 / 23 | 14 / 11 / 12 / 16 | 0 / 0 / 0 / 0 | $1,157 / $3,593 / $1,123 / $2,614 |
+
+Before the job flow: three friends 23 / 24 / 23 / 23, missed 75 of 360 with 17 weeks below $0; all average 22 in every crew, missed 37 with 2. In the robust sweep the flow is about half a week slower to tier 5 and misses it in 99 and 53 games. Over 22 weeks (60 seeds) the three friends take $7,100 less revenue (the only guest plane flying restricted, houses closed for a hazard) and spend $7,600 more on jobs and stock (the money per job band, the twin's and the turbine's dearer cards, tools, and $6,000 of stock built up), against $5,700 less overhead. The three friends' negative weeks are mostly one game (seed 50: an early storm claim, then the analyst and the mechanic away for weeks at under $4,000, the twin worn out by two deferral incidents in one week), 20 in all against 17 before; the average crews have none (2 before).
+
+**Knobs:** `ALERTS.nff` (0.2 / 0.4), `ALERTS.looksNff` 0.3; `BOT_MISS` (0.15 / 0.15 / 0.1 / 0.3), `BOT_SPARE_MAX` $400; `KIT.base` 300; `STOCK.coverWeeks` 2, `z` 1.28, `lotMaxUnit` $150; `TIERS[].overhead` (−$150 at tiers 2–5); `FREIGHT.aog` $350; the work budgets $500 and the standing limit (their sum).
+
+### Technicians' screens (B)
+
+Package B records its decisions here.
+
+### The analyst's desk (C)
+
+Package C records its decisions here.
+
+### Staff (D)
+
+Package D records its decisions here. With A's stubs the game plays as before the staff update (`tests/staffstub.test.ts`).
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
 Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; the current numbers are in *Phase B review fixes*.

@@ -1,4 +1,6 @@
 import type { Aircraft } from '../sim/aircraft';
+import type { InvoiceContext } from '../sim/stock';
+import type { ElecSpec } from '../sim/types';
 import type { Fx } from '../ui/feedback';
 
 export type PuzzleId =
@@ -63,6 +65,15 @@ export interface PuzzleContext {
   plane?: { name: string; reg: string; designation: string; turbine: boolean; floats: boolean; ampMax: number; wing: 'high' | 'low'; battery: 'on' | 'off' };
   /** the part chain's circuit check (the meter on the airplane): what is really wrong, the unit or its wiring */
   bench?: { fault: 'unit' | 'wiring' };
+  /**
+   * the job flow (docs/JOBFLOW.md 8.7): the lines the tech chose for this job, so the puzzle labels
+   * what is going in (the device, the stick size, the panelboard). Display only: scoring is unchanged
+   */
+  pick?: { pn: string; nomen: string; qty: number; slot?: string; spec?: ElecSpec }[];
+  /** the parts auction (17.3): the broker's lot a win buys, at list and the broker's fair price */
+  lot?: { lines: { pn: string; nomen: string; qty: number; list: number }[]; fair: number; list: number };
+  /** the three-way match (17.3): the POs received at the last resolve and not paid yet (their real lines) */
+  invoice?: InvoiceContext;
 }
 
 /** One value as the manual prints it, with the effectivity it applies to. */

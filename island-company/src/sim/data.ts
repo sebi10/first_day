@@ -1,7 +1,7 @@
 // Every tunable number lives here so balance passes touch one file.
 // scripts/balance.ts re-runs the paper sim against these values.
 import type { PuzzleId } from '../puzzles/types';
-import type { Asset, Insurance, OpsRole, Role } from './types';
+import type { Asset, Insurance, ItemId, ItemTrade, OpsRole, Role, SupplierId } from './types';
 
 export const ECON = {
   startCash: 8000,
@@ -33,7 +33,7 @@ export const ECON = {
   flightWear: 1,
   houseWear: 2,
   houseInspectionWeeks: 8,
-  /** a kit shipped by boat when no plane could carry it */
+  /** a kit shipped by boat when no plane could carry it (the part chain's name for FREIGHT.aog) */
   boatKit: 350,
   planeInspectionFlights: 12,
   nearMissPerFlight: 0.1,
@@ -72,7 +72,12 @@ export const MODELS: Record<string, AssetModel> = {
 export type TierDef = {
   n: number;
   name: string;
+  /** today's fixed cost a week (= overhead + the standard crew's payroll; kept for old readers and tests) */
   fixed: number;
+  /** the tier's overhead a week: leases, utilities, property insurance, admin, licences (fixed = overhead + payroll) */
+  overhead: number;
+  /** stores bin locations (9.6) */
+  bins: number;
   /** weekly revenue budget for the board grade */
   budget: number;
   adds: { id: string; model: string; name: string }[];
@@ -87,6 +92,8 @@ export const TIERS: TierDef[] = [
   {
     n: 1,
     name: 'Airstrip',
+    overhead: 740,
+    bins: 40,
     fixed: 1500,
     budget: 3900,
     adds: [
@@ -103,7 +110,9 @@ export const TIERS: TierDef[] = [
   {
     n: 2,
     name: 'Outpost',
-    fixed: 2300,
+    overhead: 1070,
+    bins: 50,
+    fixed: 2150,
     budget: 5900,
     adds: [
       { id: 'p2', model: 'cargo', name: 'Cargo C-7' },
@@ -118,7 +127,9 @@ export const TIERS: TierDef[] = [
   {
     n: 3,
     name: 'Village',
-    fixed: 3000,
+    overhead: 1770,
+    bins: 60,
+    fixed: 2850,
     budget: 6900,
     adds: [{ id: 'gen', model: 'gen', name: 'Generator house' }],
     storms: true,
@@ -129,7 +140,9 @@ export const TIERS: TierDef[] = [
   {
     n: 4,
     name: 'Harbor',
-    fixed: 7000,
+    overhead: 5590,
+    bins: 75,
+    fixed: 6850,
     budget: 16000,
     adds: [
       { id: 'p3', model: 'float', name: 'Float F-3' },
@@ -144,7 +157,9 @@ export const TIERS: TierDef[] = [
   {
     n: 5,
     name: 'Resort',
-    fixed: 9500,
+    overhead: 8030,
+    bins: 90,
+    fixed: 9350,
     budget: 22000,
     adds: [{ id: 'h7', model: 'lodge', name: 'The Lodge' }],
     storms: true,
@@ -169,6 +184,8 @@ export type CatalogEntry = {
   targets: string[];
   /** 0 = not eligible now */
   weight(a: Asset, week: number): number;
+  /** a per-model factor on today's card: the twin's 100-hour and oil change (two engines), the cargo plane's starter-generator */
+  costBy?: Partial<Record<string, number>>;
 };
 
 const below = (h: number, w: number) => (a: Asset) => (a.health < h ? w : 0);
@@ -178,19 +195,21 @@ export const CATALOG: CatalogEntry[] = [
   {
     kind: 'inspect100', log: '100-hr inspection', role: 'mech', title: '100-hr inspection', puzzle: 'crack', tier: 1, cost: 180, parts: 0, gain: 10,
     targets: ['twin', 'cargo', 'float'],
+    costBy: { twin: 1.6 },
     weight: (a) => ((a.sinceInspection ?? 0) >= ECON.planeInspectionFlights - 2 ? 100 : 0),
   },
   { kind: 'tires', log: 'tire and brake job', role: 'mech', title: 'Tire and brake', puzzle: 'torque', tier: 1, cost: 320, parts: 1, gain: 10, targets: ['twin', 'cargo', 'float'], weight: below(96, 3) },
   { kind: 'prop', log: 'prop bolt re-torque', role: 'mech', title: 'Prop bolt re-torque', puzzle: 'torque', tier: 2, cost: 280, parts: 0, gain: 12, targets: ['twin', 'cargo', 'float'], weight: below(90, 3) },
   { kind: 'corrosion', log: 'wheel-half penetrant check', role: 'mech', title: 'Wheel-half penetrant check', puzzle: 'crack', tier: 2, cost: 520, parts: 0, gain: 16, targets: ['twin', 'cargo', 'float'], weight: below(86, 4) },
   { kind: 'avionics', log: 'com radio swap', role: 'mech', title: 'Swap the com radio', puzzle: 'teardown', tier: 2, cost: 640, parts: 1, gain: 14, targets: ['twin', 'cargo', 'float'], weight: below(92, 2) },
-  { kind: 'alternator', log: 'alternator replacement', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4) },
-  { kind: 'cylinder', log: 'cylinder swap', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'cargo', 'float'], weight: below(65, 8) },
+  { kind: 'alternator', log: 'alternator replacement', role: 'mech', title: 'Replace alternator', puzzle: 'teardown', tier: 2, cost: 820, parts: 1, gain: 18, targets: ['twin', 'cargo', 'float'], weight: below(80, 4), costBy: { cargo: 1.3 } },
+  // a turbine has no cylinders (and its logbooks record no 50-hour oil changes): pistons only
+  { kind: 'cylinder', log: 'cylinder swap', role: 'mech', title: 'Engine cylinder swap', puzzle: 'teardown', tier: 3, cost: 1700, parts: 1, gain: 28, targets: ['twin', 'float'], weight: below(65, 8) },
   { kind: 'spar', log: 'wing spar inspection', role: 'mech', title: 'Wing spar inspection', puzzle: 'crack', tier: 3, cost: 880, parts: 0, gain: 22, targets: ['twin', 'cargo', 'float'], weight: below(60, 8) },
   // paperwork, not a repair: no health gain, but no load sheet means half the charters stay on the ramp
   { kind: 'wb', log: 'charter load sheet', role: 'mech', title: 'Charter load sheet', puzzle: 'balance', tier: 1, cost: 0, parts: 0, gain: 0, targets: ['twin', 'float'], weight: () => 100 },
   { kind: 'wire', log: 'prop bolt safety wiring', role: 'mech', title: 'Safety-wire prop bolts', puzzle: 'safetywire', tier: 2, cost: 150, parts: 0, gain: 11, targets: ['twin', 'cargo', 'float'], weight: below(94, 3) },
-  { kind: 'oil', log: 'oil change', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'cargo', 'float'], weight: below(97, 2) },
+  { kind: 'oil', log: 'oil change', role: 'mech', title: 'Oil change + safety wire', puzzle: 'safetywire', tier: 1, cost: 190, parts: 0, gain: 9, targets: ['twin', 'float'], weight: below(97, 2), costBy: { twin: 1.8 } },
   // power brakes and an accumulator: the twin's brake-and-gear system and the amphibian floats' gear system
   { kind: 'hydraulics', log: 'brake hydraulic servicing', role: 'mech', title: 'Service the brake hydraulics', puzzle: 'hydraulics', tier: 2, cost: 260, parts: 0, gain: 13, targets: ['twin', 'float'], weight: below(94, 4) },
   // the singles only (the puzzle's airframes): a piston single through order tier 3, a turbine single from tier 4
@@ -218,6 +237,237 @@ export const CATALOG: CatalogEntry[] = [
 ];
 
 export const CATALOG_BY_KIND = Object.fromEntries(CATALOG.map((c) => [c.kind, c]));
+
+// ---------------------------------------------------------------------------
+// The job flow: purchasing, stock, alerts and labour (docs/JOBFLOW.md). Tune here.
+
+/** purchasing suppliers (3.6): price multiplier by line type, weeks added to the item's lead, the AOG boat, receiving paperwork (3.7) */
+export type SupplierDef = {
+  id: SupplierId;
+  name: string;
+  short: string;
+  trade: ItemTrade;
+  /** price x by item kind; `rest` for every other kind */
+  mult: { parts?: number; rotables?: number; consumables?: number; rest: number };
+  leadAdd: number;
+  /** may ship on the AOG boat */
+  aog: boolean;
+  /** receiving: the chance a line comes without its paperwork, by line type (none: nothing checked) */
+  paper?: { part?: number; rotable?: number };
+  /** the document receiving checks */
+  doc?: { part: string; rotable: string };
+};
+
+export const SUPPLIERS: Record<SupplierId, SupplierDef> = {
+  oem: {
+    id: 'oem',
+    name: 'Harbor Aero Supply (OEM distributor)',
+    short: 'OEM',
+    trade: 'mech',
+    mult: { rest: 1 },
+    leadAdd: 0,
+    aog: true,
+    paper: { part: 0.02, rotable: 0.08 },
+    doc: { part: "the maker's certificate of conformance", rotable: "an FAA 8130-3 matching the unit's data plate" },
+  },
+  broker: {
+    id: 'broker',
+    name: 'Tradewind Surplus (broker)',
+    short: 'Broker',
+    trade: 'mech',
+    mult: { parts: 0.8, rotables: 0.8, consumables: 0.9, rest: 0.9 },
+    leadAdd: 1,
+    aog: false,
+    paper: { part: 0.25, rotable: 0.25 },
+    doc: { part: 'traceability to the maker or an approved repair station (AC 20-62E)', rotable: 'traceability to the maker or an approved repair station (AC 20-62E)' },
+  },
+  supply: { id: 'supply', name: 'Mainland Electric Supply', short: 'Supply house', trade: 'elec', mult: { rest: 1 }, leadAdd: 0, aog: true },
+  online: { id: 'online', name: 'Voltbox (online)', short: 'Online', trade: 'elec', mult: { rest: 0.85 }, leadAdd: 1, aog: false },
+  yard: { id: 'yard', name: 'Harbor Lumber & Block', short: 'Yard', trade: 'build', mult: { rest: 1 }, leadAdd: 0, aog: false },
+  barge: { id: 'barge', name: 'Island barge (bulk)', short: 'Barge', trade: 'build', mult: { rest: 0.85 }, leadAdd: 1, aog: false },
+};
+
+/** each trade's default supplier */
+export const DEFAULT_SUPPLIER: Record<ItemTrade, SupplierId> = { mech: 'oem', elec: 'supply', build: 'yard' };
+
+/** freight: scheduled rides the week's carrier for free; the AOG boat brings a PO at this week's resolve whatever flew */
+export const FREIGHT = { aog: 350 };
+
+/** stock and purchasing (9) */
+export const STOCK = {
+  /** the carrying charge a week: storage and insurance on the stock's value (cash) */
+  carry: 0.001,
+  /** the cost of cash tied up a week (26% a year): shown on the Money tab, never charged */
+  capital: 0.005,
+  /** a line sent back at receiving: restocking, a share of its value (at least `restockMin`) */
+  restock: 0.15,
+  restockMin: 40,
+  /** scrap: a return to the vendor credits this share of average cost (the rest is booked as loss) */
+  returnCredit: 0.75,
+  /** autopilot's purchasing for an absent analyst, a week */
+  autopilotCap: 800,
+  /** closed POs and requisitions kept this many weeks (the invoice match, the UI) */
+  keepWeeks: 2,
+  /** the finance ledger's length */
+  ledgerWeeks: 26,
+  /** 90% cycle service (suggested reorder points) */
+  z: 1.28,
+  /** most lines on one PO or buy */
+  maxLines: 12,
+  /** the most units of one item on a plan line (wire by the foot) */
+  maxQty: 500,
+  /** a broker's auction lot holds shop stock: no line whose unit price is over this */
+  lotMaxUnit: 150,
+  /** a suggested max adds this many weeks of the family's use over its reorder point (at least one pack) */
+  coverWeeks: 2,
+};
+
+/**
+ * A starter stock line (19.3): an item, or an IPC slot on the island's airplane of that model (`other`: the
+ * near-miss beside it, the slot's other P/N: the other SB state's lining). Units; rop / max where
+ * replenishment keeps the line up.
+ */
+export type StarterLine = {
+  item?: ItemId;
+  plane?: { model: 'twin' | 'cargo' | 'float'; ata: string; tag: string; other?: boolean };
+  qty: number;
+  rop?: number;
+  max?: number;
+};
+
+/** starter stock by the tier that brings it: a new island gets tier 1, a migrated one every tier up to its own; a tier-up adds its tier's lines */
+export const STARTER: Record<number, StarterLine[]> = {
+  1: [
+    // the twin
+    { item: 'SAE-J1899-2050', qty: 24, rop: 12, max: 36 },
+    { plane: { model: 'twin', ata: '79-20', tag: 'oilFilter' }, qty: 2, rop: 2, max: 4 },
+    { item: 'AN900-10', qty: 25, rop: 5, max: 25 },
+    { item: 'FH-G18', qty: 50, rop: 24, max: 50 },
+    { item: 'MS20995C32', qty: 25, rop: 5, max: 25 },
+    { item: 'MS24665-302', qty: 100, rop: 10, max: 100 },
+    { item: 'MS28775-227', qty: 10, rop: 2, max: 10 },
+    { item: 'MIL-PRF-81322', qty: 10, rop: 2, max: 10 },
+    { item: 'MIL-PRF-5606', qty: 12, rop: 4, max: 12 },
+    { plane: { model: 'twin', ata: '32-40', tag: 'lining' }, qty: 4, rop: 0, max: 4 },
+    { item: '105-00500', qty: 50, rop: 16, max: 50 },
+    { plane: { model: 'twin', ata: '32-40', tag: 'tire' }, qty: 1 },
+    { plane: { model: 'twin', ata: '32-40', tag: 'tube' }, qty: 1 },
+    // near-miss, left by the previous operator
+    { plane: { model: 'twin', ata: '32-40', tag: 'lining', other: true }, qty: 4 },
+    { item: 'SAE-J1899-50', qty: 12 },
+    { item: 'MS20995C41', qty: 25 },
+    // the electrician
+    { item: 'KR15-TR', qty: 10, rop: 4, max: 10 },
+    { item: 'KR20-TR', qty: 10, rop: 4, max: 10 },
+    { item: 'KA15-TR', qty: 2, rop: 1, max: 3 },
+    { item: 'KG20-TR', qty: 2, rop: 1, max: 4 },
+    { item: 'KG15-TR', qty: 1 },
+    { item: 'KDF20-TR', qty: 1, rop: 1, max: 2 },
+    { item: 'KP115', qty: 4, rop: 2, max: 6 },
+    { item: 'KP120', qty: 4, rop: 2, max: 6 },
+    { item: 'KP120AF', qty: 1 },
+    { item: 'NMB-14-2', qty: 250 },
+    { item: 'NMB-12-2', qty: 250 },
+    { item: 'WN-ASST', qty: 15, rop: 5, max: 15 },
+    { item: 'BOX-OW1', qty: 25, rop: 5, max: 25 },
+    { item: 'WP-INUSE', qty: 2 },
+    { item: 'PLATE-BLANK', qty: 10 },
+    { item: 'LABELS', qty: 10 },
+    // near-miss
+    { item: 'KR15', qty: 10 },
+    { item: 'WP-FLIP', qty: 2 },
+    // tools on every island
+    { item: 'T-TW-IN', qty: 1 },
+    { item: 'T-TW-FT', qty: 1 },
+    { item: 'T-DIFF', qty: 1 },
+    { item: 'T-CLAMP', qty: 1 },
+    { item: 'T-TORQUE', qty: 1 },
+  ],
+  2: [
+    { plane: { model: 'cargo', ata: '32-40', tag: 'lining' }, qty: 4, rop: 0, max: 4 },
+    { plane: { model: 'cargo', ata: '32-40', tag: 'tire' }, qty: 1 },
+    { plane: { model: 'cargo', ata: '32-40', tag: 'tube' }, qty: 1 },
+    { item: 'NT3031-PK', qty: 2, rop: 1, max: 2 },
+    { item: 'MS9068-012', qty: 2, rop: 1, max: 2 },
+    { item: 'MS24665-283', qty: 100 },
+  ],
+  3: [
+    { item: 'HPS-OF-60', qty: 1 },
+    { item: 'HPS-FF-60', qty: 1 },
+    { item: 'API-CK4-15W40', qty: 4 },
+    { item: 'ELC-5050', qty: 4 },
+  ],
+  4: [
+    { plane: { model: 'float', ata: '79-20', tag: 'oilFilter' }, qty: 2, rop: 1, max: 2 },
+    { plane: { model: 'float', ata: '32-40', tag: 'lining' }, qty: 4, rop: 0, max: 4 },
+    { plane: { model: 'float', ata: '32-40', tag: 'tire' }, qty: 1 },
+    { plane: { model: 'float', ata: '32-40', tag: 'tube' }, qty: 1 },
+    { item: 'KG20-TRWR', qty: 2 },
+    { item: 'KDF20-TR', qty: 1 },
+  ],
+};
+
+/** alerts (5) */
+export const ALERTS = {
+  /** a week's chance of one extra alert whose cause is "no fault" (outside the slots) */
+  nff: { mech: 0.2, elec: 0.4 } as Record<OpsRole, number>,
+  /** at alert tier 3+, an intermittent symptom with a real cause shows the NFF finding this often */
+  looksNff: 0.3,
+  /** an NFF close (or a wrong task) on a real fault comes back after this many weeks */
+  againMin: 1,
+  againMax: 2,
+  /** closed alerts are kept this many weeks */
+  keep: 2,
+  /** hard cap on stored alerts (oldest closed dropped first) */
+  cap: 40,
+  /** teaching weeks after the flow starts on an island (alert tier 1) */
+  teachWeeks: 2,
+};
+
+/** labour: the floor under a job's labour (8.3), an hourly rate x hours by task number */
+export const LABOR = {
+  rate: { mech: 85, elec: 75 } as Record<OpsRole, number>,
+  hours: {
+    '05-20-01': 0.6,
+    '05-20-02': 0.6,
+    '79-00-01': 1,
+    '32-40-01': 2,
+    '32-40-02': 2.5,
+    '32-40-03': 3,
+    '32-42-01': 1.5,
+    '29-10-01': 1.5,
+    '61-10-01': 2,
+    '61-10-02': 0.75,
+    '23-10-01': 1,
+    '24-30-01': 3,
+    '24-30-02': 1,
+    '72-30-01': 8,
+    '57-10-01': 4,
+    'GSM 2-1': 2,
+    'GSM 2-4': 2,
+    'R-OUT': 0.75,
+    'R-GFCI': 1,
+    'R-WH': 1,
+    'R-GRND': 1,
+    'R-3WAY': 1.5,
+    'R-INSP': 1,
+    'R-STORM': 8,
+    'R-FLICK': 1,
+    'R-SPA': 4,
+    'R-FEED': 4,
+    'R-PANEL': 12,
+    'R-DEAD': 1.5,
+    'R-DOCK': 5,
+    'R-XFER': 6,
+    'R-GENT': 1.5,
+  } as Record<string, number>,
+  minDefault: 50,
+};
+
+/** the money a job that needed a parts kit carried in today's card (the auction's fair value was 340 at tier 1; tuned: docs/DECISIONS.md, Real job flow · Balance) */
+export const KIT = { base: 300 };
+/** a kit's value at a tier: KIT.base at tier 1, +10% a tier */
+export const kitValue = (tier: number) => Math.round((KIT.base * (1 + 0.1 * (Math.max(1, tier) - 1))) / 10) * 10;
 
 export const FIN_TASKS = {
   close: { title: 'Weekly close', puzzle: 'variance' as PuzzleId, tier: 1 },
@@ -517,6 +767,115 @@ export const DEFECT_RULES: Record<string, DefectRule> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// The job flow's own sure defects (docs/JOBFLOW.md 11). Keyed `flow:*`, `ipc:noteff`, `elec:*`.
+
+/** the job flow's consequences: a wrong task or an NFF close re-raise the alert (no repair), a part that isn't effective comes off, a code miss is repaired */
+export const FLOW_RULES: Record<string, DefectRule> = {
+  // a wrong task: the fault is still there. It comes back as the same squawk (no repair: the fix is the right task)
+  'flow:task': {
+    incident: ['{a}: the same fault is back ({symptom}): the last job didn’t fix it', '{a}: the same fault is back ({symptom}): the last job didn’t fix it'],
+    found: 'the fault the last job didn’t fix',
+    fix: { puzzle: 'crack', title: 'Find the fault the last job didn’t fix' },
+    redo: false,
+    sure: true,
+  },
+  // an NFF close on a real fault: it comes back, due now
+  'flow:nff': {
+    incident: ['{a}: written up again ({symptom})', '{a}: written up again ({symptom})'],
+    found: 'a fault closed as no fault found',
+    fix: { puzzle: 'crack', title: 'Find the fault closed as no fault found' },
+    redo: false,
+    sure: true,
+  },
+  'ipc:noteff': {
+    incident: ['A records review of {a} found a part installed that isn’t effective for its S/N or SB status: it has to come off', 'A part not effective for {a} failed in service'],
+    found: 'a part installed that isn’t effective for this airplane',
+    fix: { puzzle: 'teardown', title: 'Replace it with the effective part' },
+    redo: false,
+    sure: true,
+  },
+  'elec:nogfci': {
+    incident: ['A guest at {a} felt a tingle from the {room} receptacle: no GFCI on it', 'A guest at {a} got a shock in the {room}: no GFCI protection'],
+    found: 'a receptacle with no GFCI protection where the code needs it',
+    fix: { puzzle: 'wireup', title: 'Fit GFCI protection and test it', job: 'gfci' },
+    redo: false,
+    sure: true,
+  },
+  'elec:noafci': {
+    incident: ['The code inspection at {a} wrote up a receptacle replaced without AFCI protection', 'An arcing fault in a wall at {a} scorched a box: no AFCI on the circuit'],
+    found: 'a replacement with no AFCI protection',
+    fix: { puzzle: 'wireup', title: 'Fit AFCI protection and re-terminate', job: 'outlet' },
+    redo: false,
+    sure: true,
+  },
+  'elec:oversized': {
+    incident: ['Callback from {a}: a circuit smells hot, its breaker oversized for the wire', 'An oversized breaker at {a} let the wire overheat: scorched insulation'],
+    found: 'a breaker oversized for its wire',
+    fix: { puzzle: 'wireup', title: 'Replace the scorched run and land it on the right-size breaker', job: 'outlet' },
+    redo: false,
+    sure: true,
+  },
+  'elec:undersized': {
+    incident: ['Callback from {a}: the {what} trips under load', 'The undersized {what} at {a} overheated: scorched insulation, the circuit dead'],
+    found: 'undersized conductors or equipment',
+    fix: { puzzle: 'wireup', title: 'Replace it with the right size', job: 'outlet' },
+    redo: false,
+    sure: true,
+  },
+  'elec:rating': {
+    incident: ['The microwave’s plug at {a} runs warm: a 15 A receptacle on a 20 A circuit', 'The 15 A receptacle at {a} overheated under the microwave'],
+    found: 'a single 15 A receptacle on a 20 A circuit',
+    fix: { puzzle: 'wireup', title: 'Fit a 20 A receptacle on the individual circuit', job: 'outlet' },
+    redo: false,
+    sure: true,
+  },
+  'elec:notr': {
+    incident: ['The code inspection at {a} wrote up non-tamper-resistant receptacles', 'A child at {a} pushed a hairpin into a receptacle: a burn, the guests moved out'],
+    found: 'receptacles that aren’t tamper-resistant',
+    fix: { puzzle: 'wireup', title: 'Replace them with tamper-resistant receptacles', job: 'outlet' },
+    redo: false,
+    sure: true,
+  },
+  'elec:nowr': {
+    incident: ['The porch receptacle at {a} is corroded and tripping after the rain', 'Rain got into the porch receptacle at {a} (no in-use cover): it faulted and scorched the box'],
+    found: 'an outdoor receptacle not rated or covered for a wet location',
+    fix: { puzzle: 'wireup', title: 'Fit a WR receptacle under an in-use cover', job: 'outlet' },
+    redo: false,
+    sure: true,
+  },
+  'elec:boxfill': {
+    incident: ['Callback from {a}: a switch plate is warm, the box crammed', 'Crammed conductors at {a} nicked and faulted in the box'],
+    found: 'an overfilled box',
+    fix: { puzzle: 'wireup', title: 'Fit a deeper box and re-terminate', job: 'switch3' },
+    redo: false,
+    sure: true,
+  },
+  'elec:raintight': {
+    incident: ['Water in the spa feed at {a}: set-screw connectors outdoors, the GFCI trips in the rain', 'Water ran down the spa feed into the panel at {a}: corroded bus, the house closed'],
+    found: 'EMT set-screw fittings in a wet location',
+    fix: { puzzle: 'conduit', title: 'Refit the run with raintight connectors' },
+    redo: false,
+    sure: true,
+  },
+  'elec:noburial': {
+    incident: ['{a}: the east cottages flicker again, the feeder splice in the ground is failing', 'The buried feeder splice at {a} failed: two cottages dark'],
+    found: 'split bolts and tape buried in the feeder trench',
+    fix: { puzzle: 'trace', title: 'Cut it out and re-splice with a direct-burial kit' },
+    redo: false,
+    sure: true,
+  },
+  // a service-neutral fault "made safe" at a branch breaker: it isn't isolated (re-raise, due now)
+  'elec:isolation': {
+    incident: ['A guest at {a} felt the tingle again: a branch breaker doesn’t isolate a loose service neutral', 'A guest at {a} was shocked at the shower valve: the service neutral was never isolated'],
+    found: 'a service-neutral fault made safe at a branch breaker',
+    fix: { puzzle: 'meter', title: 'Find the loose service neutral' },
+    redo: false,
+    sure: true,
+  },
+};
+for (const [k, v] of Object.entries(FLOW_RULES)) DEFECT_RULES[k] = v;
+
 /** Per work-order kind: checked before the puzzle row. A repair's own defect uses the puzzle row. */
 export const DEFECT_RULES_BY_KIND: Record<string, DefectRule> = {
   // mechanic
@@ -613,6 +972,17 @@ export const DEFECT_RULES_BY_KIND: Record<string, DefectRule> = {
     incident: ['{a}: a backed-up circuit failed to pick up in the weekly test', '{a}: a backed-up circuit dropped out in a real outage, houses dark'],
     found: 'a backed-up circuit that won’t pick up',
     fix: { puzzle: 'wireup', title: 'Re-terminate the generator circuit', job: 'outlet' },
+  },
+  // the job flow's reference tasks with their own words (R-WH, R-GRND)
+  wh: {
+    incident: ['Callback from {a}: the water heater trips its breaker again', 'The water heater at {a} faulted to its sheath again: a guest got a tingle at the tap'],
+    found: 'a water heater element terminal left loose',
+    fix: { puzzle: 'meter', title: 'Find the water heater fault', job: 'heater' },
+  },
+  bond: {
+    incident: ['Callback from {a}: a tingle at the shower valve again', 'A guest at {a} got a shock at the shower valve: the water-pipe bond is still open'],
+    found: 'a water-pipe bond left loose',
+    fix: { puzzle: 'meter', title: 'Re-make the water-pipe bond and test it', job: 'bond' },
   },
   hottub: {
     incident: ['The hot-tub GFCI at {a} keeps tripping: a conductor nicked in a kinked run', 'The hot-tub run at {a} faulted to ground: tub closed'],
@@ -889,8 +1259,10 @@ export const CHAIN = {
   /** nothing is found before this week, nor before this island tier */
   fromWeek: 3,
   minTier: 2,
-  /** chance an eligible job finds a part it can't finish without (one open chain at a time) */
+  /** chance an eligible job finds a part it can't finish without (one open chain at a time): legacy orders only */
   chance: 0.3,
+  /** the job flow's jobs never open a chain at random: the flow's Parts step is the IPC lookup (docs/JOBFLOW.md 13) */
+  flowChance: 0,
   /**
    * On a plane that carries an alteration, the trouble is mostly where the alteration is
    * (its ICA parts wear, and nobody stocks them): a job on the altered assembly finds a part

@@ -1,11 +1,19 @@
 // Scripted players for the paper sim (scripts/balance.ts) and tests.
 // They call the same reducer as real phones, so balance numbers are real.
-import { botChainData, islandAircraft, needsFreight, openChain } from './chain';
-import { ECON, GSE, TIERS } from './data';
+import { planeModel, type Ata } from './aircraft';
+import { alertFlags, alertTier, causeOf, fixesOf, liveAlerts, needsOf, siteOf, symptomOf } from './alerts';
+import { botChainData, islandAircraft, needsFreight, openChain, wrongPn } from './chain';
+import { ECON, GSE, STOCK, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
-import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
+import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
+import { cardOf, judgeSlot, planTask, repairTask, stdPick } from './flow';
+import { allItems, buyUnits, itemById, priceAt } from './items';
+import { spendable } from './ledger';
 import { hashSeed, rng, type Rng } from './rng';
-import { ROLES, type Action, type GseCart, type IslandState, type Order, type Role } from './types';
+import { botStaff, buildDef } from './staff';
+import { available, binsInUse, binsTotal, dueJob, families, insuranceSpare, isSafetyJob, knownDemand, moveClass, needsNewBin, position, stockFlags, suggestRop, urgentJob, velocity } from './stock';
+import { tasksFor, type Task } from './tasks';
+import { ROLES, type Action, type Alert, type GseCart, type IslandState, type Order, type PickLine, type Role } from './types';
 
 export type Bot = {
   skill: number;
@@ -17,6 +25,8 @@ export type Bot = {
   tierDrop?: number;
   /** absences come in streaks (holidays, busy weeks), not independent rolls */
   streak?: boolean;
+  /** the analyst starts an extra cottage at tier 4 when spendable is over $40,000 (the balance run's `cottages` variant, 20.5) */
+  cottages?: boolean;
 };
 export type Team = Record<Role, Bot>;
 
@@ -93,6 +103,8 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
       s = step(s, { t: 'gse', role, cart: c.id, op: 'inspect', call: worn === right ? 'tag' : 'ok' }, now);
     }
   }
+  // the job flow: stopped jobs repicked, then every open alert of the trade called and planned (18.1)
+  s = flowTurn(s, role, bot, r, now);
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
   // a crewmate's report is a favour done on top of the usual jobs (people make time when a friend is stuck);
@@ -113,9 +125,10 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
     if (cart) s = step(s, { t: 'gse', role, cart: cart.id, op: 'charge' }, now);
     return true;
   };
-  for (const o of ready) if (o.kind === 'report') play(o);
+  // the electrician's check on a flow alert's unit is a quick meter job a plane is waiting on: done on top, like a report
+  for (const o of ready) if (o.kind === 'report' || o.bench) play(o);
   let jobs = 0;
-  for (const o of ready) if (o.kind !== 'report' && jobs < (bot.perTurn ?? 4) && play(o)) jobs++;
+  for (const o of ready) if (o.kind !== 'report' && !o.bench && jobs < (bot.perTurn ?? 4) && play(o)) jobs++;
   // a job that found a part: the IPC lookup comes straight after it, if there's a slot left (the plane is down)
   let extra = Math.max(1, (bot.perTurn ?? 4) - jobs);
   for (let guard = 0; guard < 3 && extra > 0; guard++) {
@@ -157,11 +170,15 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
   if (s.pendingBonus) s = step(s, { t: 'allocateBonus', choice: 'reserve' }, now);
   if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role: 'fin' }, now);
 
-  const reserve = 1500 + TIERS[s.tier - 1].fixed;
+  const reserve = 1500 + fixedNow(s);
   const pend = s.orders.filter((o) => o.status === 'pending').sort((a, b) => urgency(s, b) - urgency(s, a));
   for (const o of pend) {
     if (bot.naive) {
       s = step(s, { t: 'approve', orderId: o.id }, now);
+      continue;
+    }
+    if (o.flow) {
+      s = finCard(s, o, reserve, now);
       continue;
     }
     const asset = s.assets.find((a) => a.id === o.assetId);
@@ -190,16 +207,331 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
   for (const o of tasks) {
     const sc = score(r, skill);
     if (o.kind === 'auction') {
-      const fair = (ECON.partMarket.low + ECON.partMarket.high) / 2;
-      const win = sc > 0.5;
-      s = step(s, { t: 'complete', role: 'fin', orderId: o.id, score: sc, perfect: sc >= 0.95, data: { kits: win ? 1 : 0, spent: win ? Math.round(fair * (1.15 - sc * 0.25)) : 0 } }, now);
+      // the lot at the broker's price: a good bid wins it under fair, when the cash is there
+      const fair = o.lot?.fair ?? (ECON.partMarket.low + ECON.partMarket.high) / 2;
+      const bid = Math.round(fair * (1.15 - sc * 0.25));
+      const win = sc > 0.5 && !!o.lot && spendable(s) - bid > reserve;
+      s = step(s, { t: 'complete', role: 'fin', orderId: o.id, score: sc, perfect: sc >= 0.95, data: { kits: win ? 1 : 0, spent: win ? bid : 0 } }, now);
     } else if (o.kind === 'forecast') {
       const ctx = forecastContext(s);
       const pts = ctx.projection.map((p) => Math.round(p * (1 + r.range(-0.1, 0.1) * (1 - sc))));
       s = step(s, { t: 'complete', role: 'fin', orderId: o.id, score: sc, perfect: sc >= 0.95, data: { points: pts } }, now);
     } else s = step(s, { t: 'complete', role: 'fin', orderId: o.id, score: sc, perfect: sc >= 0.95 }, now);
   }
-  if (s.parts.stock + s.parts.inTransit < 2 && s.cash > reserve + 600) s = step(s, { t: 'buyList' }, now);
+  // requisitions, needs, the reorder policy (18.2); the staff through D's botStaff
+  s = bot.naive ? naiveStock(s, r, now) : finStock(s, reserve, now);
+  s = botStaff(s, bot, r, now);
+  // the growth project (15.6): refused until the staff update, then the builders' extra cottage
+  if (bot.cottages && s.tier >= 4 && spendable(s) > 40000 && !(s.builds ?? []).some((b) => b.id.startsWith('cottage') && b.finished === undefined))
+    s = step(s, { t: 'build', what: 'cottage', week: s.week }, now);
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// The job flow's bots (docs/JOBFLOW.md 18)
+
+const clamp01 = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+/** the chance a bot gets a call right: its skill, less at the higher alert tiers */
+export const hit = (skill: number, alertTier: number) => clamp01(0.55 + 0.45 * skill - 0.08 * Math.max(0, alertTier - 2), 0.3, 0.97);
+/**
+ * How often a miss turns into a wrong move (tuned, docs/DECISIONS.md "Real job flow · Balance"): the bots stand
+ * for players who search, and the search puts a fixing task and the book's line in the top three at tiers 0-2.
+ * One roll for the diagnosis and one for the whole pick (a miss swaps one slot for its near-miss), so a job with
+ * four slots isn't four times as likely to go wrong as a job with one.
+ */
+export const BOT_MISS = { task: 0.15, pick: 0.15, nff: 0.1, looksNff: 0.3 };
+/** the most the fin bot keeps on the shelf as a first insurance spare (one job's worth), USD */
+export const BOT_SPARE_MAX = 400;
+const open = (o: Order) => o.status !== 'done' && o.status !== 'cancelled';
+
+/** a near-miss for a slot: the other effectivity's or block's P/N, the IPC part on an altered assembly, the other amperage or protection */
+const ELEC_MISS: Record<string, string> = {
+  'KDF20-TR': 'KR20-TR',
+  'KG20-TR': 'KR20-TR',
+  'KG20-TRWR': 'KR20-TRWR',
+  'KA15-TR': 'KR15-TR',
+  'KR15-TR': 'KR15',
+  'KR20S': 'KR15S',
+  'KP120DF': 'KP120',
+  'KP120AF': 'KP120',
+  'KP120GF': 'KP120',
+  'WP-INUSE': 'WP-FLIP',
+  'NMB-12-3': 'NMB-14-3',
+  'SPA-60GF': 'SPA-50GF',
+  'KP260': 'KP270',
+  'THWN-6': 'THWN-8',
+  'THWN-10': 'THWN-12',
+  'EMT-C34RT': 'EMT-C34SS',
+  'DBS-2': 'SPLIT-4',
+  KP120: 'KP115',
+};
+function nearMiss(s: IslandState, al: Alert, task: Task, l: PickLine): PickLine {
+  const asset = s.assets.find((a) => a.id === al.assetId);
+  const m = task.main.find((x) => x.slot === l.slot);
+  if (asset?.kind === 'plane' && m?.ata && m.tag && m.ata !== '79-20') {
+    const pn = wrongPn(islandAircraft(s.seed, asset), m.ata as Ata, m.tag);
+    return pn && itemById(pn) ? { ...l, item: pn } : l;
+  }
+  const alt = ELEC_MISS[l.item];
+  return alt && itemById(alt) ? { ...l, item: alt } : l;
+}
+
+/** a plausible wrong diagnosis: the fix for another of the symptom's causes, else a task in the same chapter (none: the fix) */
+function siblingTask(s: IslandState, al: Alert, fix: Task, r: Rng): Task {
+  const asset = s.assets.find((a) => a.id === al.assetId)!;
+  const sym = symptomOf(al);
+  const others = (sym?.causes ?? [])
+    .filter((c) => c.fix && c.kind !== 'wiring')
+    .map((c) => planTask(s, al, c.fix!.startsWith('ref:') || c.fix!.startsWith('gsm:') ? c.fix! : `amm:${planeModel(asset.model)}:${c.fix === '05-20' ? (planeModel(asset.model) === 'cargo' ? '05-20-02' : '05-20-01') : c.fix}`))
+    .filter((t): t is Task => !!t && t.id !== fix.id && !!t.kind);
+  if (others.length) return r.pick(others);
+  const same = tasksFor(s, asset, al.role).filter((t) => t.kind && t.kind !== 'gpustart' && t.id !== fix.id && t.chapter === fix.chapter && !t.fixed);
+  return same.length ? r.pick(same) : fix;
+}
+
+/** the right pick with the bot's hit rate per needed slot (a near-miss otherwise); research on an altered assembly */
+function botPick(s: IslandState, al: Alert, task: Task, h: number, r: Rng): { pick: PickLine[]; research: boolean } {
+  const asset = s.assets.find((a) => a.id === al.assetId)!;
+  if (task.fixed) return { pick: [], research: false };
+  const std = stdPick(s, asset, task, siteOf(s, al), needsOf(s, al));
+  let research = false;
+  // one roll for the pick: a miss swaps one of the slots' lines for its near-miss
+  const miss = r.chance((1 - h) * BOT_MISS.pick) ? r.int(0, Math.max(0, std.length - 1)) : -1;
+  const pick = std.map((l, i) => {
+    const m = task.main.find((x) => x.slot === l.slot);
+    // an ICA part with no EA on file: the right move is the research branch
+    if (asset.kind === 'plane' && m?.ata && m.tag && judgeSlot(s, asset, m.ata, m.tag, l.item).unapproved && r.chance(h)) research = true;
+    return i === miss ? nearMiss(s, al, task, l) : l;
+  });
+  return { pick, research };
+}
+
+/**
+ * A tech bot's flow turn (18.1): stopped jobs repicked; hazards made safe and
+ * MEL items placarded when their fix needs a line not on hand; a bench alert
+ * gets the electrician's check; then every open alert planned (due first),
+ * with the right task and pick at the bot's hit rate.
+ */
+function flowTurn(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: number): IslandState {
+  if (s.turns[role]?.ended) return s;
+  const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
+  // a stopped job: repicked with the right pick (research when the part is an altered assembly's)
+  for (const o of s.orders.filter((x) => x.role === role && x.flow?.stop && open(x) && !x.flow.wired)) {
+    const al = liveAlerts(s).find((a) => a.id === o.flow!.alert);
+    const task = al ? planTask(s, al, o.flow!.task) : undefined;
+    if (!al || !task) continue;
+    const asset = s.assets.find((a) => a.id === al.assetId)!;
+    const pick = task.fixed ? [] : stdPick(s, asset, task, siteOf(s, al), needsOf(s, al));
+    s = step(s, { t: 'repick', role, order: o.id, pick, ...(o.flow!.stopResearch ? { research: true } : {}), week: s.week }, now);
+  }
+  const alerts = liveAlerts(s)
+    .filter((a) => a.role === role)
+    .sort((a, b) => a.due - b.due || (a.id < b.id ? -1 : 1));
+  for (const a0 of alerts) {
+    const al = liveAlerts(s).find((x) => x.id === a0.id);
+    if (!al) continue;
+    const asset = s.assets.find((x) => x.id === al.assetId);
+    if (!asset) continue;
+    const f = alertFlags(s, al);
+    const h = hit(skill, alertTier(s, al, role));
+    const fix = al.repair ? repairTask(s, al) : fixesOf(s, al)[0] ? planTask(s, al, fixesOf(s, al)[0]) : undefined;
+    const needsBuy = !!fix && !fix.fixed && stdPick(s, asset, fix, siteOf(s, al), needsOf(s, al)).some((l) => available(s, l.item) < l.qty);
+    // the calls first
+    if (role === 'elec' && f.hazard && !al.safe) {
+      if (causeOf(al)?.neutral) {
+        // a service neutral: leave the house closed (right with the bot's hit rate), else the branch breaker
+        if (!r.chance(h)) s = step(s, { t: 'makeSafe', role, alert: al.id, how: 'breaker', week: s.week }, now);
+      } else s = step(s, { t: 'makeSafe', role, alert: al.id, how: 'breaker', week: s.week }, now);
+    }
+    if (role === 'mech' && f.mel === 'C' && !al.mel && needsBuy && al.status !== 'closed') s = step(s, { t: 'mel', role: 'mech', alert: al.id, week: s.week }, now);
+    const cur = liveAlerts(s).find((x) => x.id === al.id);
+    if (!cur || cur.status !== 'open') continue;
+    // a bench alert: the electrician's check when that seat is held. At the teaching tiers the finding says which it is
+    // in plain words ("It's the unit."), and a player reads it: the unit is planned at once, the wiring goes to the electrician
+    if (role === 'mech' && f.bench && !cur.bench?.call) {
+      if (cur.bench?.order) continue;
+      const plain = alertTier(s, cur, role) <= 2;
+      if (s.players.elec && (!plain || causeOf(cur)?.kind === 'wiring')) {
+        s = step(s, { t: 'askBench', role: 'mech', alert: cur.id, week: s.week }, now);
+        continue;
+      }
+    }
+    const nff = cur.cause < 0;
+    const closable = !cur.repair && !['due', 'ad', 'code', 'takeoff'].includes(cur.src) && !symptomOf(cur)?.writeUp;
+    if (nff && closable) {
+      if (r.chance(h)) {
+        s = step(s, { t: 'nff', role, alert: cur.id, week: s.week }, now);
+        continue;
+      }
+      // replaced on suspicion: the most common cause's task
+      const sym = symptomOf(cur)!;
+      const top = [...sym.causes].filter((c) => c.fix).sort((a, b) => b.w - a.w)[0];
+      const t = top ? planTask(s, cur, top.fix!.startsWith('ref:') || top.fix!.startsWith('gsm:') ? top.fix! : `amm:${planeModel(asset.model)}:${top.fix === '05-20' ? (planeModel(asset.model) === 'cargo' ? '05-20-02' : '05-20-01') : top.fix}`) : undefined;
+      if (!t || !t.kind) continue;
+      const pick = t.fixed ? [] : stdPick(s, asset, t, siteOf(s, cur), top.needs ?? []);
+      s = step(s, { t: 'plan', role, alert: cur.id, task: t.id, pick, week: s.week }, now);
+      continue;
+    }
+    // a real fault wrongly closed as nothing (more often when the finding hides it)
+    if (!nff && closable && cur.kind !== 'wiring' && r.chance((1 - h) * (cur.looksNff ? BOT_MISS.looksNff : BOT_MISS.nff))) {
+      s = step(s, { t: 'nff', role, alert: cur.id, week: s.week }, now);
+      continue;
+    }
+    if (!fix) {
+      // the wiring with nobody to meter it: the unit, as the symptom reads
+      const unit = symptomOf(cur)?.causes.find((c) => c.kind !== 'wiring' && c.fix);
+      const t = unit ? planTask(s, cur, `amm:${planeModel(asset.model)}:${unit.fix}`) : undefined;
+      if (!t) continue;
+      s = step(s, { t: 'plan', role, alert: cur.id, task: t.id, pick: stdPick(s, asset, t, null, unit!.needs ?? []), week: s.week }, now);
+      continue;
+    }
+    // a due item, an AD, a code notice, a take-off or a write-up names its task: nothing to diagnose
+    const task = cur.repair || cur.task || !r.chance((1 - h) * BOT_MISS.task) ? fix : siblingTask(s, cur, fix, r);
+    const { pick, research } = task === fix ? botPick(s, cur, task, h, r) : { pick: task.fixed ? [] : stdPick(s, asset, task, siteOf(s, cur), task.main.filter((m) => !m.optional).map((m) => m.slot)), research: false };
+    s = step(s, { t: 'plan', role, alert: cur.id, task: task.id, pick, ...(research ? { research: true } : {}), week: s.week }, now);
+  }
+  return s;
+}
+
+/** a flow card by the fin bot's rule (18.2): approve when waiting costs at least 0.6 x the card or it is critical, keeping the reserve; default freight */
+function finCard(s: IslandState, o: Order, reserve: number, now: number): IslandState {
+  const card = cardOf(s, o);
+  const asset = s.assets.find((a) => a.id === o.assetId);
+  const exp = expectedDeferralCost(s, o).cost + (card.aog || card.restricted || card.shut ? (card.downtime?.usd ?? 0) : 0);
+  const urgent = dueJob(s, o);
+  const critical = urgent || isSafetyJob(s, o) || o.kind === 'inspect100' || o.kind === 'codeprep' || (asset && asset.health < 70) || o.deferrals >= 2;
+  const worth = exp >= card.total * 0.6 || critical;
+  const room = spendable(s) - card.total;
+  if ((worth && room >= reserve) || (critical && room >= ECON.freezeBelow) || (urgent && room >= 0)) return step(s, { t: 'approve', orderId: o.id, buy: { freight: card.freight.pick }, week: s.week }, now);
+  if (o.lastDeferredWeek !== s.week) return step(s, { t: 'defer', orderId: o.id, reason: room < reserve ? 'cash' : 'priority', week: s.week }, now);
+  return s;
+}
+
+/** an item drawn at a sign-off in the ledger's weeks */
+const usedItem = (s: IslandState, id: string) => (s.ledger ?? []).some((r) => (r.use?.[id] ?? 0) > 0);
+
+/** the fin bot's stock (18.2): requisitions, needs, the order flags, min/max from use, dead stock, the builders' materials */
+function finStock(s: IslandState, reserve: number, now: number): IslandState {
+  // requisitions: a grounding job's at once, a tool a job needs always, the rest keeping the reserve
+  for (const q of (s.reqs ?? []).filter((x) => x.status === 'open')) {
+    const x = itemById(q.item);
+    const o = q.order ? s.orders.find((y) => y.id === q.order) : undefined;
+    const cost = x ? x.price * Math.ceil(q.qty / Math.max(1, x.cut ? 1 : x.pack)) : 0;
+    const urgent = !!o && urgentJob(s, o);
+    if (urgent || (x?.kind === 'tool' && o) || spendable(s) - cost >= reserve) s = step(s, { t: 'approveReq', reqs: [q.id], week: s.week }, now);
+  }
+  // an MEL placard running out (this week, or at the last resolve) on a plane whose fix isn't ready: the one extension
+  for (const a of liveAlerts(s).filter((x) => x.mel && !x.mel.ext && (x.mel.until === s.week || x.mel.until === s.week - 1))) {
+    const o = a.order ? s.orders.find((y) => y.id === a.order) : undefined;
+    if (!o || o.status !== 'ready') s = step(s, { t: 'melExtend', alert: a.id, week: s.week }, now);
+  }
+  // nudge the unplanned airworthiness and hazard alerts due within a week
+  for (const a of liveAlerts(s).filter((x) => x.status === 'open' && x.due <= s.week + 1 && x.nudged !== s.week)) {
+    const f = alertFlags(s, a);
+    if (f.aw || f.hazard) s = step(s, { t: 'nudge', alert: a.id, week: s.week }, now);
+  }
+  // the order flags, urgent first, each through its one-tap action (a stock buy up to the suggestion, whole packs, scheduled).
+  // A card goes by the card rule above; a job's requisition is approved (it is what the job waits on)
+  const flags = stockFlags(s).filter((f) => f.kind === 'order' && f.act && f.act.t !== 'approve');
+  for (const f of flags.slice(0, 6)) {
+    if (f.act!.t === 'approveReq') {
+      if (spendable(s) > ECON.freezeBelow) s = step(s, { ...f.act!, week: s.week } as Action, now);
+      continue;
+    }
+    if (spendable(s) < reserve) break;
+    if (f.item && needsNewBin(s, f.item) && binsInUse(s) >= binsTotal(s)) continue;
+    const l = f.item ? s.inv?.[f.item] : undefined;
+    // up to the line's max from where its position stands (what's on order counts)
+    const want = l?.max !== undefined ? Math.max(1, l.max - Math.max(0, position(s, f.item!))) : 1;
+    if (f.item) s = step(s, { t: 'buy', lines: [{ item: f.item, qty: want }], week: s.week }, now);
+  }
+  // min/max from use once a family has 3 uses (at most 6 changes a turn); insurance spares keep one job's worth
+  let changed = 0;
+  for (const fam of families(s)) {
+    if (changed >= 6) break;
+    const v = velocity(s, fam.fam);
+    const uses = v.series.reduce((a, b) => a + b, 0);
+    const spare = insuranceSpare(s, fam.fam);
+    if (uses < 3 && !spare) continue;
+    for (const id of fam.items) {
+      const l = s.inv?.[id];
+      // only a line that moved: the family's other P/Ns (the near-miss beside it on the shelf) get no min/max
+      if (!usedItem(s, id)) continue;
+      if (spare && uses < 3) {
+        // an insurance spare the island has needed once: one job's worth on the shelf, reordered when it's drawn.
+        // Not a rotable worth hundreds (a radio, an alternator): the placard and a lead-1 order cover those
+        const worth = fam.fam.startsWith('lining') ? 4 : 1;
+        const x = itemById(id);
+        if (!x || worth * priceAt(x) > BOT_SPARE_MAX) continue;
+        if (l?.rop === 0 && l.max === worth) continue;
+        if (needsNewBin(s, id) && binsInUse(s) >= binsTotal(s)) continue;
+        s = step(s, { t: 'setStock', item: id, rop: 0, max: worth, week: s.week }, now);
+        if (++changed >= 6) break;
+        continue;
+      }
+      if (!l || l.on <= 0) continue;
+      const sug = suggestRop(s, id);
+      if (sug.max <= 0 || sug.rop >= sug.max) continue;
+      if (l.rop !== undefined && Math.abs(l.rop - sug.rop) < 2 && Math.abs((l.max ?? 0) - sug.max) < 2) continue;
+      if (needsNewBin(s, id) && binsInUse(s) >= binsTotal(s)) continue;
+      s = step(s, { t: 'setStock', item: id, rop: sug.rop, max: sug.max, week: s.week }, now);
+      if (++changed >= 6) break;
+    }
+  }
+  // dead stock worth $100 or more that isn't an insurance spare and nobody needs goes back to the vendor
+  for (const fam of families(s)) {
+    if (moveClass(s, fam.fam) !== 'dead' || insuranceSpare(s, fam.fam)) continue;
+    for (const id of fam.items) {
+      const free = available(s, id);
+      const x = itemById(id);
+      if (!x || free <= 0 || knownDemand(s, id).length) continue;
+      if (free * (s.inv?.[id]?.avg ?? x.price / x.pack) < 100) continue;
+      s = step(s, { t: 'scrap', item: id, qty: free, week: s.week }, now);
+    }
+  }
+  // the builders' next two units
+  s = buyBuildUnits(s, 2, now);
+  return s;
+}
+
+/**
+ * The open build's next units' materials, when they aren't on the shelf or on order, once the
+ * builders are at it (they have drawn a unit, or stood idle for want of one): a build nobody works
+ * on (the staff stubs) never ties up cash in the yard.
+ */
+function buyBuildUnits(s: IslandState, units: number, now: number): IslandState {
+  const b = (s.builds ?? []).find((x) => x.finished === undefined);
+  const def = b ? buildDef(b.id) : undefined;
+  if (!b || !def || !((b.drawn ?? 0) > 0 || (b.idle ?? 0) > 0)) return s;
+  const from = Math.floor(b.drawn ?? 0);
+  const need = new Map<string, number>();
+  for (const u of def.units.slice(from, from + units)) for (const [id, q] of Object.entries(u)) need.set(id, (need.get(id) ?? 0) + (q ?? 0));
+  const lines: { item: string; qty: number }[] = [];
+  for (const [id, q] of need) {
+    const onOrder = (s.pos ?? []).filter((p) => p.status === 'open' || p.status === 'held').reduce((n, p) => n + p.lines.filter((l) => l.item === id && l.got === undefined).reduce((m, l) => m + l.qty, 0), 0);
+    const short = q - available(s, id) - onOrder;
+    if (short > 0) lines.push({ item: id, qty: short });
+  }
+  if (!lines.length || spendable(s) < ECON.freezeBelow + 500) return s;
+  return step(s, { t: 'buy', lines, week: s.week }, now);
+}
+
+/** the naive analyst (18.2): never sets a min/max, buys 3 random items of its trades a week while spendable is over $8,000, never nudges */
+function naiveStock(s: IslandState, r: Rng, now: number): IslandState {
+  for (const q of (s.reqs ?? []).filter((x) => x.status === 'open')) s = step(s, { t: 'approveReq', reqs: [q.id], week: s.week }, now);
+  if (spendable(s) > 8000) {
+    const pool = allItems().filter((x) => (x.trade === 'mech' || x.trade === 'elec') && x.kind !== 'tool' && x.price <= 400);
+    for (let i = 0; i < 3; i++) {
+      if (binsInUse(s) >= binsTotal(s)) break;
+      const x = r.pick(pool);
+      s = step(s, { t: 'buy', lines: [{ item: x.id, qty: buyUnits(x, 1) }], week: s.week }, now);
+    }
+  }
+  // the builders get materials only when they're idle
+  const b = (s.builds ?? []).find((x) => x.finished === undefined);
+  if (b && (b.idle ?? 0) > 0) s = buyBuildUnits(s, 1, now);
+  void STOCK;
+  void TIERS;
   return s;
 }
 
@@ -246,6 +578,8 @@ export function simulate(team: Team, weeks: number, seed: number, trace?: (s: Is
       if (missed) continue;
       s = botTurn(s, role, bot, rng(hashSeed('bots', seed, salt, role, week)), now);
       s = step(s, { t: 'endTurn', role }, now);
+      // each seat plays at its own time (a card that comes in after the analyst ended the turn goes through on the standing approval)
+      now += 60_000;
     }
     if (s.week === week) {
       now = (s.deadline ?? now) + 1000;
