@@ -1,17 +1,40 @@
 // Week 0: the tutorial is a normal (solo) week, not a separate mode.
 // Nothing here can be failed. Shared clock starts when all three finish.
-import { useEffect, useState } from 'preact/hooks';
+// The techs' second step walks one scripted alert through the job flow
+// (docs/JOBFLOW.md 17.5): the worn tire on the twin, the bathroom GFCI that
+// trips. It is raised on a copy of the island and nothing is written: Send
+// says what would happen in a real week.
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { raiseAlert } from '../sim/alerts';
 import { ROLE_LABEL, ROLE_LONG } from '../sim/data';
 import { hashSeed } from '../sim/rng';
 import type { PuzzleId } from '../puzzles/types';
-import type { Role } from '../sim/types';
+import type { Alert, IslandState, OpsRole, Role } from '../sim/types';
 import { fx } from './feedback';
+import { AlertRow } from './flow/AlertRow';
+import { JobFlow } from './flow/JobFlow';
+import type { Preview } from './flow/steps';
+import { whatsNewKey } from './flow/WhatsNew';
+import { local } from './flow/words';
 import { Island } from './island';
 import { settings } from './settings';
 import { Btn, Icon, usd } from './kit';
 import { PuzzleHost } from './puzzlehost';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
+
+/** week 0's scripted alert for a tech: raised on a copy of the island (the real one is never written) */
+export function demoAlert(s: IslandState, role: OpsRole): { s: IslandState; alert: Alert } | null {
+  try {
+    const copy = JSON.parse(JSON.stringify(s)) as IslandState;
+    const asset = copy.assets.find((a) => (role === 'mech' ? a.kind === 'plane' : a.kind === 'house'));
+    if (!asset) return null;
+    const alert = raiseAlert(copy, { role, asset, sym: role === 'mech' ? 'M_TIRE_WORN' : 'E_GFCI_TRIPS', cause: 0, due: copy.week + 3 }, 0);
+    return { s: copy, alert };
+  } catch {
+    return null;
+  }
+}
 
 const FIRST: Record<Role, PuzzleId> = { mech: 'torque', elec: 'trace', fin: 'variance' };
 const SECOND: Record<Role, PuzzleId> = { mech: 'crack', elec: 'panel', fin: 'auction' };
@@ -33,11 +56,15 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
   const [approved, setApproved] = useState(false);
   const [deferred, setDeferred] = useState(false);
   const name = s.players[role]?.name ?? ROLE_LABEL[role];
+  // the techs' walk-through: one alert, on a copy of the island
+  const demo = useMemo(() => (role === 'fin' ? null : demoAlert(s, role)), [role]);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [sent, setSent] = useState<Preview | null>(null);
   const analyst = s.players.fin && s.players.fin.name !== ROLE_LABEL.fin ? s.players.fin.name : 'the analyst';
   const mechanic = s.players.mech && s.players.mech.name !== ROLE_LABEL.mech ? s.players.mech.name : 'The mechanic';
 
   useEffect(() => {
-    if (step !== 2 || role === 'fin') return;
+    if (step !== 2 || role === 'fin' || demo) return;
     const t = setTimeout(() => {
       setApproved(true);
       fx.snap();
@@ -96,7 +123,37 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
               </Btn>
             </div>
           )}
-          {step === 2 && role !== 'fin' && (
+          {step === 2 && role !== 'fin' && demo && (
+            <div class="card col" style={{ gap: 12 }}>
+              <h2>Work comes in as alerts</h2>
+              <p class="muted" style={{ margin: 0 }}>
+                {role === 'mech'
+                  ? "A pilot squawk, a trend, a wear limit. Look first; then find the task in the AMM, pick the parts in this airplane's IPC, check stock and send it."
+                  : 'A guest complaint, a utility reading, a code notice. Look first; then find the procedure in the reference, pick the materials in the catalog, check stock and send it.'}
+              </p>
+              <div class="jf-rows" role="list">
+                <AlertRow s={demo.s} a={demo.alert} me={role} quiet onOpen={() => setDemoOpen(true)} />
+              </div>
+              {sent ? (
+                <>
+                  <div class="jf-note ok" role="status">
+                    {sent.text}
+                  </div>
+                  <span class="label">
+                    Week 0 is a walk-through: nothing was written. From week 1 your alerts land in Your move on Home. A job that needs parts bought, or runs past your work budget, goes to {analyst} as a card.
+                  </span>
+                  <Btn block onClick={() => setStep(3)}>
+                    Next
+                  </Btn>
+                </>
+              ) : (
+                <Btn block onClick={() => setDemoOpen(true)}>
+                  Open the alert
+                </Btn>
+              )}
+            </div>
+          )}
+          {step === 2 && role !== 'fin' && !demo && (
             <div class="card col" style={{ gap: 12 }}>
               <h2>Nobody wins alone</h2>
               <p class="muted" style={{ margin: 0 }}>
@@ -192,6 +249,22 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
           )}
         </div>
       </div>
+      {demoOpen && demo && role !== 'fin' && (
+        <JobFlow
+          ctl={{ ...ctl, s: demo.s }}
+          alert={demo.alert}
+          onClose={() => setDemoOpen(false)}
+          onStart={() => {}}
+          demo={{
+            onSent: (p) => {
+              setSent(p);
+              setDemoOpen(false);
+              // a crew that walked the flow here doesn't need the What's new sheet
+              local.set(whatsNewKey(s.id, role), '1');
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

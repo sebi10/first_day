@@ -14,7 +14,7 @@
 // socket's barrel and clamped: no hook, and no bare copper past the barrel.
 import { rng } from '../sim/rng';
 import { C, backdrop, clamp, label, loop, pointer, roundRect, settle, stage } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 type Term = {
   id: string;
@@ -45,9 +45,19 @@ export type WireModel = {
   /** live strip-length readout: teaching tiers, or the stripper-with-gauge tool */
   stripReadout: boolean;
   stripTarget: number; // inches
+  /** the device the electrician picked in the job flow ("KG20-TR · GFCI receptacle 20 A"): display only, never scored */
+  picked: string | null;
 };
 
-export function generateWireup(seed: number, tier: number, tools: string[] = [], job?: string): WireModel {
+const DEVICE_SPECS = ['receptacle', 'switch1', 'switch3', 'switch4'];
+
+/** the job flow's device line, in a few words: its P/N and its name up to the first comma */
+export function pickedDevice(pick: PuzzleContext['pick']): string | null {
+  const d = pick?.find((l) => DEVICE_SPECS.includes(l.spec?.device ?? ''));
+  return d ? `${d.pn} · ${d.nomen.split(',')[0]}` : null;
+}
+
+export function generateWireup(seed: number, tier: number, tools: string[] = [], job?: string, pick?: PuzzleContext['pick']): WireModel {
   const r = rng(seed);
   const t = Math.max(0, tier);
   const byTier: WireModel['device'] = t <= 1 ? 'receptacle' : t === 2 ? (r.chance(0.5) ? 'switch3' : 'receptacle') : t === 3 ? r.pick(['passthrough', 'switch3'] as const) : t === 4 ? 'gfci' : 'switch3src';
@@ -185,6 +195,7 @@ export function generateWireup(seed: number, tier: number, tools: string[] = [],
     stamps: !labels && tools.includes('labelMaker'),
     stripReadout: t <= 2 || tools.includes('torqueScrewdriver'),
     stripTarget: 0.75,
+    picked: device === 'gpuplug' ? null : pickedDevice(pick),
   };
 }
 
@@ -232,7 +243,7 @@ export const wireup: PuzzleDef = {
   term: 'Brass = hot, silver = neutral, green = ground. Hook clockwise so tightening closes the loop.',
   seconds: (tier) => 70 + tier * 10,
   mount(host, p) {
-    const m = generateWireup(p.seed, p.tier, p.tools, p.context?.job);
+    const m = generateWireup(p.seed, p.tier, p.tools, p.context?.job, p.context?.pick);
     const st = stage(host.el);
     const { ctx } = st;
     const strip = new Map<string, number>(); // inches stripped
@@ -415,6 +426,8 @@ export const wireup: PuzzleDef = {
         ctx.fillStyle = C.elec; // yellow tape over LOAD, as shipped
         ctx.fillRect(g.box.x + g.box.w * 0.62, g.box.y + g.box.h * 0.26, 14, g.box.h * 0.16);
       }
+      // the device the electrician picked, its P/N on its face (the host's header names it in full)
+      if (m.picked && m.device !== 'gpuplug') label(ctx, m.picked.split(' · ')[0], g.box.x + g.box.w / 2, g.box.y + g.box.h * 0.5, { size: 10, weight: 800, color: '#8a9397' });
       // cables entering from the top
       for (const c of m.cables) {
         const x = g.box.x + c.x * g.box.w;

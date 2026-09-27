@@ -33,7 +33,7 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 2. Do 2–4 jobs. Each job is a 60–120 s puzzle; the clock starts on your first touch. The better the work, the more the asset recovers: a bare pass (60%) restores 81% of the job, a clean one 105%, and perfect runs add a small permanent bonus. On an easy job (tier 1) you see your score, and under 40% it comes back as **rework** with a fresh fault. From tier 2 you don't see a score at all (see *No one tells you you're wrong*).
 3. Make your calls:
    - **Analyst:** swipe cards (→ approve, ← defer, ↑ cheaper fix), then set prices on the demand curve.
-   - **Mechanic / electrician:** accept or push back on a cheaper fix, and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident). Once a week you can also **write up a squawk**: tap one of your assets and pick the job you judge it needs; it lands on the analyst's desk with your name on it.
+   - **Mechanic / electrician:** work your alerts (next section), and make **safety calls**: ground a plane or red-tag a house for the week if you wouldn't trust it (it earns nothing, but it can't have an incident). Once a week you can also **write up** what an asset needs: open your asset list (*Hangar + airstrip* or *Cottages + grid*), tap the asset and pick the job you judge it needs; it comes back as an alert with its task filled in.
 4. Tap **End turn**.
 
 **Mechanic: the ground power carts.** A *Ground power start* job needs a charged cart hooked up to that plane first, and so does radio work (the ops check runs the bus on ground power). Tap a yellow cart on the island (or the *Ground power* card on your panel) to plug it in on the hangar charger, hook it up to a plane, unhook it, or inspect its cable. Its light is green from 60%, amber from 30%, red below: a start needs 30% and takes about a quarter on the piston planes, nearly half on the turbine cargo plane. A cart only charges when the week resolves, on the charger, while the hangar has power, so put it back after a start (the result screen and *End turn* remind you).
@@ -56,9 +56,36 @@ On the job, nobody grades you. From tier 2 every real work order is **signed off
 
 Tier 1 jobs, week 0, the weekly challenge and Lend a hand still show your score. They're for learning.
 
-## 5. Mechanic: the manual, and when a part is missing
+## 5. Your move: work comes in as alerts
 
-**Every job on a plane starts with the manual.** Tap the job: under *Start the job* is the **Manual**. At the top is the airplane's data plate: registration, model, **S/N**, year, and the **SBs complied with**. Below it is the AMM task card: task number, effectivity, warnings and cautions, the procedure, and the torques, servicing values and consumables. The card prints **both effectivities**, as a real manual does, for example the wheel tie-bolt nuts at *A · S/N 208C00001 THRU 208C00309: 190–200 in-lb* and *B · S/N 208C00310 AND ON: 170–180 in-lb*, or the hydraulic fluid *PRE SB IC208-29-03: MIL-PRF-5606 only* and *POST SB: MIL-PRF-5606 or MIL-PRF-83282*.
+From week 1 the trades' work arrives as **alerts** at the top of Home, under *Your move*: a pilot squawk, an engine trend, a wear limit, a due inspection or an AD for the mechanic; a guest's complaint, a utility reading, a code notice or an install take-off for the electrician. Each row names the asset, when it's due and whose move it is. Tap it and the job sheet opens (from the bottom on a phone, as a panel on the right on a computer) with five steps across the top. Nothing is written until you send it, and a half-planned job keeps its place if you close the sheet.
+
+**Mechanic: Investigate · Manual · Parts · Stock · Send**
+
+1. **Investigate.** Read the finding and the airplane's data plate (S/N, SBs complied with). The finding says what's wrong; it doesn't say which task fixes it. It may be nothing at all: *No fault found · close* (if you're wrong, it comes back, due at once). A radio, an alternator or a starter-generator that might be its wiring: *Ask the electrician to meter it*. A deferrable item: *MEL C: placard it INOP*, and the plane flies with it through this week's resolve (the analyst can extend it once).
+2. **Manual.** *Find the task ▸* opens the AMM search. Up to tier 2 it lists what the alert's words find, and tier 1 marks the likely task; from tier 3 you search (P/N, words or a task number) or open a chapter. Tap a task to read its card, then *Use this task ▸*.
+3. **Parts.** One row per part the task can take, marked *if needed* where the fault decides. Tap a row and the airplane's own IPC opens at the task's figure, rows as printed: EFF, UPA, SUPSD BY, NP, ALT. Up to tier 2, badges say *◀ this airplane*, *not effective for S/N …* or *SUPSD: order …*; from tier 3 you read the effectivity codes yourself. Tap a row to put it in the slot. The shelf badge (*1 on hand*, *on order, lands tonight*, *none in stores*) only says what's in stores: near-miss parts sit on the shelf too. If the assembly on the airplane isn't in the IPC, *Not in the IPC · research the records* sends that part to the research branch (section 6).
+4. **Stock.** Every line the job draws: your picks, the task card's own consumables, its tools, each with its badge. Up to tier 1 the warnings come first (*Check: … is only for POST SB brakes*).
+5. **Send.** All on hand and within your work budget ($500 a week): *Send ▸ ready now*, then *Start ▸*. Anything to buy: *Send ▸ card for Cy*, with what it comes to. Once the analyst approves it, it's bought; when it lands (most parts at that week's resolve) the job is back in *Your move*, ready.
+
+A 100-hour inspection, or any due task with nothing to pick, is one tap: the row's *Start*. Below *Your move*, the **Inbox** shows what waits on a crewmate (an approval, parts, the electrician's check, research), today's other work, and what closed. **Stores** shows the hangar's shelf, read-only, with *Request* for anything you want the analyst to buy. A job that stops at the start (the wrong part, a part short) shows why, with *Repick ▸*; *Drop the job* puts the alert back.
+
+**Electrician: Investigate · Reference · Materials · Stock · Send**
+
+The same five steps, with the electrician's books: the **Reference** (the code and procedure entries with their NEC basis; up to tier 2 each adds the answer for this job's site: *this circuit: 20 A, 12 AWG, bathroom: GFCI protection*) and the **Materials** catalog (opened at the slot's category; up to tier 2 with badges such as *for 20 A circuits* or *not TR: TR is required in dwellings*).
+
+- **Hazards first.** A warm outlet, a tingle at the shower valve: *Make it safe*, with the breaker off and tagged or a blank plate. The house is closed while it's a hazard; made safe it rents at 75% until the fix. A branch breaker won't isolate a loose service neutral: leave that house closed until it's fixed.
+- **Protection.** A replaced receptacle needs the protection its room needs today: GFCI in bathrooms, kitchens, laundries and outdoors; AFCI in bedrooms, living areas and halls; both in kitchens and laundries. The device can give it (a GFCI, an AFCI or a dual-function receptacle), or a breaker in the protection slot.
+- **Take-offs.** An install (the hot tub, the fuel dock) opens at Materials with the run measured: wire by the foot per conductor, the EMT wall section the conduit puzzle bends (3/4 in, so the bender's take-up is 6 in), raintight connectors outdoors, PVC underground.
+- **The mechanic's checks.** When the mechanic asks you to meter a radio or an alternator circuit on a plane, it shows in *Your move* with a meter icon.
+
+Each job's puzzle shows what you picked (*Your pick: KG20-TR*): the wire-up prints the device's P/N on its face, the conduit puzzle labels your stick, connectors and wire, the panel puzzle names the panelboard.
+
+**Week 0** walks one alert through all five steps (a worn tire on the twin; a bathroom outlet that trips with the hair dryer) and writes nothing to the island.
+
+## 6. Mechanic: the manual, and when a part is missing
+
+**Every job on a plane works to the manual.** In the job sheet's *Manual* step, tap a task and its card opens. At the top is the airplane's data plate: registration, model, **S/N**, year, and the **SBs complied with**. Below it is the AMM task card: task number, effectivity, warnings and cautions, the procedure, and the torques, servicing values and consumables. The card prints **both effectivities**, as a real manual does, for example the wheel tie-bolt nuts at *A · S/N 208C00001 THRU 208C00309: 190–200 in-lb* and *B · S/N 208C00310 AND ON: 170–180 in-lb*, or the hydraulic fluid *PRE SB IC208-29-03: MIL-PRF-5606 only* and *POST SB: MIL-PRF-5606 or MIL-PRF-83282*.
 
 - Up to tier 2 the card marks your airplane's line (◀ this airplane).
 - From tier 3 nothing is marked. Read the S/N off the plate and check the SB record, the way you would on the ramp.
@@ -66,7 +93,7 @@ Tier 1 jobs, week 0, the weekly challenge and Lend a hand still show your score.
 - **An altered airplane.** About half the planes carry one STC or field approval (Form 337) that replaced an assembly: a 4-blade composite prop, a power pack, heavy-duty brakes, a radio or an alternator. The data plate says so (*Altered: STC SA… · ICA: …*), and an SB on the assembly it took off reads *n/a: … removed by STC …*. On that assembly the **alteration's ICA governs**: its values are printed first on the card (*ICA · Seaboard ICA SPC-61-4, Rev B · STC SA…: 80–85 ft-lb, lubricated*), and the airframe manual's lines stay printed, marked *not this airplane: assembly replaced by STC …* up to tier 2. Torque to the airframe manual's value there, or service with a fluid the ICA doesn't allow, and it's a hidden defect for sure.
 - **A ground power start** shows the flight manual's procedure instead (*AFM/POH Section 4: Starting engine with external power*) with this plane's placard: volts, the start current limit on the turbine, the battery switch position.
 
-**When a job finds a part (the part chain, from week 3 at tier 2).** Sometimes, when you sign off a job on a plane, you find a part that is gone or damaged. The screen says **Work stopped · Part needed**, and the plane is **grounded (AOG)** until the part is on. Everyone sees a banner on the island screen with the plane, the part, the steps, and whose move it is.
+**When the part isn't in the IPC (the part chain's research branch).** On an altered airplane the assembly that's on it may not be in its IPC at all. Tap *Not in the IPC · research the records* on that part's row in the Parts step, or the job goes there by itself when receiving or the install finds the part was for an assembly an alteration replaced. The job waits for that part; the plane is grounded only if its alert grounds it. Everyone sees a banner (*Research: the brake assy on Twin N-12 isn't in the IPC*) with the steps and whose move it is. A job from the job flow enters at step 4, the research; an older job that stops for a part (*Work stopped · Part needed*, the plane AOG) still starts at step 1.
 
 1. **IPC lookup** (mechanic). The squawk tells you what's on the airplane (*"brake assy P/N 30-86A (Clearwater Wheel & Brake)"*). Find the part for **this S/N and SB status** in the IPC and order it. If the assembly on the airplane isn't in the IPC at all, tap **Not in the IPC · research the records**. On an altered plane the trouble is mostly on its altered assembly, so this happens a lot.
 2. **Circuit check** (electrician, on a com radio, an alternator or a starter-generator only). Beside the lookup, meter the unit's circuit at the airplane on 28 V DC, under the mechanic's supervision (14 CFR 43.3(d)): good all the way to the unit and still no output means **the unit**; a dead point on the way means **the wiring**, fixed where you found it, no part needed. The part card waits on your call. Autopilot calls the unit (the symptom), so an empty seat never holds the plane.
@@ -82,7 +109,7 @@ You get one chain at a time, with a breather after each. It never falls on the i
 
 **A grounded plane and the carts.** A plane that's down for a part can still take a *Ground power start* (an engine run on the ground; it doesn't fly until the part is on). A cart left hooked up to it isn't stuck there: hook it up to the next plane that needs a start and it's towed straight over. The start's card says where the cart is (*GPU cart 1 is on Cargo C-7, AOG for a part*), and *Ground power carts ▸* opens on that cart. Autopilot does the same if you miss a week.
 
-## 6. Crewmates' problems (cross-trade reports)
+## 7. Crewmates' problems (cross-trade reports)
 
 From week 3 the island throws up problems one trade has and another has to fix. All three of you report and all three fix:
 
@@ -96,11 +123,11 @@ A report lands on the fixer's list, ready, no approval. While it's open it eithe
 
 **Whose move it is.** A report and the part chain's next step count the same way: the crew strip marks who's *waiting on you* and who's *blocking you*, the top of the island screen says what for, *End turn* asks first when a crewmate is waiting on you (*Seb is waiting on you: approve the part …*), and with ntfy set up the crew gets pinged when a report comes in or is closed out, and when the chain moves on to someone's move.
 
-## 7. Lend a hand
+## 8. Lend a hand
 
 Once a week you can try another trade's job that has already waited a week (*Lend a hand* on your panel). It's always expert difficulty: no tools, no rule text, and you do see the score. Under 60% botches it: the asset takes −6 and the job stays open for its owner. You can't fix your own report this way: the trade you reported it to has to (the third crewmate can help). Only do it if you actually know how.
 
-## 8. Getting better together
+## 9. Getting better together
 
 - **Board → Weekly challenge:** the same puzzle and seed for all three this week. Try each other's trades and compare. No XP; bragging only.
 - **Streaks:** every third B+ week in a row brings a story card. Two of three votes decide it.
@@ -109,7 +136,7 @@ Once a week you can try another trade's job that has already waited a week (*Len
 - **Crew projects:** qualifying for the next tier (tier 2: 4 full-crew B+ weeks) opens one job per trade. The tier arrives when all three are done, and your average score sets how healthy the new buildings start. Nobody can do your part for you.
 - **Cash trouble:** under $2,000 only safety-critical work gets approved. Two weeks below zero puts the island in receivership, with one bridge loan to climb out.
 
-## 9. What to test and report
+## 10. What to test and report
 
 After each of your first 3 days, send one message in the group chat:
 

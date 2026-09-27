@@ -1,14 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import {
   TABLE,
-  TAKE_UP,
   bendPath,
+  cornerAt,
   fitChecks,
   generateConduit,
+  pickLabels,
   scoreConduit,
   solveConduit,
+  takeUp,
   type Bend,
 } from '../src/puzzles/conduit';
+import type { PuzzleContext } from '../src/puzzles/types';
+import { itemById } from '../src/sim/items';
+
+/** a job flow pick as launchFor hands it to the puzzle (context.pick) */
+const pickOf = (lines: { item: string; qty: number; slot?: string }[]): NonNullable<PuzzleContext['pick']> =>
+  lines.map((l) => {
+    const x = itemById(l.item)!;
+    return { pn: x.pn, nomen: x.nomen, qty: l.qty, ...(l.slot ? { slot: l.slot } : {}), ...(x.spec ? { spec: x.spec } : {}) };
+  });
+/** the spa run's pick: 3/4 in EMT on the wall, raintight connectors, 8 AWG with a 10 AWG EGC */
+const SPA = pickOf([
+  { item: 'SPA-60GF', qty: 1, slot: 'spa' },
+  { item: 'KP260', qty: 1, slot: 'feed' },
+  { item: 'THWN-8', qty: 150, slot: 'wire' },
+  { item: 'THWN-10', qty: 50, slot: 'egc' },
+  { item: 'EMT-34', qty: 1, slot: 'emt' },
+  { item: 'EMT-C34RT', qty: 2, slot: 'connectors' },
+  { item: 'PVC40-1', qty: 4, slot: 'pvc' },
+]);
 
 describe('conduit puzzle model', () => {
   it('is deterministic per seed', () => {
@@ -17,7 +38,8 @@ describe('conduit puzzle model', () => {
   });
 
   it('uses real ½-in EMT field numbers', () => {
-    expect(TAKE_UP).toBe(5);
+    expect(takeUp('1/2')).toBe(5);
+    expect(takeUp()).toBe(5);
     expect(TABLE[30].mult).toBe(2);
     expect(TABLE[30].shrink).toBe(0.25);
     expect(TABLE[22.5].mult).toBe(2.6);
@@ -33,7 +55,7 @@ describe('conduit puzzle model', () => {
 
   it('a stub marked at height − take-up stands exactly that tall', () => {
     const m = generateConduit(9, 1);
-    const { corners } = bendPath(m, [{ at: m.stub - TAKE_UP, angle: 90, dir: 1 }]);
+    const { corners } = bendPath(m, [{ at: m.stub - takeUp('1/2'), angle: 90, dir: 1 }]);
     expect(corners[0].y).toBeCloseTo(0, 6);
     expect(corners[0].heading).toBeCloseTo(0, 6);
   });
@@ -135,5 +157,72 @@ describe('conduit puzzle model', () => {
     }
     expect(generateConduit(1, 2).table).not.toBeNull();
     expect(generateConduit(1, 1).hints.length).toBeGreaterThan(0);
+  });
+
+  it('the take-up follows the picked stick: ½ in takes 5 in, ¾ in (the spa run) takes 6 in', () => {
+    expect(takeUp('3/4')).toBe(6);
+    expect(cornerAt({ at: 10, angle: 90, dir: 1 }, 6)).toBe(16);
+    expect(cornerAt({ at: 10, angle: 30, dir: 1 }, 6)).toBe(10);
+    const half = generateConduit(9, 1);
+    const three = generateConduit(9, 1, [], SPA);
+    expect(half.size).toBe('1/2');
+    expect(half.takeUp).toBe(5);
+    expect(three.size).toBe('3/4');
+    expect(three.takeUp).toBe(6);
+    // the same wall: only the stick changed
+    expect(three.stub).toBe(half.stub);
+    expect(three.panelX).toBe(half.panelX);
+    // a stub marked at height − 6 in stands exactly that tall on the ¾ in stick, and 1 in short with the ½ in bender's 5
+    const { corners } = bendPath(three, [{ at: three.stub - 6, angle: 90, dir: 1 }]);
+    expect(corners[0].y).toBeCloseTo(0, 6);
+    const short = fitChecks(three, [{ at: three.stub - 5, angle: 90, dir: 1 }]);
+    expect(short.checks.find((c) => c.label === 'Stub height')!.err).toBeCloseTo(1, 6);
+    expect(scoreConduit(three, [[{ at: three.stub - 5, angle: 90, dir: 1 }]])).toBeLessThan(0.95);
+    // the teaching line says the stick's own take-up
+    expect(generateConduit(3, 0, [], SPA).hints[0]).toMatch(/− 6 in take-up = mark at 6 in/);
+    expect(generateConduit(3, 0).hints[0]).toMatch(/− 5 in take-up = mark at 7 in/);
+  });
+
+  it('every ¾ in instance is solvable with its own take-up', () => {
+    for (let tier = 0; tier <= 5; tier++) {
+      for (let seed = 1; seed <= 120; seed++) {
+        const m = generateConduit(seed, tier, [], SPA);
+        const plan = solveConduit(m, tier === 2 ? 45 : 30);
+        const f = fitChecks(m, plan);
+        expect(f.checks.every((c) => c.ok)).toBe(true);
+        expect(scoreConduit(m, [plan])).toBeGreaterThanOrEqual(0.95);
+      }
+    }
+  });
+
+  it('labels the stick, connectors and wire only for an EMT pick', () => {
+    // no pick (practice, a legacy order): today's plain ½ in stick, no labels
+    expect(generateConduit(5, 3).labels).toBeNull();
+    expect(pickLabels(undefined)).toEqual({ size: '1/2', labels: null });
+    // the fuel dock's lot: no EMT in the pick, so nothing to label (the classified RMC stays outside the puzzle)
+    expect(pickLabels(pickOf([{ item: 'LOT-DOCK', qty: 1 }]))).toEqual({ size: '1/2', labels: null });
+    // PVC and wire alone aren't an EMT pick either
+    expect(pickLabels(pickOf([{ item: 'PVC40-1', qty: 4, slot: 'pvc' }, { item: 'THWN-8', qty: 150, slot: 'wire' }])).labels).toBeNull();
+    // the spa run: the stick, its raintight connectors, the conductors
+    const l = generateConduit(5, 3, [], SPA).labels!;
+    expect(l.stick).toMatch(/¾″ EMT · EMT-34/);
+    expect(l.connectors).toBe('raintight connectors EMT-C34RT');
+    expect(l.wire).toBe('8 AWG + 10 AWG EGC');
+    // a ½ in EMT pick with set-screw connectors says so (the defect rules judge it, not the puzzle)
+    const ss = pickLabels(pickOf([{ item: 'EMT-12', qty: 1, slot: 'emt' }, { item: 'EMT-C12SS', qty: 2, slot: 'connectors' }]));
+    expect(ss.size).toBe('1/2');
+    expect(ss.labels!.connectors).toMatch(/^set-screw connectors/);
+    expect(ss.labels!.wire).toBeUndefined();
+  });
+
+  it('the labels are display only: the same bends score the same with or without them', () => {
+    for (let tier = 0; tier <= 5; tier++) {
+      const bare = generateConduit(21, tier);
+      const labelled = generateConduit(21, tier, [], pickOf([{ item: 'EMT-12', qty: 1, slot: 'emt' }, { item: 'EMT-C12RT', qty: 2, slot: 'connectors' }]));
+      expect(labelled.labels).not.toBeNull();
+      expect({ ...labelled, labels: null }).toEqual(bare);
+      const plan = solveConduit(bare);
+      expect(scoreConduit(labelled, [plan])).toBe(scoreConduit(bare, [plan]));
+    }
   });
 });
