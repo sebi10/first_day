@@ -715,7 +715,7 @@ describe('MEL, make safe and the only guest plane (10)', () => {
     s = only(endWeek(s), com.id);
     // it flew on the placard: the board says so, and nothing grounded it
     expect(reviewSays(s, 5, /AOG|grounded until|cancelled/)).toBe(false);
-    expect(reviewSays(s, 5, /^Cargo C-7 flew with .+ placarded INOP \(MEL C, to week 5\)\. Fix it by then, or it is grounded\.$/)).toBe(true);
+    expect(reviewSays(s, 5, /^Cargo C-7 flew with .+ placarded INOP \(MEL C, to week 5: its last week\)\. From week 6 it stays on the ground until it's fixed\.$/)).toBe(true);
     // the extension is the maintenance side's call: the mechanic asks, the analyst approves the cost and downtime
     expect(no(s, { t: 'melExtend', role: 'fin', alert: com.id, week: 6 })).toBe("Ana asks for the extension first (the maintenance side's call).");
     expect(no(s, { t: 'melExtend', role: 'elec', alert: com.id, week: 6 })).toBe('Not your call.');
@@ -728,7 +728,7 @@ describe('MEL, make safe and the only guest plane (10)', () => {
     expect(no(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 6 })).toBe('The MEL allows one extension.');
     s = only(endWeek(s), com.id);
     expect(reviewSays(s, 6, /Cargo C-7 AOG|ran out/)).toBe(false);
-    expect(reviewSays(s, 6, /\(MEL C, to week 6, extended\)/)).toBe(true);
+    expect(reviewSays(s, 6, /\(MEL C, to week 6, extended: its last week\)\. From week 7 it stays on the ground until it's fixed\./)).toBe(true);
     s = only(endWeek(s), com.id);
     expect(reviewSays(s, 7, /^Cargo C-7's MEL C for .+ ran out in week 6: grounded until it's fixed \(\d flights? cancelled\)\.$/)).toBe(true);
     expect(s.ledger!.find((l) => l.w === 7)?.aog).toEqual({ plan: 1 });

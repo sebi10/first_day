@@ -3,7 +3,7 @@
 //
 // Run it from island-company/ so it resolves the `firebase` package from its node_modules:
 //   cp ../docs/handoff/probe-gate.mts .probe-gate.mts
-//   OLD_V=2 NEW_V=3 node_modules/.bin/tsx .probe-gate.mts; rm .probe-gate.mts
+//   OLD_V=3 NEW_V=4 node_modules/.bin/tsx .probe-gate.mts; rm .probe-gate.mts
 // In the cloud container, prefix NODE_USE_ENV_PROXY=1. For a dry run against the
 // emulators, add PROBE_EMULATOR=<host> FS_PORT=<n> AUTH_PORT=<n> (and, behind a proxy,
 // no_grpc_proxy=<host>).
@@ -20,8 +20,8 @@ import { initializeApp, deleteApp } from 'firebase/app';
 import { connectAuthEmulator, deleteUser, getAuth, signInAnonymously } from 'firebase/auth';
 import { collection, connectFirestoreEmulator, doc, getDocs, initializeFirestore, limit, query, updateDoc } from 'firebase/firestore';
 
-const OLD = Number(process.env.OLD_V ?? 2);
-const NEW = Number(process.env.NEW_V ?? 3);
+const OLD = Number(process.env.OLD_V ?? 3);
+const NEW = Number(process.env.NEW_V ?? 4);
 const emu = process.env.PROBE_EMULATOR;
 const live = { apiKey: 'AIzaSyBiUcPpgH90USJ3yqF8_ZMec4NZBnqqw88', authDomain: 'islandgame-efc37.firebaseapp.com', projectId: 'islandgame-efc37', appId: '1:6783640049:web:ff8fc71840b4928d792450' };
 const app = initializeApp(emu ? { apiKey: 'demo-key', projectId: 'demo-island' } : live, 'probe');

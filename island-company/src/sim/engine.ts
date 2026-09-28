@@ -204,7 +204,7 @@ export type ApplyResult = { s: IslandState; error?: string };
  * what the island doc means; firestore.rules keeps builds from before this
  * existed out (they write v:1).
  */
-export const ENGINE_VERSION = 3;
+export const ENGINE_VERSION = 4;
 
 const OPS: OpsRole[] = ['mech', 'elec'];
 
@@ -3691,11 +3691,10 @@ export function resolveWeek(s: IslandState, now: number) {
     const ml = cap > 0 ? melOn(s, p.id, W) : undefined;
     if (ml) {
       const after = soleGuestPlane(s, p) ? subCharterNeed(s, p.id, 'clear', ml.mel!.until + 1) : null;
-      line(
-        'mech',
-        'info',
-        `${p.name} flew with ${shortText(s, ml)} placarded INOP (MEL C, to week ${ml.mel!.until}${ml.mel!.ext ? ', extended' : ''}). Fix it by then, or it is grounded${after ? `: a mainland sub-charter flies the guests at ${subCharterWords(after)}` : ''}.`,
-      );
+      const subWords = after ? `: a mainland sub-charter flies the guests at ${subCharterWords(after)}` : '';
+      const placard = `${p.name} flew with ${shortText(s, ml)} placarded INOP (MEL C, to week ${ml.mel!.until}${ml.mel!.ext ? ', extended' : ''}`;
+      // the review is read next week: in the placard's last week, say what happens from then, not "by then"
+      line('mech', 'info', ml.mel!.until > W ? `${placard}). Fix it by then, or it is grounded${subWords}.` : `${placard}: its last week). From week ${W + 1} it stays on the ground until it's fixed${subWords}.`);
     }
     flown += cap;
     if (MODELS[p.model].cargo) cargoFlights += cap;

@@ -13,15 +13,51 @@
 // the chain still at the buy. Either way, the next move on this build heals it.
 // The doc version (src/net/firebase.ts, firestore.rules) keeps old tabs from
 // writing at all; the engine version keeps this build from writing over a newer one.
+//
+// tests/fixtures/v3-bd1e1d2-*.json are docs the live job-flow build wrote
+// (bd1e1d2: ENGINE_VERSION 3, DOC_VERSION 3), with its own bots
+// (scripts/fixtures-v3.ts, run in a worktree of bd1e1d2; the first doc that
+// matched each state):
+//
+//   v3-bd1e1d2-early     three friends, seed 1, week 4   tier 1, start of the week, alerts open, the starter crew
+//   v3-bd1e1d2-late      three friends, seed 1, week 20  tier 4, start of the week, 6 staff, 74 stock lines, 21 POs
+//   v3-bd1e1d2-midweek   mistakes,      seed 1, week 5   tier 1, the mechanic ended, the electrician part way, the
+//                                                        analyst not started: an open requisition, a card waiting
+//   v3-bd1e1d2-mel       three friends, seed 2, week 3   tier 1, the only guest plane on an MEL placard that runs
+//                                                        out at this week's resolve
+//   v3-bd1e1d2-chain     mistakes,      seed 2, week 20  tier 4, mid-week, an open part chain (at the fee), saved
+//                                                        10 minutes past its deadline (the next open resolves it)
+//   v3-bd1e1d2-makesafe  three friends, seed 1, week 7   tier 2, mid-week, a shower tingle made safe at the breaker
+//   v3-bd1e1d2-build     three friends, seed 1, week 6   tier 2, the builders half way through the generator house
+//   v3-bd1e1d2-feeder    three friends, seed 1, week 1   tier 1, mid-week, the feeder job's card waiting on approval
+//
+// This build (engine 4, doc v4: the only guest plane grounded past due, the
+// mainland sub-charter, the feeder scene, the builders' zoom) has to load,
+// render and resolve every one of them. The v3-bd1e1d2-restricted-* docs (the
+// twin flying restricted) are in tests/subcharter.test.ts.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { trace } from '../src/puzzles/trace';
+import { soleGuest } from '../src/sim/alerts';
 import { botTurn, TEAMS } from '../src/sim/bots';
 import { islandAircraft, openChain } from '../src/sim/chain';
+import { alertAog, downtimeOf, melOn, projectWeek, rentFactor, SUB_FEE, subCharterOn } from '../src/sim/econ';
 import { ENGINE_VERSION, apply, healOpenChain } from '../src/sim/engine';
+import { cardOf, flowStage } from '../src/sim/flow';
+import { migrate } from '../src/sim/migrate';
 import { rng, hashSeed } from '../src/sim/rng';
+import { stockFlags } from '../src/sim/stock';
 import { ROLES, type IslandState, type Order } from '../src/sim/types';
-import { blocks, crossMoves, launchFor, openOrders, pushes, teamNumbers } from '../src/ui/select';
+import { costLines } from '../src/ui/board';
+import { flagsOf } from '../src/ui/flow/words';
+import { siteBox, H, W } from '../src/ui/island/geo';
+import { cardVM, needsVM } from '../src/ui/purchasing/model';
+import { blocks, crossMoves, dockNext, endTurnChecks, flowMoves, launchFor, openOrders, pushes, teamNumbers, yourMoves } from '../src/ui/select';
+import { buildLine, buildRows, doingNow } from '../src/ui/staff/model';
+
+// ten-week runs on each fixture: CI runners are about 1.5x slower
+vi.setConfig({ testTimeout: 30000 });
 
 const load = (name: string): IslandState => JSON.parse(readFileSync(resolve(import.meta.dirname, 'fixtures', `${name}.json`), 'utf8'));
 const LIVE = ['live-79f806b-early', 'live-79f806b-late', 'live-79f806b-midweek'];
@@ -167,13 +203,13 @@ describe('a chain step handed in after its week closed', () => {
 });
 
 describe('the job flow’s version gate (docs/JOBFLOW.md 19.1)', () => {
-  it('the engine, the doc and the rules are all at 3', () => {
-    expect(ENGINE_VERSION).toBe(3);
+  it('the engine, the doc and the rules are all at 4 (the sub-charter release; see the v4 gate below)', () => {
+    expect(ENGINE_VERSION).toBe(4);
     const net = readFileSync(resolve(import.meta.dirname, '..', 'src', 'net', 'firebase.ts'), 'utf8');
-    expect(net).toMatch(/const DOC_VERSION = 3;/);
+    expect(net).toMatch(/const DOC_VERSION = 4;/);
     const rules = readFileSync(resolve(import.meta.dirname, '..', 'firestore.rules'), 'utf8');
-    expect(rules).toMatch(/request\.resource\.data\.v == 3/);
-    expect(rules).not.toMatch(/data\.v == 2/);
+    expect(rules).toMatch(/request\.resource\.data\.v == 4;/);
+    expect(rules).not.toMatch(/data\.v == [123]\b/);
   });
 
   it('the live and skew docs migrate on their first move: kits become store credit, the stock, the crew and the ledger come up', () => {
@@ -183,7 +219,7 @@ describe('the job flow’s version gate (docs/JOBFLOW.md 19.1)', () => {
       const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
       expect(r.error, name).toBeUndefined();
       const s = r.s;
-      expect(s.engine).toBe(3);
+      expect(s.engine).toBe(ENGINE_VERSION);
       // (a skew doc's first move also heals its chain, which may pay for the part it had approved)
       if (!doc.chain) expect(s.cash).toBe(doc.cash);
       expect(s.parts).toEqual({ stock: 0, inTransit: 0 });
@@ -194,6 +230,191 @@ describe('the job flow’s version gate (docs/JOBFLOW.md 19.1)', () => {
       expect(s.flowSince).toBe(doc.week);
       expect(s.orders.filter((o) => o.status !== 'done' && o.status !== 'cancelled' && o.parts > 0)).toEqual([]);
       selectors(s);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The v4 gate: docs the live job-flow build (bd1e1d2, engine 3) wrote
+
+const V3 = ['early', 'late', 'midweek', 'mel', 'chain', 'makesafe', 'build', 'feeder'].map((n) => `v3-bd1e1d2-${n}`);
+const live = (o: Order) => o.status !== 'done' && o.status !== 'cancelled';
+
+/** every selector the screens run on an island today: Home, the tech panels, the desk, the cards, the staff, the review */
+function screens(s: IslandState) {
+  selectors(s);
+  flowMoves(s);
+  stockFlags(s);
+  needsVM(s);
+  projectWeek(s);
+  subCharterOn(s);
+  const box = siteBox(s);
+  if (box) expect(box[0] >= 0 && box[1] >= 0 && box[2] <= W && box[3] <= H && box[2] > box[0] && box[3] > box[1]).toBe(true);
+  buildLine(s);
+  for (const b of s.builds ?? []) buildRows(s, b);
+  for (const n of s.staff ?? []) expect(typeof doingNow(s, n)).toBe('string');
+  for (const role of ROLES) {
+    dockNext(s, role);
+    endTurnChecks(s, role);
+    if (role !== 'fin') yourMoves(s, role);
+  }
+  for (const o of s.orders)
+    if (o.flow && o.status === 'pending') {
+      expect(cardOf(s, o).total).toBeGreaterThanOrEqual(0);
+      cardVM(s, o);
+    }
+  for (const a of s.alerts ?? []) {
+    flowStage(s, a);
+    flagsOf(s, a);
+  }
+  for (const a of s.assets) if (a.kind === 'plane') expect(Number.isFinite(downtimeOf(s, a.id).usd)).toBe(true);
+  for (const h of s.history.slice(-3)) for (const [, usd] of costLines(h)) expect(Number.isFinite(usd)).toBe(true);
+}
+
+describe('island docs written by the live job-flow build (bd1e1d2, engine 3)', () => {
+  for (const name of V3) {
+    it(`${name}: loads and renders, needs no migration, keeps its cash and every open order through the week's resolve on this build, and plays ten more weeks the same in memory and through JSON`, () => {
+      const doc = load(name);
+      expect(doc.engine).toBe(3);
+      screens(doc);
+      // nothing to migrate: the live build wrote every job-flow field already
+      expect(JSON.stringify(migrate(structuredClone(doc)))).toBe(JSON.stringify(doc));
+      // the first move on this build stamps its version and leaves the money and the work as they were
+      const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
+      expect(r.error).toBeUndefined();
+      expect(r.s.engine).toBe(ENGINE_VERSION);
+      expect(r.s.cash).toBe(doc.cash);
+      expect(r.s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
+      expect(r.s.alerts).toEqual(doc.alerts);
+      // the seats still playing finish the week (the paper-sim crew) and it resolves here
+      let a = week(structuredClone(doc), name, false);
+      let b = week(JSON.parse(JSON.stringify(doc)) as IslandState, name, true);
+      const h = a.history[a.history.length - 1];
+      expect(h.week).toBe(doc.week);
+      expect(h.cashStart).toBe(doc.openCash);
+      expect(Number.isFinite(h.cashEnd)).toBe(true);
+      // no open order is lost (the resolve may finish or cancel one, never drop it)
+      for (const o of doc.orders.filter(live)) expect(a.orders.some((x) => x.id === o.id), o.id).toBe(true);
+      screens(a);
+      for (let w = 0; w < 10; w++) {
+        a = week(a, name, false);
+        b = week(b, name, true);
+        screens(a);
+        expect(Number.isFinite(a.cash)).toBe(true);
+        expect(a.engine).toBe(ENGINE_VERSION);
+        // each week's review starts from the cash the week before ended with
+        const [prev, last] = a.history.slice(-2);
+        expect(last.cashStart).toBe(prev.cashEnd);
+      }
+      expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+      expect(JSON.stringify(a).length).toBeLessThan(200_000);
+    });
+  }
+
+  it("the MEL doc: the only guest plane flies on its placard this week; unfixed and not extended, it's grounded from next week and the sub-charter flies its guests", () => {
+    const doc = load('v3-bd1e1d2-mel');
+    const al = doc.alerts!.find((a) => a.mel && a.status !== 'closed' && soleGuest(doc, a.assetId))!;
+    expect(al.mel!.until).toBe(doc.week);
+    const p = doc.assets.find((a) => a.id === al.assetId)!;
+    // this week: on the placard, flying
+    expect(melOn(doc, p.id)).toBeTruthy();
+    expect(alertAog(doc, p.id)).toBeUndefined();
+    expect(subCharterOn(doc)).toBeNull();
+    // nobody fixes it this week (every seat ends the turn): the placard runs out at the resolve
+    let s = doc;
+    const t = doc.updatedAt + 1000;
+    for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: doc.week }, t).s;
+    expect(s.week).toBe(doc.week + 1);
+    expect(s.alerts!.find((a) => a.id === al.id)!.status).not.toBe('closed');
+    expect(alertAog(s, p.id)?.id).toBe(al.id);
+    const sub = subCharterOn(s)!;
+    expect(sub.plane.id).toBe(p.id);
+    expect(sub.alert?.id).toBe(al.id);
+    // and the week after: the operator flew the guests, the review books it, the twin flew nothing
+    const W = s.week;
+    for (const role of ROLES) s = apply(s, { t: 'endTurn', role, week: W }, (s.deadline ?? s.updatedAt) - 1000).s;
+    const h = s.history[s.history.length - 1];
+    expect(h.week).toBe(W);
+    expect(h.flightsFlown).toBe(0);
+    expect(h.costs.subCharter).toBe(sub.flights * SUB_FEE);
+    expect(h.housesBooked).toBeGreaterThanOrEqual(sub.flights);
+    expect(h.lines.some((l) => /mainland sub-charter flew the guests/.test(l.text))).toBe(sub.flights > 0);
+  });
+
+  it('the feeder doc: the analyst approves the waiting feeder card on this build and the job plays the underground feeder scene, not the bedroom trace', () => {
+    const doc = load('v3-bd1e1d2-feeder');
+    const card = doc.orders.find((o) => o.role === 'elec' && o.job === 'feeder' && o.status === 'pending')!;
+    expect(card.puzzle).toBe('trace');
+    let s = apply(doc, { t: 'approve', orderId: card.id, week: doc.week }, doc.updatedAt + 1000).s;
+    // parts not on the shelf land on a PO: play weeks until the job is ready
+    for (let w = 0; w < 3 && s.orders.find((o) => o.id === card.id)!.status !== 'ready'; w++) {
+      const W = s.week;
+      for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: W }, (s.deadline ?? s.updatedAt) - 1000).s;
+    }
+    const o = s.orders.find((x) => x.id === card.id)!;
+    expect(o.status).toBe('ready');
+    const L = launchFor(s, o, 'elec');
+    expect(L.puzzle).toBe('trace');
+    expect(L.context?.job).toBe('feeder');
+    expect(trace.titleFor?.(L.context)).toBe('Underground feeder');
+  });
+
+  it("the build doc: the builders' site has its own zoom box on Home", () => {
+    const doc = load('v3-bd1e1d2-build');
+    expect(siteBox(doc)).not.toBeNull();
+    expect(buildLine(doc)).not.toBeNull();
+  });
+
+  it("the mid-week doc: the analyst approves the open requisition and the tech's waiting card on this build, then the week resolves", () => {
+    const doc = load('v3-bd1e1d2-midweek');
+    const q = doc.reqs!.find((x) => x.status === 'open')!;
+    const card = doc.orders.find((o) => o.status === 'pending' && o.role !== 'fin' && o.flow)!;
+    let t = doc.updatedAt + 1000;
+    let r = apply(doc, { t: 'approveReq', reqs: [q.id], week: doc.week }, ++t);
+    expect(r.error).toBeUndefined();
+    expect(r.s.reqs!.find((x) => x.id === q.id)!.status).not.toBe('open');
+    r = apply(r.s, { t: 'approve', orderId: card.id, week: doc.week }, ++t);
+    expect(r.error).toBeUndefined();
+    expect(['ready', 'waiting_part']).toContain(r.s.orders.find((o) => o.id === card.id)!.status);
+    let s = r.s;
+    for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: doc.week }, ++t).s;
+    expect(s.week).toBe(doc.week + 1);
+    screens(s);
+  });
+
+  it('the chain doc: the open part chain runs to the end on this build', () => {
+    const doc = load('v3-bd1e1d2-chain');
+    expect(openChain(doc)).toBeTruthy();
+    let s = structuredClone(doc);
+    for (let w = 0; w < 8 && openChain(s); w++) s = week(s, 'chain', false);
+    expect(openChain(s)).toBeFalsy();
+  });
+
+  it("the make-safe doc: the house made safe at the breaker rents at 75% on this build until the fix", () => {
+    const doc = load('v3-bd1e1d2-makesafe');
+    const al = doc.alerts!.find((a) => a.safe && a.status !== 'closed')!;
+    const house = doc.assets.find((a) => a.id === al.assetId)!;
+    expect(rentFactor(doc, house)).toBe(0.75);
+    screens(doc);
+  });
+
+  it('reverse skew: every doc this build writes is engine 4, and an engine older than the doc (the live v3 one) refuses to write it', () => {
+    for (const name of V3) {
+      const doc = load(name);
+      const r4 = apply(doc, { t: 'rename', role: 'elec', name: doc.players.elec!.name }, doc.updatedAt + 1000);
+      expect(r4.error, name).toBeUndefined();
+      const v4 = r4.s;
+      expect(v4.engine, name).toBe(4);
+      // bd1e1d2's apply() opens with the same guard as this one, `(prev.engine ?? 0) > ENGINE_VERSION`, at 3:
+      // a doc one version ahead of the engine is refused whole, and the tab reloads (useIsland's ic:stale)
+      expect(v4.engine! > 3).toBe(true);
+      const ahead = { ...v4, engine: ENGINE_VERSION + 1 };
+      for (const role of ROLES) {
+        const r = apply(ahead, { t: 'endTurn', role, week: v4.week }, v4.updatedAt + 1000);
+        expect(r.error, `${name} ${role}`).toMatch(/saved by a newer version of Island Company\. Reload/);
+        expect(r.s).toBe(ahead);
+      }
+      expect(apply(ahead, { t: 'resolve', week: v4.week }, (v4.deadline ?? v4.updatedAt) + 1000).s).toBe(ahead);
     }
   });
 });

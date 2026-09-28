@@ -14,6 +14,7 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
    - already live before it: the island art, blind sign-off with hidden defects, cross-trade reports, the part chain (IPC → logbooks → engineering approval), AMM task cards with S/N effectivity, the crack / hydraulics / ground power puzzles with interactive carts, the crew board and DMs, and the doc version gate
    - numbers: 689 tests; `DOC_VERSION` 3; `ENGINE_VERSION` 3; `firestore.rules` `v == 3`. Live v2 islands migrate on first read (kits become store credit, a starter shelf, a What's new sheet).
 2. **In flight in the cloud:** nothing. The swarm landed (§3).
+   - **Local, not pushed:** branch `gaps` has the four job-flow gap fixes (the known gaps in §3) and the **v4 version gate** (`ENGINE_VERSION` 4, `DOC_VERSION` 4, rules `v == 4`). It ships with more v4 engine work later; the proof is in `docs/DECISIONS.md` "2026-09-28: integrating the job-flow gap fixes; the v4 version gate". After that deploy: `probe-gate.mts` with OLD_V=3 NEW_V=4, and tell the crew to close and reopen the app.
 3. **First local tasks:**
    - set up the machine (§4), then `git pull`
    - make the scripts' Chromium path portable (§4.3)
@@ -66,12 +67,12 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
     - all average: median week 23, 80 of 360 miss, 0 weeks below $0
     - the previous build had 75 and 37 misses
     - the misses come from crew projects stalled by long absences and the electrician's tier-4 overload, not cash; the levers are in `docs/DECISIONS.md` (stagger code notices, throttle the generator)
-- **Known gaps** (also in §7):
-  - Past due, the only guest plane still flies restricted; there's no mainland sub-charter.
-  - The builders' zoom on Home needs its own zoom box.
-  - The MEL wording in `src/ui/flow/Investigate.tsx` says "Past it, the plane is grounded", which is wrong for the only guest plane (it flies restricted).
-  - The underground feeder re-splice launches the branch-circuit trace puzzle ("Bedroom is dead · Drywall cutaway"); an electrician would notice.
-  - `scripts/e2e-online.mjs` stalls if the first alert is a no-fault-found; port `planFirst`'s NFF skip from `scripts/e2e.mjs`.
+- **Known gaps** (also in §7). All five are fixed on branch `gaps` (not deployed; live still has them):
+  - Past due, the only guest plane still flies restricted; there's no mainland sub-charter. *Fixed (`gap-charter`): grounded like any plane, and a sub-charter flies its guests at $270 a flight.*
+  - The builders' zoom on Home needs its own zoom box. *Fixed (`gap-zoom`): `siteBox`; the beaten scene is still 1,390 nodes.*
+  - The MEL wording in `src/ui/flow/Investigate.tsx` says "Past it, the plane is grounded", which is wrong for the only guest plane (it flies restricted). *Moot (`gap-charter`): it is grounded now, and the words name the sub-charter.*
+  - The underground feeder re-splice launches the branch-circuit trace puzzle ("Bedroom is dead · Drywall cutaway"); an electrician would notice. *Fixed (`gap-feeder`): its own "Underground feeder" scene.*
+  - `scripts/e2e-online.mjs` stalls if the first alert is a no-fault-found; port `planFirst`'s NFF skip from `scripts/e2e.mjs`. *Fixed (`gap-e2e`), plus configurable emulator ports.*
 - **Backup branch `backup/jobflow`** (= `jobflow` at `bdf97ba`) is now redundant; delete it once the owner OKs.
 - **The spec's key decisions** (full text: `docs/JOBFLOW.md` §25):
   1. v1 covers the jobs that make up ~90% of the work. Rare jobs keep the diagnosis but come with parts pre-filled.
@@ -228,7 +229,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 
 1. **Crew playtest on real phones.** Nothing has had a human playtest since the island art, and the job flow changes every seat. Collect friction points per seat.
 2. **Owner decisions** (§1): builders speed-up; wages scale.
-3. **Job flow follow-ups from review and QA** (§3 "Known gaps"):
+3. **Job flow follow-ups from review and QA** (§3 "Known gaps"). All five are done on branch `gaps`, waiting on the v4 release:
    - the MEL wording for the only guest plane
    - the feeder re-splice launching the branch-circuit trace puzzle
    - a mainland sub-charter for the only guest plane when past due

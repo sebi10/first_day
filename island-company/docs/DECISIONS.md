@@ -998,3 +998,86 @@ HANDOFF §3 "Known gaps": the island on Home zoomed only to the viewer's own tra
   - the tier build is framed before a queued cottage
   - there is no box with no build open or on a doc without builds
   - every crew spot stands in front of its site
+
+## 2026-09-28: integrating the job-flow gap fixes; the v4 version gate
+
+Branch `gaps`, off `1f92356`. The four gap branches merged `--no-ff` in this order: `gap-charter` (`c714c2e`), `gap-feeder` (`800fe30`), `gap-e2e` (`5038bdc`), `gap-zoom` (`89f9e49`). Then the version gate. Not pushed, not deployed.
+
+- **Merges.** Only this file conflicted: each branch appended its own 2026-09-28 section at the same spot. Every section is kept, in merge order. No code conflicts. After the four merges and before the gate: tsc clean, 731/731 tests.
+- **What each fix does now, merged:**
+  - **Only guest plane past due** (`gap-charter`): grounded like any plane; a mainland sub-charter flies the guests who need a seat at $270 a flight ($180 own cost × 1.5), automatically. The MEL words in Investigate, the cards, Needs, End turn, the cash card and the Home stat all say so before it happens.
+  - **Feeder re-splice** (`gap-feeder`): every feeder job (`Order.job === 'feeder'`) plays its own "Underground feeder" scene inside the trace puzzle: site plan, megger at the hand holes, dig, close-out. The bedroom trace is gone from it. There is no new puzzle id, so orders already stored as `trace` + `feeder` get the scene.
+  - **Online e2e** (`gap-e2e`): `planFirst` skips a no-fault-found first alert for both techs. Emulator ports come from `VITE_FB_FS_PORT` / `VITE_FB_AUTH_PORT`; the production build is unchanged.
+  - **Builders' zoom** (`gap-zoom`): tap the builders' line or a builder to get `siteBox(s)`, and "See the island" to go back. The beaten island-lab scene is still 1,390 SVG nodes (budget 1,500).
+- **Why v4.** `gap-charter` changes what a doc means. A tab still on the v3 engine (`bd1e1d2`) would resolve a week flying the only guest plane restricted (half its flights, near-misses) where this engine grounds it and bills the sub-charter. So: `ENGINE_VERSION` 4, `DOC_VERSION` 4, `firestore.rules` `v == 4`. The other three fixes need no bump on their own: no new stored field, and nothing stored changes shape. This release will ship with more engine changes later, all under the same v4.
+- **Fixtures from the live build.** `scripts/fixtures-v3.ts` ran in a temp worktree of `bd1e1d2` (outside the repo, removed afterwards). It plays the live engine's own bots, 'three friends' and 'mistakes' (the same crew with slips and a stock request a week; that crew leaves requisitions open mid-week), and saves the first doc that matches each state. Every doc is written by the live reducer; the script only dispatches moves.
+
+  | fixture | crew, seed, week, tier | state |
+  |---|---|---|
+  | `v3-bd1e1d2-early` | three friends, 1, wk 4, T1 | start of the week, alerts open, the starter crew |
+  | `v3-bd1e1d2-late` | three friends, 1, wk 20, T4 | start of the week, 6 staff, 74 stock lines, 21 POs, 19 ledger weeks |
+  | `v3-bd1e1d2-midweek` | mistakes, 1, wk 5, T1 | mechanic ended, electrician part way, analyst not started: an open requisition and a tech's card waiting |
+  | `v3-bd1e1d2-mel` | three friends, 2, wk 3, T1 | the only guest plane on an MEL C placard that runs out at this week's resolve |
+  | `v3-bd1e1d2-chain` | mistakes, 2, wk 20, T4 | mid-week, an open part chain at the engineering fee; saved 10 minutes past its deadline, so whoever opens it next resolves the week first |
+  | `v3-bd1e1d2-makesafe` | three friends, 1, wk 7, T2 | mid-week, a shower tingle made safe at the breaker |
+  | `v3-bd1e1d2-build` | three friends, 1, wk 6, T2 | the builders half way through the generator house |
+  | `v3-bd1e1d2-feeder` | three friends, 1, wk 1, T1 | mid-week, the feeder job's card waiting on approval |
+
+  The three `v3-bd1e1d2-restricted-*` docs from `gap-charter` (the twin flying restricted) stay in `tests/subcharter.test.ts`.
+- **Tests** (748 in all, from 689 on `1f92356`):
+  - `tests/skew.test.ts`, for each of the 8 docs:
+    - it loads and runs every screen's selectors: Home, the tech panels, the desk and cards, Needs, the staff and builds, the sub-charter, `siteBox`, the review's cost lines
+    - `migrate()` leaves it byte-identical
+    - the first move stamps engine 4 and leaves the cash, the orders and the alerts as they were
+    - through the week's resolve, the review opens at the doc's `openCash` and no open order is dropped
+    - it plays ten more weeks with each review opening at the last one's close, identical in memory and through JSON
+  - `tests/skew.test.ts`, one test per doc:
+    - MEL runs out: grounded from the next week, with the sub-charter (1 flight, $270) in the review
+    - the waiting feeder card, approved here, launches "Underground feeder"
+    - the build has its site box
+    - the analyst approves the open requisition and the card
+    - the chain runs to the end
+    - the made-safe house rents at 75%
+  - Reverse skew: every doc this build writes is engine 4, and a doc ahead of the engine is refused whole on every move, the resolve included.
+  - `tests/migrate.test.ts`: all 11 v3 fixtures come through `migrate()` byte-identical, and a v2 doc goes to engine 4 in one move.
+- **The live v3 engine against v4 docs, for real.** In the `bd1e1d2` worktree, `apply()` refused 67 of 67 moves on the 8 docs this build wrote: every seat's end turn, the resolve, a rename, each pending approval, each open alert's NFF. Every time it returned the doc untouched ("saved by a newer version … Reload").
+- **Rules on the emulator.** `firebase-tools@14` (this Mac has Java 17). Ports on 127.0.0.1: Firestore 8282, Auth 9292, hub 4482, logging 4582, websocket 9252. The branch's rules, its own TMPDIR.
+  - `probe-gate.mts` with OLD_V=3, NEW_V=4:
+    - v:3 → permission-denied
+    - v:4 → not-found
+    - list → permission-denied
+    - result: GATE LIVE
+  - Real writes:
+    - create v:3 refused
+    - create v:4 written
+    - update v:3 refused
+    - update v:4 written
+    - create v:5 refused
+  - The rules never read the stored `v`, so a live v:3 doc takes a v:4 write from this build.
+  - The online e2e passed 3 of 3 runs on the same emulator (Vite on 5197). In 2 of them the electrician's first alert was NFF ("lights flicker when the AC kicks on", "kitchen outlets are dead"): it was skipped and the next alert planned. The mechanic's first alert was never NFF in these runs; `gap-e2e` covered that case.
+- **In the real app.** Each of the 11 v3 fixtures went into pass and play on this build at 390×844, with the clock at the doc's own time. Each run covered:
+  - every seat's Home and a job sheet
+  - the analyst's desk
+  - the builders' zoom and back, on the build doc
+  - the week ended in the UI and resolved here, writing engine 4
+  - Three docs were past their deadline (`chain`, `restricted-t2`, `restricted-mel`). They resolved on open on this build, as a live doc does when nobody was on at 20:00. The review that popped up then covered the harness's tap on a job row: a harness miss, not an app error.
+  - No page errors, apart from Chrome's "vibrate before a tap" intervention.
+- **A wording fix found in integration.** In a placard's last week the review line read "(MEL C, to week 5). Fix it by then, or it is grounded". It sits in week 5's review, which the crew reads in week 6. It now reads "(MEL C, to week 5: its last week). From week 6 it stays on the ground until it's fixed: a mainland sub-charter flies the guests at about $540 a week (2 flights at $270)". Earlier weeks keep "Fix it by then". This is text only.
+- `docs/handoff/probe-gate.mts` now defaults to OLD_V 3 / NEW_V 4.
+- **Balance** (medians; baseline `1f92356` → `gaps`):
+  - Standard (26 weeks × 30 seeds):
+    - three friends, tiers 2/3/4/5: weeks 8/12/16/23 → 8/11/16/23, 0 weeks below $0
+    - all average: weeks 7/12/16/23 → 7/12/16/22, 0 weeks below $0
+    - solo, absent and nobody teams stay at tier 1
+  - Robust (90 seeds × 4 crews = 360 games a team):
+
+    | team | tier 5 missed | by crew −/a/b/c | weeks below $0 |
+    |---|---|---|---|
+    | three friends | 96 → 92 | 20+24+31+17 | 7 → 7 |
+    | all average | 80 → 76 | 19+19+18+20 | 0 → 2 |
+
+  - The 2 new weeks below $0 are `gap-charter`'s: weeks 25–26 at tier 4, where no sub-charter flies. The tail is still open (HANDOFF §7.5).
+- **When it ships.**
+  - The push runs the Action, which deploys hosting and rules together.
+  - Then run `probe-gate.mts` live with OLD_V=3 NEW_V=4: want v:3 permission-denied and v:4 not-found.
+  - Then tell the crew to close and reopen the app.

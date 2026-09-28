@@ -248,7 +248,7 @@ describe('the only guest plane past due: grounded, a mainland sub-charter flies 
     expect(alertAog(s, 'p1')).toBeUndefined();
     expect(subCharterOn(s)).toBeNull();
     s = only(endWeek(s), com.id);
-    expect(says(s, 5, new RegExp(`^Twin N-12 flew with .+ placarded INOP \\(MEL C, to week 5\\)\\. Fix it by then, or it is grounded: a mainland sub-charter flies the guests at about \\$${(2 * SUB_FEE).toLocaleString('en-US')} a week \\(2 flights at \\$${SUB_FEE}\\)\\.$`))).toBe(true);
+    expect(says(s, 5, new RegExp(`^Twin N-12 flew with .+ placarded INOP \\(MEL C, to week 5: its last week\\)\\. From week 6 it stays on the ground until it's fixed: a mainland sub-charter flies the guests at about \\$${(2 * SUB_FEE).toLocaleString('en-US')} a week \\(2 flights at \\$${SUB_FEE}\\)\\.$`))).toBe(true);
     expect(report(s, 5).costs.subCharter).toBeUndefined();
     s = only(endWeek(s), com.id);
     expect(says(s, 6, /^Twin N-12's MEL C for .+ ran out in week 5: grounded until it's fixed \(4 flights cancelled\)\.$/)).toBe(true);

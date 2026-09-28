@@ -13,7 +13,7 @@ service cloud.firestore {
       allow create, update: if request.auth != null
         && request.resource.data.json is string
         && request.resource.data.json.size() < 900000
-        && request.resource.data.v == 3;
+        && request.resource.data.v == 4;
       allow delete: if false;
     }
   }

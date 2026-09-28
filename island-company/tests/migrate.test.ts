@@ -10,6 +10,9 @@
 //   v2-6c0c426-chain-review   seed 4,  week 23  tier 5, an open chain waiting on engineering's answer
 //   v2-6c0c426-midweek        seed 1,  week 9   tier 3, the mechanic ended, the electrician one job in, the analyst not started
 //   v2-6c0c426-late           seed 1,  week 22  tier 4, storm season
+//
+// The v3 docs the live job-flow build wrote (bd1e1d2, scripts/fixtures-v3.ts) need no migration on the v4
+// build: see the last describe here, and tests/skew.test.ts for how they play.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -230,5 +233,27 @@ describe('what the migration does to the orders', () => {
     expect(s.week).toBe(W + 1);
     expect(s.engine).toBe(ENGINE_VERSION);
     expect(s.history.at(-1)!.week).toBe(W);
+  });
+});
+
+describe('the v3 docs the live job-flow build wrote (bd1e1d2): the v4 build reads them as they are', () => {
+  const V3 = ['early', 'late', 'midweek', 'mel', 'chain', 'makesafe', 'build', 'feeder', 'restricted-t1', 'restricted-t2', 'restricted-mel'].map((n) => `v3-bd1e1d2-${n}`);
+  it("migrate() changes nothing on any of them, so the app's read path (useIsland: engine below this build's → migrate a copy) shows the doc as written", () => {
+    for (const name of V3) {
+      const doc = load(name);
+      expect(doc.engine, name).toBe(3);
+      expect((doc.engine ?? 0) < ENGINE_VERSION).toBe(true);
+      expect(JSON.stringify(migrate(clone(doc))), name).toBe(JSON.stringify(doc));
+      selectors(doc);
+    }
+  });
+
+  it('a v2 doc goes straight to engine 4 on its first move, migrated once', () => {
+    const doc = load('v2-6c0c426-midweek');
+    const r = apply(doc, { t: 'rename', role: 'fin', name: doc.players.fin!.name }, doc.updatedAt + 1000);
+    expect(r.error).toBeUndefined();
+    expect(r.s.engine).toBe(ENGINE_VERSION);
+    expect(ENGINE_VERSION).toBe(4);
+    expect(JSON.stringify(migrate(clone(r.s)))).toBe(JSON.stringify(r.s));
   });
 });

@@ -191,9 +191,10 @@ function cached(id: string): IslandState | null {
  * running an older build gets permission-denied (and reloads, see flush) instead
  * of writing with an older engine. Raise it with the rules when an old engine
  * would corrupt a new island (v2: the part chain and the ground power carts; v3: the job flow, stock and
- * purchasing, the ledger and the NPC staff).
+ * purchasing, the ledger and the NPC staff; v4: the only guest plane grounded past due with the mainland
+ * sub-charter flying its guests, which a v3 engine would resolve as restricted flying).
  */
-const DOC_VERSION = 3;
+const DOC_VERSION = 4;
 
 /** a write refused by the rules: this build is older than the island's (or the rules'); reload to the new one */
 const isStaleClient = (e: unknown) => /permission-denied/i.test(String((e as { code?: string })?.code ?? e));

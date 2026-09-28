@@ -34,7 +34,7 @@
 //          VITE_FB_AUTH_PORT=9191 VITE_CACHE_DIR=/tmp/emu-a/vite-cache npx vite --port 5194 --strictPort
 //   4. BASE=http://localhost:5194 node scripts/e2e-online.mjs /tmp/emu-a/shots
 //   5. The rules probes against the same emulators (../docs/handoff/probe-gate.mts; its header says how to run it):
-//        PROBE_EMULATOR=127.0.0.1 FS_PORT=8181 AUTH_PORT=9191 OLD_V=2 NEW_V=3 node_modules/.bin/tsx .probe-gate.mts
+//        PROBE_EMULATOR=127.0.0.1 FS_PORT=8181 AUTH_PORT=9191 OLD_V=3 NEW_V=4 node_modules/.bin/tsx .probe-gate.mts
 //   Stop the emulators and the Vite by their own PIDs.
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
