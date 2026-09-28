@@ -166,7 +166,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 5. **Fix round.** Every blocker and major plus the cheap minors, then re-run everything.
 6. **QA agent.**
    - tsc, vitest, build, balance (standard + robust), and e2e on phone and desktop
-   - the online e2e on its **own emulator host IP** (127.0.0.x) with the branch's rules, including rules probes
+   - the online e2e on its **own emulator ports** with the branch's rules, including rules probes (macOS has only 127.0.0.1: separate runs by port, `VITE_FB_FS_PORT` / `VITE_FB_AUTH_PORT`; the steps are in the header of `scripts/e2e-online.mjs`)
    - migration from fixtures written by the previous live commit
    - the islandlab node count
    - scripted phone runs of the new flows, with screenshots
@@ -216,7 +216,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 - **Worktree base:** the `Workflow` agent option `isolation: 'worktree'` starts from the repo's **default branch `master`** (an unrelated first commit). The templates create worktrees explicitly with `git worktree add -b <b> .claude/worktrees/<b> <sha>`.
 - **Concurrency:** about 2 agents run at once on a 4-CPU box. Plan wall-clock accordingly; a stronger local machine runs more.
 - **Font 403:** the Manrope font 403s through a symlinked `node_modules` in worktrees. It's cosmetic.
-- **Dev server port:** Vite's 5173 is `strictPort`. Agents used ports 5190–5230 and emulator hosts 127.0.0.2–127.0.0.4.
+- **Dev server port:** Vite's 5173 is `strictPort`. Agents used ports 5190–5230. The cloud container gave each emulator its own host (127.0.0.2–127.0.0.4); macOS has only 127.0.0.1, so locally each emulator gets its own ports instead (`scripts/e2e-online.mjs` header).
 - **CI speed:** the runner is about 1.5× slower (§6.4 item 9).
 - **The only guest plane:** never ground it by rule. That empties every house and can bankrupt the island.
 - **Anonymous-auth accounts:** deleting one breaks that device's seat. The app has a recovery layer ("Missing or insufficient permissions" → re-sign-in → relink), but still don't delete them.

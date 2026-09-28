@@ -75,7 +75,7 @@ BASE=http://localhost:5173 node scripts/e2e.mjs /tmp/e2e [desktop]
 ```
 
 - **Chromium for scripts:** the scripts launch the browser from `scripts/chromium.mjs`: `$CHROMIUM_PATH`, else `/opt/pw-browsers/chromium` (the cloud container's path) if it exists, else Playwright's own install (`npx playwright@1.56 install chromium`).
-- **Online e2e:** needs Java plus `npx --yes firebase-tools@15 emulators:start --only firestore,auth --project demo-island`, and a second Vite with the emulator env. The header of `scripts/e2e-online.mjs` has the steps.
+- **Online e2e:** needs Java (21+ for `firebase-tools@15`; `@14` runs on Java 11–17) plus `npx --yes firebase-tools@15 emulators:start --only firestore,auth --project demo-island`, and a second Vite with the emulator env. Parallel runs on one host use their own emulator ports (`VITE_FB_FS_PORT`, `VITE_FB_AUTH_PORT`). The header of `scripts/e2e-online.mjs` has the steps.
 
 ## Invariants every change must keep
 

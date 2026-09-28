@@ -175,7 +175,9 @@ const planFirst = async (tag) => {
   await sheet().getByRole('button', { name: 'No fault found · close' }).click();
   await sheet().getByRole('button', { name: 'Close it: no fault found' }).click();
   await page.waitForTimeout(700);
-  const banner = (await page.locator('.jf-sheet .jf-note.ok').first().innerText().catch(() => '')).trim();
+  // the sheet turns to the closed card ("Closed: no fault found. Week 1.")
+  const banner = (await page.locator('.jf-sheet .jf-stage.closed b').first().innerText().catch(() => '')).trim();
+  if (!/no fault found/i.test(banner)) fail(`${tag}: the alert didn't close with no fault found (${banner || 'no closed card'})`);
   await shot(`${tag}-nff-closed`);
   await closeSheet();
   return { label: 'No fault found', banner };

@@ -867,3 +867,24 @@ Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
 - **Deadline hour:** 20:00 creator time. If the three of you span time zones, change `resolveHour` in `createIsland`.
 - **Difficulty:** if weeks feel too easy by tier 3, raise `ECON.decay` from 5 to 6. That is the single biggest knob.
 - **Trust model:** anyone with the island code can play an open seat. That's fine for friends. Don't post the code publicly.
+
+## 2026-09-28: online e2e handles a no-fault-found first alert; emulator ports are configurable
+
+- **The gap, reproduced.** `scripts/e2e-online.mjs` took the mechanic's first Your move row straight into the flow. On a no-fault-found (NFF) alert nothing in the book or the catalog is marked likely, so the script either stalls or plans the wrong job. On forced NFF-first week-1 islands (seeds found with the engine, the state loaded into pass-and-play), the old move:
+  - stalled at Stock on 2 of 4 electrician alerts ("outlet trips with the hair dryer", "bedroom outlets dead"): "Pick the GFCI device first", no Send
+  - on the other two ("phase B sags", "lights flicker") and on the mechanic's "gear takes 12 s", reached Send with the book's first task, e.g. AMM 29-10-01 hydraulic power pack servicing for a low-battery finding, sent to the analyst as a card: a silent wrong plan
+- **How often it happens.** 1,000 engine islands at week 1: the electrician's first alert is NFF on 206 (21%), the mechanic's on 61 (6%), either on 258 (26%). The old online script never drove the electrician, so it only met the 6% case.
+- **Fix: `planFirst` ported from `scripts/e2e.mjs`.**
+  - Open each alert row; skip one that offers "No fault found · close"; plan the first real one.
+  - If every row is NFF, close the first with "Close it: no fault found".
+  - The online run now also drives the electrician's first alert on her phone, so both techs meet the case.
+  - Both scripts now check the close on the closed card (`.jf-stage.closed`: "Closed: no fault found.") and fail if it isn't there. Before, `scripts/e2e.mjs` read `.jf-note.ok`, which that card doesn't use, so its banner was always empty and never checked.
+- **Emulator ports.** `src/net/firebase.ts` reads `VITE_FB_FS_PORT` and `VITE_FB_AUTH_PORT` (defaults 8080 and 9099) when `VITE_FB_EMULATOR` is set. macOS has only the 127.0.0.1 loopback, so parallel emulators need their own ports, not their own 127.0.0.x hosts. The header of `scripts/e2e-online.mjs` has the steps: a temp `firebase.json` with its own auth, firestore, websocket, hub and logging ports, `--config`, and its own `TMPDIR`.
+  - Nothing changes live. Production never sets `VITE_FB_EMULATOR`. The reads stay direct `import.meta.env.X`, so the production build still inlines `undefined` and drops the emulator branch. The production `dist/` is byte-identical to `1f92356`'s: one shasum over every file matches.
+- **`docs/handoff/probe-gate.mts` also tries to list the islands** (a read, limit 1): want permission-denied. It still writes nothing.
+- **`firebase-tools@15` needs Java 21+.** This Mac has Java 17: `@15` refuses to start the emulators, and `@14` runs the same emulators with a deprecation warning.
+- **Proof** (emulator on 127.0.0.1: Firestore 8181, Auth 9191, hub 4481, logging 4581, websocket 9251; branch rules; `demo-island`; Vite on 5194):
+  - The online e2e passed on 7 of 7 new islands. The first alert was NFF on 3 of them: the electrician's on `86x2tvwev9` and `0s8dr5fvf8`, the mechanic's on `y6mym60780`. There's no seed picker in the UI (the seed is hashed from the island code and the creation time), so those islands came from re-running, at about 26% per island.
+  - Rules: `v: 2` update → permission-denied, `v: 3` → not-found (passes the rules), list → permission-denied.
+  - Real emulator writes: create `v: 2` refused, create `v: 3` written, update `v: 2` refused, update `v: 3` written.
+- **No version bump. Balance unchanged:** no sim code was touched.
