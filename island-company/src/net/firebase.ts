@@ -63,6 +63,12 @@ const setUid = (uid: string) => {
   uidSubs.forEach((f) => f(uid));
 };
 
+/** an emulator port from the env (VITE_FB_FS_PORT, VITE_FB_AUTH_PORT), else the default */
+const emulatorPort = (v: string | undefined, fallback: number): number => {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : fallback;
+};
+
 function boot() {
   if (ready) return ready;
   ready = (async () => {
@@ -70,14 +76,15 @@ function boot() {
     if (!cfg) throw new Error('Firebase is not configured.');
     const [{ initializeApp }, authApi, fs] = await Promise.all([import('firebase/app'), import('firebase/auth'), import('firebase/firestore')]);
     const app = initializeApp(cfg);
-    const emulator = import.meta.env.VITE_FB_EMULATOR; // e.g. "localhost" for local testing
+    const emulator = import.meta.env.VITE_FB_EMULATOR; // e.g. "127.0.0.1" for local testing; production never sets it
     const db = fs.initializeFirestore(app, {
       localCache: emulator ? fs.memoryLocalCache() : fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }),
     });
     const auth = authApi.getAuth(app);
     if (emulator) {
-      fs.connectFirestoreEmulator(db, emulator, 8080);
-      authApi.connectAuthEmulator(auth, `http://${emulator}:9099`, { disableWarnings: true });
+      // the ports default to the emulators' own (firebase.json); a second emulator on the same host runs on others
+      fs.connectFirestoreEmulator(db, emulator, emulatorPort(import.meta.env.VITE_FB_FS_PORT, 8080));
+      authApi.connectAuthEmulator(auth, `http://${emulator}:${emulatorPort(import.meta.env.VITE_FB_AUTH_PORT, 9099)}`, { disableWarnings: true });
     }
     await authApi.setPersistence(auth, authApi.indexedDBLocalPersistence).catch(() => {});
     // restore the saved session before deciding whether to sign in

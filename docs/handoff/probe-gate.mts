@@ -13,10 +13,12 @@
 // so a write the rules allow still fails as not-found and no doc is created, even
 // if the new rules haven't propagated yet. Expect v:OLD_V -> permission-denied
 // (old builds are refused) and v:NEW_V -> not-found (the new build passes the rules).
+// It also tries to list the islands (a read of at most one): expect permission-denied,
+// so island codes can't be enumerated.
 // The anonymous user it signs in with is deleted before exiting.
 import { initializeApp, deleteApp } from 'firebase/app';
 import { connectAuthEmulator, deleteUser, getAuth, signInAnonymously } from 'firebase/auth';
-import { connectFirestoreEmulator, doc, initializeFirestore, updateDoc } from 'firebase/firestore';
+import { collection, connectFirestoreEmulator, doc, getDocs, initializeFirestore, limit, query, updateDoc } from 'firebase/firestore';
 
 const OLD = Number(process.env.OLD_V ?? 2);
 const NEW = Number(process.env.NEW_V ?? 3);
@@ -39,10 +41,15 @@ const attempt = async (v: number) => {
 };
 const older = await attempt(OLD);
 const newer = await attempt(NEW);
+const listed = await getDocs(query(collection(db, 'islands'), limit(1))).then(
+  (q) => `LISTED ${q.size}`,
+  (e) => (e as { code?: string }).code ?? String(e),
+);
 try { await deleteUser(user); console.log('probe user deleted'); } catch (e) { console.log('user delete failed:', (e as Error).message); }
 console.log(`v:${OLD} -> ${older} (want permission-denied)`);
 console.log(`v:${NEW} -> ${newer} (want not-found)`);
-const ok = older === 'permission-denied' && newer === 'not-found';
+console.log(`list islands -> ${listed} (want permission-denied)`);
+const ok = older === 'permission-denied' && newer === 'not-found' && listed === 'permission-denied';
 console.log(ok ? 'GATE LIVE' : 'GATE NOT CONFIRMED');
 await deleteApp(app);
 process.exit(ok ? 0 : 1);

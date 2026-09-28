@@ -6,7 +6,7 @@ These are the workflow scripts the cloud session ran for Island Company, kept so
 
 - **Paths:** `MAIN` (the repo, `/home/user/first_day` in the cloud) and `OUT` (the scratch dir, `/tmp/claude-0/...`). Point them at your checkout and at a scratch folder outside the repo.
 - **Chromium:** `/opt/pw-browsers/chromium` → your Playwright Chromium (see `HANDOFF.md` §4.3).
-- **Ports** (5190–5230) and **emulator hosts** (127.0.0.x) if they clash with something on your machine.
+- **Ports** (5190–5230) and **emulator hosts** (127.0.0.x) if they clash with something on your machine. On macOS (only 127.0.0.1) give each emulator its own ports instead: see the header of `island-company/scripts/e2e-online.mjs`.
 - **Commit trailer:** the `TRAILER` placeholder → your session's attribution trailer.
 - **Base commits and branch names:** the shas in them are from the day they ran.
 
