@@ -2,6 +2,8 @@
 // so art changes can be judged on the same states every time.
 //   /islandlab.html?w=358            all scenarios at phone card width
 //   /islandlab.html?w=600&only=t5-night
+//   /islandlab.html?w=358&map=1      each scenario in the map (map/MapView.tsx): pinch, pan, tap, the presets
+//   &still                           reduced motion (no ambient animation)
 import { render } from 'preact';
 import '@fontsource-variable/manrope';
 import './styles.css';
@@ -12,6 +14,7 @@ import { developmentOf } from './sim/growth';
 import { BUILDS, COTTAGE, wageAt } from './sim/staff';
 import type { Alert, IslandState, NpcRole, Order, Role, Weather, WeekReport } from './sim/types';
 import { Island } from './ui/island';
+import { MapView } from './ui/map/MapView';
 
 type Phase = 'dawn' | 'day' | 'golden' | 'night';
 type Scn = { id: string; note: string; tier: number; phase: Phase; weather?: Weather; focus?: Role | 'site' | null; tweak?: (s: IslandState) => void };
@@ -236,12 +239,30 @@ const SCN: Scn[] = [
       s.creditsWeek = s.week - 1;
     },
   },
+  // the heaviest scene for the map's frame times (docs/EXPANSION.md 5.6): the beaten island at night in a storm
+  {
+    id: 'beaten-storm-night',
+    note: 'Beat the game, at night in a storm: rain over the lit houses, both carts on the charger, the heaviest scene',
+    tier: 5,
+    phase: 'night',
+    weather: 'storm',
+    tweak: (s) => {
+      played(s, 30, { bplus: 26, perfect: 6, strength: 1.1, grade: 'A' });
+      s.stats.aStreak = 8;
+      s.creditsWeek = s.week - 1;
+      gse(s);
+    },
+  },
 ];
 
 const q = new URLSearchParams(location.search);
 const w = Number(q.get('w') ?? 358);
 const only = q.get('only');
+const map = q.has('map');
 void ECON;
+/** the map's taps, for a script to read (the lab has no sheets) */
+const tapped: string[] = [];
+(window as unknown as { __tapped: string[] }).__tapped = tapped;
 
 function Lab() {
   return (
@@ -251,9 +272,21 @@ function Lab() {
         x.tweak?.(s);
         return (
           <div key={x.id} class="scn" data-id={x.id} style={{ width: w }}>
-            <div class="island-wrap">
-              <Island s={s} focus={x.focus ?? null} reduceMotion={q.has('still')} phase={x.phase} />
-            </div>
+            {map ? (
+              <MapView
+                s={s}
+                role={x.focus && x.focus !== 'site' ? x.focus : 'mech'}
+                initial={x.focus === 'site' ? 'site' : x.focus ? 'zone' : 'all'}
+                phase={x.phase}
+                reduceMotion={q.has('still')}
+                onObject={(r) => tapped.push(`${r.kind}:${r.id}`)}
+                onCart={(id) => tapped.push(`cart:${id}`)}
+              />
+            ) : (
+              <div class="island-wrap">
+                <Island s={s} focus={x.focus ?? null} reduceMotion={q.has('still')} phase={x.phase} />
+              </div>
+            )}
             <div style={{ fontSize: 12, marginTop: 6, color: '#1F2A30' }}>
               <b>{x.id}</b> · {x.note}
               <div style={{ opacity: 0.7 }}>

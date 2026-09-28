@@ -211,12 +211,15 @@ const area = (a: Rect, b: Rect) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a
  *  while staying off the other bubbles, off every other asset and the runway
  *  (keep-outs) and inside the view. A small exhaustive search per bubble
  *  (a few hundred candidate offsets), two rounds, deterministic. */
+/** the rect a placed bubble's body covers (with its white rim), in map units: what spread() keeps apart, and what a tap on it hits */
+export function bubbleBox(b: Pick<Placed, 'x' | 'y' | 'k'>, dx: number, dy: number): Rect {
+  const w = (BW + 8) * b.k, h = (BH + 10) * b.k;
+  const cx = b.x + dx, cy = b.y + dy - (TIP + 9 + BH / 2) * b.k;
+  return [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
+}
+
 export function spread<T extends Placed>(bs: T[], keepOut: KeepOut[] = [], view: Rect = [0, 0, 800, 600]) {
-  const boxAt = (b: T, dx: number, dy: number): Rect => {
-    const w = (BW + 8) * b.k, h = (BH + 10) * b.k;
-    const cx = b.x + dx, cy = b.y + dy - (TIP + 9 + BH / 2) * b.k;
-    return [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
-  };
+  const boxAt = bubbleBox;
   const pref = bs.map((b) => [b.dx, b.dy] as const);
   const order = bs.map((_, i) => i).sort((i, j) => Number(!!bs[j].fixed) - Number(!!bs[i].fixed) || bs[i].y - bs[j].y);
   for (let round = 0; round < 2; round++)
