@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { needsFreight, openChain } from '../sim/chain';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
 import { chainCardCost } from '../sim/engine';
-import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, logistic, occupancy, openReports, projectWeek, rateBounds, season } from '../sim/econ';
+import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, logistic, occupancy, openReports, projectWeek, rateBounds, season, SUB_FEE } from '../sim/econ';
 import { committed, spendable } from '../sim/ledger';
 import { urgentJob } from '../sim/stock';
 import type { Insurance, IslandState, Order } from '../sim/types';
@@ -122,7 +122,13 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           </span>
           <span class="chip num">Fixed −{usd(fixedNow(s))}</span>
           {leakTotal > 0 && <span class="chip rust num">Open reports −{usd(leakTotal)}/wk</span>}
+          {proj.subCharter > 0 && <span class="chip rust num">Sub-charter −{usd(proj.subCharter)} this week</span>}
         </div>
+        {proj.subCharter > 0 && (
+          <span class="label" style={{ color: C.rust }}>
+            The only guest plane is grounded: a mainland sub-charter flies the guests in ({proj.subFlights} flight{proj.subFlights > 1 ? 's' : ''} at {usd(SUB_FEE)}) until it's back in service.
+          </span>
+        )}
         {leaks.map((o) => (
           <span class="label" key={o.id} style={{ color: C.rust }}>
             <b>{o.title}:</b> <span style={{ whiteSpace: 'nowrap' }}>−{usd(o.report!.amount)}</span> every week until {o.role === 'fin' ? 'you fix it' : `${s.players[o.role]?.name ?? ROLE_LABEL[o.role]} fixes it`}.
@@ -409,7 +415,7 @@ function Approvals({ ctl, disabled, keys }: { ctl: Ctl; disabled: boolean; keys:
               </span>
               {/* a known defect is still in service: the card has no room for the story, the owner's detail has it */}
               {top.repair && <span class="chip ink">Repair</span>}
-              {/* AOG only when the chain's plane is grounded (a flow-opened chain flies on MEL, restricted, or meanwhile) */}
+              {/* AOG only when the chain's plane is grounded (a flow-opened chain flies on MEL, or meanwhile) */}
               {top.chain && chain && chain.id === top.chain.id && chainGrounds(s, chain) && <span class="chip rust">AOG</span>}
             </span>
             <span style={{ flex: 'none' }}>

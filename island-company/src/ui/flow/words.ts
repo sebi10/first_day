@@ -1,10 +1,10 @@
 // Small shared reads for the job-flow screens: the source icon, the flags a
 // row shows beside its stage, the whose-move chip, an asset's name with its
 // registration. Pure (no DOM).
-import { alertFlags, alertShort } from '../../sim/alerts';
+import { alertFlags, alertShort, soleGuest } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
 import { ROLE_LABEL } from '../../sim/data';
-import { alertAog, hazardOn, restrictedBy } from '../../sim/econ';
+import { alertAog, hazardOn } from '../../sim/econ';
 import { flowStage, type FlowStage } from '../../sim/flow';
 import type { Alert, AlertSrc, Asset, IslandState, Role } from '../../sim/types';
 import { flowMove } from '../select';
@@ -43,7 +43,7 @@ export const SRC_WORDS: Record<AlertSrc, string> = {
 
 export type Flag = { text: string; tone?: 'rust' | 'sea' | 'palm' | 'ink' };
 
-/** the flags beside an alert's stage: due, MEL, made safe, AOG, restricted, the house shut */
+/** the flags beside an alert's stage: due, MEL, made safe, AOG (the only guest plane's guests on the sub-charter), the house shut */
 export function flagsOf(s: IslandState, a: Alert): Flag[] {
   const out: Flag[] = [];
   if (a.status === 'closed') return out;
@@ -57,8 +57,10 @@ export function flagsOf(s: IslandState, a: Alert): Flag[] {
   if (a.status === 'open' && a.nudged === s.week) out.push({ text: `${nameOf(s, 'fin')} nudged`, tone: 'sea' });
   const asset = s.assets.find((x) => x.id === a.assetId);
   if (asset?.kind === 'plane') {
-    if (alertAog(s, asset.id)?.id === a.id) out.push({ text: 'AOG', tone: 'rust' });
-    if (restrictedBy(s, asset.id)?.id === a.id) out.push({ text: 'RESTRICTED', tone: 'rust' });
+    if (alertAog(s, asset.id)?.id === a.id) {
+      out.push({ text: 'AOG', tone: 'rust' });
+      if (soleGuest(s, asset.id)) out.push({ text: 'sub-charter', tone: 'rust' });
+    }
   }
   if (asset?.kind === 'house') {
     const hz = hazardOn(s, asset.id);

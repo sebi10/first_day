@@ -706,7 +706,7 @@ function flightsWith(s: IslandState): number {
   ).reduce((t, c) => t + c.n, 0);
 }
 
-/** the flights these pilots could fly on the tier's full schedule (every plane in service, none restricted) */
+/** the flights these pilots could fly on the tier's full schedule (every plane in service) */
 function fullFlights(s: IslandState, crew: Npc[]): number {
   const per = flightsPerPlane(s.tier);
   const ps = planes(s);
@@ -781,7 +781,7 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
     else if (!guest && !hasCargo) need.push('you have no cargo plane: nothing for them to fly');
     else if (dRev !== 0) need.push(`tours ${sign(hire ? dRev : -dRev)}${Math.abs(Math.round(((charterMult(A) - charterMult(B)) / charterMult(B)) * 100))}% (~${usd(Math.abs(dRev))} a week)`);
     else {
-      // a plane out of service or restricted this week hides a gap the full schedule would show
+      // a plane out of service this week hides a gap the full schedule would show
       const full = fullFlights(s, withMe) - fullFlights(s, base);
       if (full > 0) need.push(hire ? `every flight this week has a pilot; on the full schedule +${plural(full, 'flight')} a week` : `the others cover this week's flights; on the full schedule −${plural(full, 'flight')} a week`);
       else need.push(hire ? 'every flight already has a pilot: a spare' : 'the others cover every flight');
@@ -848,7 +848,7 @@ export function cottagePlan(s: IslandState): { plot: { id: string; name: string 
   const cost = COTTAGE_SHELL + valueOf(COTTAGE.units.flatMap((u) => Object.entries(u).map(([item, qty]) => ({ item, qty: qty ?? 0 }))));
   if (!plot) return { plot, cost, rent: 0, housekeeper: false, payback: null };
   const extra: Asset = { id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: s.week, inspectionUntil: s.week + ECON.houseInspectionWeeks };
-  // a normal week: nothing grounded, restricted or closed for an alert, no safety tag, no plane chain-grounded
+  // a normal week: nothing grounded or closed for an alert, no safety tag, no plane chain-grounded
   const normal = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
   const weeks = Array.from({ length: 8 }, (_, i) => s.week - i).filter((w) => w >= 1);
   if (!weeks.length) weeks.push(Math.max(1, s.week));

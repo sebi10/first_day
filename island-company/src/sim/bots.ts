@@ -479,7 +479,8 @@ function stockRequest(s: IslandState, role: 'mech' | 'elec', r: Rng, now: number
 function finCard(s: IslandState, o: Order, reserve: number, now: number): IslandState {
   const card = cardOf(s, o);
   const asset = s.assets.find((a) => a.id === o.assetId);
-  const exp = expectedDeferralCost(s, o).cost + (card.aog || card.restricted || card.shut ? (card.downtime?.usd ?? 0) : 0);
+  // a grounded plane's downtime (the only guest plane's: its lost tours and the sub-charter's fee) or a closed house's rent
+  const exp = expectedDeferralCost(s, o).cost + (card.aog || card.shut ? (card.downtime?.usd ?? 0) : 0);
   const urgent = dueJob(s, o);
   const critical = urgent || isSafetyJob(s, o) || o.kind === 'inspect100' || o.kind === 'codeprep' || (asset && asset.health < 70) || o.deferrals >= 2;
   const worth = exp >= card.total * 0.6 || critical;

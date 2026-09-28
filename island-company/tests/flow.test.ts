@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { findingOf, raiseAlert, symptomText, SYMPTOMS } from '../src/sim/alerts';
 import { ALERTS, ECON, FREIGHT, STOCK } from '../src/sim/data';
-import { alertAog, hazardOn, houseBlocker, rentFactor, restrictedBy } from '../src/sim/econ';
+import { alertAog, hazardOn, houseBlocker, rentFactor, SUB_FEE, subCharterOn } from '../src/sim/econ';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { apply, createIsland } from '../src/sim/engine';
 import { cardOf, fixTaskFor, flowStage, installCheck, planTask, stdPickFor } from '../src/sim/flow';
@@ -667,7 +667,8 @@ describe('the card (8.6)', () => {
 
   it('the default freight: scheduled, unless the AOG boat saves more downtime than it costs', () => {
     let s = island();
-    // the only guest plane's wheel halves, due now, with a new wheel (a two-week part) on the pick: it flies restricted until the fix
+    // the only guest plane's wheel halves, due now, with a new wheel (a two-week part) on the pick: it's grounded until the fix
+    // (its guests on the mainland sub-charter)
     const corr = raise(s, 'M_WHEEL_CORROSION', 0, 'p1', 5);
     const std = stdPickFor(s, corr, fixTaskFor(s, corr)!);
     const wheel = ['40-190A', '40-190B', '40-220A', '40-220B', '40-120A', '40-120B'].find((id) => itemById(id)?.models?.includes('twin'))!;
@@ -676,8 +677,8 @@ describe('the card (8.6)', () => {
     s = r.s;
     const o = orderOf(s, r.o.id);
     const c = cardOf(s, o);
-    expect(c.restricted).toBe(true);
-    expect(c.aog).toBe(false);
+    expect(c.aog).toBe(true);
+    expect(c.sub).toEqual({ flights: 2, fee: SUB_FEE, usd: 2 * SUB_FEE });
     // the wheel rides any flight, the bulk consumables the cargo flight: two shipments, as placePo splits them
     expect(c.freight.sched).toEqual({ eta: 6, outWeeks: 2, cost: 2 * FREIGHT.sched.mech, shipments: 2 });
     expect(c.freight.aog).toEqual({ eta: 5, outWeeks: 1, cost: FREIGHT.aog });
@@ -797,15 +798,20 @@ describe('MEL, make safe and the only guest plane (10)', () => {
     expect((s.defects ?? []).some((x) => x.variant === 'isolation')).toBe(false);
   });
 
-  it('the only guest plane past due flies restricted, a near-miss on each flight, never AOG', () => {
+  it('the only guest plane past due is grounded like any plane: a mainland sub-charter flies its guests, no near-miss', () => {
     let s = island();
     const al = raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
     expect(al.sole).toBe(true);
-    expect(alertAog(s, 'p1')).toBeUndefined();
-    expect(restrictedBy(s, 'p1')?.id).toBe(al.id);
+    expect(alertAog(s, 'p1')?.id).toBe(al.id);
+    expect(subCharterOn(s)).toMatchObject({ alert: { id: al.id }, flights: 2, fee: SUB_FEE, usd: 2 * SUB_FEE });
     s = only(endWeek(s), al.id);
-    expect(reviewSays(s, 5, /^Twin N-12 flew \d of \d with .+ \(due week 5\): a near-miss on each flight\. Fix it, or ground it \(tag\)\.$/)).toBe(true);
-    expect(reviewSays(s, 5, /Twin N-12 AOG/)).toBe(false);
+    expect(reviewSays(s, 5, /^Twin N-12 AOG: .+ \(due week 5, not fixed\): 4 flights cancelled\.$/)).toBe(true);
+    expect(reviewSays(s, 5, new RegExp(`^Twin N-12 stayed on the ground: a mainland sub-charter flew the guests in \\(2 flights at \\$${SUB_FEE}, \\$${2 * SUB_FEE}\\)\\.$`))).toBe(true);
+    expect(reviewSays(s, 5, / flew \d of \d with /)).toBe(false);
+    const h = s.history.find((x) => x.week === 5)!;
+    expect(h.nearMisses).toBe(0);
+    expect(h.housesBooked).toBe(2);
+    expect(h.costs.subCharter).toBe(2 * SUB_FEE);
   });
 });
 

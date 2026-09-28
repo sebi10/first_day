@@ -2,9 +2,9 @@
 // A job-flow job (docs/JOBFLOW.md 17.2) adds its alert on the card, and in the
 // detail its task, each line's state, the POs carrying them and the stop; the
 // tech's own job opens in the job-flow sheet (Repick, Drop the job, Start).
-import { alertShort } from '../sim/alerts';
+import { alertShort, soleGuest } from '../sim/alerts';
 import { CABLE_REPORT, defectRule, ECON, GSE, incidentText, ROLE_LABEL, SUPPLIERS } from '../sim/data';
-import { deferralRisk, expectedDeferralCost, gseForStart, needsCart } from '../sim/econ';
+import { deferralRisk, expectedDeferralCost, gseForStart, needsCart, SUB_FEE } from '../sim/econ';
 import { isEmergency, tracedTo } from '../sim/engine';
 import { flowStage, installCheck } from '../sim/flow';
 import { itemById } from '../sim/items';
@@ -214,7 +214,7 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
         <span class="label">
           {o.repair.via === 'inspection'
             ? asset?.kind === 'plane'
-              ? 'Not airworthy until it’s repaired: ground it, or it flies with a known defect (a near-miss on the safety grade). '
+              ? `Not airworthy until it’s repaired: ground it${soleGuest(s, asset.id) ? ` (a mainland sub-charter flies the guests meanwhile, $${SUB_FEE} a flight)` : ''}, or it flies with a known defect (a near-miss on the safety grade). `
               : 'Not safe until it’s repaired: red-tag it, or it stays in service with a known defect (a near-miss on the safety grade). '
             : ''}
           {o.status === 'pending' ? 'Safety-critical: it can be approved even through a cash freeze.' : ''}

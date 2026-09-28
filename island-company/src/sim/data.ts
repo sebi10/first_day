@@ -298,6 +298,17 @@ export const DEFAULT_SUPPLIER: Record<ItemTrade, SupplierId> = { mech: 'oem', el
  */
 export const FREIGHT = { aog: 350, sched: { mech: 35, elec: 25, build: 0 } as Record<ItemTrade, number> };
 
+/**
+ * The mainland sub-charter (docs/DECISIONS.md, 2026-09-28): the island's only guest plane on the ground (past due on
+ * an airworthiness item, or grounded by the mechanic's safety call) and an outside Part 135 operator flies the
+ * island's guests in on its own plane and crew, so the houses stay booked. It flies only the flights the guests need
+ * (no day tours) and the island pays it per flight: the island's own cost of a guest flight on the twin (avgas and
+ * oil, maintenance reserves and the landing fee, the pilot's share of the week) times the operator's premium (its own
+ * fixed costs, the positioning leg and its margin). A charter's rate runs about 1.3-1.8x an owner's fully loaded
+ * cost for the same piston twin; 1.5x is the middle.
+ */
+export const SUBCHARTER = { ownPerFlight: 180, mult: 1.5 };
+
 /** stock and purchasing (9) */
 export const STOCK = {
   /** the carrying charge a week: storage and insurance on the stock's value (cash) */

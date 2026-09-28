@@ -81,7 +81,7 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
      - cards stay approvable after the analyst ends their turn
      - a standing auto-approve limit applies at resolve
      - a 1-week-lead part ordered this week arrives at this week's resolve
-  4. The only guest plane is never grounded by an alert. Overdue, it flies half its flights with near-misses.
+  4. The only guest plane is grounded past due like any plane, and a mainland sub-charter flies its guests meanwhile ($270 a flight, automatic). Changed 2026-09-28 (branch `gap-charter`); before, overdue, it flew half its flights with near-misses.
   5. Labour plus parts equals today's card prices. Exceptions: the twin's 100-hr and oil change, and the cargo plane's starter-generator.
   6. Mistakes stay hidden. The stockroom holds near-miss parts, so "on hand" never gives the answer away.
   7. Velocity ("fast vs slow movers") is tracked by **part family over 26 weeks**; per-P/N weekly data is too sparse. Bills are paid a week after delivery, after a three-way match.
@@ -218,7 +218,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 - **Font 403:** the Manrope font 403s through a symlinked `node_modules` in worktrees. It's cosmetic.
 - **Dev server port:** Vite's 5173 is `strictPort`. Agents used ports 5190–5230 and emulator hosts 127.0.0.2–127.0.0.4.
 - **CI speed:** the runner is about 1.5× slower (§6.4 item 9).
-- **The only guest plane:** never ground it by rule. That empties every house and can bankrupt the island.
+- **The only guest plane:** never let grounding it empty the houses. That can bankrupt the island. Since 2026-09-28 (`gap-charter`) it's grounded past due like any plane and the mainland sub-charter (`subCharterOn`, econ.ts) flies its guests, at a price; the part chain still never opens on it.
 - **Anonymous-auth accounts:** deleting one breaks that device's seat. The app has a recovery layer ("Missing or insufficient permissions" → re-sign-in → relink), but still don't delete them.
 - **Sim tests:** balance or pacing tests that play whole seasons belong in files with `vi.setConfig({ testTimeout: 30000 })`.
 

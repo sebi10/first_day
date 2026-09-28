@@ -38,7 +38,7 @@ export function Needs({ ctl }: { ctl: Ctl }) {
                     <span class="pd-wrap">{x.text}</span>
                     <span class="d">
                       <b>{x.dueText}</b>
-                      {x.aw ? ' · grounds, restricts or closes it when due' : ''}
+                      {x.aw ? ` · ${x.sub ? `grounds it ${x.sub}` : 'grounds or closes it when due'}` : ''}
                     </span>
                   </span>
                   {x.scheduled ? (

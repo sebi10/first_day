@@ -5,7 +5,7 @@ This document is the contract between the four work packages. Where it names a t
 
 **What the critique round changed** (for anyone who read the first draft):
 - **v1 is smaller** (0.3). The full search-and-stock flow covers the high-volume jobs; rare jobs carry one pre-filled material line. Deferred to v2: the ignition and hot-section kinds, six of the seven new IPC figures, cores, calibration, tool wear, shelf life, FIFO lots, online backorders, ABC classes, spend budgets, line crew, the groundskeeper, morale, raises, traits and staff asks.
-- **No gridlock, by rule** (0.2 rule 8, 8.4, 8.5, 9.4). In stock → do it now at any tier, on the trade's work budget. Cards stay approvable after the analyst's End turn. A standing limit approves late cards at the resolve. A lead-1 part rides this week's carrier. The only guest plane never goes AOG on an alert.
+- **No gridlock, by rule** (0.2 rule 8, 8.4, 8.5, 9.4). In stock → do it now at any tier, on the trade's work budget. Cards stay approvable after the analyst's End turn. A standing limit approves late cards at the resolve. A lead-1 part rides this week's carrier. The only guest plane goes AOG past due like any plane, and a mainland sub-charter flies its guests meanwhile, automatically (10; 2026-09-28).
 - **Money per job is verified** (8.3). Every v1 task × model × island tier × health band lands at 0.96–1.16 × today's card. A scratch script checked this against the real `orderCost`, `orderTier` and catalog, with the spec's prices. Wire is sold by the foot, the twin's inspection and oil change cost more (two engines), and so does the cargo plane's starter-generator.
 - **Stock can't give the answer away** (0.2 rule 7, 6.4, 9, 14). There is near-miss stock on the shelf, the analyst's screens show no effectivity, and needs for unplanned alerts carry no P/N. Supersession badges are built from `judgePart`.
 - **Inventory is FP&A-correct** (9, 14). The spec now has one inventory-position formula, an allocation rule, soft reservations, stores bins, and commitments with payables (net 7, matched before payment). Velocity is measured per item family over 26 weeks, and insurance spares are never flagged to stop.
@@ -75,7 +75,7 @@ The analyst sits in the middle. They stock ahead of demand (min/max per item, st
 8. **No gridlock, written as rules and tested** (21.1):
    - *One session per seat per week keeps a stocked plane flying.* A plan whose lines are all on hand goes straight to Ready on the trade's work budget, at any tier. Airworthiness and hazard work may run past the budget. The tech plays it in the same session.
    - *A part ordered the week its alert appears arrives that week's resolve* (lead 1: `eta = week + lead + leadAdd − 1`). The analyst's approval is never the bottleneck: cards and requisitions stay approvable after the analyst's End turn, and at the resolve a standing limit approves what came in after it (8.5).
-   - *The only guest plane never goes AOG on an alert.* It gets no no-go squawks. Past due, it flies restricted (10).
+   - *The only guest plane is grounded past due like any plane, and nobody has to act for its guests.* It gets no no-go squawks (the early-sign wording, 5.6). Past due it's AOG, and a mainland sub-charter flies the guests in at the island's cost (10; 2026-09-28, it used to fly restricted).
    - MEL C, make-safe, autopilot for absent seats, and the AOG boat stay as backstops.
 
 ### 0.3 What's in v1 and what waits for v2
@@ -275,7 +275,7 @@ The stage a player sees is derived (`flowStage(s, alert)` in `src/sim/flow.ts`),
 | `ready` | job `ready` |
 | `done` / `closed` | job signed off / alert closed |
 
-Flags shown beside the stage: `mel` (placarded), `safe` (made safe), `aog` (the plane is grounded by it), `restricted` (the only guest plane flies half its flights on it), `shut` (the house is closed by it), `due` (week).
+Flags shown beside the stage: `mel` (placarded), `safe` (made safe), `aog` (the plane is grounded by it; on the only guest plane also `sub-charter`: its guests fly in on the mainland sub-charter), `shut` (the house is closed by it), `due` (week).
 
 ### 2.5 Ledger (stored, bounded) and budgets
 
@@ -334,7 +334,7 @@ export interface Build { id: string; what: string; tier?: number; cottage?: stri
 
 | Stored in the island doc | Derived every read (never stored) |
 | --- | --- |
-| alerts (id, sym, src, week, due, seed, hidden kind and cause, status, MEL, make-safe, bench, repair, again, who, nudged) | symptom text, finding text, the electrical site, MEL category, airworthiness and hazard flags, the fix tasks, alert tier, keyword chips, whether the plane is restricted |
+| alerts (id, sym, src, week, due, seed, hidden kind and cause, status, MEL, make-safe, bench, repair, again, who, nudged) | symptom text, finding text, the electrical site, MEL category, airworthiness and hazard flags, the fix tasks, alert tier, keyword chips, whether the plane is grounded and the sub-charter flies its guests |
 | orders' `flow` (task, pick, bench, tools, reqs, bom, stop) | flow stage, whose move, the stepper, soft vs hard reservations |
 | stock lines (on hand, reservations, ROP/max, average cost, first received) | available, inventory position, on order, ETA, bins in use, families, velocity, classes, insurance spares, suggested ROP, flags, needs |
 | POs, requisitions, EA records, store credit, the standing limit | inventory value, committed, payable, spendable cash, cost of cash tied up, spend by category over time |
@@ -544,7 +544,7 @@ The shells of new buildings are prefab, set by the mainland contractor (paid in 
   - small lines (not `bulk`): any flight flown that week, guest or cargo (a part fits in a guest flight's hold);
   - `bulk` lines (cases, coils, bundles, rotables, wheel assemblies): a cargo flight from tier 2, a guest flight's hold at tier 1 (today's kit rule);
   - building materials: the weekly supply boat, which always runs.
-  `placePo` splits a buy into one PO per supplier × carrier class. A PO whose carrier didn't run slips a week (review line). A slipping PO with a line for a job whose alert grounds a plane, restricts the only guest plane or closes a house takes the AOG boat instead (booked as freight), as today's "a mainland boat brings the most urgent kit".
+  `placePo` splits a buy into one PO per supplier × carrier class. A PO whose carrier didn't run slips a week (review line). A slipping PO with a line for a job whose alert grounds a plane (the only guest plane too) or closes a house takes the AOG boat instead (booked as freight), as today's "a mainland boat brings the most urgent kit".
 - **AOG freight** (`aog`): the AOG boat, `FREIGHT.aog` = $350 per PO (today's `ECON.boatKit`, renamed; keep the old name as an alias for the chain code). `eta = this week`: it arrives at this week's resolve whatever flew. OEM and supply house only; never building materials. With the eta rule above, the boat matters for lead-2 lines (rotables, wheel assemblies, lots), broker and online lines (+1), and weeks when the carrier doesn't fly.
 
 ### 3.7 Receiving paperwork (9.4 step 1)
@@ -802,14 +802,14 @@ Rules for sites: bathrooms are on a 20 A, 12 AWG circuit (210.11(C)(3)); kitchen
 
 - **NFF close**: only on a finding that reads "could not duplicate" (the NFF cause, or a real intermittent that hides at tier 3+, `looksNff`). A finding that shows the fault can't be closed as nothing: the engine refuses (*"The finding shows the fault: fix it, placard it or make it safe."*) and Investigate has no button for it (fix round 1: an IA doesn't sign "could not duplicate" over a failed test-set reading, and an electrician doesn't close a guest's shock complaint). The finding already says which case it is, so the gate leaks nothing.
 - **NFF close on a real intermittent**: the alert closes `nff`; a hidden comeback (`flow:nff` defect) re-raises it after `ALERTS.againMin..againMax` (1–2) weeks as `src: 'again'`, due now, same cause, text prefixed "Written up again: …". No incident: the repeat squawk and the due-now grounding are the cost.
-- **An alert nobody planned**, past its due week: it rolls today's deferral risk as if it were a carried order (`deferralRisk` with its weeks past due, cost `3 × labour` of its true kind), blamed on its trade. An airworthiness alert on a plane doesn't roll: the plane is AOG instead, or restricted if it's the only guest plane (10).
+- **An alert nobody planned**, past its due week: it rolls today's deferral risk as if it were a carried order (`deferralRisk` with its weeks past due, cost `3 × labour` of its true kind), blamed on its trade. An airworthiness alert on a plane doesn't roll: the plane is AOG instead, the only guest plane too (its guests on the mainland sub-charter, 10).
 - An alert on an asset that is out of service (grounded, red-tagged, AOG) doesn't roll.
 
 ### 5.6 The only guest plane
 
 Through tier 3 the twin is the island's only guest plane. Grounding it empties every house, which is why DECISIONS.md already keeps the part chain off it. `soleGuest(s, planeId)` is true for it until a second non-cargo plane arrives (the float, tier 4). On the only guest plane:
 - a symptom with an *Only guest plane* wording (5.2) is raised in that wording, with its lead (the deferrable early sign of the same fault: travel increasing, a nicked safety wire, a light vibration). The no-go wording isn't raised there, and neither is the no-go finding: each such cause has a `soleFinding` that is still within limits (*"Two prop bolts at the bottom of the torque band, stripes intact, no fretting at the flange"*, *"linings 0.12 in (limit 0.10)"*, *"the wire is nicked at the twist, not parted"*), so what the mechanic reads is a squawk an IA would let fly to its due week (fix round 1). Hard landings aren't rolled on it (15.3). Its MEL C items keep their placards;
-- past due, it never goes alert-AOG: it **flies restricted** (half its flights, a near-miss per flight) until the fix is signed off (10);
+- past due, it goes alert-AOG like any plane (flying past the due week or the MEL interval isn't legal), and a **mainland sub-charter** flies its guests in until the fix is signed off, so the houses stay booked (10; 2026-09-28: it used to fly restricted, half its flights with a near-miss each);
 - everything else (the flow, the parts, the money) is as for any plane.
 
 ## 6. Search
@@ -916,7 +916,7 @@ Types in `types.ts`, handling in `engine.ts` (flow and purchasing), `src/sim/sta
 | `dropJob` | the job's trade | a flow job, not done | Releases, cancels unordered requisitions, the job `cancelled`, the alert back to `open`. A job never started gives its labour back (a negative `labor` line; the work budget's spend too): dropping a wrong task to plan the right one doesn't pay twice. A part already bought for it lands as free stock (fix round 1). |
 | `request` | mechanic or electrician | the item is this trade's; 1–50 (tools: 1); at most `STOCK.maxReqs` (12) open per trade (*"12 requests are already waiting on Cy: cancel one, or wait for the desk."*) | A stock or tool requisition (no job): the analyst's call. A repeat request for the same line folds into the open one (a tool: *"Already asked: Cy decides on it."*). |
 | `cancelReq` | its requester or the analyst | the requisition is `open` | `cancelled`. |
-| `approve` (flow card) | analyst | as today (the freeze, with `spendable` for cash: under $2,000 only safety-critical; `isEmergency` now also counts a job whose alert grounds a plane, restricts the only guest plane or closes a house; receivership blocks over $800 except safety-critical) | Charges the labour (cash), places the card's lines to buy on POs (committed, 9.7) with the `buy` choice (default: 8.6), makes soft reservations hard; the job → `waiting_part` or `ready`. XP +10 as today. |
+| `approve` (flow card) | analyst | as today (the freeze, with `spendable` for cash: under $2,000 only safety-critical; `isEmergency` now also counts a job whose alert grounds a plane (the only guest plane too) or closes a house; receivership blocks over $800 except safety-critical) | Charges the labour (cash), places the card's lines to buy on POs (committed, 9.7) with the `buy` choice (default: 8.6), makes soft reservations hard; the job → `waiting_part` or `ready`. XP +10 as today. |
 | `approveReq` | analyst | the requisitions are `open`; the same freeze and receivership rules; a new stock line needs a free bin, as for `buy` | Places them on POs (grouped by supplier and carrier). |
 | `deferReq` | analyst | `open`, not deferred this week | `deferredWeek = week`; XP +10. |
 | `buy` | analyst | 1–12 lines; not under the freeze (*"Spendable cash under $2,000: stock orders are frozen."*); spendable covers it; bins (*"Stores full: 40 of 40 bins. Use up, scrap or return a line first."*, 9.6) | A stock PO (`by: 'fin'`). Quantities round up to whole packs (cut-to-length items: any quantity). |
@@ -1027,16 +1027,17 @@ export function cardOf(s: IslandState, o: Order, buy?: BuyChoice): {
   tools: { item: ItemId; price: number }[];                        // tools to buy (capex)
   freight: { sched: Arrival; aog?: Arrival & { cost: number }; pick: Freight };
   total: number;                                                   // labour (cash now) + to buy + tools + freight (committed)
-  aog: boolean; restricted: boolean; shut: boolean;                // what the job's alert does to its asset now
+  aog: boolean; shut: boolean;                                     // what the job's alert does to its asset now
+  sub?: { flights: number; fee: number; usd: number };               // the only guest plane's airworthiness job: a week of the sub-charter once it's grounded
   downtime?: { flights: number; usd: number };                     // a week of it (today's downtimeOf)
   due: number; mel?: { until: number; ext?: boolean };
   budget: { trade: OpsRole; spent: number; of: number };           // the trade's work budget this week
 };
-type Arrival = { eta: number; outWeeks: number };                  // outWeeks: resolves the asset spends AOG / restricted / closed with this freight
+type Arrival = { eta: number; outWeeks: number };                  // outWeeks: resolves the asset spends AOG / closed with this freight
 ```
 
 - **A pending card's shortfall lives only on the card**; there are no requisition objects for it. Requisitions are standalone requests and the new shortfall of an approved job (after a repick, or a line sent back at receiving).
-- **Default freight.** The AOG boat when the scheduled arrival leaves the asset out (AOG, restricted or closed) for more resolves than the boat would, and the difference × a week's downtime is more than `FREIGHT.aog`; otherwise scheduled. The card says both: *"Scheduled: here wk 9 · N-12 AOG wk 8 (~$3,100 of guests) | AOG boat +$350: here wk 8"*. The fin bot, autopilot and the standing approval use the same test.
+- **Default freight.** The AOG boat when the scheduled arrival leaves the asset out (AOG or closed) for more resolves than the boat would, and the difference × a week's downtime is more than `FREIGHT.aog`; otherwise scheduled. The card says both: *"Scheduled: here wk 9 · N-12 AOG wk 8 (~$3,100 of guests) | AOG boat +$350: here wk 8"*. The fin bot, autopilot and the standing approval use the same test.
 
 ### 8.7 Start, the install check, and sign-off
 
@@ -1099,7 +1100,7 @@ For each PO with `eta ≤ W` (in id order) whose carrier ran (3.6), or AOG freig
 2. **Supersession**: a line whose item the IPC prints as superseded by code 1 or 2 ships as the superseding P/N (*"shipped as TR-155-02 (supersedes TR-155-01, INTCHG 2)"*). Code 3 ships as ordered. A job's pick line is split: what is already reserved for it stays the old P/N (it's on the shelf), the rest becomes the new P/N (a job short 4 of 6 bolts with 2 old ones held keeps 2 old + 4 new; fix round 1).
 3. **Against the work order** (a mechanic line bought for a job): `judgePart(ac, ata, tag, pn)` for that job's airplane. `wrong`, `unlisted`: sent back (credited at the payment run, less `STOCK.restock`), the job gets `flow.stop` with the reason and waits for a repick. `displaced` (the IPC part for an assembly an alteration replaced): sent back the same way, and the research branch opens (13). `noteff`: passes receiving (the P/N is in the book); it installs, and leaves a sure defect (11.2).
 4. **Into stock**: `on += qty`, average cost updated, a job's lines reserved to it, requisitions `filled`; the PO becomes `received` (payable, 9.7). Then `allocate`.
-5. **Not carried**: scheduled POs slip a week (review line). A slipping PO with a line for a job whose alert grounds a plane, restricts the only guest plane or closes a house takes the AOG boat instead (`FREIGHT.aog`, booked as freight).
+5. **Not carried**: scheduled POs slip a week (review line). The mainland sub-charter's flights carry POs as guest flights do. A slipping PO with a line for a job whose alert grounds a plane or closes a house takes the AOG boat instead (`FREIGHT.aog`, booked as freight).
 
 ### 9.5 Replenishment (resolve, step 11b)
 
@@ -1126,11 +1127,12 @@ For each item with `rop`/`max`: if `IP ≤ rop`, order `max − IP` rounded up t
 - **Near-miss stock** (19.3): the starter shelf and the migrated shelf hold, beside each plane line whose book prints a near-miss, a few units of it: the other SB state's P/N, the other S/N block's, a straight-50 case beside the 20W-50. So "4 on hand ✓" in the Stock step doesn't tell the tech he picked right. It is honest dead stock: the analyst finds it slow or dead, and can scrap it or keep it for a bin's worth of cost.
 - **Dead stock** is movement only: an item family with no use in 26 weeks (14.2). There is no effectivity test, so nothing on the analyst's screens reveals which P/N fits which airplane from alert tier 2.
 
-## 10. MEL, make safe, AOG, restricted, closed houses (`econ.ts`, A)
+## 10. MEL, make safe, AOG, the sub-charter, closed houses (`econ.ts`, A)
 
 ```ts
-export function alertAog(s: IslandState, planeId: string, week = s.week): Alert | undefined;       // an open or planned (not done) airworthiness alert on it, due ≤ week, not placarded through ≥ week; never on the only guest plane
-export function restrictedBy(s: IslandState, planeId: string, week = s.week): Alert | undefined;   // the same condition on the only guest plane: it flies restricted instead
+export function alertAog(s: IslandState, planeId: string, week = s.week): Alert | undefined;       // an open or planned (not done) airworthiness alert on it, due ≤ week, not placarded through ≥ week; every plane
+export function subCharterOn(s: IslandState, week = s.week, weather = s.weather);                    // the only guest plane out of service (alert AOG, chain AOG, this week's tag): { plane, alert?, flights, cap, fee, usd }
+export function subCharterNeed(s: IslandState, planeId: string, weather?, week?);                    // what a week of it would fly and cost (the cards' "from wk N"); null unless it's the only guest plane
 export const isAog = (s, id) => chainAog(s, id) || !!alertAog(s, id);                             // chainAog: today's rule, but a chain opened from the flow (`PartChain.flow`) doesn't ground by itself
 export function hazardOn(s: IslandState, houseId: string): Alert | undefined;                       // an open or planned hazard alert on it
 export function rentFactor(s: IslandState, h: Asset): number;                                       // 0.75 while a made-safe hazard is open on it, else 1
@@ -1138,11 +1140,11 @@ export function rentFactor(s: IslandState, h: Asset): number;                   
 ```
 
 - **AOG.** An alert-AOG plane flies nothing and is off the week's schedule, as today's chain AOG (DECISIONS.md, *Pacing*). The review names it: *"Twin N-12 AOG: left brake pedal soft (due week 7, not fixed)."*
-- **Restricted (the only guest plane).** Past due, it flies half its flights (`ceil(per / 2)`, as at 40–59 health) and each flight flown counts a near-miss on the safety grade, until the fix is signed off: *"Twin N-12 flew 2 of 4 with the brake pedal travel increasing (due week 7): a near-miss on each flight. Fix it, or ground it (tag)."* The mechanic can still ground it with the existing `tag`. This mirrors the chain exemption and the 40–59 band: an empty island is worse than a restricted plane.
-- **MEL C.** `mel.until = max(the week placarded, the due week)`: the placard covers the item through its due week's resolve (a placard put on early isn't spent before it's needed). The one extension adds a week (`melExtend`): the mechanic asks for it from the placard row (Investigate, *"Ask Cy to extend the MEL (once)"*), the analyst approves it on the card or the Needs list (*"Approve Ana's MEL extension (to wk 9)"*); it can still be asked the week after the placard ran out, before that week's flights. Past it: *"Twin N-12's MEL C for com 1 ran out in week 11: grounded until the radio is replaced."* (the only guest plane: restricted). The mechanic's End turn says what the MEL still allows: *"Fix it or placard it (MEL C) this week, or Cargo C-7 is AOG"*, *"Fix it or tag it this week (no MEL relief)"*, *"The MEL placard ran out: ask Cy to extend it (once), or fix it"*, *"Cy hasn't approved the MEL extension yet"* (fix round 1).
+- **The only guest plane: grounded, and the mainland sub-charter (2026-09-28).** Past due it's AOG like any plane, until the fix is signed off: *"Twin N-12 AOG: brake pedal travel increasing (due week 7, not fixed): 4 flights cancelled."* An outside Part 135 operator's plane and crew fly the island's guests in meanwhile, automatically: the guests who need a seat (the houses that can rent and the housekeepers can turn over, less the ferry's parties), up to the twin's own schedule in that weather, no day tours. The island pays `SUB_FEE` a flight ($270: its own $180 a flight × the operator's 1.5), booked as `subcharter` spend and `costs.subCharter`: *"Twin N-12 stayed on the ground: a mainland sub-charter flew the guests in (2 flights at $270, $540)."* The twin's schedule stays on the on-time grade's books (0 of 4: the operator's flights aren't the island's); no near-miss is counted, since nothing flew an unairworthy plane. Its flights carry POs as guest flights do. The mechanic's safety call (`tag`) on it brings the sub-charter too. From tier 4 the float shares the guests, so the twin is grounded with no sub-charter, like any plane. Every seat sees it coming: Investigate, the MEL words, the card's chip (*"From wk 7: sub-charter ~$540/wk"*), the Needs row and the End turn line say what a week of it costs. The old rule (half its flights, a near-miss each) flew a plane past its interval, which an A&P won't sign; the pillar it served (grounding it must never empty every house) is kept by the sub-charter.
+- **MEL C.** `mel.until = max(the week placarded, the due week)`: the placard covers the item through its due week's resolve (a placard put on early isn't spent before it's needed). The one extension adds a week (`melExtend`): the mechanic asks for it from the placard row (Investigate, *"Ask Cy to extend the MEL (once)"*), the analyst approves it on the card or the Needs list (*"Approve Ana's MEL extension (to wk 9)"*); it can still be asked the week after the placard ran out, before that week's flights. Past it: *"Twin N-12's MEL C for com 1 ran out in week 11: grounded until the radio is replaced."* (the only guest plane too, its guests on the sub-charter; the weeks it flies on the placard the review says so: *"Fix it by then, or it is grounded: a mainland sub-charter flies the guests at about $540 a week (2 flights at $270)."*). The mechanic's End turn says what the MEL still allows: *"Fix it or placard it (MEL C) this week, or Cargo C-7 is AOG"*, *"Fix it or tag it this week (no MEL relief)"*, *"The MEL placard ran out: ask Cy to extend it (once), or fix it"*, *"Cy hasn't approved the MEL extension yet"* (fix round 1).
 - **Make safe.** Breaker off and tagged, or a blank-off: the house rents at ×0.75 (*"Cottage 2 rented at 75%: the bathroom circuit is off and tagged."*). A hazard not made safe closes the house (*"Cottage 2 closed: a guest felt a tingle at the shower valve (make it safe or fix it)."*). **A branch breaker doesn't isolate a service-neutral fault** (the tingle's neutral cause): `makeSafe` with `breaker` there plants a sure hidden `elec:isolation` defect (due W+1..2), removed if the alert is fixed first; else it surfaces as a shock incident (11.4) and re-raises the alert due now. The right move is to leave the house closed (the main off) until the neutral is fixed. Tiers ≤ 2 say so in the finding; tier 3+ doesn't.
 - `downtimeOf` loses the kits: the cargo plane down holds its bulk POs due that week (the AOG boat's price for any that carry a line for a grounding job, else nothing).
-- The island shows an alert-AOG plane at its AOG spot on jacks (today's art for a chain AOG), a restricted plane with a placard bubble, a closed house with its no-entry bubble, a made-safe house with a small tag bubble (package D owns island art; A exposes `alertAog`, `restrictedBy` and `hazardOn`).
+- The island shows an alert-AOG plane at its AOG spot on jacks (today's art for a chain AOG; the only guest plane too), a plane on an MEL placard with a small placard bubble, a closed house with its no-entry bubble, a made-safe house with a small tag bubble (package D owns island art; A exposes `alertAog`, `melOn`, `subCharterOn` and `hazardOn`).
 
 ## 11. Wrong choices surface later (the consequences)
 
@@ -1190,11 +1192,11 @@ Rule order: category stop, then `nogfci`, `noafci`, `oversized`, `undersized`, `
 
 | Wrong choice | What happens |
 | --- | --- |
-| An MEL placard left past its limit | the plane is AOG until fixed (the only guest plane: restricted) |
+| An MEL placard left past its limit | the plane is AOG until fixed (the only guest plane too: the sub-charter flies its guests, at a price) |
 | A hazard not made safe | the house is closed until it's made safe or fixed |
 | A service-neutral fault "made safe" at a branch breaker | rule `elec:isolation`: [`"A guest at {a} felt the tingle again: a branch breaker doesn't isolate a loose service neutral"`, `"A guest at {a} was shocked at the shower valve: the service neutral was never isolated"`], found `"a service-neutral fault made safe at a branch breaker"`, fix: none (re-raise, due now) |
 | An NFF close on a real fault | it comes back in 1–2 weeks, due now (11.1) |
-| An alert ignored past due | deferral risk (5.5); a plane with an airworthiness alert goes AOG (the only guest plane: restricted) |
+| An alert ignored past due | deferral risk (5.5); a plane with an airworthiness alert goes AOG (the only guest plane too: the sub-charter flies its guests, at a price) |
 | The electrician's bench call wrong | today's `meter:unit` / `meter:wiring` / `meter:radio` |
 | Stocking the wrong things | bins held, a small carrying charge, a 25% loss to send it back |
 | Buying from the broker | cheaper, a week slower, and one line in four held a week without traceability |
@@ -1213,7 +1215,7 @@ Rule order: category stop, then `nogfci`, `noafci`, `oversized`, `undersized`, `
 **`resolveWeek`**:
 0. `settleBlind` (unchanged)
 1. autopilot for missed seats (18.3); 1b. standing approvals (8.5), and today's `leftoverChainCard` for chain cards
-2. flights: capacity per plane with `isAog` (alerts included) and `restrictedBy` (half, a near-miss per flight flown). Then the pilots' caps (`pilotCap(s)`, D) cut the fleet's total, taking flights off the cargo plane first so guests keep flying. Weak battery (unchanged). `staffAfterFlights(s, flown, r, W, line)` (D: hard landings raise `M_HARD_LANDING` for next week)
+2. flights: capacity per plane with `isAog` (alerts included, the only guest plane too). The only guest plane out of service: `subCharterOn` flies its guests (they count as arrivals and as guest flights for receiving; the fee is paid at step 11). Then the pilots' caps (`pilotCap(s)`, D) cut the fleet's total, taking flights off the cargo plane first so guests keep flying. Weak battery (unchanged). `staffAfterFlights(s, flown, r, W, line)` (D: hard landings raise `M_HARD_LANDING` for next week)
 3. `receive(s, W, flew, line)` (9.4; the chain's own part keeps its rules), then `allocate`
 4. power (unchanged); `chargeCarts` (unchanged: the carts stay the mechanic's)
 5. houses and guests: rentable with hazards, rent × `rentFactor`; `housekeepingCap(s)` (D) caps bookings; occupancy × `reviewMult(s)` (D)
@@ -1505,7 +1507,7 @@ export type StaffAction =
 
 - Up to 8 figures, each one `<use>` of a symbol: the existing `#i-guy`, plus new symbols with a hard hat (builders), an apron (housekeepers) and a white shirt (pilots), defined once in `LifeDefs`. Placement: builders on the open build's site (one each, up to 3); a pilot by the lead guest plane and one by the cargo plane (up to 2); a housekeeper at a booked house (up to 2).
 - None in a storm or at night, except one figure at the office window. A two-frame hammer bob for builders when motion is on; otherwise static.
-- D also draws what A exposes (10): the alert-AOG plane at its AOG spot, the restricted plane's placard bubble, the closed-house no-entry bubble, and a small tag bubble on a made-safe house.
+- D also draws what A exposes (10): the alert-AOG plane at its AOG spot, the placard bubble of a plane on its MEL placard, the closed-house no-entry bubble, and a small tag bubble on a made-safe house.
 - **Node budget**: the beaten island-lab scene stays at or under 1,500 SVG nodes (1,365 today; the crew adds at most 8, plus the symbols). New island-lab scenes: `staff` (tier 3, builders on the villa site, a pilot by the twin) and `staff-night`.
 
 ### 15.11 The hiring UI (D: `src/ui/staff/`)
@@ -1539,7 +1541,7 @@ export function dockNext(s: IslandState, role: Role): { label: string; target: D
 export function endTurnChecks(s: IslandState, role: Role): { text: string; urgent: boolean; standing?: boolean }[];   // the End-turn confirm
 export function revenueMoves(s: IslandState, role: Role): { order: Order; label: string; cost: string }[];            // the week's revenue work (a load sheet, a GPU start): Your move and the Dock
 export function chainStepOrder(s: IslandState): { order: string; who: Role; label: string } | null;                 // the part chain's step a tap opens ('Open the logbooks ▸', 'Open the IPC ▸', 'Meter the circuit ▸')
-export function chainTag(s: IslandState, c: PartChain): string;                                                       // "Cargo C-7 is AOG" / "flies restricted" / "flies on its MEL placard to wk 9" / "flies meanwhile"
+export function chainTag(s: IslandState, c: PartChain): string;                                                       // "Cargo C-7 is AOG" / "flies on its MEL placard to wk 9" / "flies meanwhile"
 export function openTarget(t: DockTarget): void;   // window.dispatchEvent(new CustomEvent('ic:open', { detail: t })): B's ops panel and C's desk listen
 ```
 
@@ -1561,7 +1563,7 @@ export function openTarget(t: DockTarget): void;   // window.dispatchEvent(new C
 - a pending flow card not deferred this week (who: analyst, waits: the trade, key `flow:card:{order}`);
 - a standalone requisition or an approved job's new shortfall, not deferred this week (analyst, the requester, `flow:req:{id}`). A pending card's shortfall is on the card, never counted twice;
 - a bench check asked (electrician, mechanic, `flow:bench:{alert}`);
-- a ready job whose alert grounds a plane, restricts the only guest plane or closes a house (the trade, the analyst, `flow:aog:{order}`: *"Twin N-12 is AOG: do the brake bleed"*).
+- a ready job whose alert grounds a plane or closes a house (the trade, the analyst, `flow:aog:{order}`: *"Twin N-12 is AOG (its guests on the sub-charter): do the brake bleed"*).
 
 - **Crew strip and cards** (`blocks`): a seat that hasn't ended its turn reads *"you wait on Ben"* in a neutral tone; *waiting on you* and a seat that has ended stay rust (fix round 1: "blocking you" in red before a friend had played read as blame). Flow moves are counted per pair of seats in one line, *"2 cards and 1 requisition waiting ($1,240)"* (it replaces today's *"N approvals waiting"*). A move for a grounded plane or a closed house gets its own line. The line about kits stuck on a grounded cargo plane becomes *"cargo plane grounded: 2 POs waiting for a flight"*.
 - **Pushes** (`pushes`):
@@ -1571,10 +1573,10 @@ export function openTarget(t: DockTarget): void;   // window.dispatchEvent(new C
   - A stop pushes nothing: the tech sees it at the start.
 - **The Dock** (A, `home.tsx`, from `dockNext`). The tech's primary button opens JobFlow on the first *Your move* row, due now first (*"Next: soft brake pedal · Twin N-12 ▸"*); a ready job opens its start, as today, and a job the per-turn cap would refuse is skipped. A research step opens the chain's step (*"Open the logbooks · Cargo C-7 ▸"*). The week's revenue work (the charter load sheet, a ground power start) shows first when the top row isn't due this week, in Your move too (*"This week"*), with what skipping it costs. The analyst's reads *"Review 2 cards · 1 requisition ▸"* and opens the desk's Approvals (fix round 1).
 - **End-turn check** (today's confirm, from `endTurnChecks`):
-  - A tech gets every unplanned alert (*"Plan it now so the parts come in time: main tire worn on Twin N-12 (due wk 9)."*), and every due-now alert with no sign-off: *"Fix it or placard it this week, or Twin N-12 is AOG."* (the only guest plane: *"… or Twin N-12 flies restricted."*); a hazard: *"Make it safe or fix it, or Cottage 2 stays closed."*. Planning alone doesn't save the plane: `alertAog` counts planned alerts too. Today's ready jobs, owed cross-trade moves and carts stay in the list.
+  - A tech gets every unplanned alert (*"Plan it now so the parts come in time: main tire worn on Twin N-12 (due wk 9)."*), and every due-now alert with no sign-off: *"Fix it or placard it this week, or Twin N-12 is AOG."* (the only guest plane: *"… or Twin N-12 is grounded and a mainland sub-charter flies the guests (about $540 a week)."*); a hazard: *"Make it safe or fix it, or Cottage 2 stays closed."*. Planning alone doesn't save the plane: `alertAog` counts planned alerts too. Today's ready jobs, owed cross-trade moves and carts stay in the list.
   - The analyst gets: *"2 cards and 1 requisition wait on you (Seb, Ana). After you end your turn, anything that comes in goes through tonight up to your standing limit ($1,000); the rest waits for next week."* When a tech hasn't played yet: *"Ana and Ben haven't played yet: a card over $1,000 that isn't safety work due this week or next will wait a week. Raise the limit …"*, with a one-tap *"Raise the standing limit to $2,000"* on Home.
   - A tech's revenue work: *"No load sheet: half of Twin N-12's charters stay on the ramp."* The MEL lines say what the MEL still allows (10).
-- **The chain's words** (`chainTag`): a chain's plane is *AOG* only when it is grounded (an airworthiness item due now, not placarded); otherwise it *flies restricted*, *flies on its MEL placard to wk N* or *flies meanwhile*. The pushes, the banner, the crew strip and the desk's chip read it (fix round 1: "Cargo C-7 AOG" on a job not due for two weeks was false).
+- **The chain's words** (`chainTag`): a chain's plane is *AOG* only when it is grounded (an airworthiness item due now, not placarded); otherwise it *flies on its MEL placard to wk N* or *flies meanwhile*. The pushes, the banner, the crew strip and the desk's chip read it (fix round 1: "Cargo C-7 AOG" on a job not due for two weeks was false).
 - **Where it shows**: the inbox chips and the stepper (B), the approval cards (C), the Home crew strip (unchanged code reading `blocks`), the Dock and the End-turn check (A), the pushes.
 
 ## 17. Screens (phone first: 390 × 844; desktop 1280 × 820)
@@ -1591,12 +1593,12 @@ export function openTarget(t: DockTarget): void;   // window.dispatchEvent(new C
 
 **Your move comes first.** A mounts B's `YourMove` (the inbox's *Your move* group) at the top of Home's main column for the techs, above the waiting cards, the story card, the chain banner and the crew project. On a phone it sits right under the crew strip's numbers, not several screens down.
 
-**The ops panel.** The asset list folds into one chip row (*AOG 1 · MEL 1 · restricted · SAFE 1 · closed 1*; a tap expands it to today's list). Then the ground power card, and the rest of the inbox (`AlertInbox`):
+**The ops panel.** The asset list folds into one chip row (*AOG 1 · MEL 1 · sub-charter 2 × $270 · SAFE 1 · closed 1*; a tap expands it to today's list). Then the ground power card, and the rest of the inbox (`AlertInbox`):
 1. *Waiting*: approval, parts, bench, research, each with its chip saying on whom or until when.
 2. *Other work*: today's order cards for load sheets, ground power starts, reports, redos, legacy orders and the crew project.
 3. *Closed this week* (collapsed).
 
-The *Your move* rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then by due week. A row (56 px or more): the source icon; the symptom on one line (ellipsis); under it the asset, the due chip (*due now* in rust, *due wk 9*), the flags (*MEL C to wk 9*, *SAFE*, *AOG*, *RESTRICTED*, *SHUT*); on the right the whose-move chip (16). The Stock chip (*"Stock: 2 low"*) opens this trade's stock read-only with **Request** per item.
+The *Your move* rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then by due week. A row (56 px or more): the source icon; the symptom on one line (ellipsis); under it the asset, the due chip (*due now* in rust, *due wk 9*), the flags (*MEL C to wk 9*, *SAFE*, *AOG*, *sub-charter*, *SHUT*); on the right the whose-move chip (16). The Stock chip (*"Stock: 2 low"*) opens this trade's stock read-only with **Request** per item.
 
 **The job-flow sheet** (`JobFlow`): header (asset and registration or house; the symptom; due; flags) and a five-dot stepper, *Investigate · Manual · Parts · Stock · Send* (electrician: *Investigate · Reference · Materials · Stock · Send*). Steps that don't apply are skipped:
 - repairs open at Stock;
@@ -1665,7 +1667,7 @@ The *Your move* rows: new alerts, ready jobs, stopped jobs; due now first, then 
 - `ApprovalCard`:
   - The header: the job title, asset, the trade's avatar and *for Seb*; the symptom (one line) and the task (*"32-40-01 Main wheel, tire and tube"*).
   - The lines: *From stock: 3 lines, $86*, *To buy: 1 × OG-65010-8 TIRE, $285 · OEM · next flight, here tonight*, *Labour $290*; then the total.
-  - Chips: *AOG*, *restricted*, *house closed*, *due now*, *MEL to wk 9*, *waiting a week costs about $1,120* (`expectedDeferralCost`, counting a grounded plane's downtime or a closed house's rent), and the trade's work budget.
+  - Chips: *AOG*, *Sub-charter ~$540/wk* (before it happens: *From wk 9: sub-charter ~$540/wk*), *house closed*, *due now*, *MEL to wk 9*, *waiting a week costs about $1,120* (`expectedDeferralCost`, counting a grounded plane's downtime or a closed house's rent), and the trade's work budget.
   - Swipe right to approve, left to defer (today's gesture), or the buttons. There's **no counter gesture on flow cards**.
   - A tap expands it: per line the supplier (*OEM* | *Broker −20%, +1 week, 1 in 4 held for traceability*), and the freight with what it does to the asset (*"Scheduled: here wk 9 · N-12 AOG wk 8 (~$3,100 of guests)"* | *"AOG boat +$350: here wk 8"*). The total follows `cardOf(s, o, buy)`.
 - `ReqQueue`: standalone requests and approved jobs' new shortfalls: *"Seb asks for 1 × T-N2 nitrogen charging kit ($480, a tool: capex) · 'the accumulator job needs it'"*. **Defer** / **Approve**; select several for **Approve 3 ($890)** (`approveReq`, one PO per supplier and carrier).
@@ -1720,7 +1722,7 @@ They call the same reducer as a phone. They don't run the search: a hit rate sta
 const hit = (skill: number, alertTier: number) => clamp(0.55 + 0.45 * skill - 0.08 * Math.max(0, alertTier - 2), 0.3, 0.97);
 ```
 
-- **First, the calls.** A hazard is made safe when its fix needs a line not on hand. On a service-neutral cause the bot leaves the house closed with `hit`; else it makes it safe at the branch breaker. An MEL C item is placarded when its fix needs a part not on hand, or while it waits on the electrician's check (fix round 1: a com radio's wiring fault on the only guest plane flew it restricted for weeks while the check came round). A placard running out with the fix not ready: the mechanic asks for the one extension and the fin bot approves it. A bench alert gets the electrician's check when that seat is a bot that isn't absent; otherwise the bot reads the finding right with `hit`.
+- **First, the calls.** A hazard is made safe when its fix needs a line not on hand. On a service-neutral cause the bot leaves the house closed with `hit`; else it makes it safe at the branch breaker. An MEL C item is placarded when its fix needs a part not on hand, or while it waits on the electrician's check (fix round 1: a com radio's wiring fault on the only guest plane kept it restricted for weeks while the check came round; since 2026-09-28 it would sit grounded on the sub-charter). A placard running out with the fix not ready: the mechanic asks for the one extension and the fin bot approves it. A bench alert gets the electrician's check when that seat is a bot that isn't absent; otherwise the bot reads the finding right with `hit`.
 - **Then it plans every open alert of its trade at once** (due first). A bot plans early, so parts come in time. With `hit` the task is one of `fixesOf`, else a sibling task in the same chapter. An NFF alert is closed NFF with `hit`, else its most common cause's task is planned. A real fault is wrongly closed NFF only when its finding hides it (`looksNff`, tier 3+), with (1 − hit) × `BOT_MISS.looksNff` (the engine refuses an NFF close over a finding that shows the fault). Each slot the cause needs gets the `stdPick` line with `hit`, else a near-miss from the slot's own rows (the other S/N block, the code-3 P/N without its set, the other amperage or protection).
 - A stopped job is repicked with `stdPick` on the next turn.
 - Then ready jobs are played as today (per-turn limits, carts, reports first).
@@ -1729,7 +1731,7 @@ const hit = (skill: number, alertTier: number) => clamp(0.55 + 0.45 * skill - 0.
 ### 18.2 The fin bot (A; staff through D's `botStaff`)
 
 - **Cards**: today's rule (approve when the expected cost of waiting is at least 0.6 × the card or it is critical, keeping the reserve), with the default freight (8.6). The broker only for consumables, when spendable − cost is under the reserve.
-- **Requisitions**: approved when spendable − cost ≥ the reserve, or at once for a job whose alert grounds a plane, restricts the only guest plane or closes a house; a tool a job needs, always.
+- **Requisitions**: approved when spendable − cost ≥ the reserve, or at once for a job whose alert grounds a plane (the only guest plane too) or closes a house; a tool a job needs, always.
 - **Needs**: nudges every unplanned airworthiness or hazard need due within a week.
 - **Reorder policy**, once per turn:
   - The `order` flags are worked urgent first, each through its one-tap action; stock buys go up to the suggestion (whole packs, scheduled, within the bins).
@@ -1745,9 +1747,9 @@ const hit = (skill: number, alertTier: number) => clamp(0.55 + 0.45 * skill - 0.
 - **A technician**:
   - makes hazards safe (breaker; on a service-neutral cause it leaves the house closed: autopilot keeps to the manual);
   - placards MEL items whose fix needs a part not in stock or that wait on the electrician's check, and asks for the one extension when a placard runs out with the fix not ready;
-  - plans the alerts due now or next week that ground a plane, restrict the only guest plane or close a house, with the right task (`fixesOf`) and `stdPick` (autopilot keeps to the manual: no hidden defects, as today);
+  - plans the alerts due now or next week that ground a plane (the only guest plane too) or close a house, with the right task (`fixesOf`) and `stdPick` (autopilot keeps to the manual: no hidden defects, as today);
   - plays up to 2 ready jobs at 50% (today). No NFF closes.
-- **The analyst**: today's rule (up to 2 cards above the $4,000 floor; a job whose alert grounds a plane, restricts the only guest plane or closes a house whenever spendable covers it, with the default freight). Plus requisitions and urgent stock flags within `STOCK.autopilotCap` ($800 a week), and `autoStaff` (15.12). Replenishment runs whoever plays (it is the analyst's standing policy, 9.5).
+- **The analyst**: today's rule (up to 2 cards above the $4,000 floor; a job whose alert grounds a plane (the only guest plane too) or closes a house whenever spendable covers it, with the default freight). Plus requisitions and urgent stock flags within `STOCK.autopilotCap` ($800 a week), and `autoStaff` (15.12). Replenishment runs whoever plays (it is the analyst's standing policy, 9.5).
 - The standing approvals (8.5) run after autopilot, and only when the analyst ended the turn.
 
 ## 19. Migration and the version gate (A)
@@ -1857,7 +1859,7 @@ The real drain is about $6,700 over 26 weeks (`costBy` $1,400, tools $2,100, bui
 | No-fault-found share of alerts | 10–20% |
 | Weeks from alert to sign-off | today's order-to-sign-off + 0.25 or less |
 | Plane-weeks AOG on alerts per game | today's chain AOG weeks + 2 or less, reported by cause (not stocked, waiting on approval, not planned, carrier) |
-| Weeks the only guest plane flies restricted, per game | 2 or less |
+| Weeks the mainland sub-charter flies the only guest plane's guests (it's grounded), per game | 2 or less |
 | House-weeks closed by a hazard per game | 3 or less |
 | Fill rate by value, weeks 8–26 | 45–80% |
 | Job-weeks waiting on parts, per week | 1.5 or less |
@@ -1870,7 +1872,7 @@ The real drain is about $6,700 over 26 weeks (`costBy` $1,400, tools $2,100, bui
 
 ### 20.5 `scripts/balance.ts` (A)
 
-- The summary table adds `latency`, `AOG wk` (split stock / approval / plan / carrier), `restricted`, `fill%`, `wait/wk`, `inv@26`, `bins@26`, `payroll@26` and `late bld`; the robust sweep adds `latency`, `AOG wk` and `fill%`.
+- The summary table adds `latency`, `AOG wk` (split stock / approval / plan / carrier), `sub` (was `restricted`: weeks on the mainland sub-charter), `fill%`, `wait/wk`, `inv@26`, `bins@26`, `payroll@26` and `late bld`; the robust sweep adds `latency`, `AOG wk` and `fill%`.
 - `detail` adds, per week: alerts raised / planned / NFF-closed, POs placed / received / paid, inventory value, payroll.
 - A new mode, `flow` (`npm run balance -- flow [team] [seed]`), prints the first 40 alerts of one game: the symptom, the hidden cause, the bot's task and pick, the verdict (right, wrong task, near-miss, stop) and what came of it, to tune the symptom weights.
 - A new variant, `cottages`: the three friends with a fin bot that starts a cottage at tier 4 when spendable is over $40,000, so the optional cottages are tested too.
@@ -1957,7 +1959,7 @@ B, C and D then start from A3 in parallel and edit only their own files. If one 
 | `tests/*` (except the files named for B, C, D), `tests/fixtures/v2-6c0c426-*.json`, `scripts/balance.ts`, `scripts/fixtures-v2.ts` | A |
 | `src/ui/flow/*` (new: `YourMove`, `Inbox`, `JobFlow`, `Search`, `ManualView`, `IpcView`, `SupplyView`, `StockStep`, `StockBadge`, `StopSheet`, `WhatsNew`, `steps.ts`, `flow.css`), `src/ui/ops.tsx` (the asset chip row, the inbox, the `ic:open` listener), `orders.tsx`, `manual.tsx`, `chain.tsx`, `puzzlehost.tsx`, `week0.tsx`, `src/puzzles/wireup.ts`, `conduit.ts`, `panel.ts`, `meter.ts` (two `PLACES` entries), `tests/flowui.test.ts`, `tests/conduit.test.ts` | B |
 | `src/ui/purchasing/*` (new: `ApprovalCard`, `ReqQueue`, `StockPlanner`, `Needs`, `ItemSheet`, `BuySheet`, `Receiving`, `Money`, `WhatsNew`, `model.ts`, `purchasing.css`), `src/ui/desk.tsx` (the segments, the End-turn lock removed for flow cards, the `ic:open` listener), `src/ui/board.tsx`, `src/puzzles/auction.ts`, `invoice.ts`, `tests/purchasing.test.ts` | C |
-| `src/sim/staff.ts` (after A), `src/ui/staff/*` (after A), `src/ui/island.tsx`, `src/ui/island/*` (new `staff.tsx`; the restricted, closed and made-safe bubbles), `src/islandlab.tsx`, `scripts/island-shots.mjs`, `tests/staff.test.ts` | D |
+| `src/sim/staff.ts` (after A), `src/ui/staff/*` (after A), `src/ui/island.tsx`, `src/ui/island/*` (new `staff.tsx`; the placard, closed and made-safe bubbles), `src/islandlab.tsx`, `scripts/island-shots.mjs`, `tests/staff.test.ts` | D |
 | `src/styles.css` | A, only for a shared token; B, C and D style in their own CSS files |
 | `scripts/e2e.mjs`, `scripts/e2e-online.mjs`, `docs/ONBOARDING.md` | the Integrate phase (from B's, C's and D's *how to play*) |
 | `docs/DECISIONS.md` | A adds *## Real job flow* with four subsections (*Engine and data (A)*, *Technicians' screens (B)*, *The analyst's desk (C)*, *Staff (D)*), each with a placeholder line; each package writes only in its own |
@@ -1975,7 +1977,7 @@ B, C and D then start from A3 in parallel and edit only their own files. If one 
   - money: `committed`, `payable`, `spendable`, `capitalCost`, `fixedNow`; `spendSeries`, `tradeSpend`, `assetSpend`, `stockBuiltUsed`, `fillRate`, `waitWeeks`, `runway`;
   - suppliers and search: `SUPPLIERS`, `FREIGHT`, `priceAt`; `search` over `supplyIndex`; `auctionLot`, `invoiceContext`;
   - the actions `approve` (with `buy`), `approveReq`, `deferReq`, `buy`, `setStock`, `scrap`, `nudge`, `melExtend`, `setStanding`, `setBudget`; the `ic:open` contract.
-- **D**: the `STAFF`, `BUILDS` and `COTTAGE` constants and the stub signatures (15.4); `raiseAlert`; `takeStock`; `book`; the `Liner` type; the staff actions in the `Action` union and `WEEK_BOUND`; `builtShare` wired into `finishProjectIfDone`; the hooks called from `resolveWeek`, `openWeek` and `projectWeek`; `alertAog`, `restrictedBy` and `hazardOn` for the island.
+- **D**: the `STAFF`, `BUILDS` and `COTTAGE` constants and the stub signatures (15.4); `raiseAlert`; `takeStock`; `book`; the `Liner` type; the staff actions in the `Action` union and `WEEK_BOUND`; `builtShare` wired into `finishProjectIfDone`; the hooks called from `resolveWeek`, `openWeek` and `projectWeek`; `alertAog`, `hazardOn` (and, since 2026-09-28, `subCharterOn` in place of `restrictedBy`) for the island.
 
 **What no package does**:
 - change another package's files;
@@ -2044,7 +2046,7 @@ Every blocker and major is resolved in the sections above. These points were rej
 1. **v1 is a smaller game than the first draft, on purpose.** The full "alert → manual → IPC → stock → buy" flow covers the jobs that make up about 90% of the work: inspections, oil, tires and brakes, props, hydraulics, radios, alternators, outlets, GFCIs, 3-ways, the hot tub, the feeder. Rare jobs keep the diagnosis but come with their parts filled in. Ignition, the turbine hot section, calibration, cores, shelf life, line crew and morale wait for v2. *Trade-off:* less realism on rare jobs for now, in exchange for a build that can land on live islands without breaking them.
 2. **In stock means "do it now"; missing means "ask the analyst".** That's your own flow. A job whose parts and tools are all on the shelf starts at once, paid from the trade's weekly work budget, at any tier. Safety work may go over the budget. The analyst's approvals are for buying, and for bigger jobs over the budget. *Trade-off:* the analyst swipes fewer cards and steers through budgets and stock instead. Stocking well becomes the analyst's main lever on how fast the planes fly again.
 3. **Nobody can hold the island hostage by playing at the wrong time.** Cards stay approvable after the analyst ends the turn. A card that comes in after the analyst has played goes through at the week's resolve, up to a standing limit the analyst sets. A part with a one-week lead time, ordered this week, arrives at this week's resolve. *Trade-off:* the analyst gives up some control (they can set the limit to $0). In return a plane isn't grounded just because the analyst played first.
-4. **The island's only guest plane is never grounded by an alert.** It gets early warning signs instead of no-go squawks. If a fix is overdue, it flies half its flights with a safety near-miss on each, until someone fixes it or grounds it. *Trade-off:* less strict than real life, where it would be grounded. But grounding the only guest plane empties every house and can bankrupt the island, which is the same reason the part chain already leaves that plane alone.
+4. **The island's only guest plane is grounded past due like any plane, and a mainland sub-charter flies its guests** (changed 2026-09-28; it used to fly half its flights with a near-miss each). It still gets early warning signs instead of no-go squawks. Overdue, it's AOG until the fix, and an outside operator flies the guests in automatically, at $270 a flight against the island's own $180, so the houses stay booked and the cost is real. Nobody has to act; every seat sees the cost before it happens. *Trade-off:* the island pays a premium and loses the day tours for those weeks, instead of flying an unairworthy plane with near-misses. Grounding the only guest plane still never empties every house, which is the same reason the part chain leaves that plane alone. See docs/DECISIONS.md, 2026-09-28.
 5. **Jobs cost what they cost today, with three honest exceptions.** A job's labour plus its parts equals today's card, checked for every job. The exceptions are the twin's 100-hour and oil change (two engines) and the cargo plane's starter-generator: those cost more, about $1,400 over a game. *Trade-off:* a little more maintenance spend, in exchange for prices a mechanic believes.
 6. **Mistakes stay hidden, and the shelf can't give the answer away.** A wrong task, a part for the wrong serial number, or a wrong breaker or missing AFCI protection shows up weeks later, as a repeat squawk, an incident or an inspection find. A part that simply doesn't fit stops the job at the install. The stockroom holds some near-miss parts left by "the previous operator", so "4 on hand" never tells the mechanic he picked right, and the analyst's screens never show which P/N fits which plane. *Trade-off:* a little dead stock on every island, for a test that stays a test.
 7. **"Which parts move fast or slow" is answered by family, over 26 weeks.** Tires, linings, oil filters, GFCI devices, 20 A breakers are ranked against each other, not single part numbers week by week: there isn't enough demand for per-part weekly numbers to mean anything (the twin's tire is used less than once a game). Safety spares are marked "insurance" and never flagged to stop. Money follows real FP&A: orders are commitments, and bills are paid a week after delivery once the three-way match has run. *Trade-off:* fewer, broader numbers, but ones that are true and useful for planning.
