@@ -188,6 +188,9 @@ export interface PuzzleDef {
   term: string;
   /** the job's own term when the context changes the scenario (an airplane's 28 V DC circuit on the meter) */
   termFor?(context?: PuzzleContext): string | undefined;
+  /** the scene's own name and first-encounter line when the job makes it a different place (the trace's underground feeder) */
+  titleFor?(context?: PuzzleContext): string | undefined;
+  howToFor?(context?: PuzzleContext): string | undefined;
   /** time budget in seconds for a tier (tier 0 is untimed and ignored); the context when the job changes it (a turbine start) */
   seconds(tier: number, context?: PuzzleContext): number;
   mount(host: PuzzleHost, params: PuzzleParams): PuzzleInstance;

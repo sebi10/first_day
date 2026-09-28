@@ -8,7 +8,7 @@ import { generateForecast, scoreForecast } from '../src/puzzles/forecast';
 import { AMPACITY, generatePanel, legOf, scorePanel, type Placement } from '../src/puzzles/panel';
 import { generateTeardown, installable, mustRemove, removable, scoreTeardown, scoreTeardownRun } from '../src/puzzles/teardown';
 import { SIGNOFF } from '../src/sim/econ';
-import { generateTrace, isFaultMark, scoreTrace } from '../src/puzzles/trace';
+import { distToPoly, faultSeg, generateTrace, isFaultMark, megWords, pickedSplice, scoreTrace, trace } from '../src/puzzles/trace';
 import { generateVariance, scoreVariance } from '../src/puzzles/variance';
 import { generateWireup, scoreWireup, type Landing } from '../src/puzzles/wireup';
 
@@ -252,6 +252,110 @@ describe('circuit trace', () => {
     // no site: the stock scenario (a 20 A circuit)
     expect(generateTrace(2, 3).amps).toBe(20);
     expect(generateTrace(2, 3).warm).toBeUndefined();
+  });
+});
+
+describe('circuit trace: the underground feeder (its own scene, never a room)', () => {
+  const tiers = [0, 1, 2, 3, 4, 5];
+  const mid = (pts: { x: number; y: number }[]) => {
+    // halfway along a polyline
+    const len = pts.slice(1).map((q, i) => Math.hypot(q.x - pts[i].x, q.y - pts[i].y));
+    let d = len.reduce((a, b) => a + b, 0) / 2;
+    for (let i = 0; i < len.length; i++) {
+      if (d <= len[i]) return { x: pts[i].x + ((pts[i + 1].x - pts[i].x) * d) / len[i], y: pts[i].y + ((pts[i + 1].y - pts[i].y) * d) / len[i] };
+      d -= len[i];
+    }
+    return pts[pts.length - 1];
+  };
+
+  it('is deterministic, and it is a yard: hand holes and the cottages, no outlet, switch or room', () => {
+    for (const t of tiers)
+      for (const seed of seeds) {
+        const m = generateTrace(seed, t, [], 'feeder', { amps: 100, fault: 'dead' });
+        expect(generateTrace(seed, t, [], 'feeder', { amps: 100, fault: 'dead' })).toEqual(m);
+        expect(m.feeder).toBeDefined();
+        expect(m.warm).toBeUndefined();
+        expect(m.devices.some((d) => d.kind === 'outlet' || d.kind === 'switch')).toBe(false);
+        for (const d of m.devices) expect(d.name, d.name).not.toMatch(/Kitchen|Bath|Bedroom|Porch|Living room|Deck|outlet/);
+        expect(m.symptom).toBe('Feeder to the east cottages: 0.4 MΩ');
+        expect(m.devices[0].name).toBe('Feeder breaker 100 A');
+        // the run: the panel, the hand holes in order, the cottages at the end
+        expect(m.chain.slice(1, -1).map((i) => m.devices[i].name)).toEqual(m.chain.slice(1, -1).map((_, k) => `HH${k + 1}`));
+        expect(m.devices[m.chain[m.chain.length - 1]].kind).toBe('cottages');
+      }
+    // the room's scene is untouched: no job, no feeder
+    expect(generateTrace(2, 3).feeder).toBeUndefined();
+    expect(generateTrace(2, 3, [], 'hangar').feeder).toBeUndefined();
+  });
+
+  it('the megger reads good (hundreds of MΩ or more, less the more cable it takes in) up to the failed splice, and the failed splice from it on', () => {
+    for (const t of tiers)
+      for (const seed of seeds) {
+        const m = generateTrace(seed, t, [], 'feeder');
+        const f = m.feeder!;
+        expect(f.megohms[0]).toBe(f.fault);
+        const good = m.chain.slice(1, m.faultAfter + 1).map((i) => f.megohms[i]);
+        const bad = m.chain.slice(m.faultAfter + 1).map((i) => f.megohms[i]);
+        expect(good.length).toBeGreaterThanOrEqual(1);
+        expect(bad.length).toBeGreaterThanOrEqual(1);
+        for (const v of good) expect(v).toBeGreaterThanOrEqual(300);
+        for (let k = 1; k < good.length; k++) expect(good[k]).toBeLessThan(good[k - 1]);
+        for (const v of bad) expect(v).toBe(0.4);
+        for (const i of m.chain.slice(1)) expect(m.devices[i].live).toBe(f.megohms[i] >= 300);
+        // the tap and the other circuit are their own runs: good
+        for (const d of m.devices.filter((x) => !m.chain.includes(x.id))) expect(f.megohms[d.id]).toBeGreaterThanOrEqual(300);
+        // re-spliced, the whole run reads good from the panel
+        expect(f.whole).toBeGreaterThanOrEqual(300);
+      }
+    expect(megWords(0.4)).toBe('0.4');
+    expect(megWords(1240)).toBe('1,240');
+  });
+
+  it('dig the section between the last good hand hole and the first bad: not a hand hole, not another section, not the other circuit', () => {
+    for (const t of tiers)
+      for (const seed of seeds) {
+        const m = generateTrace(seed, t, [], 'feeder');
+        const seg = faultSeg(m);
+        expect(seg.from).toBe(m.chain[m.faultAfter]);
+        expect(isFaultMark(m, mid(seg.pts))).toBe(true);
+        // the splices in the hand holes at either end are good
+        expect(isFaultMark(m, m.devices[seg.from].pos)).toBe(false);
+        expect(isFaultMark(m, m.devices[seg.to].pos)).toBe(false);
+        // (where another run crosses the failed section, a dig there does open the failed section)
+        for (const s of m.segs) if (s !== seg && distToPoly(mid(s.pts), seg.pts) > 0.06) expect(isFaultMark(m, mid(s.pts)), `${s.from}-${s.to}`).toBe(false);
+        expect(scoreTrace(m, { wrongMarks: 0, correct: true, tests: m.optimalTests, tracedFrac: 1 })).toBe(1);
+      }
+  });
+
+  it('teaching tiers show the readings; the run gets longer and busier with the tier', () => {
+    expect(generateTrace(1, 2, [], 'feeder').showStates).toBe(true);
+    expect(generateTrace(1, 3, [], 'feeder').showStates).toBe(false);
+    const holes = (t: number) => generateTrace(4, t, [], 'feeder').devices.filter((d) => d.kind === 'handhole').length;
+    expect(holes(1)).toBeLessThan(holes(3));
+    expect(holes(3)).toBeLessThan(holes(5));
+    expect(generateTrace(4, 2, [], 'feeder').devices.some((d) => d.name === 'Splice pedestal')).toBe(false);
+    expect(generateTrace(4, 3, [], 'feeder').devices.some((d) => d.name === 'Splice pedestal')).toBe(true);
+    expect(generateTrace(4, 3, [], 'feeder').segs.some((s) => s.circuit === 2)).toBe(false);
+    expect(generateTrace(4, 4, [], 'feeder').segs.some((s) => s.circuit === 2)).toBe(true);
+    // the alert's breaker
+    expect(generateTrace(4, 3, [], 'feeder', { amps: 125, fault: 'dead' }).amps).toBe(125);
+  });
+
+  it('its own name, first-encounter card and term; a little more time for the close-out', () => {
+    expect(trace.titleFor?.({ job: 'feeder' })).toBe('Underground feeder');
+    expect(trace.howToFor?.({ job: 'feeder' })).toMatch(/megger/);
+    expect(trace.howToFor!({ job: 'feeder' })!.split(' ').length).toBeLessThanOrEqual(12);
+    expect(trace.termFor?.({ job: 'feeder' })!.split(' ').length).toBeLessThanOrEqual(15);
+    for (const c of [undefined, {}, { job: 'hangar' }, { job: 'trip' }]) {
+      expect(trace.titleFor?.(c)).toBeUndefined();
+      expect(trace.howToFor?.(c)).toBeUndefined();
+      expect(trace.termFor?.(c)).toBeUndefined();
+    }
+    expect(trace.seconds(3, { job: 'feeder' })).toBe(trace.seconds(3) + 10);
+    // the close-out names the kits the job flow picked (display only)
+    expect(pickedSplice([{ pn: 'DBS-2', nomen: 'Direct-burial splice kit', qty: 4, slot: 'splice', spec: { device: 'splice', burial: true } }])).toBe('DBS-2 × 4');
+    expect(pickedSplice([{ pn: 'KR20-TR', nomen: 'Receptacle', qty: 1 }])).toBeNull();
+    expect(pickedSplice(undefined)).toBeNull();
   });
 });
 

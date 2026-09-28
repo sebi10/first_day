@@ -7,11 +7,13 @@
 //   &isl=7  the island seed the plane (and its card) comes from
 //   &charge=25  the ground power cart's charge (%): a low cart sags under the start
 //   &job=boom / &job=van  the hydraulic bench's crewmate vehicles; &job=gpuCable (wire-up), hangar (meter), gpu (variance)
+//   p=trace&job=feeder  the underground feeder to the east cottages (&pick=DBS-2:4 labels the close-out's splice kits)
 //   p=gpu&asset=Float%20F-3  the start on the island's own plane (its placard; the amphibian on its float wheels)
 //   p=meter&job=altField|sgField|comPower&fault=unit|wiring  the part chain's circuit check on the airplane
 import type { PuzzleContext, PuzzleDef, PuzzleId, PuzzleResult } from './puzzles/types';
 import { aircraftOf, externalPower, type Ata, type PlantVia } from './sim/aircraft';
 import { chainFind, manualCard } from './sim/chain';
+import { itemById } from './sim/items';
 import { rng } from './sim/rng';
 import { fx } from './ui/feedback';
 import '@fontsource-variable/manrope';
@@ -30,7 +32,7 @@ const mod = (await mods[`./puzzles/${id}.ts`]()) as Record<string, PuzzleDef>;
 const def = mod[id];
 const el = document.getElementById('stage')!;
 const res = document.getElementById('res')!;
-document.getElementById('title')!.textContent = `${def.title} · tier ${tier} · seed ${seed}${blind ? ' · blind' : ''}`;
+document.getElementById('title')!.textContent = `${def.titleFor?.({ job }) ?? def.title} · tier ${tier} · seed ${seed}${blind ? ' · blind' : ''}`;
 
 const lab = {
   result: null as PuzzleResult | null,
@@ -82,6 +84,17 @@ if ((id === 'trace' || id === 'meter') && q.has('room')) {
     ...(q.get('device') === 'switch' ? { device: 'switch' as const } : {}),
   };
 }
+// the job flow's pick, display only (&pick=DBS-2:4,SPLIT-4:4): what the puzzle labels as going in
+if (q.has('pick'))
+  context.pick = q
+    .get('pick')!
+    .split(',')
+    .filter(Boolean)
+    .map((t) => {
+      const [pn, n] = t.split(':');
+      const x = itemById(pn);
+      return { pn, nomen: x?.nomen ?? pn, qty: Number(n ?? 1), ...(x?.spec ? { spec: x.spec } : {}), ...(x?.spec?.device === 'splice' ? { slot: 'splice' } : {}) };
+    });
 const chainStep = q.get('chain');
 if (chainStep === 'lookup' || chainStep === 'research') {
   const ata = (plant ?? ({ tires: '32-40', prop: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, Ata>)[job ?? 'tires'] ?? '32-40') as Ata;

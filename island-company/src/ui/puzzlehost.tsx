@@ -82,11 +82,14 @@ export function PuzzleHost({
   onCancel?(): void;
 }) {
   const def = PUZZLES[launch.puzzle];
+  // a job that makes the puzzle a different place has its own name and first-encounter card (the underground feeder)
+  const sceneTitle = def.titleFor?.(launch.context);
+  const title = sceneTitle ?? def.title;
   const bodyRef = useRef<HTMLDivElement>(null);
   const inst = useRef<PuzzleInstance | null>(null);
   const [status, setStatus] = useState('');
   const [res, setRes] = useState<PuzzleResult | null>(null);
-  const seenKey = `${SEEN}${launch.seat ?? 'any'}.${launch.puzzle}`;
+  const seenKey = `${SEEN}${launch.seat ?? 'any'}.${launch.puzzle}${sceneTitle && launch.context?.job ? `.${launch.context.job}` : ''}`;
   const firstTime = !safeGet(seenKey);
   const [howto, setHowto] = useState<'first' | 'help' | null>(firstTime ? 'first' : null);
   const [started, setStarted] = useState(false);
@@ -271,14 +274,14 @@ export function PuzzleHost({
   const shaking = oops && performance.now() - oops < 400;
 
   return (
-    <div class="overlay" role="dialog" aria-label={def.title}>
+    <div class="overlay" role="dialog" aria-label={title}>
       <div class="overlay-inner">
         <div class="phost-top">
           <div class="row spread">
             <div class="col" style={{ gap: 0, minWidth: 0 }}>
               <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{launch.title}</h3>
               <span class="label">
-                {def.title} · <TierDots tier={launch.tier} />
+                {title} · <TierDots tier={launch.tier} />
                 {launch.subtitle ? ` · ${launch.subtitle}` : ''}
               </span>
               {picked && (
@@ -325,7 +328,7 @@ export function PuzzleHost({
           {howto && (
             <div class="howto" onClick={dismissHowto}>
               <span class="chip ink">{def.gesture}</span>
-              <h2>{def.howTo}</h2>
+              <h2>{def.howToFor?.(launch.context) ?? def.howTo}</h2>
               <p class="muted" style={{ margin: 0, maxWidth: 320 }}>
                 {launch.expert ? 'Outside your trade: no hints. Under 60% is a botch.' : (def.termFor?.(launch.context) ?? def.term)}
               </p>
