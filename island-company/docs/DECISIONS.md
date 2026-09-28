@@ -867,3 +867,65 @@ Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
 - **Deadline hour:** 20:00 creator time. If the three of you span time zones, change `resolveHour` in `createIsland`.
 - **Difficulty:** if weeks feel too easy by tier 3, raise `ECON.decay` from 5 to 6. That is the single biggest knob.
 - **Trust model:** anyone with the island code can play an open seat. That's fine for friends. Don't post the code publicly.
+
+## 2026-09-28: Expansion spec (the airline network, the free map, per-trade island interactions)
+
+The spec is `docs/EXPANSION.md`. It is written for four packages (A engine, B map, C objects, D network desk), builds on branch `gaps`, and ships as v4 with it (v5 if `gaps` ships alone first). Not built yet; the critique round comes next.
+
+### The finding that reorders the work
+
+The long game after the Resort doesn't hold today. Scratch probes on `1f92356` (the real reducer, 10 seeds × 52 weeks, nothing committed):
+- **three friends:** 10 of 10 games go below $0 in weeks 24–52 (141 of 290 weeks), with 214 dead weeks (revenue under $2,000) and −$187,000 median cash at week 52.
+- **all average:** 10 of 10 games, 134 weeks below $0, −$183,000.
+- **all good:** 0 of 10 games, +$416,000.
+- **credits:** 0 of 20 games for the two target crews reach them.
+
+What drives it:
+- The electrician's upkeep at tiers 4–5 (7 houses, the grid, the generator, bunched code prep) beats about 3 jobs a week.
+- House condition slides from 87 at week 12 to 60 at week 22 (the medians), so it starts before the Resort.
+- The grid is the single point of failure. Once it's down, the houses are dark, the hangar is capped at one job, and the planes rot.
+- The 26-week balance window hides it: cash keeps rising until week 28–30.
+
+Post-tier-5 levers alone don't fix it. Decay 1, code inspections every 13 weeks and houseWear 1 still leave three friends negative in 4 of 10 games.
+
+**Decision:** package A starts with **A0, a Resort that holds**:
+- a 52-week target (T1: median 0 weeks below $0 in weeks 24–52, at most 3 of 30 games ever below $0)
+- measured on `gaps`' levers first
+- then levers that act from tier 4, inside the tier 1–5 pacing band
+
+The network is built on A0.
+
+### Key decisions in the spec
+
+- **Backbone, not a new game.**
+  - A station is a field on the asset (`asset.st`; absent = home).
+  - Tern Cay and Port Adair reuse the `cottage` and `panel` models, so every symptom, task, puzzle and defect rule applies.
+  - Adding an airport is data: a `StationDef`, its `RouteDef`s and a `SceneLayout`. A data-only test station (ZZ) proves it for each trade.
+- **Home is byte-identical until the network opens.**
+  - New fields are lazy, and new draws have their own rng streams.
+  - A golden digest test (recorded after A0) is the proof that tiers 1–5 are untouched.
+- **The trades' time is the scarce resource.** The network's routine alerts come from a separate pass: at most 1 new a week per trade, network-wide, plus must-dos capped at 3 open. The analyst sees a load gauge.
+- **Travel is one trip a week per tech,** from the work budget, 2 taps, with the parts hand-carried. A plane is worked at its base or either end of its route, so planes on a route through home never need a trip. There is no ferry action. HEAVY work (100-hr, cylinder, spar, penetrant) needs a hangar end, or a field repair if the plane is AOG.
+- **One central stockroom.** Station jobs' parts are drop-shipped at the normal ETA. Port Adair's parts desk takes a week off long leads network-wide.
+- **The only guest plane is per station** (`soleFor`), with `gaps`' sub-charter generalized to take the station. Home can't assign away its last guest plane.
+- **Money, at game scale, at tier 5:**
+  - the first twin on Home–Adair makes about +$2,930 a week; a second there, −$3,370; Adair–Tern, −$240 (the traps are on the cards)
+  - Tern Cay pays back in about 19 weeks, Port Adair in about 21
+  - lease is $1,000 a week (13-week minimum); buy is $58,000, resale from 80% falling to 45%
+  - no network spend may leave spendable cash under $25,000
+- **Quick checks: one a week per tech,** available from week 1, blind:
+  - the mechanic's walkaround (6 zones, 3 looks)
+  - the electrician's IR scan (ΔT against load, with the NETA criteria) or meter check (voltage drop under load)
+  - a right call turns a hidden defect into a repair via inspection; a wrong one becomes an NFF write-up for later
+- **"Report a problem":** on a crewmate's asset, a flag (their write-up alert, one a week, counted in their slots); on a fixture, a crew-board DM. A player can't raise a cross-trade report row, because rows carry a cap or a leak on the reporter.
+- **The map:**
+  - an inline map that keeps the page scrolling at k = 1, plus a full-screen Explore
+  - transform-only gestures on a wrapper div (no render per frame, one commit at the end)
+  - JS hit-tests with 0 new SVG nodes
+  - one detailed scene at a time; every scene ≤ 1,500 nodes, the region ≤ 400
+  - the empty-ground tap keeps toggling "my zone" (delayed 250 ms so a double tap can zoom)
+- **Realism scope:**
+  - Port Adair's terminal and airfield lighting are the airport authority's; our electrician does the leased hangar bay's panel, the GPU charger and 28 V circuits (NEC 513) and the hub's hangar reports
+  - Tern Cay's dispenser circuit follows NEC 514 (seals, the remote disconnect, the emergency shutoff)
+  - no airfield series lighting
+- **Wages:** the route numbers assume today's wages. At the ×2.5–3 wage call, the stations' paybacks stretch to 35–83 weeks and the network would need a retune.
