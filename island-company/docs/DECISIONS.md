@@ -1259,3 +1259,123 @@ Robust (90 seeds × 4 crews = 360 games a team; misses by crew − / a / b / c):
 
 - `npx tsc --noEmit -p .`; 781/781 tests (45 files; 763 before): `tests/subcharter.test.ts` (the cover sweep, the worn and pilot-capped cover, the fee's side and asset, the card's waiting cost, the wind AOG line, the forecast hint, the MEL ask on a sent job), `tests/feeder.test.ts` (the blind re-test right and wrong, dig again, the route stays as traced, one trench over 40 seeds × 3 tiers), `tests/robusttail.test.ts` (one miss isn't two, the cover week, the floatplane won / outbid / covered / waiting, the inspector card, the booking), `tests/whosemove.test.ts`, `tests/staff.test.ts`.
 - `npm run build`; balance standard and robust (above); the pass-and-play e2e on a 390 × 844 phone and at 1280 × 820 (only the Manrope 403s); the island lab (beaten scene 1,390 nodes); scripted phone checks at 390 and 360 px of the hangar row, the job sheet's and End turn's MEL ask, the crew project card, the desk's projection, the island hint, and the feeder's blind close-out in the lab (wrong dig 0.4 MΩ → dig again → 380 MΩ → re-energize: 70%, one wrong call).
+
+## 2026-09-28: Expansion spec (the airline network, the free map, per-trade island interactions)
+
+The spec is `docs/EXPANSION.md`. It is written for four packages (A engine, B map, C objects, D network desk), builds on branch `gaps`, and ships as v4 with it (v5 if `gaps` ships alone first). Not built yet; the critique round comes next.
+
+### The finding that reorders the work
+
+The long game after the Resort doesn't hold today. Scratch probes on `1f92356` (the real reducer, 10 seeds × 52 weeks, nothing committed):
+- **three friends:** 10 of 10 games go below $0 in weeks 24–52 (141 of 290 weeks), with 214 dead weeks (revenue under $2,000) and −$187,000 median cash at week 52.
+- **all average:** 10 of 10 games, 134 weeks below $0, −$183,000.
+- **all good:** 0 of 10 games, +$416,000.
+- **credits:** 0 of 20 games for the two target crews reach them.
+
+What drives it:
+- The electrician's upkeep at tiers 4–5 (7 houses, the grid, the generator, bunched code prep) beats about 3 jobs a week.
+- House condition slides from 87 at week 12 to 60 at week 22 (the medians), so it starts before the Resort.
+- The grid is the single point of failure. Once it's down, the houses are dark, the hangar is capped at one job, and the planes rot.
+- The 26-week balance window hides it: cash keeps rising until week 28–30.
+
+Post-tier-5 levers alone don't fix it. Decay 1, code inspections every 13 weeks and houseWear 1 still leave three friends negative in 4 of 10 games.
+
+**Decision:** package A starts with **A0, a Resort that holds**:
+- a 52-week target (T1: median 0 weeks below $0 in weeks 24–52, at most 3 of 30 games ever below $0)
+- measured on `gaps`' levers first
+- then levers that act from tier 4, inside the tier 1–5 pacing band
+
+The network is built on A0.
+
+### Key decisions in the spec
+
+- **Backbone, not a new game.**
+  - A station is a field on the asset (`asset.st`; absent = home).
+  - Tern Cay and Port Adair reuse the `cottage` and `panel` models, so every symptom, task, puzzle and defect rule applies.
+  - Adding an airport is data: a `StationDef`, its `RouteDef`s and a `SceneLayout`. A data-only test station (ZZ) proves it for each trade.
+- **Home is byte-identical until the network opens.**
+  - New fields are lazy, and new draws have their own rng streams.
+  - A golden digest test (recorded after A0) is the proof that tiers 1–5 are untouched.
+- **The trades' time is the scarce resource.** The network's routine alerts come from a separate pass: at most 1 new a week per trade, network-wide, plus must-dos capped at 3 open. The analyst sees a load gauge.
+- **Travel is one trip a week per tech,** from the work budget, 2 taps, with the parts hand-carried. A plane is worked at its base or either end of its route, so planes on a route through home never need a trip. There is no ferry action. HEAVY work (100-hr, cylinder, spar, penetrant) needs a hangar end, or a field repair if the plane is AOG.
+- **One central stockroom.** Station jobs' parts are drop-shipped at the normal ETA. Port Adair's parts desk takes a week off long leads network-wide.
+- **The only guest plane is per station** (`soleFor`), with `gaps`' sub-charter generalized to take the station. Home can't assign away its last guest plane.
+- **Money, at game scale, at tier 5:**
+  - the first twin on Home–Adair makes about +$2,930 a week; a second there, −$3,370; Adair–Tern, −$240 (the traps are on the cards)
+  - Tern Cay pays back in about 19 weeks, Port Adair in about 21
+  - lease is $1,000 a week (13-week minimum); buy is $58,000, resale from 80% falling to 45%
+  - no network spend may leave spendable cash under $25,000
+- **Quick checks: one a week per tech,** available from week 1, blind:
+  - the mechanic's walkaround (6 zones, 3 looks)
+  - the electrician's IR scan (ΔT against load, with the NETA criteria) or meter check (voltage drop under load)
+  - a right call turns a hidden defect into a repair via inspection; a wrong one becomes an NFF write-up for later
+- **"Report a problem":** on a crewmate's asset, a flag (their write-up alert, one a week, counted in their slots); on a fixture, a crew-board DM. A player can't raise a cross-trade report row, because rows carry a cap or a leak on the reporter.
+- **The map:**
+  - an inline map that keeps the page scrolling at k = 1, plus a full-screen Explore
+  - transform-only gestures on a wrapper div (no render per frame, one commit at the end)
+  - JS hit-tests with 0 new SVG nodes
+  - one detailed scene at a time; every scene ≤ 1,500 nodes, the region ≤ 400
+  - the empty-ground tap keeps toggling "my zone" (delayed 250 ms so a double tap can zoom)
+- **Realism scope:**
+  - Port Adair's terminal and airfield lighting are the airport authority's; our electrician does the leased hangar bay's panel, the GPU charger and 28 V circuits (NEC 513) and the hub's hangar reports
+  - Tern Cay's dispenser circuit follows NEC 514 (seals, the remote disconnect, the emergency shutoff)
+  - no airfield series lighting
+- **Wages:** the route numbers assume today's wages. At the ×2.5–3 wage call, the stations' paybacks stretch to 35–83 weeks and the network would need a retune.
+
+## 2026-09-28: Expansion spec, critique round
+
+Three read-only critics (trade realism, game design, architecture) raised 81 points: 3 blockers, 44 majors, 34 minors. `docs/EXPANSION.md` is revised: every blocker and major is resolved, and the points turned down are in its §17 with reasons. **This entry replaces the previous one wherever they differ.** The spec is now based on `gaps` at `249988a`.
+
+- **Three releases, each with its own version bump,** instead of one v4:
+  1. A0, a Resort that holds. It rides in `gaps`' v4 if `gaps` hasn't deployed yet.
+  2. The free map, tappable objects, quick checks and *Report a problem*.
+  3. The airline.
+  - Why: A0 fixes a live collapse and shouldn't wait for the largest engine change so far.
+  - Each release gets fixtures from the previous live commit, reverse skew, the probe, and "close and reopen".
+- **Quick checks read wear that is coming, never `s.defects`** (the two blockers).
+  - The top in-scope catalog kind with weight > 0 shows a tell that grows with the wear depth, drawn from seeded pools of look-alike phrasings.
+  - A right call raises that alert now, one order tier easier and a week earlier (`alert.early`).
+  - A wrong call is a `src: 'check'` write-up that takes a slot until it's closed on site.
+  - One view, ≤ 3 taps. From tier 2.
+  - The IR scan is load-normalized: the tell is 10–20 °C over what its load should give, at 40–70% load; the distractor is normal at 85–95%; under 30% is "too light to judge". The PPE line and NFPA 70B are on screen.
+  - Defects in scope is Seb's call; the default is no.
+- **One alert pass per trade over every asset** (today's targets and the must-do cap of 8). The network adds no routine slots; its cost is condition, shown on a load gauge.
+  - No `wb` for route planes: the load manifest is the pilot's, 135.63(c).
+  - Route planes' 100-hr counts block hours (`NET.inspPerH` 0.12).
+  - One decay rule for every plane; network rules come from a plane's origin (`isNetPlane`), never from `st`/`rt`.
+- **The island-ops loophole is closed.** A network plane must fly a route or it's parked; it never flies home's tours. An unassigned leased twin would have earned about +$1,250 a week there.
+- **Where work is.**
+  - A plane is worked at its base (where it overnights), or where it's stuck: a route plane's grounding strands it at a seeded end (`aogAt`, derived).
+  - A base must be an end of the plane's route.
+  - Leased planes are delivered to Port Adair while it's open and need an acceptance (records review via `logbook`, then `inspect100`) before they fly.
+  - HEAVY and the ferry permit are dropped from v1: every route has a hangar end, and a ferry permit needs the mechanic on site anyway.
+- **Hands-on vs paperwork (`SITE_BOUND`).**
+  - On site: `complete`, `makeSafe`, `nff`, (M) MEL items, `check`, `gse`.
+  - Anywhere: planning, requests, the mechanic's grounding call, (O)-only MEL, `squawk`.
+  - The electrician's remote `tag` closes a station house via the station agent (not trade work).
+- **Trips** are booked as `travel`, never in `autoSpent`: a free company seat plus the per diem, or an air taxi. They're allowed with cash short.
+- **Hub hangar reports** are drawn only after the mechanic worked there in the last 2 weeks. Their cap binds only his jobs at that station.
+- **A station's only plane grounds like any other** (no station sub-charter). Its cottages sit empty that week. `soleGuest` stays home-only.
+- **Money, retuned** (starting values, **tune**). Route P&L carries each plane's parts and labour, hull (1.5% a year), pilots by block hour, fuel, fees and travel.
+  - Twin: $150,000, or $500 a week to lease (13-week minimum, 4-week deposit, a true-up of $300 a point under 85 on return). Resale 92%, −0.1% a week, floor 55%.
+  - Tern Cay: capex $12,000, $650 a week. Port Adair: capex $15,000, $1,200 a week.
+  - Demand is frequency-sensitive, ramps from 50% over 8 flown weeks, has a seeded ±20% maturity, and swings ±25% on the trunk. Connecting passengers go via home. Routes into unlit Tern Cay are day VFR only.
+  - Good play pays back about 11 weeks (Tern) and 13 weeks (Adair) after opening. Naive play loses about $2,150 a week.
+- **The grade counts the network by contribution.** A new station is out of it for 4 weeks. The A bonus is on home revenue only. Test: the naive bot's A-week rate ≤ no-network's.
+- **Station content is its own data.** `StationDef.kinds`, `syms`, `after` and `panels`; station-only `SYMPTOMS`/`REPORTS` rows (`only`). `words`/`stationWords` are dropped.
+  - Tern Cay: a 200 A service with underground cottage feeds, so the feeder scene fits; an attended dispenser (NEC 2023 514.11).
+  - Port Adair: the bay subpanel (513.10(B), 513.12).
+  - The projects are retitled to match their puzzles: `ipc` fly-away kit; `conduit` RMC with EYS seal; `panel` bay circuits. Hazardous-location work runs "under the company's commercial permit (master of record)".
+  - The electrician's project score rolls a hidden defect on the asset it built.
+- **A0** leads with grid-first and a spiral breaker, tested with the other levers from tier 4. It adds an A streak that pauses (not resets) on an autopilot week.
+  - T1 now includes reaching the credits in ≥ 50% of three-friends games by week 45.
+  - It's time-boxed to one balance pass. Then Seb gets the numbers.
+- **The camera:**
+  - one finger always scrolls Home; two fingers pan and zoom inline; one-finger pan only in Explore
+  - Explore portals the one map
+  - true-footprint hit-tests: 2+ near objects zoom ×2, and a chooser at max zoom
+  - ambient animations paused during gestures
+  - region pinch-out only in Explore
+  - presets built on `gap-zoom`'s view state
+- **Absences:** after 2 missed analyst weeks, the analyst's autopilot guard trims round trips, returns a losing lease past its minimum, and mothballs a station losing over $1,000 a week. It never opens or leases.
+- **The contract** (§14.3) lists every cross-package symbol with its signature and a working home-only implementation. §4.2 decides every `planes`/`houses`/`grid`/`generator`/`powered` call site. File ownership now covers purchasing, staff, flow, board and crewboard, with an ownership check at Integrate.
