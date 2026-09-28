@@ -1,10 +1,11 @@
 // Screenshot a page on a phone-sized viewport.
 // node scripts/shot.mjs "/lab.html?p=torque&tier=3" out.png [taps as x,y;x,y]
 import { chromium } from 'playwright-core';
+import { executablePath } from './chromium.mjs';
 
 const [path = '/', out = 'shot.png', taps = ''] = process.argv.slice(2);
 const base = process.env.BASE ?? 'http://localhost:5173';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));

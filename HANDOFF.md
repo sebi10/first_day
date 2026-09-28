@@ -125,9 +125,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 
 ### 4.3 Chromium for the e2e and screenshot scripts
 
-- `scripts/*.mjs` hardcode `/opt/pw-browsers/chromium`. Run `npx playwright@1.56 install chromium`, then either:
-  - **No code change:** `sudo mkdir -p /opt/pw-browsers && sudo ln -sf "$(node -e "console.log(require('playwright-core').chromium.executablePath())")" /opt/pw-browsers/chromium` (from `island-company/`), or
-  - **Recommended, after the swarm lands:** change each `chromium.launch({ executablePath: ... })` to `executablePath: process.env.CHROMIUM_PATH || (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined)` and commit.
+- Done (2026-09-28): the scripts take their Chromium from `scripts/chromium.mjs`: `$CHROMIUM_PATH`, else `/opt/pw-browsers/chromium` if it exists, else Playwright's default. Locally, `npx playwright@1.56 install chromium` once is enough.
 - Locally there's no egress proxy, so you can also Playwright the live site. Careful: that creates real anonymous users and island docs in production.
 
 ---

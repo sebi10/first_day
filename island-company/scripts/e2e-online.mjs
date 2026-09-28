@@ -10,11 +10,12 @@
 //   BASE=http://localhost:5174 node scripts/e2e-online.mjs out-dir
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { executablePath } from './chromium.mjs';
 
 const out = process.argv[2] ?? 'e2e-online';
 mkdirSync(out, { recursive: true });
 const base = process.env.BASE ?? 'http://localhost:5174';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath });
 const phone = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true };
 const laptop = { viewport: { width: 1280, height: 820 } };
 const errors = [];

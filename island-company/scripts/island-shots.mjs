@@ -2,11 +2,12 @@
 //   BASE=http://localhost:5173 node scripts/island-shots.mjs out-dir
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { executablePath } from './chromium.mjs';
 
 const out = process.argv[2] ?? 'island-shots';
 mkdirSync(out, { recursive: true });
 const base = process.env.BASE ?? 'http://localhost:5173';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath });
 const errors = [];
 for (const [label, w, dpr] of [
   ['phone', 358, 2],

@@ -1,9 +1,10 @@
 // Render PNG app icons from public/icons/icon.svg (run once; outputs are committed).
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { executablePath } from './chromium.mjs';
 
 const svg = readFileSync('public/icons/icon.svg', 'utf8');
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath });
 const page = await browser.newPage();
 for (const [size, name, pad] of [
   [192, 'icon-192.png', 0],

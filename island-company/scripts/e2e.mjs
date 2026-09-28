@@ -7,12 +7,13 @@
 //   BASE=http://localhost:5173 node scripts/e2e.mjs out-dir [desktop]
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { executablePath } from './chromium.mjs';
 
 const out = process.argv[2] ?? 'e2e-shots';
 const desktop = process.argv[3] === 'desktop';
 mkdirSync(out, { recursive: true });
 const base = process.env.BASE ?? 'http://localhost:5173';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath });
 const ctx = await browser.newContext(
   desktop ? { viewport: { width: 1280, height: 820 } } : { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true },
 );

@@ -74,7 +74,7 @@ npm run build                                 # tsc + vite build (then rm -rf di
 BASE=http://localhost:5173 node scripts/e2e.mjs /tmp/e2e [desktop]
 ```
 
-- **Chromium for scripts:** the scripts hardcode `executablePath: '/opt/pw-browsers/chromium'` (the cloud container's path). Locally, run `npx playwright@1.56 install chromium`. Then either symlink that binary to `/opt/pw-browsers/chromium`, or make the scripts use `process.env.CHROMIUM_PATH`, falling back to Playwright's default (see HANDOFF.md).
+- **Chromium for scripts:** the scripts launch the browser from `scripts/chromium.mjs`: `$CHROMIUM_PATH`, else `/opt/pw-browsers/chromium` (the cloud container's path) if it exists, else Playwright's own install (`npx playwright@1.56 install chromium`).
 - **Online e2e:** needs Java plus `npx --yes firebase-tools@15 emulators:start --only firestore,auth --project demo-island`, and a second Vite with the emulator env. The header of `scripts/e2e-online.mjs` has the steps.
 
 ## Invariants every change must keep
