@@ -44,6 +44,40 @@ export const ECON = {
   aGradeBonus: 0.1,
 };
 
+/**
+ * A0, "a Resort that holds" (docs/EXPANSION.md 11.2, docs/DECISIONS.md 2026-09-29): the upkeep rules of the late game.
+ * From tier 4 (the Harbor: six houses, seven at the Resort, the grid and the generator on one electrician) the island's upkeep outran
+ * any crew that plays 3 jobs a week, and the Resort collapsed by week 35-45 in the 52-week sim. Tiers 1-3 play
+ * exactly as before. Each rule is realistic on its own: none adds cash, lowers a cost or softens a tier gate.
+ */
+export const LATE = {
+  /** the island tier these rules start at */
+  fromTier: 4,
+  /**
+   * (e) Grid first: the island grid under this reliability is must-do work (it gets a job whatever else is open)
+   * and ranks above code prep in the bots', autopilot's and the Dock's order. The grid is the single point of
+   * failure: under 40 it's down, and every house without the generator goes dark. 0 = off.
+   */
+  gridFirst: 55,
+  /** the grid-first job's urgency bonus (econ `urgency`): as much as a hazard or airworthiness item due now */
+  gridFirstUrgency: 150,
+  /** (g) the spiral breaker: a house that's dark all week (grid down, generator not carrying) doesn't decay: nobody's in it */
+  darkNoDecay: true,
+  /** (a) the county's code inspection comes every this many weeks (ECON.houseInspectionWeeks before tier 4) */
+  inspectionWeeks: 13,
+  /** (b) a booked week's wear on a house (ECON.houseWear before tier 4) */
+  houseWear: 1,
+  /** (c) a maintained asset (at or above `at` health) loses `decay` a week untouched, planes and home assets alike (ECON.decay below it) */
+  healthyDecay: { at: 70, decay: 3 },
+  /**
+   * (d) an asset under 50 raises its alerts a tier from tier 4 too. Tested and not kept (false would stop it): no
+   * measurable effect on the long run, and a worn-out asset really is the harder job
+   */
+  lowHealthTierBump: true,
+  /** (f) the credits' A streak pauses on an autopilot week graded A (the week doesn't count; a lower grade still breaks it) */
+  streakPause: true,
+};
+
 export const INSURANCE: Record<Insurance, { label: string; premium: number; cover: number }> = {
   none: { label: 'None', premium: 0, cover: 0 },
   standard: { label: 'Standard', premium: 150, cover: 0.5 },
@@ -1421,7 +1455,7 @@ export const STORIES = [
     title: 'County inspector in town',
     body: 'She can do every house this week if you pay the call-out.',
     options: [
-      { key: 'book', label: 'Book her', effect: '−$400, every house passes now; the county books each renewal a week of its own, about 8 weeks out' },
+      { key: 'book', label: 'Book her', effect: '−$400, every house passes now; the county books each renewal a week of its own, about 8 weeks out (13 from tier 4)' },
       { key: 'wait', label: 'Wait', effect: 'Nothing changes' },
     ],
   },

@@ -8,7 +8,7 @@
 // alert's seed.
 import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
-import { ALERTS, CATALOG, CATALOG_BY_KIND, MODELS } from './data';
+import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
 import { hashSeed, rng, type Rng } from './rng';
 import { pilotOf, squawkNff, wearMult } from './staff';
 import { defaultTask, taskOn, type Task } from './tasks';
@@ -836,7 +836,8 @@ export function alertFlags(s: IslandState, a: Alert): { aw: boolean; hazard: boo
 /**
  * The alert's tier (what the flow teaches or tests): tier 1 in the first two
  * weeks of the flow on an island and during a player's grace; else
- * 1 + island tier / 2, one more on an asset under 50; a repair, its defect's.
+ * 1 + island tier / 2, one more on an asset under 50 (A0's lever d, tried and
+ * not kept, would stop that from tier 4: LATE.lowHealthTierBump); a repair, its defect's.
  */
 export function alertTier(s: IslandState, a: Pick<Alert, 'assetId' | 'repair'>, role: Role): number {
   if (a.repair) return clamp(a.repair.defect.tier, 1, 5);
@@ -844,7 +845,8 @@ export function alertTier(s: IslandState, a: Pick<Alert, 'assetId' | 'repair'>, 
   const p = s.players[role];
   if (p && s.week <= p.graceUntil) return 1;
   const asset = s.assets.find((x) => x.id === a.assetId);
-  return clamp(1 + Math.floor(s.tier / 2) + (asset && asset.health < 50 ? 1 : 0), 1, 5);
+  const bump = !!asset && asset.health < 50 && (LATE.lowHealthTierBump || s.tier < LATE.fromTier);
+  return clamp(1 + Math.floor(s.tier / 2) + (bump ? 1 : 0), 1, 5);
 }
 
 /** words that fill a symptom's text, derived from the alert's seed */
@@ -1253,9 +1255,11 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
         if (w > 0) cands.push({ kind: c.kind, asset, w });
       }
     }
-    // an asset in critical shape with nothing open on it always gets a job
+    // an asset in critical shape with nothing open on it always gets a job; so does the grid under 55 from tier 4
+    // (A0 e: grid first, the island's single point of failure), and its job goes first among the must-dos
+    const gridFirst = (a: Asset) => !!LATE.gridFirst && s.tier >= LATE.fromTier && a.kind === 'grid' && a.health < LATE.gridFirst;
     for (const asset of s.assets) {
-      if (asset.health >= 45 || workable.some((o) => o.assetId === asset.id) || openAlerts.some((a) => a.assetId === asset.id)) continue;
+      if ((asset.health >= 45 && !gridFirst(asset)) || workable.some((o) => o.assetId === asset.id) || openAlerts.some((a) => a.assetId === asset.id)) continue;
       const fix = cands.filter((c) => c.asset.id === asset.id && c.w < 100).sort((a, b) => (CATALOG_BY_KIND[a.kind]?.parts ?? 0) - (CATALOG_BY_KIND[b.kind]?.parts ?? 0) || b.w - a.w)[0];
       if (fix) fix.w = 100;
     }
@@ -1263,8 +1267,8 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
       if (kind === 'wb' || kind === 'gpustart') direct(kind, asset);
       else raiseAlert(s, { role, asset, kind }, now);
     };
-    // must-do work (inspections, critical repairs) jumps the queue, capped at 8 open per role
-    for (const m of cands.filter((c) => c.w >= 100)) {
+    // must-do work (inspections, critical repairs) jumps the queue, capped at 8 open per role (the grid first, A0 e)
+    for (const m of cands.filter((c) => c.w >= 100).sort((a, b) => Number(gridFirst(b.asset)) - Number(gridFirst(a.asset)))) {
       if (openCount >= 8) break;
       issue(m.kind, m.asset);
       openCount++;

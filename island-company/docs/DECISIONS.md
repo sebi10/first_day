@@ -1379,3 +1379,94 @@ Three read-only critics (trade realism, game design, architecture) raised 81 poi
   - presets built on `gap-zoom`'s view state
 - **Absences:** after 2 missed analyst weeks, the analyst's autopilot guard trims round trips, returns a losing lease past its minimum, and mothballs a station losing over $1,000 a week. It never opens or leases.
 - **The contract** (§14.3) lists every cross-package symbol with its signature and a working home-only implementation. §4.2 decides every `planes`/`houses`/`grid`/`generator`/`powered` call site. File ownership now covers purchasing, staff, flow, board and crewboard, with an ownership check at Integrate.
+
+## 2026-09-29: A0, a Resort that holds (stage 1 of docs/EXPANSION.md)
+
+Branch `gaps` (on `258d0d2` + the `expansion-spec` merge). Goal (EXPANSION §0.3, §11.2): the long game after the Resort collapsed in every sim game; make it hold from tier 4 with the spec's levers, tested together, without buying numbers with cash, overhead, softer gates or cheaper prices. One balance pass (the time box), then Seb gets the numbers. Not pushed, not deployed; it rides in the branch's v4 gate.
+
+### The long run (`npx tsx scripts/balance.ts long`, new)
+
+52 weeks × 30 seeds, every team, no network; weeks 24–52 judged (after the Resort). The T1 columns: games ever below $0, weeks below $0 (total and the median game), dead weeks (revenue under $2,000), receiverships, cash at weeks 26 / 39 / 52, the credits' week and the share of games with the credits by week 45, the A-week rate at tier 5, and the mean house and grid health over weeks 30–52 (the mechanism). `robust` now plays its 360 games 52 weeks: its 26-week columns read only the first 26 (identical to before: checked against `258d0d2`, column for column) and two columns are new, games below $0 in weeks 24–52 and credits by week 45. The standard 26-week run is unchanged.
+
+### Before: `258d0d2` on the long run
+
+The collapse the spec found on `1f92356` is still there after the robust-tail work: three friends and all average go below $0 in 30 of 30 games (399 and 308 weeks below $0; 605 and 531 dead weeks). Traced (three friends, seed 1): the houses slide from about 70 when tier 4 arrives (week 17) to about 40 by week 29 on the electrician's 3 jobs a turn; the grid falls from about 55 to 0 between weeks 30 and 36; then the houses go dark, the planes rot, and revenue is $0 from week 38. Cash peaks near $87,000 at week 32, so the 26-week table never sees it.
+
+### The levers, from tier 4, in the spec's order (cumulative)
+
+All from tier 4 (data `LATE`); tiers 1–3 play byte for byte as before (the standard run's medians, the solo, absent and nobody teams and every pre-tier-4 week are unchanged in every row). The long columns are the two target teams over the 30 seeds; robust is 360 games a team (misses by crew − / a / b / c).
+
+| Levers | Long: three friends games < $0 · weeks < $0 · dead wk | Long: all average | Robust: three friends miss T5 · weeks < $0 · long < $0 | Robust: all average |
+|---|---|---|---|---|
+| `258d0d2` | 30/30 · 399 · 605 | 30/30 · 308 · 531 | 102 (27+25+24+26) · 1 · 359 | 77 (19+18+19+21) · 0 · 351 |
+| (e) grid first | 30/30 · 372 · 448 | 29/30 · 244 · 293 | 103 (29+23+25+26) · 0 · 358 | 73 (18+19+18+18) · 0 · 339 |
+| + (g) dark houses don't decay | 30/30 · 370 · 449 | 29/30 · 245 · 292 | 103 · 0 · 358 | 73 · 0 · 339 |
+| + (a) inspections every 13 weeks | 30/30 · 345 · 412 | 28/30 · 183 · 228 | 109 (29+24+28+28) · 0 · 357 | 79 (19+20+20+20) · 0 · 330 |
+| + (b) houseWear 1 | 28/30 · 221 · 298 | 14/30 · 61 · 104 | 82 (24+19+21+18) · 0 · 333 | 70 (19+17+14+20) · 0 · 214 |
+| + (c) decay 3 at 70+ | 18/30 · 104 · 200 | 7/30 · 24 · 60 | **69 (17+20+14+18) · 0 · 247** | **63 (18+14+16+15) · 0 · 100** |
+| + (d) no +1 alert tier under 50 | 20/30 · 112 · 207 | 7/30 · 19 · 56 | 70 (18+20+14+18) · 0 · 248 | 62 (18+14+16+14) · 0 · 103 |
+| + (f) the A streak pauses | 20/30 · 112 · 207 | 7/30 · 19 · 56 | 70 · 0 · 248 | 62 · 0 · 103 |
+| the same with (c) decay 4 | 26/30 · 163 · 261 | 15/30 · 48 · 79 | 78 (22+20+18+18) · 0 · 307 | 64 (19+13+15+17) · 0 · 156 |
+| **kept: e, g, a, b, c (3), f** | **18/30 · 104 · 200** | **7/30 · 24 · 60** | **69 · 0 · 247** | **63 · 0 · 100** |
+
+- **(e) Grid first** (`gridFirst`, econ.ts; `generateAlerts`, `urgency`, autopilot, `yourMoves`). The island grid under 55 reliability at tier 4+ is must-do work: it gets a job even when the electrician's list is full (the must-do pass, grid first among them), it ranks above code prep in the bots' and autopilot's order (`urgency` +150, what a hazard or airworthiness item due now gets), autopilot plans its alert though it isn't due yet, and on Home it counts as due now, after hazards and airworthiness: the Dock's button and the top of *Your move*, with a **grid first** chip on the row saying why. It trades house health for the grid (houses 44 → 37 against the same set without it) but kills the blackouts (all average grid health 41 → 57 over weeks 30–52, dead weeks 172 → 56). An electrician would do the same: the service that feeds every house comes before an inspection's paperwork.
+- **(g) The spiral breaker** (`decayOf`). A house dark all week (grid down, the generator not carrying it) loses nothing to the week's decay: nobody's in it. Storms still hit it. No measurable effect in the sim, because grid first keeps the grid up; kept as the safety net for the weeks it does go down (an electrician away two weeks at the Harbor), where it stops the spiral by construction. It costs nothing when the grid is up.
+- **(a) Code inspections every 13 weeks** (`inspectionWeeks`; the county's calendar from the robust tail books them, one house a week). Real rental inspections are annual or biennial; quarterly is still strict. Effect alone: small, and in the robust run slightly the wrong way (+6 and +6 misses, about the ±3 per crew noise): fewer $150 preps, but the slot goes to a dearer job, so the tier-5 cash gate comes a little later. Kept: it's realistic, and with (b) and (c) the set is far better.
+- **(b) A booked week wears a house 1, not 2** (`houseWearOf`). The biggest lever with (c).
+- **(c) A maintained asset (70 or more) loses 3 a week untouched, not 5,** every plane and every home asset alike; under 70 it's 5 again. 3 beat 4 on every column (the spec's range was 3–4). Kept at 3.
+- **(d) No "+1 alert tier under 50" from tier 4: tested, not kept.** No measurable effect (three friends 18 → 20 games below $0, all average 24 → 19 weeks below $0; robust 69 → 70 and 63 → 62), and a worn-out asset really is the harder job. The knob stays (`LATE.lowHealthTierBump`, true), so the bump is unchanged. The owner summary in EXPANSION §18.2 never listed it.
+- **(f) The credits' A streak pauses on an autopilot week graded A** (`aStreakAfter`, econ.ts). From tier 4 an A week with a seat on autopilot doesn't count toward the eight and doesn't reset the streak; any week graded below A still resets it, whoever played. Chosen over "pause on any autopilot week" because that one is an exploit: skip a turn in a week that looks bad and a reset becomes a pause. With A-only, missing a week can never help a streak. Nobody wins alone: the credits need tier 5, which solo and absent teams never reach, and a test checks on 6 whole seasons (the crews with absences) that the streak never grows on an autopilot week and the credits never land on one. Effect: the credits by week 45 in the robust run, three friends 3 → 4 of 360, all average 2 → 5 of 360 (the rest of play is identical: the streak drives only the credits and the bunting).
+- **Goodhart check.** No cash, overhead, price, payroll or tier gate changed, and the bots play as before. The levers are upkeep rules an electrician and an FP&A person can check: the feed before the paperwork, no wear on an empty dark house, a quarterly inspection, lighter wear on a maintained asset, an A streak that an absence pauses.
+
+### After: the kept set on the long run, against T1 (weeks 24–52, 30 seeds)
+
+| Metric | Three friends: `258d0d2` → A0 | All average: `258d0d2` → A0 | T1 |
+|---|---|---|---|
+| Games ever below $0 | 30/30 → **18/30** | 30/30 → **7/30** | ≤ 3/30 (**missed** by both) |
+| Weeks below $0: total (the median game) | 399 (14) → **104 (1)** | 308 (12) → **24 (0)** | median 0 (**met** by all average, missed by three friends) |
+| Dead weeks: total (the median game) | 605 (20) → **200 (6)** | 531 (18) → **60 (1)** | median ≤ 2 (**met** by all average, missed by three friends) |
+| Receiverships entered | 30 → 16 | 30 → 5 | |
+| Cash at weeks 26 / 39 / 52, median | $92,628 / $1,355 / −$192,491 → $100,133 / $136,134 / $567 | $100,685 / $21,538 / −$166,928 → $108,518 / $186,262 / $138,729 | |
+| Credits by week 45 | 2/30 (7%) → 1/30 (3%) | 0/30 → 2/30 (7%) | ≥ 50% of three friends' games (**missed**) |
+| A-week rate at tier 5 | 2% → 7% | 3% → 13% | |
+| House / grid health, weeks 30–52 | 8 / 8 → 22 / 49 | 14 / 15 → 36 / 58 | |
+| Tier medians (wk → T2 / T3 / T4 / T5) | 8 / 11 / 16 / 23 → same | 7 / 12 / 16 / 23 → same | as in T0 (**met**) |
+
+All good: 0/30 → 0/30 below $0, credits by week 45 53% → 63%, house health 60 → 88. Solo, absent and nobody teams: every number identical (they never reach tier 4) and all stay at tier 1 through week 52.
+
+**T1 is not met.** All average meets two of its four lines (median 0 weeks below $0, median 1 dead week); three friends meet none but the tier medians. The collapse is gone in most games: three friends' median game is 1 week below $0 instead of 14, cash at week 52 is flat instead of −$192,000, and the grid holds. Three friends' credits went 2 → 1 of 30 on the standard seeds, and 3 → 4 of 360 in the robust run: noise at a level near zero either way. Per the time box I stopped here.
+
+### What would reach T1 (probes for Seb's call, scratch, not kept)
+
+On top of the A0 set (these ran with (d) on, which the table shows makes no difference):
+
+| Probe | Three friends: games < $0 · weeks < $0 (median) · dead (median) · credits ≤ 45 | All average |
+|---|---|---|
+| A0 as kept | 18/30 · 104 (1) · 200 (6) · 3% | 7/30 · 24 (0) · 60 (1) · 7% |
+| + one more electrician job a turn (the line-crew NPC's ceiling) | 8/30 · 19 (0) · 60 (1) · 7% | 0/30 · 0 · 3 · 13% |
+| + one more job a turn for both techs | 4/30 · 6 (0) · 38 (0) · 0% | 0/30 · 0 · 0 · 3% |
+| decay 3 for every asset from tier 4 (no 70 gate) | 7/30 · 14 (0) · 42 (1) · 3% | 0/30 · 0 · 5 · 10% |
+| the healthy decay from 50, not 70 | 9/30 · 41 (0) · 101 (3) · 3% | 0/30 · 0 · 11 · 10% |
+
+- **The money side of T1 needs more hands, not softer rules:** the line-crew NPC (an electrician's helper the analyst hires; JOBFLOW v2) is the lever that gets close: three friends at a median of 0 weeks below $0 and 1 dead week, all average at 0 of 30. It's a feature and the owner's call (HANDOFF §1). Decay 3 without the 70 gate gets as far, but "a run-down asset wears as slowly as a kept one" isn't believable; not proposed.
+- **The credits line is out of reach of any upkeep lever.** An A week needs revenue at 85–100% of the tier-5 budget ($22,000) with the flights and safety grades at A. Three friends' bot plays tier 5 at skill 0.62 (0.82 less 0.05 a tier) and takes about $13,800 a week there even with an extra job a turn in both trades; all good takes $22,300 and gets the credits in 63% of games. So "credits in half the three friends' games by week 45" is a question about the goal (the budget, or what counts as a credits week), which is a gate: Seb's call, not a balance lever.
+- **Found on the way (not changed):** the credits count A weeks from before the Resort. `aStreak` builds at tier 4 and the check is `tier === 5 && aStreak >= 8`, so a crew with 8 straight A weeks at the Harbor gets the credits the week the Resort arrives (both of three friends' credits on `258d0d2` came that way: weeks 21 and 23, the week tier 5 arrived). The review line says *"Eight straight A weeks at the Resort"*. Counting only tier-5 weeks would make the credits rarer still; it's a win-condition change, so it's listed for Seb.
+
+### The golden digests (EXPANSION §13.1)
+
+`tests/golden.test.ts` records, after A0, the sha-256 of 26 weeks of the paper-sim crews (three friends seeds 1–3, all average seed 1: the week-by-week table and the island doc at week 26). Stages 2 and 3 must reproduce them with their new features unused. Re-record only on purpose (`GOLDEN=print`), with a DECISIONS line saying why.
+
+### Old docs and the version gate
+
+- **No new stored field.** `LATE` is code; `aStreak`, `inspectionUntil` and health are read as they were.
+- **Live v3 docs** load, render and resolve (the skew and migration tests unchanged). The tier-4 ones (`v3-bd1e1d2-late`, `v3-bd1e1d2-chain`) switch to A0's rules at their next resolve: their 8-week notices stand until they come round, and each renewal books 13 weeks. `tests/resort.test.ts` plays `v3-bd1e1d2-late` twelve weeks with the electrician on autopilot. `tests/robusttail.test.ts`'s chain-doc test now plays seven weeks, not six: on that doc grid first takes two of the electrician's slots (the grid at 45–50), so the last house's prep comes in the seventh week.
+- **Version gate:** A0 changes the resolve from tier 4, so an open v3 client must not resolve a v4 doc; the branch's v4 gate (`ENGINE_VERSION` 4, `DOC_VERSION` 4, rules `v == 4`) already covers it. No further bump.
+
+### Balance (T0)
+
+- **Standard** (26 weeks × 30 seeds, medians): three friends 8 / 11 / 16 / 23, all average 7 / 12 / 16 / 23 (unchanged), both 0 weeks below $0; all good 5 / 9 / 16 / 21; mistakes tier 5 at 24 (was 25); solo, absent and nobody at tier 1 with identical numbers. Pacing guard and "no role can win alone" pass.
+- **Robust** (90 seeds × 4 crews): three friends 102 → **69** misses (27+25+24+26 → 17+20+14+18), weeks below $0 1 → 0; all average 77 → **63** (19+18+19+21 → 18+14+16+15), 0 → 0. Median week to tier 5 23 in every crew (was 23 / 24 / 23 / 24 and 23 / 24 / 24 / 23). Better than `gaps` as landed, as T0 asks; three friends are inside the old ≤ 75 target again, all average still over ≤ 37. Long columns: games below $0 in weeks 24–52, 359 → 247 and 351 → 100 of 360.
+
+### Tests
+
+`tests/resort.test.ts` (17): each lever at tier 3 and tier 4 ((a) the renewal, the sign-off and the villas' first notices; (b); (c) by kind and in the resolve; (g) by kind and in a grid-down resolve; (d)'s knob; (e) the urgency order, the must-do with a full list, autopilot planning the grid, the Dock and *Your move*; (f) the streak rule), then whole seasons: the solo, absent and nobody teams at tier 1 through 52 weeks, the streak never growing on an autopilot week over 6 seasons (and the pause seen), the long-game guard (seeds 1–10, with room for noise), and the live tier-4 doc. `tests/golden.test.ts` (5). 803 tests in all (781 before), 47 files.

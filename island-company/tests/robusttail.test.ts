@@ -158,8 +158,10 @@ describe('1. code inspections on the county calendar', () => {
     const before = s.assets.filter((a) => a.kind === 'house').map((a) => a.inspectionUntil);
     expect(new Set(before).size).toBe(3);
     const team = TEAMS['three friends'];
-    // the paper-sim crew plays six weeks on this build: every house's prep comes due and is signed off once
-    for (let w = 0; w < 6; w++) {
+    // the paper-sim crew plays seven weeks on this build: every house's prep comes due and is signed off once. (Six
+    // before A0: from tier 4 the grid under 55 goes first, and on this doc it takes the electrician's slot in two of
+    // these weeks, so the last house is prepped in the seventh, as a lapsed inspection re-done)
+    for (let w = 0; w < 7; w++) {
       const W = s.week;
       const now = (s.deadline ?? NOW) - 3600_000;
       for (const role of ROLES) {

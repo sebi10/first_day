@@ -69,7 +69,8 @@ npm run dev                                   # http://localhost:5173 (strictPor
 npx tsc --noEmit -p .                         # typecheck
 npx vitest run                                # all tests
 npx tsx scripts/balance.ts                    # paper sim, 26 wk x 30 seeds
-npx tsx scripts/balance.ts robust             # 90 seeds x 4 crews
+npx tsx scripts/balance.ts robust             # 90 seeds x 4 crews (+ the long game's columns)
+npx tsx scripts/balance.ts long               # the long game: 52 wk x 30 seeds, the T1 table (docs/EXPANSION.md 11.1)
 npm run build                                 # tsc + vite build (then rm -rf dist)
 BASE=http://localhost:5173 node scripts/e2e.mjs /tmp/e2e [desktop]
 ```

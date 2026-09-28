@@ -17,7 +17,7 @@
 import { raiseAlert, soleGuest } from './alerts';
 import type { Bot } from './bots';
 import { ECON, MODELS, STOCK } from './data';
-import { bookInspection, capFleet, capOf, clamp, flightsPerPlane, houseRentable, planes, projectWeek, round10, tierDef } from './econ';
+import { bookInspection, capFleet, capOf, clamp, flightsPerPlane, houseRentable, inspectionWeeks, planes, projectWeek, round10, tierDef } from './econ';
 import { apply, type ApplyResult } from './engine';
 import { itemById, priceAt } from './items';
 import { book, spendable } from './ledger';
@@ -545,7 +545,7 @@ export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void
     if (b.cottage) {
       const plot = COTTAGE_PLOTS.find((p) => p.id === b.cottage);
       if (plot && !s.assets.some((a) => a.id === plot.id))
-        s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + ECON.houseInspectionWeeks) });
+        s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + inspectionWeeks(s.tier)) });
       line('all', 'good', `${plot?.name ?? 'The new cottage'} is finished: it takes guests from next week.`);
     } else line('all', 'good', `The site work on ${site} is done: ${b.tier ? `they open with tier ${b.tier} in good shape` : 'finished'}.`);
     tidyBuilds(s, W, line);
@@ -847,7 +847,7 @@ export function cottagePlan(s: IslandState): { plot: { id: string; name: string 
   const plot = freePlots(s)[0] ?? null;
   const cost = COTTAGE_SHELL + valueOf(COTTAGE.units.flatMap((u) => Object.entries(u).map(([item, qty]) => ({ item, qty: qty ?? 0 }))));
   if (!plot) return { plot, cost, rent: 0, housekeeper: false, payback: null };
-  const extra: Asset = { id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: s.week, inspectionUntil: s.week + ECON.houseInspectionWeeks };
+  const extra: Asset = { id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: s.week, inspectionUntil: s.week + inspectionWeeks(s.tier) };
   // a normal week: nothing grounded or closed for an alert, no safety tag, no plane chain-grounded
   const normal = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
   const weeks = Array.from({ length: 8 }, (_, i) => s.week - i).filter((w) => w >= 1);

@@ -93,6 +93,7 @@ import {
 import { builtShare, buildWeek, charterMult, housekeepingCap, newIslandStaff, payroll, pilotCap, reviewMult, staffAction, staffAfterFlights, staffOpenWeek, autoStaff } from './staff';
 import { benchFor, defaultTask, fixedFor, laborMin, plannable, taskById, taskOn, tasksFor, type Task } from './tasks';
 import {
+  aStreakAfter,
   alertAog,
   cableBand,
   cableReport,
@@ -132,6 +133,10 @@ import {
   houseRentable,
   houses,
   bookInspection,
+  decayOf,
+  gridFirst,
+  houseWearOf,
+  inspectionWeeks,
   onSchedule,
   projectCoverWeek,
   renewedInspection,
@@ -405,7 +410,7 @@ function addTierAssets(s: IslandState, tier: number, week: number, health = 80, 
       health: fresh ? ECON.startHealth : kind === 'house' || kind === 'generator' ? built : health,
       touchedWeek: week,
       // the county books each house a week of its own (a tier's pair gets its notices a week apart)
-      ...(kind === 'house' ? { inspectionUntil: bookInspection(s, a.id, week + ECON.houseInspectionWeeks) } : {}),
+      ...(kind === 'house' ? { inspectionUntil: bookInspection(s, a.id, week + inspectionWeeks(s.tier)) } : {}),
       ...(kind === 'plane' ? { sinceInspection: 4 } : {}),
     });
   }
@@ -3062,7 +3067,7 @@ function decideStory(s: IslandState, key: string, now: number): ApplyResult {
       // (fix round 1: every notice coming back in the same week was the code-prep pile-up the calendar removed)
       const hs = houses(s);
       for (const h of hs) h.inspectionUntil = 0;
-      for (const h of hs) h.inspectionUntil = bookInspection(s, h.id, W + ECON.houseInspectionWeeks);
+      for (const h of hs) h.inspectionUntil = bookInspection(s, h.id, W + inspectionWeeks(s.tier));
       break;
     }
     case 'rival:ads':
@@ -3339,7 +3344,8 @@ function autoRun(s: IslandState, role: Role) {
     // autopilot keeps to the manual: what grounds a plane or closes a house, and whatever else comes due now or next
     // week (the seat's work doesn't pile up past due while it's away), and an asset in critical shape
     const grounds = asset.kind === 'plane' ? f.aw && al.due <= s.week + 1 : f.hazard;
-    const critical = asset.health < 45;
+    // (A0 e: the grid under 55 at tier 4+ is must-do work, for autopilot too)
+    const critical = asset.health < 45 || gridFirst(s, asset);
     const dueSoon = al.due <= s.week + 1;
     if (!(grounds || critical || dueSoon) || (!realFault(al) && !al.repair)) continue;
     const pick = task.fixed ? [] : stdPick(s, asset, task, siteOf(s, al), needsOf(s, al));
@@ -3893,7 +3899,7 @@ export function resolveWeek(s: IslandState, now: number) {
       nearMisses++;
       line('elec', 'bad', `Outage at ${h.name}: guests refunded half (${usd(rev * 0.5)}).`);
     }
-    h.health -= ECON.houseWear;
+    h.health -= houseWearOf(s);
   }
   for (const h of hs) {
     if (isTagged(s, h.id)) continue; // red-tagged = de-energised: no fire
@@ -4096,8 +4102,9 @@ export function resolveWeek(s: IslandState, now: number) {
 
   // 9. decay + storm
   const shield = s.modifiers.some((m) => m.kind === 'stormShield' && m.until >= W) ? 0.5 : 1;
+  // A0 (from tier 4): a maintained asset wears slower, and a house dark all week (grid down, no generator) not at all
   for (const a of s.assets) {
-    if (a.touchedWeek < W) a.health -= ECON.decay;
+    if (a.touchedWeek < W) a.health -= decayOf(s, a, !pw.on);
     if (s.weather === 'storm') {
       if (a.kind === 'house') a.health -= 6 * shield;
       if (a.kind === 'grid') a.health -= 8 * shield;
@@ -4235,7 +4242,8 @@ export function resolveWeek(s: IslandState, now: number) {
     st.streakBPlus += 1;
   } else st.streakBPlus = 0;
   if (perfectWeek && fullTeam) st.perfectWeeks += 1;
-  st.aStreak = grade === 'A' && fullTeam ? (st.aStreak ?? 0) + 1 : 0;
+  // (A0 f: from tier 4 an autopilot week graded A pauses the credits' streak instead of resetting it)
+  st.aStreak = aStreakAfter(s, grade, fullTeam);
   if (s.tier === 5 && (st.aStreak ?? 0) >= 8 && !s.creditsWeek) {
     s.creditsWeek = W;
     line('all', 'good', 'Eight straight A weeks at the Resort. You beat Island Company!');

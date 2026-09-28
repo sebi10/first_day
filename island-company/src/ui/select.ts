@@ -5,7 +5,7 @@ import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../
 import { externalPower } from '../sim/aircraft';
 import { CABLE_REPORT, ECON, FLOAT_AUCTION, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
-import { alertAog, cartOn, flightsAvailable, flightsPerPlane, groundsFrom, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, subCharterNeed, subCharterOn } from '../sim/econ';
+import { alertAog, cartOn, flightsAvailable, flightsPerPlane, gridFirst, groundsFrom, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, subCharterNeed, subCharterOn } from '../sim/econ';
 import { cardOf, flowStage } from '../sim/flow';
 import { itemById, priceAt } from '../sim/items';
 import { toolsFor } from '../sim/progression';
@@ -276,12 +276,21 @@ export function dueNow(s: IslandState, role: OpsRole): Alert[] {
     })
     .sort((a, b) => a.due - b.due || rank(s, a) - rank(s, b));
 }
+/** A0 (e) grid first: the alert is on the island grid while it's under 55 at tier 4+ (every house hangs off it) */
+const onGridFirst = (s: IslandState, a: Alert) => {
+  const asset = s.assets.find((x) => x.id === a.assetId);
+  return !!asset && gridFirst(s, asset);
+};
 const rank = (s: IslandState, a: Alert) => {
   const f = alertFlags(s, a);
-  return f.hazard ? 0 : f.aw ? 1 : 2;
+  return f.hazard ? 0 : f.aw ? 1 : onGridFirst(s, a) ? 1.5 : 2;
 };
 
-/** the tech's "Your move" rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then by due week */
+/**
+ * the tech's "Your move" rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then
+ * by due week. From tier 4 the grid under 55 counts as due now and ranks after hazards and airworthiness, so it goes
+ * before a code prep (A0 e: grid first; the Dock's button is the first row)
+ */
 export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?: Order }[] {
   const rows: { alert: Alert; order?: Order }[] = [];
   for (const a of liveAlerts(s)) {
@@ -291,7 +300,8 @@ export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?
     const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
     rows.push({ alert: a, order: o && o.status !== 'cancelled' ? o : undefined });
   }
-  return rows.sort((x, y) => Number(y.alert.due <= s.week) - Number(x.alert.due <= s.week) || rank(s, x.alert) - rank(s, y.alert) || x.alert.due - y.alert.due || (x.alert.id < y.alert.id ? -1 : 1));
+  const now = (a: Alert) => a.due <= s.week || onGridFirst(s, a);
+  return rows.sort((x, y) => Number(now(y.alert)) - Number(now(x.alert)) || rank(s, x.alert) - rank(s, y.alert) || x.alert.due - y.alert.due || (x.alert.id < y.alert.id ? -1 : 1));
 }
 
 export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' };

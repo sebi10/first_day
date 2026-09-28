@@ -1758,6 +1758,8 @@ Today's steps are unchanged except where marked. **Every network addition is ski
 
 ### 11.2 A0: a Resort that holds (stage 1)
 
+> **Status (2026-09-29, branch `gaps`, v4): built, one balance pass, T1 not met.** Kept: (e), (g), (a), (b), (c) at 3, (f) (the streak pauses on an autopilot week graded A; a lower grade still breaks it). Tested, not kept: (d) (no effect). T0 holds (standard unchanged; robust 102 → 69 and 77 → 63 misses, 0 weeks below $0). Long run, weeks 24–52: three friends 18/30 games below $0 (median game 1 week, 6 dead weeks), all average 7/30 (0 weeks, 1 dead week), credits by week 45 in 1/30 and 2/30. The table, the probes (one more electrician job a turn reaches the money lines; the credits line is the tier-5 budget, a gate) and the call are in `docs/DECISIONS.md` "2026-09-29: A0". The golden digests are recorded (`tests/golden.test.ts`).
+
 - **The finding and the numbers are in 0.3.** A0 lands first, on top of `gaps`.
 - **Order:**
   1. **Measure `gaps` as landed on the long run.** Its staggered code notices and alert throttle aim at the tier-4 electrician overload that starts the slide.

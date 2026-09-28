@@ -1,8 +1,8 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
 import { soleGuest, symptomOf } from './alerts';
-import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, ROLE_LABEL, SUBCHARTER, TIERS } from './data';
+import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, LATE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, ROLE_LABEL, SUBCHARTER, TIERS } from './data';
 import { charterMult, housekeepingCap, payroll, pilotCap, reviewMult } from './staff';
-import type { Alert, Asset, CableBand, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
+import type { Alert, Asset, CableBand, Grade, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round10 = (v: number) => Math.round(v / 10) * 10;
@@ -156,20 +156,63 @@ export function powered(s: IslandState) {
   return { gridDown, genOK: !!gen && gen.health >= 50, on: !gridDown || (!!gen && gen.health >= 50) };
 }
 
+// ---------------------------------------------------------------------------
+// A0, "a Resort that holds" (data LATE; docs/EXPANSION.md 11.2): the late game's upkeep, from tier 4
+
+/** the late game's upkeep rules apply on this island (tier 4 and up) */
+export const lateGame = (s: Pick<IslandState, 'tier'>) => s.tier >= LATE.fromTier;
+
+/** (e) grid first: the island grid is under LATE.gridFirst at tier 4+, so its work is a must-do that ranks above code prep */
+export function gridFirst(s: Pick<IslandState, 'tier' | 'assets'>, a?: Pick<Asset, 'kind' | 'health'>): boolean {
+  if (!LATE.gridFirst || !lateGame(s)) return false;
+  const g = a ?? s.assets.find((x) => x.kind === 'grid');
+  return !!g && g.kind === 'grid' && g.health < LATE.gridFirst;
+}
+
+/** (a) weeks from a code inspection to the next one: every 8 weeks, every 13 from tier 4 */
+export const inspectionWeeks = (tier: number) => (tier >= LATE.fromTier ? LATE.inspectionWeeks : ECON.houseInspectionWeeks);
+
+/** (b) a booked week's wear on a house */
+export const houseWearOf = (s: Pick<IslandState, 'tier'>) => (lateGame(s) ? LATE.houseWear : ECON.houseWear);
+
+/**
+ * (c) what an untouched asset loses this week (resolve step 9): ECON.decay; from tier 4 a maintained one (at or above
+ * LATE.healthyDecay.at) loses LATE.healthyDecay.decay, every plane and home asset alike; (g) and a house that's dark all
+ * week (the grid down, the generator not carrying it) loses nothing: nobody's in it
+ */
+export function decayOf(s: Pick<IslandState, 'tier'>, a: Pick<Asset, 'kind' | 'health'>, dark = false): number {
+  if (!lateGame(s)) return ECON.decay;
+  if (dark && LATE.darkNoDecay && a.kind === 'house') return 0;
+  return a.health >= LATE.healthyDecay.at ? LATE.healthyDecay.decay : ECON.decay;
+}
+
+/**
+ * (f) The credits' A streak after this week's grade (resolve step 14): a full-crew A week adds one; any week graded
+ * below A ends it, whoever played. An A week that autopilot covered a seat for doesn't count (nobody wins alone):
+ * before tier 4 it ends the streak, as it always did; from tier 4 it pauses it (one missed evening no longer wipes
+ * a 7-week run at the Resort).
+ */
+export function aStreakAfter(s: Pick<IslandState, 'tier' | 'stats'>, grade: Grade, fullTeam: boolean): number {
+  const now = s.stats.aStreak ?? 0;
+  if (grade !== 'A') return 0;
+  if (fullTeam) return now + 1;
+  return LATE.streakPause && lateGame(s) ? now : 0;
+}
+
 /** how far ahead the county's notice comes (E_CODE_DUE's lead): a prep inside this window is ready for the booked date */
 export const INSPECTION_NOTICE = 2;
 
 /**
  * A house's next inspection date when its code prep is signed off in week `W` (the robust tail, 2026-09-28). The
  * county inspects on the booked date, so a prep done ahead of it (the notice comes 2 weeks out) renews from that
- * date, not from the week of the prep: the certificate is 8 weeks from the inspection, as a real one runs. A lapsed
+ * date, not from the week of the prep: the certificate is 8 weeks from the inspection (13 from tier 4: A0), as a real one runs. A lapsed
  * inspection is re-done at once (from `W`); a prep further ahead than the notice counts from `W` too, so preps can't
  * push the date out.
  */
-export function renewedInspection(s: Pick<IslandState, 'assets'>, h: Pick<Asset, 'id' | 'inspectionUntil'>, W: number): number {
+export function renewedInspection(s: Pick<IslandState, 'assets' | 'tier'>, h: Pick<Asset, 'id' | 'inspectionUntil'>, W: number): number {
   const until = h.inspectionUntil ?? 0;
   const on = until >= W && until - W <= INSPECTION_NOTICE ? until : W;
-  return bookInspection(s, h.id, on + ECON.houseInspectionWeeks);
+  return bookInspection(s, h.id, on + inspectionWeeks(s.tier));
 }
 
 /** how many weeks past the due date the county will book a house's inspection to find a week of its own */
@@ -381,6 +424,8 @@ export function urgency(s: IslandState, o: Order) {
     (o.redo ? 15 : 0) +
     // a plane is down until the part chain is through
     (o.chain ? 120 : 0) +
+    // A0 (e): the grid under 55 at tier 4+ goes before code prep, like a hazard due now (every house hangs off it)
+    (a && gridFirst(s, a) ? LATE.gridFirstUrgency : 0) +
     // the job flow: an airworthiness or hazard alert, due now (it grounds a plane or closes a house at this resolve)
     flowUrgency(s, o)
   );
