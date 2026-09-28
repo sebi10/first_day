@@ -1081,3 +1081,103 @@ Branch `gaps`, off `1f92356`. The four gap branches merged `--no-ff` in this ord
   - The push runs the Action, which deploys hosting and rules together.
   - Then run `probe-gate.mts` live with OLD_V=3 NEW_V=4: want v:3 permission-denied and v:4 not-found.
   - Then tell the crew to close and reopen the app.
+
+## 2026-09-28: the robust tail (HANDOFF §7.5)
+
+Branch `gaps` (on `5532631`). Goal: close the robust sweep's tier-5 tail by fixing its causes, not by buying it back with cash, overhead or softer gates. Targets (90 seeds × 4 crews = 360 games a team): three friends miss tier 5 in ≤ 75, all average in ≤ 37, all average 0 weeks below $0, three friends fewer than 7. The standard 30-seed targets must hold as they are.
+
+### Diagnosis (the sim first)
+
+A per-game trace of all 720 robust games (scratch scripts, not committed) sorted each miss by what stopped it. At `5532631`:
+
+| Why tier 5 was missed | Three friends | All average |
+|---|---|---|
+| Cash under $60,000 with tier 4 on time (week ≤ 17): the tier-4 economy | 26 | 30 |
+| Cash under $60,000 with tier 4 late (week ≥ 18): the tier-3 gate at tier 2 | 29 | 23 |
+| Tier 4 never opened, late or its project stalled | 19 | 18 |
+| The tier-5 project waited on one seat past week 26 | 18 | 5 |
+| **Total** | **92** | **76** |
+
+What the tier-4 misses look like, per tier-4 week, against the games that made it (three friends): revenue $11,223 against $15,662; 4.8 of 6 houses rentable against 6.0; the electrician's assets at 52.6 health against 65.2; carried jobs' deferral incidents 34 per 100 weeks against 13; storms 0.25 a week against 0.18. The electrician does 3.0 jobs a turn either way. Code preps were 22% of the electrician's tier-4 jobs.
+
+Four mechanisms behind that, three of them unrealistic:
+
+1. **A code prep renewed the certificate from the week of the prep.** The notice comes 2 weeks ahead and the prep is done at once, so the county's 8-week cycle ran every 6 weeks. The houses of a tier also came due in pairs (every house of a tier-up started on the same date).
+2. **A job planned ahead of its due week was deferred at the carry-over like any unfinished job.** A hall 3-way due in 2 weeks, planned this week and done next week, rolled deferral risk (tier-4 jobs: 30–50% a week of −25 health, 3× the labour and half the week's rent refunded) before it was due, while the same alert left unplanned rolls only once it's past due (resolve step 7). Planning early, which the flow asks for, cost more than waiting.
+3. **Autopilot's covered code prep and 100-hour inspection didn't pass.** Autopilot did the job at 50% and closed the alert, but the certificate wasn't renewed (and the 100-hour wasn't logged), so the notice came straight back and the house lapsed. A blind sign-off at the same tiers passes whatever it scored.
+4. **A crew project waited forever on a seat that was away** (the three friends' streaks): 18 of their 92 misses.
+
+### The levers, one at a time (robust sweep; misses by crew − / a / b / c)
+
+| Step | Three friends: miss T5 | weeks < $0 | All average: miss T5 | weeks < $0 |
+|---|---|---|---|---|
+| `5532631` | 92 (20+24+31+17) | 7 | 76 (19+19+18+20) | 2 |
+| L1a: the certificate runs from the inspection date | 95 (21+27+30+17) | 5 | 75 (16+22+18+19) | 1 |
+| L1b: + the county books one house a week | 96 (24+25+27+20) | 2 | 73 (16+17+20+20) | 0 |
+| B: + a job planned ahead of its due week is on schedule | 78 (22+22+20+14) | 2 | 60 (18+15+12+15) | 0 |
+| L3: + a crew project part waits two weeks, then autopilot does it at 50% | 75 (15+20+22+18) | 3 | 58 (17+14+12+15) | 0 |
+| L2: + the tier-4 generator holds back optional alerts at 4+ ready jobs (tried, **not kept**) | 75 (15+20+21+19) | 3 | 58 (17+14+12+15) | 0 |
+| L4: + autopilot's covered inspections pass (L2 out) | 74 (15+19+23+17) | 2 | 50 (16+10+13+11) | 0 |
+| **Final** (the inspector story card stays one visit, below) | **75 (18+19+21+17)** | **2 (0+1+0+1)** | **51 (16+10+14+11)** | **0** |
+
+The final run differs from the L4 row by the story card only (±1, noise). Median week to tier 5: three friends 23 / 23 / 23 / 23 (was 23 / 24 / 24 / 23), all average 23 for every crew (unchanged). Min cash: three friends $4,115 / −$5,312 / $5,921 / −$3,799; all average $2,890 / $4,420 / $5,116 / $1,980.
+
+- **L1: code inspections on the county's calendar** (`renewedInspection`, `bookInspection` in econ.ts).
+  - The certificate runs 8 weeks from the booked inspection date when the prep is done inside the notice (2 weeks), as a real certificate runs from the inspection. A lapsed inspection is re-done at once (from the week of the prep), and a prep further ahead than the notice counts from that week too (as before), so preps can't push the date out.
+  - The county books one of the island's houses a week: a house whose date another house holds goes to the next free week, up to 3 weeks later (`INSPECTION_SLIP`), else the date as asked. New houses (a tier's pair, a built cottage) get notices a week apart, and a live island whose houses are in step spreads out as they renew. An electrician would find this normal: a county's rental inspections are booked per unit.
+  - Effect: code preps fell from 22% to 17% of the electrician's tier-4 jobs, and weeks below $0 fell (7 → 2, 2 → 0), but the misses didn't move (92 → 96, 76 → 73, within noise). Kept for the realism and the collapses, not the misses.
+  - The inspector story card (*"Book the inspector"*) stays one visit for every house on one date: that's the card's meaning. Their renewals then book a week each.
+- **B: a job planned ahead of its alert's due week is on schedule** (`onSchedule`, econ.ts; resolve step 8). The carry-over doesn't count it as a deferral until its due week has passed, so its deferral clock starts exactly when the unplanned alert's would. Planning early never costs more than waiting. Everything else is as before: a job waiting on parts isn't deferred, a job past due is, a non-flow job is, and the analyst's own *Defer* still counts. End turn now says which ready jobs carry risk (*"2 ready jobs will carry to next week: 1 of them picks up deferral risk"*; a crew project part never did, and the old count included it). The biggest lever: −18 and −13 misses.
+- **L3: a crew project part waits two weeks for a seat that's away, then autopilot does it by the book at 50%** (`PROJECT_COVER = { wait: 2, recent: 4, score: 0.5 }` in data.ts, `projectCoverWeek` in econ.ts, `coverProject` at resolve step 1).
+  - At the resolve two weeks after the project opened, a seat still away gets its part done at 50%. The tier arrives at that resolve (step 16), and the new buildings start at 60 + 30 × the parts' average, so a 50% part costs every new building about 4 health against a 0.9 one (30 × 0.4 ÷ 3). The review says so: *"Ben was still away: autopilot did Ben's part of the crew project by the book, at 50%: Put cottages 3–4 on the panel. It had waited 2 weeks."*
+  - Only for a seat played in the last 4 weeks (someone on holiday, not a seat nobody plays): a seat with a miss streak of 4 or more waits for its player, as before.
+  - "No role can win alone" holds without leaning on it: tier 2 needs 4 full-crew B+ weeks and tier 4 2 full-crew perfect weeks, so solo and absent teams can't open a project that needs covering. A seat that plays a few weeks and vanishes could at most be carried to tier 3; the 4-week guard stops even that.
+  - The crew project card on Home shows each other seat's cover week (*"to do · autopilot wk 9 if away"*) and your own deadline (*"Yours: do it by week 9 or autopilot does it at 50%"*). ONBOARDING §10 says the same.
+  - Effect: the three friends' "project waited on one seat" misses 18 → 6 (a project opened in week 24–25 can't be covered by 26). Net −3 and −2, because most of those games then wait on cash.
+- **L2: the throttle** (tried, not kept). From tier 4, no new optional alerts while the trade has 4 or more ready jobs. No effect at all (75 → 75, 58 → 58): the generator already stops optional work at 5 open per trade, and the electrician's new alerts per tier-4 week (2.9 in the games that made tier 5, 3.0 in those that missed) already match the 3 jobs a turn. The pile-up is must-do work (critical assets under 45, code preps), and holding that back would make the island forget its problems. Reverted.
+- **L4: autopilot keeps to the manual, so its covered inspections pass** (autoRun). A covered code prep renews the certificate (`renewedInspection`, so booked like any other) and a covered 100-hour inspection is logged (`sinceInspection = 0`), as a blind sign-off is whatever it scored. Autopilot's other jobs are unchanged (2 at 50%, no hidden defects). Effect: −1 and −8 misses; the all-average crews' short absences no longer lapse houses.
+
+### Final balance
+
+Standard (26 weeks × 30 seeds, medians; `5532631` → final). Every target in CLAUDE.md holds.
+
+| Team | Wk → T2 / T3 / T4 / T5 | Min cash | Weeks < $0 |
+|---|---|---|---|
+| All good | 5 / 9 / 16 / 21 → 5 / 9 / 16 / 21 | $6,530 → $7,088 | 0 → 0 |
+| All average | 7 / 12 / 16 / 22 → 7 / 12 / 16 / 22 | $5,805 → $5,805 | 0 → 0 |
+| **Three friends** | 8 / 11 / 16 / 23 → 8 / 11 / 16 / **22** | $6,271 → $6,271 | 0 → 0 |
+| Mistakes | 8 / 12 / 16 / 24 → 8 / 13 / 16 / 24 | −$7,168 → $3,932 | 1 → 0 |
+| Naive analyst | tier 2 at week 26 → tier 2 | $2,514 → $3,675 | 0 → 0 |
+| Mech / elec / fin absent | tier 1 → tier 1 | $424 / −$16,442 / $2,821 → $3,172 / $7,410 / $4,847 | 0 / 45 / 0 → 0 / 0 / 0 |
+| Solo mech / elec / fin, nobody | tier 1 → tier 1 | | 321 / 331 / 379 / 459 → 43 / 274 / 4 / 350 |
+
+The absent and solo teams lose far less money now (L4 above all: a covered prep keeps the houses inspected, a covered 100-hour keeps the planes out of the overdue penalty) and still never leave tier 1. That's pillar 2 (nobody is gridlocked by an empty seat) working as meant; unlocks still need the full crew.
+
+Robust (the final row above), with what still misses (same trace; `5532631` → final):
+
+| Why tier 5 was missed | Three friends | All average |
+|---|---|---|
+| The tier-4 economy (cash, tier 4 on time) | 26 → 36 | 30 → 12 |
+| The tier-3 gate at tier 2 (cash, tier 4 late) | 29 → 14 | 23 → 24 |
+| Tier 4 never opened, late or stalled | 19 → 19 | 18 → 11 |
+| The tier-5 project waited on one seat | 18 → 6 | 5 → 4 |
+| **Total** | **92 → 75** | **76 → 51** |
+
+- **Three friends: target met, at the line** (75 ≤ 75; the last three code states gave 74–75, so call it ±3). Weeks below $0: 7 → 2 (target < 7). The 2 are seed 3 crew a (the mechanic away weeks 11–19, then the tier-4 houses decay to 0–30, −$5,000 in week 25) and seed 32 crew c (the electrician away 11 weeks of 19).
+- **All average: target not met** (51 against ≤ 37). Weeks below $0: 2 → 0 (target 0).
+
+### What's left, and why I stopped (not fixed)
+
+- **The electrician's tier-4 overload is structural.** At tier 4 the electrician keeps 8 assets (6 houses, the grid, the generator) on 3 jobs a turn; the mechanic keeps 4 (3 planes and the generator's service). Untouched assets lose 5 a week, a booked house 2 more, a storm 6 per house and 8 on the grid (20% of weeks from tier 3). Ceiling experiment (bots only, not kept): one extra electrician job a turn at tier 4 gives 67 and 47 misses (−8 and −11 on the final). So no electrician-side lever inside the current capacity can reach 37 either. The realistic fix is more hands, the backlog's **line-crew NPCs** (an electrician's helper the analyst hires, JOBFLOW v2): the owner's call, and a feature, not a lever.
+- **The all-average crew's other 24 misses are the tier-3 gate at tier 2**: $18,000 cash and 4 incident-free weeks together. Those games earn $620 a week less at tier 2 ($5,692 against $6,192 revenue in the games with tier 3 by week 13: the season's low weeks), and an average crew's hidden defects (0.13 a week at tier 2, blind sign-offs from tier 2) keep resetting the 4 clean weeks. That's skill and the season, as designed. Only the gate or the cash would buy it back, which the brief rules out.
+- **Goodhart check.** No cash, overhead, gate, price or payroll changed; the bots' play didn't change. The four kept levers remove a penalty for planning early, a 6-week county cycle that should be 8, an autopilot that failed inspections it did by the book, and an unbounded wait on an away friend. They also make the standard three friends a week faster to tier 5 (23 → 22, inside 21–23).
+
+### Old docs and the version gate
+
+- No new stored field; nothing stored changes shape. `inspectionUntil`, `deferrals`, the project's orders and `missedStreak` are read as they are.
+- Live v3 docs: their houses share dates in pairs (every `v3-bd1e1d2` fixture); they load, play and spread out as their preps renew (`tests/robusttail.test.ts` plays `v3-bd1e1d2-chain` six weeks: every house renews once, each on its own week). `v3-bd1e1d2-restricted-mel` has an open tier-4 project the mechanic still owes from week 15: on this build it's covered at week 17's resolve if the mechanic is still away, and tier 4 arrives.
+- Version gate: these change what a resolve does (the carry-over, autopilot, the project, the renewal date), so an open v3 client must not resolve a v4 doc. The branch's v4 gate (`ENGINE_VERSION` 4, `DOC_VERSION` 4, rules `v == 4`) already covers it; no further bump. The skew and migration tests pass unchanged.
+
+### Tests
+
+`tests/robusttail.test.ts` (15): L1 (a new island's two cottages a week apart; the renewal from the booked date, lapsed and early; one house a week with the 3-week slip; the engine's sign-off; four cottages in step spread to four weeks; the live chain doc spreads), B (on schedule until due, then carried from the due week exactly as the unplanned alert; a non-flow job unchanged), L3 (covered at the second away resolve at 50% with the tier and the building health; a returning seat does its own part; a 4-week-absent seat isn't covered; the live doc's project; the absent teams stay at tier 1 over seeds 1–6), L4 (a covered prep renews; a covered 100-hour is logged). `tests/staff.test.ts`: a built cottage is booked the first free week from 8 out. The pacing guard and "no role can win alone" pass unchanged. 763 tests in all (748 before).

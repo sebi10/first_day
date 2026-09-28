@@ -426,7 +426,7 @@ describe('crew projects', () => {
     expect(s.tier).toBe(1);
     expect(s.project?.tier).toBe(2);
     const ids = s.project!.orders;
-    // autopilot never does your part; lend a hand can't either
+    // lend a hand can't do your part (autopilot only after it has waited two weeks on an away seat: tests/robusttail.test.ts)
     s.orders.find((o) => o.id === ids.elec)!.deferrals = 1;
     expect(apply(s, { t: 'complete', role: 'mech', orderId: ids.elec!, score: 1, perfect: true, cover: true }, NOW).error).toMatch(/own part/);
     for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'complete', role: r, orderId: ids[r]!, score: 0.9, perfect: false }, NOW).s;

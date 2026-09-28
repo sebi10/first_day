@@ -395,7 +395,7 @@ describe('builders and the site work', () => {
     expect(builtShare(started(), 5)).toBe(1);
   });
 
-  it('a finished cottage joins the island: health 80, inspected for 8 weeks, and it rents like the others', () => {
+  it('a finished cottage joins the island: health 80, inspected for about 8 weeks (its own week), and it rents like the others', () => {
     const s = atTier(3);
     s.builds!.push({ id: 'cottage-h8', what: 'Cottage 5', cottage: 'h8', done: 4, drawn: 5, need: 5, started: 0 });
     s.staff = crew(s, 3);
@@ -409,7 +409,13 @@ describe('builders and the site work', () => {
     expect(plan.payback).toBe(Math.ceil(plan.cost / (plan.rent - STAFF.wage.housekeeper)));
     buildWeek(s, rng(1), s.week, line);
     const h8 = s.assets.find((a) => a.id === 'h8')!;
-    expect(h8).toMatchObject({ kind: 'house', model: 'cottage', name: 'Cottage 5', health: 80, inspectionUntil: s.week + 8 });
+    expect(h8).toMatchObject({ kind: 'house', model: 'cottage', name: 'Cottage 5', health: 80 });
+    // the county books it the first week from 8 out that no other house holds (it does one house a week)
+    const taken = new Set(s.assets.filter((a) => a.kind === 'house' && a.id !== 'h8').map((a) => a.inspectionUntil));
+    let want = s.week + 8;
+    while (taken.has(want)) want++;
+    expect(h8.inspectionUntil).toBe(want);
+    expect(want - s.week).toBeLessThanOrEqual(8 + 3);
     // it rents once someone turns it over
     expect(projectWeek(s).revenue).toBe(before);
     s.staff.push(npc('housekeeper'));

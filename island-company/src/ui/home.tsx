@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
-import { gseCarts, gseForStart, hangarJobs, needsCart, powered, startCart, tierDef, urgency } from '../sim/econ';
+import { gseCarts, gseForStart, hangarJobs, needsCart, onSchedule, powered, projectCoverWeek, startCart, tierDef, urgency } from '../sim/econ';
 import { ROLES, type IslandState, type OpsRole, type Order, type Role, type WeekReport } from '../sim/types';
 import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
@@ -444,7 +444,11 @@ export function CrewProject({ ctl, onPlay }: { ctl: Ctl; onPlay?(o: Order): void
               <b style={{ color: C.palm }}>✓ {Math.round((o.result?.score ?? 0) * 100)}%</b>
             )
           ) : (
-            <span class="label">to do</span>
+            <span class="label" style={{ textAlign: 'right' }}>
+              to do
+              {/* the week autopilot does it at 50% if that seat is still away (a seat played in the last month) */}
+              {projectCoverWeek(s, r) !== null && r !== role && <div>autopilot wk {projectCoverWeek(s, r)} if away</div>}
+            </span>
           )}
         </div>
       ))}
@@ -457,8 +461,10 @@ export function CrewProject({ ctl, onPlay }: { ctl: Ctl; onPlay?(o: Order): void
         <span class="label fault">You've hit this turn's job limit: your part waits for next turn.</span>
       )}
       <span class="label">
-        Tier {p.tier} opens the moment all three are done. Each of you does your own part: autopilot and lend-a-hand can't. New buildings start at 60–90 health, set by
+        Tier {p.tier} opens the moment all three are done. Each of you does your own part (lend-a-hand can't). A part that has waited two weeks on someone who's
+        away is done by autopilot at 50% at that week's resolve, so nobody waits for good, but it lowers the new buildings. They start at 60–90 health, set by
         your average score.
+        {mine && mine.status === 'ready' && projectCoverWeek(s, role!) !== null && ` Yours: do it by week ${projectCoverWeek(s, role!)} or autopilot does it at 50%.`}
       </span>
     </div>
   );
@@ -539,7 +545,10 @@ function Dock({
   const ask = playable > 0 || owed.length > 0 || weakUnready || leftOn.length > 0 || checks.length > 0;
   // a report or a chain step carried over never rolls an incident: only the other jobs pick up deferral risk (the
   // week's load sheet and ground power start are named by what skipping them costs, not counted here)
-  const risky = readyList.filter((o) => o.kind !== 'report' && !o.chain && o.kind !== 'wb' && o.kind !== 'gpustart').length;
+  // (a flow job planned ahead of its alert's due week is on schedule: it picks up no deferral risk until it's due)
+  // (nor does a crew project part: it waits for the crew, then for autopilot)
+  const risky = readyList.filter((o) => o.kind !== 'report' && o.kind !== 'project' && !o.chain && o.kind !== 'wb' && o.kind !== 'gpustart' && !onSchedule(s, o, s.week)).length;
+  const early = readyList.filter((o) => o.kind !== 'wb' && o.kind !== 'gpustart' && onSchedule(s, o, s.week)).length;
   const carried = readyList.filter((o) => o.kind !== 'wb' && o.kind !== 'gpustart').length;
   // the analyst's one-tap raise when the techs haven't played yet (the engine takes 0-5,000)
   const raised = Math.min(5000, standingLimit(s) + 1000);
@@ -676,7 +685,15 @@ function Dock({
           ))}
           {carried > 0 && (
             <span class="muted">
-              {carried} ready job{carried > 1 ? 's' : ''} will carry to next week{risky ? ' and pick up deferral risk' : ''}.
+              {carried} ready job{carried > 1 ? 's' : ''} will carry to next week
+              {risky && risky < carried
+                ? `: ${risky} of them pick${risky > 1 ? '' : 's'} up deferral risk`
+                : risky
+                  ? ' and pick up deferral risk'
+                  : early
+                    ? ': none picks up deferral risk before its due week'
+                    : ''}
+              .
             </span>
           )}
           <div class="row" style={{ gap: 8 }}>

@@ -21,6 +21,7 @@ import {
   INSURANCE,
   MODELS,
   PROJECTS,
+  PROJECT_COVER,
   REPORT,
   REPORT_BY_KEY,
   REPORTS,
@@ -129,6 +130,10 @@ import {
   houseBlocker,
   houseRentable,
   houses,
+  bookInspection,
+  onSchedule,
+  projectCoverWeek,
+  renewedInspection,
   occupancy,
   orderCost,
   orderTier,
@@ -335,6 +340,21 @@ function startProject(s: IslandState) {
   feed(s, 'all', 'good', `The island qualifies for tier ${tier}. Crew project: ${def.title}. One job each.`, s.updatedAt);
 }
 
+/**
+ * An away seat's crew project part, at the resolve (step 1): once it has waited PROJECT_COVER.wait weeks, autopilot does
+ * it by the book at 50%, for a seat played in the last PROJECT_COVER.recent weeks. The tier arrives at step 16.
+ */
+function coverProject(s: IslandState, role: Role, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void) {
+  // (at step 1, before this week's miss is counted: "played in the last 4 weeks" is a streak under 4 so far)
+  const from = projectCoverWeek(s, role);
+  const p = s.players[role];
+  if (from === null || s.week < from || !p) return;
+  const o = s.orders.find((x) => x.id === s.project!.orders[role])!;
+  o.status = 'done';
+  o.result = { score: PROJECT_COVER.score, perfect: false, credit: PROJECT_COVER.score, by: role, week: s.week, auto: true };
+  line('all', 'info', `${p.name} was still away: autopilot did ${p.name}'s part of the crew project by the book, at ${Math.round(PROJECT_COVER.score * 100)}%: ${o.title}. It had waited ${s.week - o.createdWeek} weeks.`);
+}
+
 function finishProjectIfDone(s: IslandState, now: number) {
   const p = s.project;
   if (!p) return;
@@ -368,7 +388,8 @@ function addTierAssets(s: IslandState, tier: number, week: number, health = 80, 
       name: a.name,
       health: fresh ? ECON.startHealth : kind === 'house' || kind === 'generator' ? built : health,
       touchedWeek: week,
-      ...(kind === 'house' ? { inspectionUntil: week + ECON.houseInspectionWeeks } : {}),
+      // the county books each house a week of its own (a tier's pair gets its notices a week apart)
+      ...(kind === 'house' ? { inspectionUntil: bookInspection(s, a.id, week + ECON.houseInspectionWeeks) } : {}),
       ...(kind === 'plane' ? { sinceInspection: 4 } : {}),
     });
   }
@@ -934,7 +955,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     // A blind sign-off is in the logbook whatever it missed (what it missed is a hidden defect).
     const signed = blind || a.score >= SIGNOFF;
     if (o.kind === 'inspect100' && signed) asset.sinceInspection = 0;
-    if (o.kind === 'codeprep' && signed) asset.inspectionUntil = s.week + ECON.houseInspectionWeeks;
+    if (o.kind === 'codeprep' && signed) asset.inspectionUntil = renewedInspection(s, asset, s.week);
   }
 
   if (o.kind === 'report') {
@@ -3004,6 +3025,7 @@ function decideStory(s: IslandState, key: string, now: number): ApplyResult {
       break;
     case 'inspector:book':
       s.cash -= 400;
+      // one visit inspects every house (the notices come together again; their renewals book a week each)
       for (const h of houses(s)) h.inspectionUntil = W + ECON.houseInspectionWeeks;
       break;
     case 'rival:ads':
@@ -3361,6 +3383,10 @@ function autoRun(s: IslandState, role: Role) {
     if (asset) {
       asset.health = clamp(asset.health + o.gain * 0.5, 0, 100);
       asset.touchedWeek = s.week;
+      // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
+      // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
+      if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
+      if (o.kind === 'inspect100') asset.sinceInspection = 0;
     }
     // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
     if (o.flow) {
@@ -3617,6 +3643,7 @@ export function resolveWeek(s: IslandState, now: number) {
     const p = s.players[role];
     if (!s.turns[role]?.ended) {
       autoRun(s, role);
+      coverProject(s, role, line);
       autoRunRoles.push(role);
       if (p) p.missedStreak += 1;
       line(role, 'info', `${p?.name ?? role} was covered by autopilot (50%).`);
@@ -3983,8 +4010,10 @@ export function resolveWeek(s: IslandState, now: number) {
       o.status = 'cancelled'; // desk tasks and load sheets are for this week only
       continue;
     }
-    // a flow job waiting on its parts isn't being put off: logistics, not a deferral (its clock starts when it's ready)
-    if (o.lastDeferredWeek !== W && !(o.flow && o.status === 'waiting_part')) {
+    // a flow job waiting on its parts isn't being put off: logistics, not a deferral (its clock starts when it's ready).
+    // Nor is one planned ahead of its alert's due week: it's on schedule, and its clock starts at the due week, as an
+    // unplanned alert's does (step 7), so planning early never costs more than leaving the alert open
+    if (o.lastDeferredWeek !== W && !(o.flow && o.status === 'waiting_part') && !onSchedule(s, o, W)) {
       o.deferrals += 1;
       o.lastDeferredWeek = W;
       o.deferReason = 'open';

@@ -17,7 +17,7 @@
 import { raiseAlert, soleGuest } from './alerts';
 import type { Bot } from './bots';
 import { ECON, MODELS, STOCK } from './data';
-import { capFleet, capOf, clamp, flightsPerPlane, houseRentable, planes, projectWeek, round10, tierDef } from './econ';
+import { bookInspection, capFleet, capOf, clamp, flightsPerPlane, houseRentable, planes, projectWeek, round10, tierDef } from './econ';
 import { apply, type ApplyResult } from './engine';
 import { itemById, priceAt } from './items';
 import { book, spendable } from './ledger';
@@ -545,7 +545,7 @@ export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void
     if (b.cottage) {
       const plot = COTTAGE_PLOTS.find((p) => p.id === b.cottage);
       if (plot && !s.assets.some((a) => a.id === plot.id))
-        s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: W + ECON.houseInspectionWeeks });
+        s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + ECON.houseInspectionWeeks) });
       line('all', 'good', `${plot?.name ?? 'The new cottage'} is finished: it takes guests from next week.`);
     } else line('all', 'good', `The site work on ${site} is done: ${b.tier ? `they open with tier ${b.tier} in good shape` : 'finished'}.`);
     tidyBuilds(s, W, line);

@@ -1463,6 +1463,14 @@ export const STORIES = [
   },
 ] as const;
 
+/**
+ * A crew project part that has waited `wait` weeks on its seat (the robust tail, 2026-09-28): if that seat is away again
+ * at the resolve, autopilot does it by the book at `score`, which lowers what the new tier's buildings start at
+ * (60 + 30 x the parts' average). Only for a seat played in the last `recent` weeks (someone away, not a seat
+ * nobody plays): the tier gates before the project still need the full crew, so no role wins alone.
+ */
+export const PROJECT_COVER = { wait: 2, recent: 4, score: 0.5 };
+
 /** Each new tier is built together: one real job per trade. */
 export const PROJECTS: Record<number, { title: string; jobs: Record<Role, { title: string; puzzle: PuzzleId }> }> = {
   2: {

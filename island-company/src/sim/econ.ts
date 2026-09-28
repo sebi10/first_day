@@ -1,6 +1,6 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
 import { soleGuest, symptomOf } from './alerts';
-import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, SUBCHARTER, TIERS } from './data';
+import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, ROLE_LABEL, SUBCHARTER, TIERS } from './data';
 import { charterMult, housekeepingCap, payroll, pilotCap, reviewMult } from './staff';
 import type { Alert, Asset, CableBand, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
 
@@ -144,6 +144,62 @@ export function powered(s: IslandState) {
   const gen = generator(s);
   const gridDown = !g || g.health < 40;
   return { gridDown, genOK: !!gen && gen.health >= 50, on: !gridDown || (!!gen && gen.health >= 50) };
+}
+
+/** how far ahead the county's notice comes (E_CODE_DUE's lead): a prep inside this window is ready for the booked date */
+export const INSPECTION_NOTICE = 2;
+
+/**
+ * A house's next inspection date when its code prep is signed off in week `W` (the robust tail, 2026-09-28). The
+ * county inspects on the booked date, so a prep done ahead of it (the notice comes 2 weeks out) renews from that
+ * date, not from the week of the prep: the certificate is 8 weeks from the inspection, as a real one runs. A lapsed
+ * inspection is re-done at once (from `W`); a prep further ahead than the notice counts from `W` too, so preps can't
+ * push the date out.
+ */
+export function renewedInspection(s: Pick<IslandState, 'assets'>, h: Pick<Asset, 'id' | 'inspectionUntil'>, W: number): number {
+  const until = h.inspectionUntil ?? 0;
+  const on = until >= W && until - W <= INSPECTION_NOTICE ? until : W;
+  return bookInspection(s, h.id, on + ECON.houseInspectionWeeks);
+}
+
+/** how many weeks past the due date the county will book a house's inspection to find a week of its own */
+export const INSPECTION_SLIP = 3;
+
+/**
+ * The week the county books a house's inspection for, from `target` (the robust tail, 2026-09-28): its inspector
+ * does one of the island's houses a week, so a house whose date another house already holds goes to the next free
+ * week, up to INSPECTION_SLIP weeks later (else the date as asked). Houses built together (a tier's pair) get their
+ * notices a week apart instead of all at once, and an island whose houses are in step (a live doc, the inspector
+ * story card's one visit) spreads out as they renew.
+ */
+export function bookInspection(s: Pick<IslandState, 'assets'>, id: string, target: number): number {
+  const taken = new Set(s.assets.filter((a) => a.kind === 'house' && a.id !== id).map((a) => a.inspectionUntil));
+  for (let w = target; w <= target + INSPECTION_SLIP; w++) if (!taken.has(w)) return w;
+  return target;
+}
+
+/**
+ * A flow job planned ahead of its alert's due week is on schedule, not put off (the robust tail, 2026-09-28): the
+ * week's carry-over doesn't count it as a deferral, so it rolls no deferral risk until its due week has passed,
+ * exactly as the alert left unplanned would (resolve step 7). Planning early never costs more than waiting.
+ */
+export function onSchedule(s: Pick<IslandState, 'alerts'>, o: Pick<Order, 'flow'>, week: number): boolean {
+  if (!o.flow) return false;
+  const al = s.alerts?.find((a) => a.id === o.flow!.alert);
+  return !!al && al.due > week;
+}
+
+/**
+ * The week's resolve at which autopilot does a seat's crew project part if that seat is still away (PROJECT_COVER),
+ * or null when it won't: nothing of that seat's left to do, or a seat nobody has played for PROJECT_COVER.recent
+ * weeks or more (then the part waits for its player, as before).
+ */
+export function projectCoverWeek(s: Pick<IslandState, 'project' | 'orders' | 'players'>, role: Role): number | null {
+  const id = s.project?.orders[role];
+  const o = id ? s.orders.find((x) => x.id === id) : undefined;
+  const p = s.players[role];
+  if (!o || o.status !== 'ready' || !p || p.missedStreak >= PROJECT_COVER.recent) return null;
+  return o.createdWeek + PROJECT_COVER.wait;
 }
 
 export function houseRentable(s: IslandState, h: Asset, week = s.week) {
