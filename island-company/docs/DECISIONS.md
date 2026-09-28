@@ -854,6 +854,14 @@ Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
 - **Run #9 was blocked at `npm test`.** Two whole-season paper-sim tests took 5.1–5.5 s on GitHub's 2-core runner, over vitest's 5 s default, though they finish in under 5 s locally. Fix: the per-file `vi.setConfig({ testTimeout: 30000 })` that `tests/ipc.test.ts` already used, now also in chain, chaingse and gse, with no assertion changed. The full suite also passes at `--testTimeout=2500`, so no other test is near the limit.
 - **Not yet done:** a human playtest on real phones. Automated coverage is 461 tests, pass-and-play e2e on phone and desktop, a 4-device online e2e on the emulator, and replays of the live docs.
 
+**Sep 28, 02:17 UTC: the real job flow, finance tracking and NPC staff go live** (run #12, merge `bd1e1d2` of branch `jobflow`). Hosting released at 02:17:23 and `firestore.rules` at 02:17:27.
+- **Doc format now `v: 3`, engine 3.** Live v2 islands migrate on their first read: kits become store credit, a starter shelf, and a What's new sheet.
+- **The live probe writes nothing now.** It tries to update a missing island doc, so a write the rules allow fails as not-found and no doc is created, even before the new rules have propagated. It signs in anonymously and deletes that user afterwards. Result 30 s after the rules release: `v: 2` → permission-denied, `v: 3` → not-found. The script is `docs/handoff/probe-gate.mts` at the repo root.
+- **Everyone must reopen the app,** as on Sep 27. A tab on the old build has its moves refused, and it reloads itself at most once a minute.
+- **Before the push:** QA passed on `bdf97ba`. That covered tsc, 689/689 tests, the build, balance, e2e on phone and desktop, the online e2e on the emulator with 10/10 rules probes, migration of 8 docs from the live build, reverse skew, 28 island-lab scenes and scripted phone runs of every new flow. The merged tree passed again here: tsc, 689/689 tests with `--maxWorkers=2 --testTimeout=3000`, and the build. On CI, `npm test` took 74 s.
+- **Robust sweep is worse than the Sep 27 build.** Three friends miss tier 5 in 96 of 360 games (was 75); all average miss in 80 (was 37). The standard targets hold. Details and levers are in *Job flow review fixes → Balance*.
+- **Not yet done:** a human playtest on real phones.
+
 ## Open questions for the three of you
 
 - **Deadline hour:** 20:00 creator time. If the three of you span time zones, change `resolveHour` in `createIsland`.

@@ -1,29 +1,28 @@
 # Handoff: moving Island Company from the cloud session to local Claude Code
 
-The rules that don't change are in `CLAUDE.md`. This file is the state of play as of **2026-09-27, about 12:00 UTC**, plus the playbook for working the way the cloud session did: multi-agent builds, reviews, testing, deploys and monitoring. Update the "State" sections when things land.
+The rules that don't change are in `CLAUDE.md`. This file is the state of play as of **2026-09-28, about 02:25 UTC**, plus the playbook for working the way the cloud session did: multi-agent builds, reviews, testing, deploys and monitoring. Update the "State" sections when things land.
 
 ---
 
 ## 1. TL;DR for the next session
 
-1. **What's live** (https://islandgame-efc37.web.app), deploy runs #10/#11, code `a80202c`, docs `6c0c426`. Nothing ships without the checklist in §6.4.
-   - the new island art
-   - blind sign-off with hidden defects
-   - cross-trade reports
-   - the part chain (IPC → logbooks → engineering approval)
-   - AMM task cards with S/N effectivity
-   - crack / hydraulics / ground power puzzles and interactive ground power carts
-   - the crew board and DMs
-   - the doc version gate
-   - numbers: 461 tests; `DOC_VERSION` 2; `ENGINE_VERSION` 2
-2. **In flight in the cloud:** a large multi-agent build, the **real job flow + finance tracking + NPC staff** (§3). The cloud session will finish it, deploy it and update this file. **Don't start overlapping work locally until it lands.** It rewrites the engine, data, types, desk, ops, orders and island files.
+1. **What's live** (https://islandgame-efc37.web.app): deploy run #12, code `bd1e1d2` (the merge of `jobflow`), 2026-09-28 at 02:17 UTC. Nothing ships without the checklist in §6.4.
+   - **new in this release:**
+     - the real job flow for both trades: alert → investigate → manual/reference search → IPC/supply search → stock check → Send (start now from the work budget, or a card to the analyst) → approval, purchase order, receiving → the puzzle → sign-off
+     - the analyst's finance tracking: cash and runway, where the money went, part-family velocity (fast / steady / slow over 26 weeks), ABC, min/max with reorder points, forecast
+     - NPC staff on payroll: pilots, housekeepers and builders, a weekly hiring board run by the analyst, every card with its dollar effect, and the staff drawn on the island
+   - already live before it: the island art, blind sign-off with hidden defects, cross-trade reports, the part chain (IPC → logbooks → engineering approval), AMM task cards with S/N effectivity, the crack / hydraulics / ground power puzzles with interactive carts, the crew board and DMs, and the doc version gate
+   - numbers: 689 tests; `DOC_VERSION` 3; `ENGINE_VERSION` 3; `firestore.rules` `v == 3`. Live v2 islands migrate on first read (kits become store credit, a starter shelf, a What's new sheet).
+2. **In flight in the cloud:** nothing. The swarm landed (§3).
 3. **First local tasks:**
-   - set up the machine (§4)
-   - once the swarm lands: `git pull`
+   - set up the machine (§4), then `git pull`
    - make the scripts' Chromium path portable (§4.3)
    - run the full check suite (§6.4 items 1–4)
-   - get the crew to playtest on real phones, then act on their feedback
-4. **Open owner decision:** should NPC builders be able to **speed up** a tier, by up to 2 weeks when staffed and supplied, but never delay it? The current spec says no: builders set how good new buildings start and can build extra cottages, but never change when a tier arrives.
+   - get the crew to playtest on real phones, then act on their feedback (the backlog in §7 lists what's known)
+4. **Open owner decisions** (defaults are what's live):
+   - **Builders speed-up:** should NPC builders be able to speed up a tier, by up to 2 weeks when staffed and supplied, but never delay it? Live default: no. Builders set how good new buildings start and can build extra cottages, but never change when a tier arrives.
+   - **Wages scale** (`docs/JOBFLOW.md` §23, question 4): a skill-3 pilot is $320 a week and a builder $260. Scale 2.5–3× with overhead cut to match, so a hire is real money? Live default: as is, tune after a playtest. It changes every island's P&L.
+   - The spec's other open questions (§23, 1–3 and 5–7) run on their bracketed defaults.
 
 ---
 
@@ -40,29 +39,41 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
 
 ---
 
-## 3. State: what's in flight (cloud swarm)
+## 3. State: what landed (the cloud swarm)
 
-**Workflow `real-job-flow`** (run `wf_81280479-e48`), template: `docs/handoff/workflows/real-job-flow.js`.
+**Workflow `real-job-flow`** (run `wf_81280479-e48`, template `docs/handoff/workflows/real-job-flow.js`): started 2026-09-27 about 08:30 UTC, resumed through two container restarts, QA passed 2026-09-28 about 02:10 UTC (about 17.5 hours wall-clock). Deployed by run #12.
 
-| Stage | What | Status at ~12:00 UTC |
-|---|---|---|
-| Design | spec → 2 critics (trade realism; game design) → revise | **done**. Spec `docs/JOBFLOW.md` (~255 KB) on cloud branch `jobflow` @ `6d7e3a4` |
-| A · Engine | alerts, manual/IPC/supply search, real inventory, requisitions, work budgets, MEL defer / make-safe, finance ledger, staff hooks, migration v2→v3, bots | **running**, cloud branch `jobflow-engine` |
-| B · Tech UI | alert inbox, job stepper, search bars, stock badges (mech + elec) | queued |
-| C · Analyst UI | requisitions, stock planner, finance tracking (family velocity over 26 weeks, spend, budget vs actual) | queued |
-| D · NPC staff | pilots, housekeepers, builders; hiring board; payroll; NPCs drawn on the island | queued |
-| Integrate → 3 reviews → fix → QA | | queued |
+| Stage | Result |
+|---|---|
+| Design | spec → 2 critics (trade realism; game design) → revise: `docs/JOBFLOW.md` |
+| A · Engine | alerts, manual/IPC/supply search, real inventory, requisitions, work budgets, MEL defer / make-safe, finance ledger, staff hooks, migration v2→v3, bots |
+| B · Tech UI | alert inbox, the five-step job sheet, search bars, stock badges (mech + elec) |
+| C · Analyst UI | requisitions, stock planner, finance tracking (family velocity over 26 weeks, spend, budget vs actual) |
+| D · NPC staff | pilots, housekeepers, builders; hiring board; payroll; staff drawn on the island |
+| Integrate | `ea41c08`, online e2e fix `29f6e90` |
+| 3 reviews (trades, play, systems) | 15 major and 37 minor issues |
+| Fix | `18ef25c` "Job flow review fixes": all 15 majors addressed (two only partly: see the gaps below) |
+| QA | **passed**: tsc, 689/689 tests, build, balance, e2e phone + desktop, online e2e on the emulator with 10/10 rules probes, migration of 8 docs from the live build (`6c0c426`) in tests and in the real app, reverse skew (the old build opens a v3 doc, reloads, never writes), 28 island-lab scenes (beaten scene 1,390 nodes), scripted phone runs of every new flow. `bdf97ba` fixed the e2e script only. |
+| Deploy | merge `bd1e1d2` → run #12; the live gate probe refuses a v:2 write |
 
-- **Timing:** expect it to land roughly 5–8 hours after 12:00 UTC.
-- **When QA passes, the cloud session will:**
-  - verify the version gate (`DOC_VERSION` 3, rules `v == 3`, migration tests)
-  - merge `jobflow` into `claude/jolly-keller-gy5hs4` with `--no-ff`, check commit trailers, and push, which deploys
-  - watch the run, run the live rules probe, report to the owner, and update this file
-- **Backup on GitHub:** branch **`backup/jobflow`** is a snapshot of the cloud integration branch `jobflow`, with the spec, all four packages and the integration. The owner OK'd it on 2026-09-27. The cloud session refreshes it at each check-in until the deploy.
-  - Pushes to `backup/*` don't deploy.
-  - **If the cloud session dies before deploying,** pick up from there locally. `git fetch origin backup/jobflow`, then check the stage it reached with `git log`. Run the remaining stages (reviews → fix → QA) from the template, then deploy per §6.4.
-  - Merge it into the deploy branch with `--no-ff`. The deploy branch has the handoff commits on top of `jobflow`'s base.
-- **The spec's key decisions** (full text: `docs/JOBFLOW.md` §25 once merged):
+- **Balance** (medians; targets in `CLAUDE.md`):
+  - standard run (26 weeks × 30 seeds), all targets met:
+    - three friends: tiers 2/3/4/5 in weeks 8/12/16/23, 0 weeks below $0
+    - all average: weeks 7/12/16/23, 0 weeks below $0
+    - solo, absent and nobody teams stay at tier 1; the pacing guard holds
+  - **robust sweep (90 seeds × 4 crews) is worse than the previous live build:**
+    - three friends: median week 24, 96 of 360 games miss tier 5, 7 weeks below $0 across all games
+    - all average: median week 23, 80 of 360 miss, 0 weeks below $0
+    - the previous build had 75 and 37 misses
+    - the misses come from crew projects stalled by long absences and the electrician's tier-4 overload, not cash; the levers are in `docs/DECISIONS.md` (stagger code notices, throttle the generator)
+- **Known gaps** (also in §7):
+  - Past due, the only guest plane still flies restricted; there's no mainland sub-charter.
+  - The builders' zoom on Home needs its own zoom box.
+  - The MEL wording in `src/ui/flow/Investigate.tsx` says "Past it, the plane is grounded", which is wrong for the only guest plane (it flies restricted).
+  - The underground feeder re-splice launches the branch-circuit trace puzzle ("Bedroom is dead · Drywall cutaway"); an electrician would notice.
+  - `scripts/e2e-online.mjs` stalls if the first alert is a no-fault-found; port `planFirst`'s NFF skip from `scripts/e2e.mjs`.
+- **Backup branch `backup/jobflow`** (= `jobflow` at `bdf97ba`) is now redundant; delete it once the owner OKs.
+- **The spec's key decisions** (full text: `docs/JOBFLOW.md` §25):
   1. v1 covers the jobs that make up ~90% of the work. Rare jobs keep the diagnosis but come with parts pre-filled.
      - Deferred to v2: ignition, the turbine hot section, calibration, cores, shelf life, line-crew NPCs, morale.
   2. In stock means the tech starts now, paid from the trade's weekly **work budget**. Missing means a requisition to the analyst.
@@ -200,7 +211,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 7. Check commit trailers. For unpushed commits only, `git filter-branch --msg-filter` can append missing trailers with an identical tree.
 8. Push to the deploy branch. If docs were committed there meanwhile, merge `--no-ff` rather than fast-forward.
 9. `gh run watch <id> --exit-status`. On failure, `gh run view --log-failed`, root-cause it, reproduce locally, fix and push again. Example: a whole-season test hit vitest's 5 s limit on the 2-core runner; fixed with a per-file `testTimeout`, no assertion changed.
-10. Live probe for rules/version changes (anon sign-in, old-version write must be refused, delete the anon user, no stray docs), then report to the owner, including **"close and reopen the app"** after a version bump.
+10. Live probe for rules/version changes with `docs/handoff/probe-gate.mts` (how to run it is in its header). It signs in anonymously and tries to update a missing doc with the old and the new `v`, so it never writes a doc, even before the rules propagate. Want `permission-denied` for the old `v` and `not-found` for the new one. It deletes its anonymous user. Then report to the owner, including **"close and reopen the app"** after a version bump.
 
 ### 6.5 Gotchas learned the hard way
 
@@ -215,11 +226,17 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 
 ---
 
-## 7. Backlog (after the swarm lands)
+## 7. Backlog
 
-1. **Crew playtest on real phones.** Nothing has had a human playtest since the island art. Collect friction points per seat.
-2. **Builders speed-up decision** (§1).
-3. **Job flow v2:**
+1. **Crew playtest on real phones.** Nothing has had a human playtest since the island art, and the job flow changes every seat. Collect friction points per seat.
+2. **Owner decisions** (§1): builders speed-up; wages scale.
+3. **Job flow follow-ups from review and QA** (§3 "Known gaps"):
+   - the MEL wording for the only guest plane
+   - the feeder re-splice launching the branch-circuit trace puzzle
+   - a mainland sub-charter for the only guest plane when past due
+   - the builders' zoom box on Home (within the 1,500-node budget)
+   - harden `scripts/e2e-online.mjs` against an NFF first alert
+4. **Job flow v2:**
    - exchange units with core charges
    - shelf life and expiry
    - tool calibration and wear
@@ -229,9 +246,9 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
    - a tow / wing-tip symptom (57-30)
    - THWN take-offs for the transfer switch and fuel dock
    - MEL category B
-4. **Robust-sweep tail:** rare week 24–26 collapses below $0 after long electrician absences (grid + generator down). Known knobs are in `docs/DECISIONS.md`.
-5. **Portable Chromium path** in the scripts (§4.3).
-6. **Keep `docs/DECISIONS.md` and `docs/ONBOARDING.md` current** with every feature.
+5. **Robust-sweep tail:** three friends miss tier 5 in 96 of 360 robust games (target about 75) and all average in 80 (about 37). Causes: crew projects stalled by long absences, the electrician's tier-4 overload, and rare week 24–26 collapses below $0 after long electrician absences (grid + generator down). The levers are in `docs/DECISIONS.md` (stagger code notices, throttle the generator).
+6. **Portable Chromium path** in the scripts (§4.3).
+7. **Keep `docs/DECISIONS.md` and `docs/ONBOARDING.md` current** with every feature.
 
 ## 8. Templates
 
