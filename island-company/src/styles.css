@@ -273,6 +273,33 @@ h3 {
   border-radius: 99px;
   pointer-events: none;
 }
+/* the builders' line scrolls the island back into view on a phone: with the island's header above it */
+.home .island-wrap {
+  scroll-margin-top: 75px;
+}
+/* the way back from the builders' site: a real 44 px button, over the island's corner */
+.island-back {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 99px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--paper);
+  background: rgba(31, 42, 48, 0.72);
+  cursor: pointer;
+}
+.island-wrap .island-back svg {
+  width: 16px;
+  height: 16px;
+}
 
 /* Island motion: transform and opacity only. Every animated element is an
    inner <g> with no transform attribute of its own; it pivots on its local

@@ -1461,7 +1461,7 @@ export const COTTAGE: BuildDef = { id: 'cottage', what: 'An extra cottage: piers
 - **Standard timing** (each unit's materials bought when it opens: lead 1 on the supply boat): a skill-3 builder finishes t2 around week 3, t3 week 5, t4 week 9 and t5 week 13. That's well before the crew projects (median weeks 8, 11, 16, 22). A skill-1 builder (0.6 a week) takes to about weeks 5, 9, 15 and 22: the Lodge's site work sometimes misses tier 5. With no builder nothing progresses, and the new buildings start 15 lower.
 - **The island** (D): a build site shows the further of the crew project's stage and the build's (`min(2, ⌊3 × done / need⌋)`), with the builders on it.
 - **Tier progress** (`nextTierProgress`, A): a line *"Site work (builders): 2.5 of 4"* beside the existing unlock lines.
-- **Home** (A mounts `BuildStatus` for the whole game, outside the crew-project card; D fills it): *"Builders: 2 of 3 units on cottages 3 and 4 · next 1 × BLD-FLASH, on the supply boat wk 6"*, or *"Builders: no site work open · start a cottage?"*.
+- **Home** (A mounts `BuildStatus` for the whole game, outside the crew-project card; D fills it): *"Builders: 2 of 3 units on cottages 3 and 4 · next 1 × BLD-FLASH, on the supply boat wk 6"*, or *"Builders: no site work open · start a cottage?"*. With a build open, the line is a button: it zooms the island to the builders' site (`siteBox` in `src/ui/island/geo.tsx`), as does a tap on a builder; *See the island* goes back (docs/DECISIONS.md, 2026-09-28).
 
 ### 15.6 Optional cottages: the builders' growth project (only if the island art has room)
 
@@ -1503,7 +1503,7 @@ export type StaffAction =
 
 ### 15.10 NPC figures on the island (D: `src/ui/island/staff.tsx`)
 
-- Up to 8 figures, each one `<use>` of a symbol: the existing `#i-guy`, plus new symbols with a hard hat (builders), an apron (housekeepers) and a white shirt (pilots), defined once in `LifeDefs`. Placement: builders on the open build's site (one each, up to 3); a pilot by the lead guest plane and one by the cargo plane (up to 2); a housekeeper at a booked house (up to 2).
+- Up to 8 figures, each one `<use>` of a symbol: the existing `#i-guy`, plus new symbols with a hard hat (builders), an apron (housekeepers) and a white shirt (pilots), defined once in `LifeDefs`. Placement: builders on the open build's site (one each, up to 3; on the villas and the seaplane dock, at the site of the unit they work: `workSites` in `src/ui/island/geo.tsx`); a pilot by the lead guest plane and one by the cargo plane (up to 2); a housekeeper at a booked house (up to 2).
 - None in a storm or at night, except one figure at the office window. A two-frame hammer bob for builders when motion is on; otherwise static.
 - D also draws what A exposes (10): the alert-AOG plane at its AOG spot, the restricted plane's placard bubble, the closed-house no-entry bubble, and a small tag bubble on a made-safe house.
 - **Node budget**: the beaten island-lab scene stays at or under 1,500 SVG nodes (1,365 today; the crew adds at most 8, plus the symbols). New island-lab scenes: `staff` (tier 3, builders on the villa site, a pilot by the twin) and `staff-night`.

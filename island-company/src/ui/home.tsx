@@ -1,6 +1,6 @@
 // The island screen: header, island view, crew, numbers, role panel, dock.
 // Mobile: one column, thumb-zone dock. Desktop: island left, work right.
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
@@ -14,6 +14,7 @@ import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
 import { unreadBoard } from './crewboard';
 import { Island } from './island';
+import { siteBox } from './island/geo';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
@@ -189,7 +190,17 @@ function Loading({ text, back }: { text: string; back?: boolean }) {
 function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void; onGse(cart: string | null): void }) {
   const { s, role, ref, sync } = ctl;
   const r = role!;
-  const [zoom, setZoom] = useState(false);
+  // the island's zoom: the seat's own zone, the builders' site (docs/JOBFLOW.md 15.5), or the whole island
+  const [view, setView] = useState<'zone' | 'site' | null>(null);
+  const site = siteBox(s);
+  const zoom = view === 'site' && !site ? null : view;
+  const wrap = useRef<HTMLDivElement>(null);
+  const seeSite = () => {
+    fx.tap();
+    setView('site');
+    // on a phone the island is up the page: bring it into view
+    wrap.current?.scrollIntoView?.({ behavior: settings.get().reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
+  };
   const now = useNow(30_000);
   const nums = teamNumbers(s);
   const bl = blocks(s);
@@ -223,23 +234,36 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
           <span class={`chip num ${s.cash < 2000 ? 'rust' : ''}`}>{usd(s.cash)}</span>
         </div>
 
-        <div class="island-wrap" style={{ cursor: 'pointer' }}>
+        <div class="island-wrap" style={{ cursor: 'pointer' }} ref={wrap}>
           <Island
             s={s}
-            focus={zoom ? r : null}
+            focus={zoom === 'zone' ? r : zoom}
             reduceMotion={settings.get().reduceMotion}
             onTap={() => {
               fx.tap();
-              setZoom((z) => !z);
+              setView(zoom ? null : 'zone');
             }}
             onCart={(id) => {
               fx.tap();
               onGse(id);
             }}
+            onBuilders={site && zoom !== 'site' ? seeSite : undefined}
           />
-          <span class="island-hint">
-            {s.weather === 'clear' ? '☀' : s.weather === 'wind' ? '〰 wind' : '⛈ storm'} · tap to {zoom ? 'see the island' : 'zoom to your zone'}
-          </span>
+          {zoom === 'site' ? (
+            <button
+              class="island-back"
+              onClick={() => {
+                fx.tap();
+                setView(null);
+              }}
+            >
+              <Icon name="island" size={16} /> See the island
+            </button>
+          ) : (
+            <span class="island-hint">
+              {s.weather === 'clear' ? '☀' : s.weather === 'wind' ? '〰 wind' : '⛈ storm'} · tap to {zoom ? 'see the island' : 'zoom to your zone'}
+            </span>
+          )}
         </div>
 
         <div class="team">
@@ -380,7 +404,7 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
             <ChainBanner s={s} role={r} />
             <CrewProject ctl={ctl} onPlay={onPlay} />
             {/* the builders' site work, the whole game (D draws it; docs/JOBFLOW.md 15.5) */}
-            <BuildStatus ctl={ctl} />
+            <BuildStatus ctl={ctl} onSee={site ? seeSite : undefined} />
             {r === 'fin' ? <Desk ctl={ctl} onPlay={onPlay} /> : <OpsPanel ctl={ctl} role={r} onPlay={onPlay} onGse={onGse} />}
           </>
         )}

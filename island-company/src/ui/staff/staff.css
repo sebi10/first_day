@@ -194,6 +194,31 @@
   padding: 10px 14px;
   font-size: 15px;
 }
+/* with a site open the line is a button: it zooms the island to the builders' site */
+.st-see {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  cursor: pointer;
+}
+.st-chev {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--ink-soft);
+}
 .st-status.wait {
   border-left: 6px solid #e0b43a;
 }
