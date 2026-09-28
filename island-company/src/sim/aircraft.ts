@@ -52,6 +52,14 @@ export const ATA_TITLE: Record<Ata, string> = {
   '24-30': 'DC generation',
 };
 
+/** the figures the job flow adds beside the five (docs/JOBFLOW.md 3.1): the oil filter and drain. The five above never change */
+export type Ata2 = '79-20';
+export type AnyAta = Ata | Ata2;
+/** every figure, in ATA order within the IPC index */
+export const ALL_ATAS: readonly AnyAta[] = [...IPC_ATAS, '79-20'];
+export const ATA2_TITLE: Record<Ata2, string> = { '79-20': 'Oil system: filter and drain' };
+export const ataTitle = (ata: AnyAta) => (ata === '79-20' ? ATA2_TITLE[ata] : ATA_TITLE[ata]);
+
 export type LogBook = 'airframe' | 'engine' | 'propeller';
 /** a twin's engines and propellers each have their own logbook */
 export type Pos = 'LH' | 'RH';
@@ -296,7 +304,7 @@ export type ArtShape =
 export type ArtItem = { item: string; shape: ArtShape; x: number; y: number; w: number; h: number };
 
 export type IpcFigure = {
-  ata: Ata;
+  ata: AnyAta;
   /** chapter-section-subject of the figure, e.g. "32-40-00" */
   chapter: string;
   fig: number;
@@ -884,6 +892,67 @@ function buildFigure(model: PlaneModel, ata: Ata, env: Env): IpcFigure {
   }
 }
 
+/** figure numbers for 79-20, after each model's existing figures in ATA order (a test keeps them unique) */
+const FIG_7920: Record<PlaneModel, number> = { twin: 58, cargo: 60, float: 46 };
+/** Sentinel Filtration: the alternate oil filter's maker */
+const SENTINEL = 'V5SF21';
+/** Brandt Aero Engines, the piston engine maker (the oil filter carries its number) */
+const BRANDT = 'V07BA1';
+
+/**
+ * Fig 79-20, the oil filter and drain. It matches what the logbooks already
+ * record ("12 qt SAE J1899 20W-50 … filter P/N BAE-481k"; 11 qt on the float; the
+ * turbine's phase entries check the level and the chip detector). One row per
+ * item: no effectivity codes.
+ */
+function fig7920(model: PlaneModel): IpcFigure {
+  const { k, fam, family } = SPECS[model];
+  const env: Env = { snB: false, postSb: false };
+  const list: R[] =
+    model === 'cargo'
+      ? [
+          { item: '1', pn: `05${fam}900-5`, ind: 0, nomen: 'OIL SYSTEM INSTL', upa: 'RF' },
+          { item: '2', pn: 'NT3031-14', ind: 1, nomen: 'ELEMENT, OIL FILTER', upa: 1, tag: 'oilElement', shape: 'filter' },
+          { item: '3', pn: 'NT3031-PK', ind: 1, nomen: 'PACKING SET, FILTER HOUSING', upa: 1, tag: 'filterPacking', shape: 'seal' },
+          { item: '4', pn: 'NT3021-8', ind: 1, nomen: 'DETECTOR, CHIP', upa: 1, tag: 'chipDetector', shape: 'pin' },
+          { item: '5', pn: 'MS9068-012', ind: 1, nomen: 'PACKING, CHIP DETECTOR', upa: 1, tag: 'detectorPacking', shape: 'ring' },
+        ]
+      : [
+          { item: '1', pn: `05${fam}900-1`, ind: 0, nomen: 'OIL SYSTEM INSTL', upa: 'RF', note: model === 'twin' ? 'LH AND RH ENGINE' : undefined },
+          { item: '2', pn: `BAE-481${k}`, ind: 1, nomen: 'FILTER, OIL', upa: 1, v: BRANDT, tag: 'oilFilter', shape: 'filter' },
+          { item: '2A', pn: `SF481${k}-1`, ind: 1, nomen: 'FILTER, OIL', upa: 1, v: SENTINEL, alt: `BAE-481${k}`, tag: 'oilFilter' },
+          { item: '3', pn: 'AN814-8DL', ind: 1, nomen: 'PLUG, DRAIN (DRILLED)', upa: 1, tag: 'drainPlug', shape: 'bolt' },
+          { item: '4', pn: 'AN900-10', ind: 1, nomen: 'GASKET, CRUSH', upa: 1, tag: 'drainGasket', shape: 'washer', near: '3' },
+          { item: '5', pn: 'MS20995C32', ind: 1, nomen: 'WIRE, SAFETY, 0.032 IN', upa: 'AR', tag: 'safetyWire' },
+        ];
+  const title = model === 'cargo' ? 'OIL FILTER AND CHIP DETECTOR' : model === 'twin' ? 'OIL FILTER AND DRAIN (TYPICAL LH AND RH)' : 'OIL FILTER AND DRAIN';
+  return {
+    ata: '79-20',
+    chapter: '79-20-00',
+    fig: FIG_7920[model],
+    title,
+    catalog: `${family} ILLUSTRATED PARTS CATALOG`,
+    effCodes: [],
+    rows: list.map((x) => rowFrom(x, env)),
+    art: artFrom(list),
+    axis: 'x',
+    notes: FIG_NOTES,
+  };
+}
+
+/**
+ * Every row a figure prints for this model, in print order, whatever the
+ * airplane: both S/N blocks and both SB states are on the page (`applies` here
+ * is for block A, PRE SB: evaluate it per airplane with ipcFor).
+ */
+export function figureRows(model: string, ata: AnyAta): IpcRow[] {
+  const m = planeModel(model);
+  return ata === '79-20' ? fig7920(m).rows : buildFigure(m, ata, { snB: false, postSb: false }).rows;
+}
+
+/** The figure number an ATA has for a model (the IPC index's chapter chips) */
+export const figNumber = (model: string, ata: AnyAta) => (ata === '79-20' ? FIG_7920[planeModel(model)] : SPECS[planeModel(model)].figs[ata]);
+
 /**
  * The row for a tag that this configuration really has: effective, not an ALT,
  * and not superseded by another effective row (a code-1 SUPSD part is used up).
@@ -1207,11 +1276,11 @@ export type IcaCard = {
   notes: string[];
 };
 
-export function icaCardFor(ac: Pick<Aircraft, 'model' | 'plant'>, ata: Ata): IcaCard | undefined {
+export function icaCardFor(ac: Pick<Aircraft, 'model' | 'plant'>, ata: Ata | string): IcaCard | undefined {
   const p = ac.plant;
   if (!p || p.via === 'pma' || p.ata !== ata) return undefined;
-  const d = plantDef(ac.model, ata);
-  return { ata, holder: d.holder, doc: d.icaDoc, approval: p.ref, title: d.title, removed: d.removed, torques: d.icaTorques, ...(d.icaFluids ? { fluids: d.icaFluids } : {}), notes: d.icaNotes };
+  const d = plantDef(ac.model, p.ata);
+  return { ata: p.ata, holder: d.holder, doc: d.icaDoc, approval: p.ref, title: d.title, removed: d.removed, torques: d.icaTorques, ...(d.icaFluids ? { fluids: d.icaFluids } : {}), notes: d.icaNotes };
 }
 
 /**
@@ -1243,6 +1312,17 @@ export function externalPower(ac: Pick<Aircraft, 'model' | 'islandSeed' | 'asset
   if (ac.model === 'float')
     return { volts: 28, ampMax: 0, battery: 'on', wing: 'high', turbine: false, floats: true, manual: 'POH Section 4', placard: 'EXTERNAL POWER 28 VOLTS DC · BATTERY MASTER ON' };
   return { volts: 28, ampMax: 0, battery: 'on', wing: 'low', turbine: false, floats: false, manual: 'POH Section 4', placard: 'EXTERNAL POWER 28 VOLTS DC · BATTERY MASTER ON' };
+}
+
+/**
+ * The alteration that governs one slot on this airplane: an STC or field
+ * approval on its ATA whose ICA parts list carries the slot's tag. A tire on an
+ * airplane with a brake conversion is still the IPC's; its linings are not.
+ */
+export function plantedFor(ac: Pick<Aircraft, 'model' | 'plant'>, ata: string, tag: string): Plant | undefined {
+  const p = ac.plant;
+  if (!p || p.via === 'pma' || p.ata !== ata) return undefined;
+  return plantDef(ac.model, p.ata).rows.some((x) => x.tag === tag) ? p : undefined;
 }
 
 /** The STC holder's ICA parts list for the kit that replaces this assembly (same row format as the IPC). */
@@ -2398,12 +2478,12 @@ export function bookSerial(ac: Aircraft, book: LogBook, pos: Pos | undefined, da
   return propAt(ac, pos, date).serial;
 }
 
-/** "32-40", "32-40-01", "ATA 32-40" -> '32-40' */
-export function ataOf(x: string): Ata {
+/** "32-40", "32-40-01", "ATA 32-40", "79-20" -> the figure's ATA */
+export function ataOf(x: string): AnyAta {
   const m = /(\d\d)-(\d\d)/.exec(x);
   const a = m ? `${m[1]}-${m[2]}` : '';
-  if (!(IPC_ATAS as readonly string[]).includes(a)) throw new Error(`no IPC figure for "${x}" (have ${IPC_ATAS.join(', ')})`);
-  return a as Ata;
+  if (!(ALL_ATAS as readonly string[]).includes(a)) throw new Error(`no IPC figure for "${x}" (have ${ALL_ATAS.join(', ')})`);
+  return a as AnyAta;
 }
 
 const envOf = (ac: Aircraft, ata: Ata): Env => ({
@@ -2416,9 +2496,16 @@ const envOf = (ac: Aircraft, ata: Ata): Env => ({
  * this aircraft's S/N and SB status. Like the real book, it knows nothing
  * about STCs: a planted alteration's parts are only in its ICA.
  */
-export function ipcFor(ac: Aircraft, ata: Ata | string): IpcFigure {
+export function ipcFor(ac: Aircraft, ata: AnyAta | string): IpcFigure {
   const a = ataOf(ata);
+  // 79-20 has one row per item and no effectivity: the same page on every airplane of the model
+  if (a === '79-20') return fig7920(ac.model);
   return buildFigure(ac.model, a, envOf(ac, a));
+}
+
+/** Every figure this airplane's IPC has (the five and 79-20), in ATA order: the IPC index */
+export function figuresFor(ac: Aircraft): IpcFigure[] {
+  return [...ALL_ATAS].sort().map((a) => ipcFor(ac, a));
 }
 
 export type OrderAnswer = {
@@ -2558,7 +2645,9 @@ export function searchLog(ac: Aircraft, query: string): LogEntry[] {
 // Maintenance manual task cards
 // ---------------------------------------------------------------------------
 
-export type AmmTaskKey = 'wheel' | 'brake' | 'prop' | 'powerpack' | 'radio' | 'alternator';
+export type AmmTaskKey = 'wheel' | 'brake' | 'prop' | 'powerpack' | 'radio' | 'alternator' | AmmTaskKey2;
+/** the job flow's task cards (docs/JOBFLOW.md 4): short cards beside the six; they resolve by their own key (a task's `job`) */
+export type AmmTaskKey2 = 'bleed' | 'wheelhalf' | 'safetywire' | 'oil' | 'belt' | 'cylinder' | 'spar' | 'inspection';
 
 export type AmmStep = {
   n: number;
@@ -2572,7 +2661,10 @@ export type Effective = { eff?: string; effText?: string; text: string; applies:
 
 export type AmmTask = {
   key: AmmTaskKey;
-  ata: Ata;
+  /** the task's chapter-section ("32-40"; the job flow's cards: "32-42", "79-00", "05-20"): its task number starts with it */
+  ata: string;
+  /** the IPC figure its parts are in, when there is one */
+  fig?: AnyAta;
   /** chapter-section-subject, e.g. "32-40-01" */
   taskNo: string;
   /** ATA page block: 201 maintenance practices, 301 servicing, 401 removal/installation */
@@ -2615,7 +2707,7 @@ export type ServiceSpec = {
 /** Brake / gear accumulator nitrogen precharge by S/N block (psi at 70°F): [A, B] */
 const PRECHARGE: Record<PlaneModel, [number, number]> = { twin: [800, 900], cargo: [900, 1000], float: [750, 850] };
 
-const TASKS: Record<AmmTaskKey, { ata: Ata; sub: string; block: number }> = {
+const TASKS: Record<Exclude<AmmTaskKey, AmmTaskKey2>, { ata: Ata; sub: string; block: number }> = {
   wheel: { ata: '32-40', sub: '01', block: 401 },
   brake: { ata: '32-40', sub: '02', block: 201 },
   prop: { ata: '61-10', sub: '01', block: 401 },
@@ -2624,6 +2716,20 @@ const TASKS: Record<AmmTaskKey, { ata: Ata; sub: string; block: number }> = {
   alternator: { ata: '24-30', sub: '01', block: 401 },
 };
 export const AMM_TASKS = Object.keys(TASKS) as AmmTaskKey[];
+
+/** the job flow's cards: the task's chapter-section, its number, the page block, and the figure its parts are in (none: no IPC figure in v1) */
+const TASKS2: Record<AmmTaskKey2, { chap: string; sub: string; block: number; fig?: AnyAta }> = {
+  bleed: { chap: '32-42', sub: '01', block: 301, fig: '29-10' },
+  wheelhalf: { chap: '32-40', sub: '03', block: 201, fig: '32-40' },
+  safetywire: { chap: '61-10', sub: '02', block: 201, fig: '61-10' },
+  oil: { chap: '79-00', sub: '01', block: 301, fig: '79-20' },
+  belt: { chap: '24-30', sub: '02', block: 201, fig: '24-30' },
+  cylinder: { chap: '72-30', sub: '01', block: 401 },
+  spar: { chap: '57-10', sub: '01', block: 601 },
+  inspection: { chap: '05-20', sub: '01', block: 601, fig: '79-20' },
+};
+export const AMM_TASKS2 = Object.keys(TASKS2) as AmmTaskKey2[];
+const JOB_KEYS2: ReadonlySet<string> = new Set(['bleed', 'wheelhalf', 'safetywire', 'belt', 'inspection']);
 
 const ALIASES: Record<string, AmmTaskKey> = {
   tires: 'wheel', tire: 'wheel', wheel: 'wheel', corrosion: 'wheel', inspect100: 'wheel',
@@ -2637,9 +2743,12 @@ const ALIASES: Record<string, AmmTaskKey> = {
 /** a catalog job kind ("tires", "prop", "avionics", "alternator"), a task key or an ATA code -> task key */
 export function taskKeyFor(job: string): AmmTaskKey | undefined {
   if (ALIASES[job]) return ALIASES[job];
+  // the job flow's card keys, where they aren't also a catalog kind (a cylinder, oil or spar job keeps no card by its kind:
+  // the flow reaches those cards through its task's `card`, and ammTaskFor takes the key itself)
+  if (JOB_KEYS2.has(job)) return job as AmmTaskKey2;
   const m = /(\d\d-\d\d)(?:-(\d\d))?/.exec(job);
   if (!m) return undefined;
-  const hit = AMM_TASKS.find((k) => TASKS[k].ata === m[1] && (!m[2] || TASKS[k].sub === m[2]));
+  const hit = (AMM_TASKS as Exclude<AmmTaskKey, AmmTaskKey2>[]).find((k) => TASKS[k].ata === m[1] && (!m[2] || TASKS[k].sub === m[2]));
   return hit;
 }
 
@@ -2674,6 +2783,182 @@ function card(model: PlaneModel, key: AmmTaskKey): Card {
   const s = SPECS[model];
   const twin = model === 'twin';
   switch (key) {
+    case 'bleed':
+      return {
+        title: 'Main Brakes — Bleeding',
+        warnings: ['Hydraulic fluid is flammable and slippery: no open flame, wipe spills at once.'],
+        cautions: [
+          'Only the fluid the effectivity lists (red: petroleum or synthetic hydrocarbon base). Never phosphate-ester (Skydrol) or automotive brake fluid.',
+          'Keep the reservoir above ADD while you bleed: air drawn in means starting over.',
+        ],
+        tools: ['Pressure bleeder pot', 'Clear bleed hose and catch bottle', 'Wrench for the bleeder screw'],
+        consumables: [['D', 'Hydraulic fluid: MIL-PRF-5606 only (PRE SB)'], ['C', 'Hydraulic fluid: MIL-PRF-5606 or MIL-PRF-83282 (POST SB)']],
+        effNotes: [['D', 'PRE SB: MIL-PRF-5606 only.'], ['C', 'POST SB: MIL-PRF-83282 approved as an alternate fluid.']],
+        servicing: [
+          ['D', 'fluid', ['MIL-PRF-5606']],
+          ['C', 'fluid', ['MIL-PRF-5606', 'MIL-PRF-83282']],
+        ],
+        steps: [
+          ['Preparation', 'Chock the wheels; release the parking brake.'],
+          ['Preparation', 'Fill the pressure pot with the approved fluid and connect it to the caliper bleeder screw.'],
+          ['Bleeding', 'Open the bleeder and push fluid up through the brake to the reservoir until the vent line runs clear of bubbles.'],
+          ['Bleeding', 'Close the bleeder; disconnect the pot and cap the bleeder.'],
+          ['Servicing', 'Top the reservoir up to FULL with the gear down.'],
+          ['Test', 'Pump the pedal: firm within a third of its travel, no sinking under steady pressure.'],
+          ['Bleeding', 'Repeat on the other main brake.'],
+          ['Test', 'Taxi check: both brakes even, no pull.'],
+        ],
+      };
+    case 'wheelhalf':
+      return {
+        title: 'Main Wheel Halves — Corrosion Treatment and Penetrant Inspection',
+        warnings: ['Deflate the tire completely before you loosen a tie bolt. A pressurized wheel can come apart with lethal force.'],
+        cautions: ['No abrasive blasting on the bead seat.', 'Penetrant materials from one family only (ASTM E1417 Type I, Method C).'],
+        tools: ['Penetrant kit and UV-A lamp', 'Nylon bristle brushes', 'Torque wrench, 20-200 in-lb'],
+        consumables: [[undefined, 'Penetrant kit ASTM E1417 Type I, Method C'], [undefined, 'Conversion coating MIL-DTL-5541 Type I Class 1A'], [undefined, 'Tube per IPC if chafed']],
+        effNotes: [['A', 'Wheels 40-xx0A: the A tie-bolt torque on reassembly.'], ['B', 'Wheels 40-xx0B: the B tie-bolt torque on reassembly.']],
+        steps: [
+          ['Removal', 'Remove the wheel and split the halves (AMM 32-40-01).'],
+          ['Cleaning', 'Clean the corrosion from the bead seat with a nylon brush and solvent; no abrasive blasting.'],
+          ['Inspection', 'Penetrant: apply, dwell 10 minutes, remove the excess, develop.'],
+          ['Inspection', 'Inspect under UV-A: any linear indication at the bead seat is a crack. A cracked half is scrap: order the wheel assembly.'],
+          ['Treatment', 'No crack: treat the bare metal with conversion coating, then prime and paint.'],
+          ['Assembly', 'Fit a new tube if the old one chafed; join the halves and torque the tie-bolt nuts.', 'tieNut'],
+          ['Installation', 'Install the wheel (AMM 32-40-01).'],
+        ],
+      };
+    case 'safetywire':
+      return {
+        title: 'Propeller Mounting Bolts — Safety Wiring',
+        warnings: [`${model === 'cargo' ? 'Battery OFF and disconnected' : 'Magnetos OFF, mixture IDLE CUTOFF'}: treat the propeller as live.`],
+        cautions: ['Never re-use safety wire.', 'The wire must pull each bolt in the tightening direction.'],
+        tools: ['Safety-wire pliers', 'Diagonal cutters'],
+        consumables: [[undefined, 'Safety wire MS20995C32 (0.032 in)']],
+        effNotes: [],
+        steps: [
+          ['Preparation', 'Remove the spinner dome.'],
+          ['Removal', 'Cut and remove the broken or nicked wire; check each bolt has not turned (torque stripe).'],
+          ['Installation', 'Run new wire through the first bolt of the pair so it pulls the bolt tight.'],
+          ['Installation', 'Twist 6-8 turns per inch to the next bolt; through it, in the tightening direction.'],
+          ['Installation', 'Finish with a 3-6 twist pigtail bent back toward the part.'],
+          ['Installation', 'Repeat on each pair; install the dome.'],
+          ['Test', 'Record the work in the propeller logbook.'],
+        ],
+      };
+    case 'oil':
+      return {
+        title: `Engine Oil and Filter — Change${twin ? ' (both engines)' : ''}`,
+        warnings: ['Hot oil burns: let it cool below 150°F before you open the drain.'],
+        cautions: ['Cut the old filter open and look for metal before you throw it away.', 'A new crush gasket on the drain plug every time.'],
+        tools: ['Torque wrench, 20-200 in-lb', 'Filter can cutter', 'Safety-wire pliers'],
+        consumables: [
+          [undefined, `Oil: SAE J1899 20W-50 ashless dispersant, ${twin ? '12 qt per engine' : '11 qt'}`],
+          [undefined, 'Oil filter per IPC Fig (79-20)'],
+          [undefined, 'Crush gasket AN900-10'],
+          [undefined, 'Safety wire MS20995C32'],
+        ],
+        effNotes: [],
+        steps: [
+          ['Preparation', 'Run the engine to warm the oil; shut down, master OFF.'],
+          ['Drain', 'Remove the drain plug and drain the sump; fit a new crush gasket.'],
+          ['Drain', 'Install the drain plug, torque it and safety wire it.'],
+          ['Filter', 'Remove the filter; cut it open and inspect the media for metal.'],
+          ['Filter', 'Install the new filter, torque it and safety wire it.'],
+          ['Servicing', `Fill with ${twin ? '12 qt per engine' : '11 qt'} of the approved oil.`],
+          ['Test', 'Run the engine: oil pressure in the green in 30 s; check for leaks; recheck the level.'],
+        ],
+      };
+    case 'belt':
+      return {
+        title: 'Alternator Drive Belt — Tension Check and Replacement',
+        warnings: ['Master OFF, magnetos OFF: the propeller is live.'],
+        cautions: ['Pry only on the alternator front housing, never on the case.', 'Replace a cracked or glazed belt; check the pulleys for wear.'],
+        tools: ['Torque wrench, 0-25 ft-lb', 'Torque wrench, 20-200 in-lb'],
+        consumables: [[undefined, 'V-belt per IPC (an ALT belt is a legal alternate)']],
+        effNotes: [],
+        steps: [
+          ['Inspection', 'Check the belt for cracks, glazing and fraying.'],
+          ['Removal', 'Loosen the adjusting arm bolt and the pivot bolt; swing the alternator in and remove the belt.'],
+          ['Installation', 'Fit the new belt over the pulleys.'],
+          ['Installation', 'Tension the belt: turn the pulley nut with a torque wrench until the belt slips.', 'beltNew'],
+          ['Installation', 'Torque the adjusting arm bolt.', 'armBolt'],
+          ['Installation', 'Torque the pivot bolt.', 'pivotBolt'],
+          ['Test', 'Run-up: bus voltage in limits, no squeal.'],
+          ['Test', 'After 10 hours, re-check the tension at the used-belt value.', 'beltUsed'],
+        ],
+      };
+    case 'cylinder':
+      return {
+        title: 'Cylinder — Removal / Installation',
+        warnings: ['Magnetos OFF and grounded, mixture IDLE CUTOFF: treat the propeller as live.'],
+        cautions: ['Tighten the base nuts in the engine maker’s sequence, in stages.', 'Keep the piston square: a cocked piston scores the barrel.'],
+        tools: ['Torque wrench, 20-150 ft-lb, with crowfoot', 'Torque wrench, 20-200 in-lb', 'Differential compression tester', 'Ring compressor'],
+        consumables: [[undefined, 'Cylinder assembly: the engine maker’s overhauled exchange unit'], [undefined, 'Gasket kit for the cylinder'], [undefined, 'Anti-seize MIL-PRF-907 on the base nut threads']],
+        effNotes: [],
+        steps: [
+          ['Removal', 'Remove the cowling, the baffles, the intake and exhaust from the cylinder.'],
+          ['Removal', 'Remove the rocker cover, the rockers and the pushrods.'],
+          ['Removal', 'Bring the piston to top dead center; remove the base nuts and the cylinder.'],
+          ['Installation', 'Fit the new cylinder over the piston with a new base seal.'],
+          ['Installation', 'Torque the base nuts in sequence, in stages.'],
+          ['Installation', 'Install the pushrods, the rockers, the intake and exhaust, new gaskets throughout.'],
+          ['Test', 'Differential compression and a ground run; check for leaks at the base.'],
+          ['Test', 'Break-in per the engine maker: the logbook entry names the cylinder’s serial number.'],
+        ],
+      };
+    case 'spar':
+      return {
+        title: 'Wing Spar Lower Cap and Wing Root — Inspection',
+        warnings: ['Support the wing at the jack points before you open the root fairing.'],
+        cautions: ['Penetrant materials from one family only.', 'Any crack indication at the lower cap: stop and call for the SRM repair.'],
+        tools: ['Penetrant kit and UV-A lamp', 'Inspection mirror and 10x glass'],
+        consumables: [[undefined, 'Penetrant kit ASTM E1417 Type I, Method C (2 uses)']],
+        effNotes: [],
+        steps: [
+          ['Access', 'Remove the wing root fairing and the lower access panels.'],
+          ['Cleaning', 'Clean the lower spar cap and the root fitting to bare paint.'],
+          ['Inspection', 'Look over the root rivets: smoking (black streaks) means a working joint.'],
+          ['Inspection', 'Penetrant on the lower cap at the root fitting: dwell, remove the excess, develop.'],
+          ['Inspection', 'Inspect under UV-A with the glass.'],
+          ['Close-up', 'No findings: refit the panels and the fairing; record the inspection.'],
+        ],
+      };
+    case 'inspection':
+      return {
+        title: model === 'cargo' ? 'Phase Inspection' : '100-Hour Inspection',
+        warnings: ['Magnetos OFF, master OFF before any work forward of the firewall.'],
+        cautions: ['Work the checklist in order; an item found is written up before the airplane is returned to service.'],
+        tools: model === 'cargo' ? ['Torque wrench, 20-200 in-lb', 'Inspection mirror and light'] : ['Torque wrench, 20-200 in-lb', 'Differential compression tester', 'Eddy-current probe (AD 2016-09-12 hub check)'],
+        consumables:
+          model === 'cargo'
+            ? [[undefined, 'Filter housing packing set, chip detector packing'], [undefined, 'Safety wire MS20995C32'], [undefined, 'Cotter pins MS24665-302']]
+            : [
+                [undefined, `Oil and filter: SAE J1899 20W-50, ${twin ? '12 qt per engine' : '11 qt'}`],
+                [undefined, 'Spark plug gaskets, 12 per engine'],
+                [undefined, 'Crush gaskets, safety wire, cotter pins'],
+              ],
+        effNotes: [],
+        steps:
+          model === 'cargo'
+            ? [
+                ['Records', 'Review the records: ADs, life limits, open write-ups.'],
+                ['Engine', 'Oil level and chip detector checked; filter element inspected.'],
+                ['Engine', 'Compressor wash per the phase card; borescope if the trend calls for it.'],
+                ['Airframe', 'Landing gear, brakes and tires; flight controls and cables.'],
+                ['Airframe', 'Wing root and lower spar cap area.'],
+                ['Close-up', 'Safety wire and cotter pins where disturbed; ground run; return to service.'],
+              ]
+            : [
+                ['Records', 'Review the records: ADs, life limits, open write-ups.'],
+                ['Engine', 'Differential compression on every cylinder.'],
+                ['Engine', 'Oil and filter change (AMM 79-00-01); filter cut open for metal.'],
+                ['Engine', 'Spark plugs out, cleaned, gapped and rotated; new gaskets.'],
+                ['Propeller', 'Hub eddy-current check per AD 2016-09-12.'],
+                ['Airframe', 'Landing gear, brakes and tires; flight controls and cables.'],
+                ['Close-up', 'Safety wire and cotter pins where disturbed; run-up; return to service.'],
+              ],
+      };
+
     case 'wheel':
       return {
         title: 'Main Wheel and Tire — Removal / Installation',
@@ -2863,10 +3148,12 @@ function card(model: PlaneModel, key: AmmTaskKey): Card {
  * marking the ones for this S/N and SB status.
  */
 export function ammTaskFor(ac: Aircraft, task: string): AmmTask {
+  if ((AMM_TASKS2 as string[]).includes(task)) return shortTask(ac, task as AmmTaskKey2);
   const key = taskKeyFor(task);
-  if (!key) throw new Error(`no AMM task for "${task}" (have ${AMM_TASKS.join(', ')})`);
+  if (!key) throw new Error(`no AMM task for "${task}" (have ${[...AMM_TASKS, ...AMM_TASKS2].join(', ')})`);
+  if ((AMM_TASKS2 as string[]).includes(key)) return shortTask(ac, key as AmmTaskKey2);
   const s = SPECS[ac.model];
-  const { ata, sub, block } = TASKS[key];
+  const { ata, sub, block } = TASKS[key as Exclude<AmmTaskKey, AmmTaskKey2>];
   const env = envOf(ac, ata);
   const fig = buildFigure(ac.model, ata, env);
   const c = card(ac.model, key);
@@ -2875,6 +3162,7 @@ export function ammTaskFor(ac: Aircraft, task: string): AmmTask {
   return {
     key,
     ata,
+    fig: ata,
     taskNo,
     pageBlock: block,
     title: c.title,
@@ -2900,4 +3188,62 @@ export function ammTaskFor(ac: Aircraft, task: string): AmmTask {
 /** the torque this aircraft needs for a step key ("tieNut", "propBolt") */
 export function torqueFor(t: AmmTask, key: string): TorqueSpec | undefined {
   return t.torques.find((x) => x.key === key && x.applies);
+}
+
+/** The job flow's short cards (docs/JOBFLOW.md 4): the same shape, the effectivity of the figure their parts are in */
+function shortTask(ac: Aircraft, key: AmmTaskKey2): AmmTask {
+  const s = SPECS[ac.model];
+  const d = TASKS2[key];
+  const sub = key === 'inspection' && ac.model === 'cargo' ? '02' : d.sub;
+  const taskNo = `${d.chap}-${sub}`;
+  const figAta = d.fig;
+  const fig = figAta ? ipcFor(ac, figAta) : undefined;
+  const env: Env = figAta && figAta !== '79-20' ? envOf(ac, figAta) : { snB: false, postSb: false };
+  const c = card(ac.model, key);
+  const used = new Set(c.steps.map((x) => x[2]).filter(Boolean));
+  // an effectivity line needs its figure's code (79-20 prints none): lines without one apply to all
+  const effOf = (code: 'A' | 'B' | 'C' | 'D' | undefined, text: string): Effective => {
+    const e = code ? fig?.effCodes.find((x) => x.code === code) : undefined;
+    return { eff: e ? code : undefined, effText: e?.text, text, applies: e ? effOk(code!, env) : true };
+  };
+  return {
+    key,
+    ata: d.chap,
+    ...(figAta ? { fig: figAta } : {}),
+    taskNo,
+    pageBlock: d.block,
+    title: c.title,
+    manual: `${s.family} Maintenance Manual`,
+    ref: `IAW ${s.family} MM ${taskNo}`,
+    effectivity: `${s.designation}, ALL`,
+    effNotes: c.effNotes.map(([code, text]) => effOf(code, text!)),
+    warnings: c.warnings,
+    cautions: c.cautions,
+    notes: [
+      fig ? `Part numbers: ${s.family} IPC Figure ${fig.fig}.` : key === 'cylinder' ? `Part numbers: ${s.engineMaker} parts catalog (${s.engineModel}).` : 'No parts are replaced by this task: findings are written up on their own task.',
+      'An airplane altered by STC or field approval (FAA Form 337) may differ from this task: check the aircraft records and use the ICA for the alteration.',
+    ],
+    tools: c.tools,
+    consumables: c.consumables.map(([code, text]) => effOf(code, text!)),
+    steps: c.steps.map(([phase, text, torque], i) => (torque ? { n: i + 1, phase, text, torque } : { n: i + 1, phase, text })),
+    torques: figAta && figAta !== '79-20' ? torquesAt(ac.model, figAta, env).filter((t) => used.has(t.key)) : [],
+    servicing: fig && figAta !== '79-20' ? servicingOf(env, fig, c) : [],
+    ipcFig: fig?.fig ?? 0,
+  };
+}
+
+/**
+ * The FAA-PMA replacements the market sells for this model: the PMA holder's
+ * number for each IPC P/N of its item (brake linings, hydraulic filter
+ * elements), with the eligibility the holder publishes. Derived, never stored.
+ */
+export function pmaParts(model: string): { pn: string; replaces: string; holder: string; eligibility: string; tag: string; ata: Ata }[] {
+  const m = planeModel(model);
+  const out: { pn: string; replaces: string; holder: string; eligibility: string; tag: string; ata: Ata }[] = [];
+  for (const ata of PMA_ATAS) {
+    const d = pmaDef(m, ata);
+    if (!d) continue;
+    for (const r of figureRows(m, ata)) if (r.tag === d.tag && !r.np) out.push({ pn: d.pn(r.pn), replaces: r.pn, holder: d.holder, eligibility: d.eligibility, tag: d.tag, ata });
+  }
+  return out;
 }

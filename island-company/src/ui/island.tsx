@@ -7,7 +7,8 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
-import { cableReport, gseCarts, houseBlocker, houseRentable, isAog, planeCapacity, powered } from '../sim/econ';
+import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, restrictedBy } from '../sim/econ';
+import { openBuild, pilotSeats, working } from '../sim/staff';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
 import { Cottage, GenHouse, Hangar, Lodge, Office, Pole, POLE_H, Ribbon, SMOKE_AT, Substation, Villa, WINDOWS, winPath, type Fault, type Win } from './island/buildings';
@@ -17,11 +18,12 @@ import {
   APRON_PROPS, ApronLights, ApronProps, BeachBar, Bench, Boardwalk, Confetti, Dock, Festoon, Fireworks, FishingBoats, Fountain, GardenBeds, Lamp, Lighthouse, Market, NewFlags,
   Observatory, Statue, Bunting, buntingBulbs, YachtAt, YachtLights,
 } from './island/extras';
-import { along, AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, OFFICE, P, PATHS, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, viewOf, W, zoomK, zoomOf, type Pt } from './island/geo';
+import { along, AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, OFFICE, P, PATHS, PLOT, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, viewOf, W, zoomK, zoomOf, type Pt } from './island/geo';
 import { blob } from './island/rocks';
 import { Clouds, DawnGrade, GoldenGrade, Gulls, Guy, LifeDefs, NightGrade, NightSky, Rain, SeaLife, StormGrade, Wind } from './island/life';
 import { K } from './island/paint';
-import { DockSite, Site, type SiteKind } from './island/sites';
+import { crewSpots, DOCK_CREW, DockSite, Site, type SiteKind } from './island/sites';
+import { NpcFigure, OfficeLate, StaffDefs } from './island/staff';
 import { Bubble, bubbleK, NewBadge, spread, type Icon, type KeepOut, type Rect, type Tone } from './island/status';
 import { COAST_LINE, Terrain, TerrainDefs } from './island/terrain';
 
@@ -130,6 +132,7 @@ function useStill(ref: { current: SVGSVGElement | null }) {
   return still;
 }
 
+const MODELS_CARGO = (p: Asset) => p.model === 'cargo';
 const siteKind = (model: string): SiteKind | null =>
   model === 'cottage' ? 'house' : model === 'villa' ? 'villa' : model === 'lodge' ? 'lodge' : model === 'gen' ? 'gen' : null;
 
@@ -221,6 +224,7 @@ export function Island({
       <defs>
         <TerrainDefs />
         <LifeDefs />
+        <StaffDefs />
       </defs>
     ),
     [],
@@ -229,9 +233,13 @@ export function Island({
   const cons = dev.construction && dev.construction.stage < 3 ? dev.construction : null;
   // the generator's shed going up: its plot by the beach is cleared of palms
   const genSite = !!cons && TIERS[cons.tier - 1].adds.some((a) => a.model === 'gen');
+  // the extra cottages' plots in use (built or going up): the grove's palms there are cleared
+  const plots = Object.keys(PLOT)
+    .filter((id) => s.assets.some((a) => a.id === id) || (s.builds ?? []).some((b) => b.cottage === id))
+    .join(',');
   const ground = useMemo(
-    () => <Terrain tier={s.tier} weather={s.weather} motion={motion} paved={paved} night={night} grove={grove} site={genSite} />,
-    [s.tier, s.weather, motion, paved, night, grove, genSite],
+    () => <Terrain tier={s.tier} weather={s.weather} motion={motion} paved={paved} night={night} grove={grove} site={genSite} plots={plots} />,
+    [s.tier, s.weather, motion, paved, night, grove, genSite, plots],
   );
   const boats = storm ? 0 : 1 + Math.round(dev.prosperity * 3);
   const sea = useMemo(() => <SeaLife motion={motion} boats={boats} storm={storm} />, [motion, boats, storm]);
@@ -259,12 +267,14 @@ export function Island({
   /** lit windows (map-space path), redrawn crisp over the night grade */
   const litWins: string[] = [];
   const bubbles: Bub[] = [];
+  /** someone working late at the office (night): drawn over the night grade, in the lit window */
+  let litFigure = false;
   const badges: Pt[] = [];
   const keep: KeepOut[] = [{ r: RUNWAY_BOX }];
   const foot = (owner: string, p: Pt, f: Rect) => keep.push({ owner, r: footAt(p, f) });
   const bub = (key: string, x: number, y: number, icon: Icon, tone: Tone, o: { small?: boolean; dx?: number; dy?: number; owner?: string; fixed?: boolean; count?: number } = {}) =>
     bubbles.push({ key, x, y, k: bubbleK(bscale, o.small), dx: (o.dx ?? 0) * bscale, dy: (o.dy ?? 0) * bscale, icon, tone, small: o.small, owner: o.owner ?? key, fixed: o.fixed, count: o.count });
-  const at = (id: string) => POS[id];
+  const at = (id: string) => POS[id] ?? PLOT[id];
 
   // ---- airfield: every plane has its own stand and its own AOG spot (worn out, or waiting on a part: the part chain)
   const isDown = (p: Asset) => p.health < 40 || isAog(s, p.id);
@@ -293,7 +303,11 @@ export function Island({
       if (p.id === 'p1' && !onWater) bub(p.id, x + 3, y - 24, 'wrench', 'alert', { fixed: true });
       else bub(p.id, x, y - (onWater ? 20 : 26), 'wrench', 'alert');
     } else if (g) bub(p.id, x, y - 22, 'noflight', 'alert');
+    // the only guest plane past due on an airworthiness alert flies restricted: a placard
+    else if (restrictedBy(s, p.id)) bub(p.id, x, y - 22, 'placard', 'warn');
     else if (p.health < 60) bub(p.id, x, y - 22, 'warn', 'warn');
+    // flying on an MEL C placard (an INOP item deferred through this week): a small placard, as a made-safe house gets a small tag
+    else if (melOn(s, p.id)) bub(p.id, x, y - 22, 'placard', 'warn', { small: true });
     if (newIds.has(p.id) && !onWater) {
       items.push({ y: y + 1, el: <Ribbon key={`rb${p.id}`} x={x} y={y - 6} /> });
       badges.push([x - 30, y - 12]);
@@ -421,16 +435,33 @@ export function Island({
     // entry), falling apart (cracked house) or inspection lapsed. No power is
     // one island-wide fault: the dark windows say it, and the grid's bubble
     // carries the count, so a house shows only a trouble of its own.
-    const icon: Icon | null = !why ? null : fault.tag ? 'noentry' : h.health < 40 ? 'broken' : fault.lapsed ? 'clipboard' : null;
+    // a hazard closes it (shock or fire: no entry until it's made safe or fixed); made safe, a small tag
+    const hz = hazardOn(s, h.id);
+    const icon: Icon | null = !why ? null : fault.tag || why === 'hazard' ? 'noentry' : h.health < 40 ? 'broken' : fault.lapsed ? 'clipboard' : null;
     if (icon) bub(h.id, x + 4, y - g.top, icon, 'alert');
+    else if (hz?.safe) bub(h.id, x + 4, y - g.top, 'tag', 'warn', { small: true });
   }
 
-  // ---- build sites: the next tier under construction, later ones surveyed
+  // ---- build sites: the next tier under construction, later ones surveyed. A site shows the further of the crew
+  // project's stage and the builders' (docs/JOBFLOW.md 15.5), with the island's builders on the one they work
+  const building = openBuild(s);
+  const builders = working(s).filter((n) => n.role === 'builder');
+  const onSite = !!building && builders.length > 0;
+  const buildStage = (b: NonNullable<IslandState['builds']>[number] | undefined): -1 | 0 | 1 | 2 => {
+    if (!b) return -1;
+    const k = Math.min(2, Math.floor((3 * b.done) / Math.max(1, b.need) + 1e-9)) as 0 | 1 | 2;
+    return b.finished !== undefined || b.done > 0 || (b === building && onSite) ? k : -1;
+  };
+  /** where the builders stand: the open build's sites, one each (up to 3) */
+  const crewAt: Pt[] = [];
   for (const t of TIERS.filter((t) => t.n > s.tier)) {
-    const stage = cons && cons.tier === t.n ? (cons.stage as 0 | 1 | 2) : -1;
+    const b = (s.builds ?? []).find((x) => x.tier === t.n);
+    const stage = Math.max(cons && cons.tier === t.n ? cons.stage : -1, buildStage(b)) as -1 | 0 | 1 | 2;
+    const spots: Pt[][] = [];
     for (const a of t.adds) {
       if (a.id === 'p3') {
         flat.push(<DockSite key="dock" stage={stage} motion={motion} />);
+        spots.push(DOCK_CREW);
         continue;
       }
       const kind = siteKind(a.model);
@@ -438,7 +469,17 @@ export function Island({
       if (stage < 0 && t.n > s.tier + 2) continue; // far future: nothing staked out yet
       const [x, y] = POS[a.id];
       items.push({ y, el: <Site key={`site${a.id}`} x={x} y={y} kind={kind} stage={stage} /> });
+      spots.push(crewSpots(kind, x, y));
     }
+    // one builder to each of the build's sites in turn
+    if (b && b === building && onSite) for (let i = 0; i < 3; i++) if (spots.length) crewAt.push(spots[i % spots.length][Math.floor(i / spots.length)] ?? spots[0][0]);
+  }
+  // the extra cottages the analyst started: their plots in the grove (a finished one is a house above)
+  for (const b of (s.builds ?? []).filter((x) => x.cottage && !s.assets.some((a) => a.id === x.cottage))) {
+    const plot = PLOT[b.cottage!];
+    if (!plot) continue;
+    items.push({ y: plot[1], el: <Site key={`site${b.cottage}`} x={plot[0]} y={plot[1]} kind="house" stage={buildStage(b)} /> });
+    if (b === building && onSite) crewAt.push(...crewSpots('house', plot[0], plot[1]));
   }
   if (s.tier >= 4) flat.push(<Dock key="dockbuilt" />);
 
@@ -479,6 +520,34 @@ export function Island({
   }
   // the finale: festoon lights from lamp to lamp over the square and the bridge path
   const festoon = has('statue') && has('benches');
+
+  // ---- the staff at work (docs/JOBFLOW.md 15.10): builders on the site they work, a pilot by the lead guest plane
+  // and one by the cargo plane, a housekeeper at a booked house; up to 8, none in a storm or at night (then one
+  // figure works late at the office window)
+  if (!storm && !night) {
+    builders.slice(0, 3).forEach((_, i) => {
+      const p = crewAt[i];
+      if (p) items.push({ y: p[1], el: <NpcFigure key={`bld${i}`} kind="builder" x={p[0]} y={p[1]} flip={i % 2 === 1} motion={motion} /> });
+    });
+    const seats = pilotSeats(s);
+    const lead = planes.find((p) => !MODELS_CARGO(p) && !isDown(p) && !tagged(p) && (seats.get(p.id) ?? []).length);
+    const cargo = planes.find((p) => MODELS_CARGO(p) && !isDown(p) && !tagged(p) && (seats.get(p.id) ?? []).length);
+    for (const p of [lead, cargo]) {
+      if (!p || p.model === 'float') continue;
+      const { x, y } = spotOf(p.id);
+      items.push({ y: y + 14, el: <NpcFigure key={`plt${p.id}`} kind="pilot" x={x - 24} y={y + 14} /> });
+    }
+    const keepers = working(s).filter((n) => n.role === 'housekeeper').length;
+    rentable
+      .slice()
+      .sort((a, b) => b.health - a.health)
+      .slice(0, Math.min(2, keepers))
+      .forEach((h, i) => {
+        const [x, y] = at(h.id) ?? [0, 0];
+        const g = houseGeo(h);
+        items.push({ y: y + 6, el: <NpcFigure key={`hk${h.id}`} kind="keeper" x={x + g.w * g.k + 6} y={y + 6} flip={i % 2 === 1} /> });
+      });
+  } else if (night && pw.on) litFigure = true;
 
   // ---- people: busier with prosperity, guests walking when houses are booked
   const pr = dev.prosperity;
@@ -594,6 +663,7 @@ export function Island({
             <Lights pts={has('bunting') ? [...glows, ...buntingBulbs().map(([x, y]): [number, number, boolean] => [x, y, true])] : glows} wins={litWins.join('')} />
             {/* every lit window, crisp over the grade */}
             {litWins.length > 0 && <path d={litWins.join('')} fill={K.lit} stroke="#f0a848" stroke-width=".7" />}
+            {litFigure && officeWin === 'lit' && <OfficeLate x={OFFICE[0] - 21} y={OFFICE[1] - 3} />}
             {has('lighthouse') && <Beam motion={motion} />}
             {has('observatory') && <Observatory lit />}
             {has('statue') && <Statue lit />}

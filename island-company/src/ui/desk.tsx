@@ -1,48 +1,126 @@
-// The analyst's desk: a game, not a form. Swipe approvals, price against a
-// live demand curve, set repair budgets, buy parts, run the money hunts.
+// The analyst's desk: a game, not a form (docs/JOBFLOW.md 17.3). The cash card
+// on top, then four tabs: Approvals (the flow cards with their parts, supplier
+// and freight; the requests; today's cards; the desk work), Stock (the planner,
+// needs, receiving), Money (cash, where it went, the stock card, the budgets,
+// pricing, insurance, overhead and payroll) and Staff (the island's payroll:
+// package D's hiring desk). Flow cards and requests stay approvable after End turn.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { needsFreight, openChain } from '../sim/chain';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
-import { budgetCap, chainCardCost, listPrice } from '../sim/engine';
-import { charterLoad, downtimeOf, expectedDeferralCost, logistic, occupancy, openReports, projectWeek, rateBounds, season, tierDef, urgency } from '../sim/econ';
-import type { Insurance, Order } from '../sim/types';
+import { chainCardCost } from '../sim/engine';
+import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, logistic, occupancy, openReports, projectWeek, rateBounds, season } from '../sim/econ';
+import { committed, spendable } from '../sim/ledger';
+import { urgentJob } from '../sim/stock';
+import type { Insurance, IslandState, Order } from '../sim/types';
 import { fx } from './feedback';
-import { Btn, Icon, Seg, Sheet, TierDots, toast, usd } from './kit';
+import { Btn, Seg, Sheet, TierDots, toast, usd } from './kit';
+import { StaffDesk } from './staff/StaffDesk';
 import { CapNotice, CoverSection, hasOrigin } from './ops';
 import { OrderCard, OrderDetail } from './orders';
-import { capNow, openOrders } from './select';
+import { FlowCards } from './purchasing/ApprovalCard';
+import { deskCounts, deskTaskLine, flowQueue, legacyQueue, openingTab, reqQueue, type DeskTab } from './purchasing/model';
+import { Money } from './purchasing/Money';
+import { ReqQueue } from './purchasing/ReqQueue';
+import { StockPlanner, type PlannerFocus } from './purchasing/StockPlanner';
+import { WhatsNew } from './purchasing/WhatsNew';
+import './purchasing/purchasing.css';
+import { capNow, chainGrounds, openOrders, takeDeskAsked, type DockTarget } from './select';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
+
+const TAB_KEY = (island: string) => `ic.desk.tab.${island}`;
+function savedTab(island: string): DeskTab | null {
+  try {
+    const v = sessionStorage.getItem(TAB_KEY(island));
+    return v === 'approvals' || v === 'stock' || v === 'money' || v === 'staff' ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void }) {
   const { s } = ctl;
   const ended = !!s.turns.fin?.ended;
-  const tasks = openOrders(s, 'fin');
   const proj = projectWeek(s);
   const delta = s.cash - s.openCash;
-  // a crewmate hasn't fixed what the analyst reported: fewer desk tasks per turn
-  const cap = capNow(s, 'fin');
+  const spend = spendable(s);
+  const owed = committed(s);
   // open 'leak' reports cost cash every week until someone fixes them
   const leaks = openReports(s).filter((o) => o.report!.effect === 'leak');
   const leakTotal = leaks.reduce((n, o) => n + o.report!.amount, 0);
-  // a crewmate's report opens its story first (who reported it and what it costs), with a Start button
-  const [sel, setSel] = useState<Order | null>(null);
+  // it opens on Approvals when something waits, else on Stock (the tab chosen this session sticks)
+  // (a tab the Dock asked for while the desk's chunk was loading comes first)
+  const [tab, setTabState] = useState<DeskTab>(() => takeDeskAsked() ?? savedTab(ctl.ref.id) ?? openingTab(s));
+  // where the tab bar sits in the page: a tab picked while the bar is stuck opens at its top, not mid-page
+  const tabTop = useRef<HTMLDivElement>(null);
+  const setTab = (t: DeskTab) => {
+    setTabState(t);
+    try {
+      sessionStorage.setItem(TAB_KEY(ctl.ref.id), t);
+    } catch {
+      /* a private window: the desk opens where it would */
+    }
+    const a = tabTop.current;
+    const bar = a?.nextElementSibling;
+    if (a && bar) {
+      const stuck = bar.getBoundingClientRect().top;
+      const y = a.getBoundingClientRect().top - parseFloat(getComputedStyle(bar).paddingTop);
+      if (y < stuck) window.scrollBy({ top: y - stuck });
+    }
+    // after the new tab renders: scrolled past the tab bar (a desktop's side column, a long tab before), the new tab
+    // opens at its top, not mid-page
+    requestAnimationFrame(() => {
+      const top = tabTop.current?.getBoundingClientRect().top;
+      if (top !== undefined && top < 0) window.scrollBy({ top: top - 8 });
+    });
+  };
+  const [focus, setFocus] = useState<PlannerFocus | null>(null);
+  // the Dock's Next (and anything else) opens the desk's Approvals or Stock (select.ts openTarget)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<DockTarget>).detail;
+      if (d && 'desk' in d) {
+        takeDeskAsked();
+        setTab(d.desk === 'stock' ? 'stock' : 'approvals');
+      }
+    };
+    window.addEventListener('ic:open', on);
+    return () => window.removeEventListener('ic:open', on);
+  }, []);
+  const counts = deskCounts(s);
+  const tabs: { v: DeskTab; label: string; n?: number; dot?: boolean; alert?: boolean }[] = [
+    // the count turns rust when a card or a request is for a job that grounds a plane or closes a house
+    { v: 'approvals', label: 'Approvals', n: counts.approvals, alert: flowQueue(s).some((o) => urgentJob(s, o)) || reqQueue(s).some((r) => r.urgent) },
+    { v: 'stock', label: 'Stock', dot: counts.stockDot },
+    { v: 'money', label: 'Money' },
+    { v: 'staff', label: 'Staff', n: counts.staff },
+  ];
   return (
-    <>
+    <div class="pdesk col" style={{ gap: 12 }}>
       <div class="card col" style={{ gap: 6, ['--tint' as string]: C.fin }}>
         <div class="row spread">
           <span class="label">Cash</span>
           <span class="label num">{delta === 0 ? 'no change this week' : `${usd(delta, true)} this week`}</span>
         </div>
-        <div class="num" style={{ fontSize: 40, fontWeight: 900, letterSpacing: '-0.02em', color: s.cash < ECON.freezeBelow ? C.rust : C.ink }}>
-          {usd(s.cash)}
+        <div class="row wrap" style={{ alignItems: 'baseline', gap: '4px 14px' }}>
+          <span style={{ fontSize: 40, fontWeight: 900, letterSpacing: '-0.02em', color: s.cash < ECON.freezeBelow ? C.rust : C.ink }}>{usd(s.cash)}</span>
+          <span class="col" style={{ gap: 0 }}>
+            <span class="label">Spendable</span>
+            <b class="num" style={{ fontSize: 18, color: spend < ECON.freezeBelow ? C.rust : C.ink }}>{usd(spend)}</b>
+          </span>
+          {owed > 0 && (
+            <span class="col" style={{ gap: 0 }}>
+              <span class="label">Committed</span>
+              <b class="num" style={{ fontSize: 18 }}>{usd(owed)}</b>
+            </span>
+          )}
         </div>
         <div class="row wrap" style={{ gap: 6 }}>
           <span class="chip sea num">Forecast revenue {usd(proj.revenue)}</span>
           <span class={`chip num ${proj.revenue >= proj.budget ? 'palm' : ''}`}>
             {Math.round((proj.revenue / proj.budget) * 100)}% of {usd(proj.budget)} budget
           </span>
-          <span class="chip num">Fixed −{usd(tierDef(s.tier).fixed)}</span>
+          <span class="chip num">Fixed −{usd(fixedNow(s))}</span>
           {leakTotal > 0 && <span class="chip rust num">Open reports −{usd(leakTotal)}/wk</span>}
         </div>
         {leaks.map((o) => (
@@ -50,36 +128,116 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
             <b>{o.title}:</b> <span style={{ whiteSpace: 'nowrap' }}>−{usd(o.report!.amount)}</span> every week until {o.role === 'fin' ? 'you fix it' : `${s.players[o.role]?.name ?? ROLE_LABEL[o.role]} fixes it`}.
           </span>
         ))}
-        {s.cash < ECON.freezeBelow && <span class="fault">Under $2,000: frozen except safety-critical work (assets under 60, inspections).</span>}
+        {spend < ECON.freezeBelow && <span class="fault">Spendable under $2,000: only safety-critical work is approved, and stock orders are frozen.</span>}
         {s.loan && <span class="label">Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week</span>}
         {s.receivership > 0 && <span class="fault">Receivership · {s.receivership} wk: rates capped, spend over $800 blocked, grade capped at C.</span>}
       </div>
 
       {s.pendingBonus && <Bonus ctl={ctl} />}
 
-      <h2 style={{ marginTop: 4, scrollMarginTop: 12 }} id="approvals">
-        Approvals
-      </h2>
-      <Approvals ctl={ctl} disabled={ended} />
+      <div class="pd-anchor" id="approvals" ref={tabTop} />
+      <div class="pd-tabs-wrap">
+        <nav class="pd-tabs" aria-label="The desk">
+          {tabs.map((t) => (
+            <button
+              key={t.v}
+              class={tab === t.v ? 'on' : ''}
+              aria-current={tab === t.v}
+              onClick={() => {
+                fx.tap();
+                setTab(t.v);
+              }}
+            >
+              {t.label}
+              {t.n ? <span class={`n ${t.alert ? 'alert' : ''}`}>{t.n}</span> : null}
+              {t.dot ? <span class="dot" aria-label="needs a look" /> : null}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {tab === 'approvals' && <ApprovalsTab ctl={ctl} onPlay={onPlay} />}
+      {tab === 'stock' && <StockPlanner ctl={ctl} focus={focus} />}
+      {tab === 'money' && (
+        <Money
+          ctl={ctl}
+          onFamily={(fam) => {
+            setTab('stock');
+            setFocus({ fam, n: Date.now() });
+          }}
+        >
+          <h2 style={{ marginTop: 4 }}>Pricing</h2>
+          <Pricing ctl={ctl} />
+          <h2 style={{ marginTop: 4 }}>Insurance</h2>
+          <Insurance ctl={ctl} />
+        </Money>
+      )}
+      {tab === 'staff' && <StaffTab ctl={ctl} />}
+
+      <CoverSection ctl={ctl} role="fin" onPlay={onPlay} />
+      <WhatsNew island={ctl.ref.id} since={s.flowSince ?? 1} />
+      {ended && <span class="label center">Your turn is over. Cards and requests stay open: approve or defer them any time this week.</span>}
+    </div>
+  );
+}
+
+/** Approvals: the flow cards, the requests, today's cards (legacy orders, the part chain), then the desk work */
+function ApprovalsTab({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void }) {
+  const { s } = ctl;
+  const ended = !!s.turns.fin?.ended;
+  const tasks = openOrders(s, 'fin');
+  // a crewmate hasn't fixed what the analyst reported: fewer desk tasks per turn
+  const cap = capNow(s, 'fin');
+  // a crewmate's report opens its story first (who reported it and what it costs), with a Start button
+  const [sel, setSel] = useState<Order | null>(null);
+  const flow = flowQueue(s).length;
+  const reqs = reqQueue(s).length;
+  const legacy = legacyQueue(s).length;
+  const deferred = s.orders.filter((o) => o.flow && o.status === 'pending' && o.lastDeferredWeek === s.week).length;
+  return (
+    <>
+      {flow + reqs + legacy === 0 && (
+        <div class="card muted">
+          No cards waiting. A job whose parts are on the shelf goes ahead on its trade's work budget; a card that comes in after you end your turn goes through on your standing limit.
+          {deferred ? ` ${deferred} deferred to next week.` : ''}
+        </div>
+      )}
+      <FlowCards ctl={ctl} keys={true} />
+      <ReqQueue ctl={ctl} />
+      {legacy > 0 && (
+        <>
+          {flow + reqs > 0 && <h3 style={{ marginTop: 4 }}>Other cards</h3>}
+          <Approvals ctl={ctl} disabled={ended} keys={flow === 0} />
+        </>
+      )}
 
       <h2 style={{ marginTop: 4 }}>Desk work</h2>
       {cap && <CapNotice cap={cap} />}
       {tasks.length === 0 && <div class="card muted">Nothing on the desk.</div>}
-      {tasks.map((o) => (
-        <OrderCard
-          key={o.id}
-          s={s}
-          o={o}
-          me="fin"
-          held={ended || !!cap?.full}
-          onOpen={(x) => {
-            if (hasOrigin(x)) return setSel(x);
-            if (x.status !== 'ready' || ended) return;
-            if (cap?.full) return toast(cap.text);
-            onPlay(x);
-          }}
-        />
-      ))}
+      {tasks.map((o) => {
+        const line = o.status === 'ready' ? deskTaskLine(s, o) : null;
+        return (
+          <div key={o.id} class="col" style={{ gap: 4 }}>
+            <OrderCard
+              s={s}
+              o={o}
+              me="fin"
+              held={ended || !!cap?.full}
+              onOpen={(x) => {
+                if (hasOrigin(x)) return setSel(x);
+                if (x.status !== 'ready' || ended) return;
+                if (cap?.full) return toast(cap.text);
+                onPlay(x);
+              }}
+            />
+            {line && (
+              <span class="label" style={{ padding: '0 8px' }}>
+                {line}
+              </span>
+            )}
+          </div>
+        );
+      })}
       <Sheet open={!!sel} onClose={() => setSel(null)} label="Desk task">
         {sel && (
           <div class="col" style={{ gap: 14 }}>
@@ -107,14 +265,16 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           </div>
         )}
       </Sheet>
-
-      <h2 style={{ marginTop: 4 }}>Pricing</h2>
-      <Pricing ctl={ctl} />
-
-      <h2 style={{ marginTop: 4 }}>Budgets, parts, insurance</h2>
-      <Budgets ctl={ctl} />
-      <CoverSection ctl={ctl} role="fin" onPlay={onPlay} />
     </>
+  );
+}
+
+/** The Staff tab: package D's hiring desk (the payroll, the crew, the hiring board, the site work) */
+function StaffTab({ ctl }: { ctl: Ctl }) {
+  return (
+    <div class="col" style={{ gap: 12 }}>
+      <StaffDesk ctl={ctl} />
+    </div>
   );
 }
 
@@ -141,11 +301,10 @@ function Bonus({ ctl }: { ctl: Ctl }) {
 
 // --- swipe approvals --------------------------------------------------------
 
-function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
+/** today's cards: legacy orders (no job flow) and the part chain's; flow cards are FlowCards' */
+function Approvals({ ctl, disabled, keys }: { ctl: Ctl; disabled: boolean; keys: boolean }) {
   const { s } = ctl;
-  const queue = s.orders
-    .filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week)
-    .sort((a, b) => urgency(s, b) - urgency(s, a));
+  const queue = legacyQueue(s);
   const top = queue[0];
   const next = queue[1];
   const [drag, setDrag] = useState({ x: 0, y: 0, on: false, leaving: '' as '' | 'left' | 'right' | 'up' });
@@ -174,8 +333,9 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
     setDrag({ x: 0, y: 0, on: false, leaving: '' });
   };
 
-  // desktop: ← defer, → approve, ↑ counter
+  // desktop: ← defer, → approve, ↑ counter (the flow cards take the keys while there are any)
   useEffect(() => {
+    if (!keys) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || document.querySelector('.overlay, .sheet')) return;
       if (e.key === 'ArrowRight') void decide('right');
@@ -189,12 +349,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (!top)
-    return (
-      <div class="card muted">
-        No cards waiting. {s.autoBudget.mech + s.autoBudget.elec > 0 ? 'Small jobs are auto-approved from your repair budgets.' : ''}
-      </div>
-    );
+  if (!top) return null;
 
   const exp = expectedDeferralCost(s, top);
   const asset = s.assets.find((a) => a.id === top.assetId);
@@ -254,7 +409,8 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               </span>
               {/* a known defect is still in service: the card has no room for the story, the owner's detail has it */}
               {top.repair && <span class="chip ink">Repair</span>}
-              {top.chain && <span class="chip rust">AOG</span>}
+              {/* AOG only when the chain's plane is grounded (a flow-opened chain flies on MEL, restricted, or meanwhile) */}
+              {top.chain && chain && chain.id === top.chain.id && chainGrounds(s, chain) && <span class="chip rust">AOG</span>}
             </span>
             <span style={{ flex: 'none' }}>
               <TierDots tier={top.tier} />
@@ -272,7 +428,14 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
               {/* the freight is on the PO: the analyst sees what the boat adds */}
               {freight && <span class="label num">{ship === 'boat' ? `part ${usd(top.cost)} + boat ${usd(ECON.boatKit)}` : `part ${usd(top.cost)}, no boat`}</span>}
             </div>
-            {top.chain ? (
+            {top.chain && chain?.flow && asset && !isAog(s, asset.id) ? (
+              // a part the job flow's research found doesn't ground the plane by itself: its job waits, the plane flies
+              <div class="col grow" style={{ gap: 0, minWidth: 0 }}>
+                <span class="label">If it waits</span>
+                <b style={{ fontSize: 15, lineHeight: 1.2 }}>{s.orders.find((o) => o.id === chain.orderId)?.title ?? 'Its job'} waits a week</b>
+                <span class="label wrap-text">{asset.name} flies meanwhile</span>
+              </div>
+            ) : top.chain ? (
               // a grounded plane's part never rolls an incident: what deferring costs is the plane on the ground
               <div class="col grow" style={{ gap: 0, minWidth: 0 }}>
                 <span class="label">If it waits</span>
@@ -281,7 +444,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
                 </b>
                 <span class="label wrap-text">
                   {down?.cargo
-                    ? `${down.flights} cargo flights/wk off: ${s.parts.inTransit ? `kits come by boat (${usd(ECON.boatKit)} each)` : 'no kits waiting on it now'}`
+                    ? `${down.flights} cargo flights/wk off: ${bulkWaiting(s) ? `${bulkWaiting(s)} PO${bulkWaiting(s) > 1 ? 's' : ''} waiting on it` : 'no POs waiting on it now'}`
                     : down
                       ? `${down.flights} flights/wk ≈ ${usd(down.usd)} of revenue lost`
                       : 'no flights until the part is on'}
@@ -339,7 +502,7 @@ function Approvals({ ctl, disabled }: { ctl: Ctl; disabled: boolean }) {
           />
           <span class="label">
             {down?.cargo
-              ? `The cargo plane is the one down. The boat brings it at the resolve; the guest flight carries it free, a week later${s.parts.inTransit ? ` (kits waiting meanwhile come by boat, ${usd(ECON.boatKit)} each)` : ''}.`
+              ? `The cargo plane is the one down. The boat brings it at the resolve; the guest flight carries it free, a week later${bulkWaiting(s) ? ` (the bulk POs waiting meanwhile slip, or come on the AOG boat for a job that grounds its asset)` : ''}.`
               : `The boat brings it at the resolve; the guest flight carries it free, a week later (≈ ${usd(down?.usd ?? 0)} more downtime).`}
           </span>
         </div>
@@ -487,44 +650,14 @@ function Pricing({ ctl }: { ctl: Ctl }) {
   );
 }
 
-function Budgets({ ctl }: { ctl: Ctl }) {
+/** bulk POs due and waiting for a cargo flight */
+const bulkWaiting = (s: IslandState) => (s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.carrier === 'bulk' && p.eta <= s.week).length;
+
+function Insurance({ ctl }: { ctl: Ctl }) {
   const { s } = ctl;
   const ended = !!s.turns.fin?.ended;
-  const room = ECON.maxParts - s.parts.stock - s.parts.inTransit;
-  const price = listPrice(s);
   return (
     <div class="card col" style={{ gap: 12 }}>
-      {(['mech', 'elec'] as const).map((r) => (
-        <BudgetRow key={r} ctl={ctl} role={r} disabled={ended} />
-      ))}
-      <div class="divider" />
-      <div class="row spread">
-        <span class="col" style={{ gap: 0 }}>
-          <b>Parts kits</b>
-          <span class="label num">
-            {s.parts.stock} in stock · {s.parts.inTransit} in transit · max {ECON.maxParts}
-          </span>
-        </span>
-        <Btn small kind="soft" disabled={ended || room <= 0} onClick={() => ctl.dispatch({ t: 'buyList' })}>
-          <Icon name="box" size={16} /> Buy at list {usd(price)}
-        </Btn>
-      </div>
-      <div class="row" style={{ gap: 4 }}>
-        {Array.from({ length: ECON.maxParts }, (_, i) => (
-          <i
-            key={i}
-            style={{
-              flex: 1,
-              height: 10,
-              borderRadius: 4,
-              background: i < s.parts.stock ? C.sea : i < s.parts.stock + s.parts.inTransit ? C.fin : 'rgba(31,42,48,.1)',
-            }}
-          />
-        ))}
-      </div>
-      <span class="label">Auctions beat list price. Kits ride the next {s.assets.some((a) => a.model === 'cargo') ? 'cargo flight (3 per flight)' : 'guest flight (1 per flight)'}.</span>
-      <div class="divider" />
-      <b>Insurance</b>
       <Seg<Insurance>
         value={s.insurance}
         onChange={(v) => !ended && ctl.dispatch({ t: 'setInsurance', tier: v })}
@@ -534,32 +667,6 @@ function Budgets({ ctl }: { ctl: Ctl }) {
         }))}
       />
       <span class="label">Covers {Math.round(INSURANCE[s.insurance].cover * 100)}% of incident costs. Premium is charged weekly.</span>
-    </div>
-  );
-}
-
-function BudgetRow({ ctl, role, disabled }: { ctl: Ctl; role: 'mech' | 'elec'; disabled: boolean }) {
-  const { s } = ctl;
-  const [v, setV] = useState(s.autoBudget[role]);
-  useEffect(() => setV(s.autoBudget[role]), [s.autoBudget[role]]);
-  return (
-    <div class="col" style={{ gap: 0 }}>
-      <div class="row spread">
-        <b>{ROLE_LABEL[role]} auto-approve</b>
-        <b class="num">{usd(v)}/wk</b>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={s.receivership > 0 ? 300 : budgetCap(s)}
-        step={50}
-        value={v}
-        disabled={disabled}
-        aria-label={`${ROLE_LABEL[role]} auto-approve budget`}
-        onInput={(e) => setV(Number((e.target as HTMLInputElement).value))}
-        onChange={(e) => ctl.dispatch({ t: 'setBudget', role, amount: Number((e.target as HTMLInputElement).value) })}
-      />
-      <span class="label num">Used {usd(s.autoSpent[role])}. Petty cash for routine, parts-free jobs; bigger work comes to you as cards.</span>
     </div>
   );
 }

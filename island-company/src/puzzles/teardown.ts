@@ -209,7 +209,10 @@ export function installable(m: TeardownModel, id: string, installed: Set<string>
 
 export function generateTeardown(seed: number, tier: number, _tools: string[] = [], job?: string): TeardownModel {
   const r = rng(seed);
-  const key = job && ASSEMBLIES[job] ? job : tier >= 3 ? 'cylinder' : r.pick(['alternator', 'avionics']);
+  // the job flow's task jobs that work on an assembly by another name (a belt is the alternator's)
+  const alias: Record<string, string> = { belt: 'alternator', radio: 'avionics' };
+  const named = job ? (alias[job] ?? job) : undefined;
+  const key = named && ASSEMBLIES[named] ? named : tier >= 3 ? 'cylinder' : r.pick(['alternator', 'avionics']);
   const a = ASSEMBLIES[key];
   const parts = a.parts.filter((p) => p.minTier <= Math.max(0, tier)).map((p) => ({ ...p, above: [...p.above] }));
   // drop references to parts that aren't in this tier's version

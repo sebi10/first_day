@@ -4,9 +4,14 @@
 // the LAST LIVE device and the FIRST DEAD one (very often a loose backstab at
 // the last live outlet). Tiers 0–2 show which devices are live; from tier 3
 // you test them yourself (fewest tests wins: half-split the run).
+//
+// From the job flow the circuit is the alert's own (context.site): its room
+// and breaker; one receptacle on an individual circuit; and a warm plate is a
+// live high-resistance joint, not a dead run: every device is live, and the
+// test is an IR thermometer at each plate: mark the hot termination.
 import { rng } from '../sim/rng';
 import { C, backdrop, clamp, label, loop, pointer, roundRect, stage, settle } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { result, type PuzzleDef, type PuzzleResult, type PuzzleSite } from './types';
 
 type P = { x: number; y: number }; // normalised
 export type Device = { id: number; kind: 'outlet' | 'switch' | 'light' | 'jbox'; pos: P; live: boolean; name: string };
@@ -15,30 +20,42 @@ export type TraceModel = {
   devices: Device[]; // index 0 = panel breaker
   segs: Seg[];
   chain: number[]; // devices on the faulty run, in order from the panel
-  faultAfter: number; // index into chain: fault lies between chain[faultAfter] and chain[faultAfter+1]
+  faultAfter: number; // index into chain: fault lies between chain[faultAfter] and chain[faultAfter+1] (warm: the hot device is chain[faultAfter])
   showStates: boolean;
   symptom: string;
   optimalTests: number;
+  /** the breaker's rating (the alert's circuit; 20 A otherwise) */
+  amps: number;
+  /** a warm termination: every device live; `temps` (°F) at each device, the hot one at chain[faultAfter] */
+  warm?: boolean;
+  temps?: number[];
 };
 
 const ROOMS = ['Kitchen', 'Bath', 'Bedroom', 'Porch', 'Living room', 'Deck'];
 /** a crewmate's report from the hangar: the same wall-and-cable hunt, the hangar's own stations */
 const HANGAR = ['Bay', 'Bench', 'Crib', 'Stores', 'Office', 'Door'];
 
-export function generateTrace(seed: number, tier: number, _tools: string[] = [], job?: string): TraceModel {
+export function generateTrace(seed: number, tier: number, _tools: string[] = [], job?: string, site?: PuzzleSite): TraceModel {
   const r = rng(seed);
   const ROOMS_ = job === 'hangar' ? HANGAR : ROOMS;
-  const n = tier <= 0 ? 3 : tier <= 2 ? 3 + tier : tier === 3 ? 6 : tier === 4 ? 7 : 8;
-  const devices: Device[] = [{ id: 0, kind: 'outlet', pos: { x: 0.08, y: 0.1 }, live: true, name: 'Breaker 12' }];
+  const single = !!site?.single;
+  const warm = site?.fault === 'warm';
+  const amps = site?.amps ?? 20;
+  // an individual circuit is one receptacle for one appliance
+  const n = single ? 1 : tier <= 0 ? 3 : tier <= 2 ? 3 + tier : tier === 3 ? 6 : tier === 4 ? 7 : 8;
+  const devices: Device[] = [{ id: 0, kind: 'outlet', pos: { x: 0.08, y: 0.1 }, live: true, name: `Breaker ${amps} A` }];
+  // the alert's room names the run's devices (the spur and the other circuit are elsewhere in the house)
+  const runRoom = () => site?.room ?? r.pick(ROOMS_);
   const segs: Seg[] = [];
   // main run: snake across the wall at two heights, through stud bays
   const chain = [0];
   const cols = n;
   for (let i = 1; i <= n; i++) {
-    const x = 0.1 + (i / (cols + 0.3)) * 0.85;
-    const y = i % 2 ? r.range(0.3, 0.42) : r.range(0.55, 0.7);
-    const kind: Device['kind'] = i === n ? r.pick(['outlet', 'light'] as const) : r.chance(0.2) ? 'switch' : 'outlet';
-    devices.push({ id: i, kind, pos: { x, y }, live: true, name: `${r.pick(ROOMS_)} ${kind}` });
+    const x = single ? 0.62 : 0.1 + (i / (cols + 0.3)) * 0.85;
+    const y = single ? 0.5 : i % 2 ? r.range(0.3, 0.42) : r.range(0.55, 0.7);
+    const kind: Device['kind'] = single ? 'outlet' : i === n ? r.pick(['outlet', 'light'] as const) : r.chance(0.2) ? 'switch' : 'outlet';
+    const name = single && site?.appliance ? `${upper(site.appliance)} outlet` : `${runRoom()} ${kind}`;
+    devices.push({ id: i, kind, pos: { x, y }, live: true, name });
     chain.push(i);
   }
   const route = (a: P, b: P): P[] => {
@@ -48,7 +65,7 @@ export function generateTrace(seed: number, tier: number, _tools: string[] = [],
   };
   for (let i = 1; i < chain.length; i++) segs.push({ from: chain[i - 1], to: chain[i], pts: route(devices[chain[i - 1]].pos, devices[chain[i]].pos), circuit: 1 });
   // branch through a junction box (tier >= 3): a spur that stays live
-  if (tier >= 3) {
+  if (tier >= 3 && !single) {
     const at = chain[1];
     const jb: Device = { id: devices.length, kind: 'jbox', pos: { x: devices[at].pos.x + 0.04, y: 0.83 }, live: true, name: 'Junction box' };
     devices.push(jb);
@@ -58,28 +75,70 @@ export function generateTrace(seed: number, tier: number, _tools: string[] = [],
     segs.push({ from: jb.id, to: spur.id, pts: [jb.pos, spur.pos], circuit: 1 });
   }
   // a second circuit crossing the wall (tier >= 4): don't follow the wrong cable
-  if (tier >= 4) {
+  if (tier >= 4 && !single) {
     const a: Device = { id: devices.length, kind: 'light', pos: { x: 0.9, y: 0.9 }, live: true, name: job === 'hangar' ? 'Yard light (other circuit)' : 'Porch light (other circuit)' };
     devices.push(a);
     segs.push({ from: 0, to: a.id, pts: [{ x: 0.12, y: 0.12 }, { x: 0.12, y: 0.48 }, { x: 0.86, y: 0.48 }, a.pos], circuit: 2 });
   }
-  // the fault: open somewhere after the first device
-  const faultAfter = r.int(1, chain.length - 2);
+  if (warm) {
+    // a live high-resistance joint (a loose backstab or terminal) at one device: everything works, that plate runs hot.
+    // The complaint names the device (a switch plate, an outlet), so that device is the hot one
+    const want = site?.device ?? 'outlet';
+    const hotAt = single ? 1 : (() => {
+      const k = chain.map((_, i) => i).filter((i) => i >= 1 && devices[chain[i]].kind === want);
+      if (k.length) return r.pick(k);
+      const i = r.int(1, chain.length - 1);
+      devices[chain[i]].kind = want;
+      devices[chain[i]].name = `${site?.room ?? r.pick(ROOMS_)} ${want}`;
+      return i;
+    })();
+    // the current through a feed-through joint warms the plates upstream a little; the hot one is 130-160 °F
+    const temps = devices.map((_, id) => {
+      const i = chain.indexOf(id);
+      if (i < 0) return Math.round(r.range(74, 79));
+      if (i === hotAt) return Math.round(r.range(130, 160));
+      return Math.round(i < hotAt ? r.range(80, 88) : r.range(74, 80));
+    });
+    const hot = devices[chain[hotAt]];
+    const same = chain.filter((id, i) => i >= 1 && devices[id].kind === hot.kind).length;
+    return {
+      devices,
+      segs,
+      chain,
+      faultAfter: hotAt,
+      showStates: tier <= 2,
+      symptom: single && site?.appliance ? `The ${site.appliance}'s plug runs warm` : `A ${hot.name.toLowerCase()} plate is warm`,
+      optimalTests: Math.max(1, same),
+      amps,
+      warm: true,
+      temps,
+    };
+  }
+  // the fault: open somewhere after the first device (an individual circuit: between the breaker and its one receptacle)
+  const faultAfter = single ? 0 : r.int(1, chain.length - 2);
   for (let k = faultAfter + 1; k < chain.length; k++) devices[chain[k]].live = false;
   const firstDead = devices[chain[faultAfter + 1]];
+  const where = site?.room ?? ROOMS_.find((x) => firstDead.name.startsWith(x)) ?? firstDead.name.split(' ')[0];
   return {
     devices,
     segs,
     chain,
     faultAfter,
     showStates: tier <= 2,
-    symptom: `${firstDead.name.split(' ')[0]} is dead${chain.length - faultAfter - 2 > 0 ? ', and more past it' : ''}`,
-    optimalTests: Math.ceil(Math.log2(chain.length - 1)) + 1,
+    symptom: single ? `The ${site?.appliance ?? 'appliance'}'s outlet is dead` : `${where} is dead${chain.length - faultAfter - 2 > 0 ? ', and more past it' : ''}`,
+    optimalTests: single ? 1 : Math.ceil(Math.log2(chain.length - 1)) + 1,
+    amps,
   };
 }
 
-/** Is a mark at `p` inside the fault region (segment between last live and first dead, incl. both devices)? */
+const upper = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** Is a mark at `p` inside the fault region (segment between last live and first dead, incl. both devices; warm: the hot device)? */
 export function isFaultMark(m: TraceModel, p: P, tol = 0.05) {
+  if (m.warm) {
+    const d = m.devices[m.chain[m.faultAfter]];
+    return Math.hypot(p.x - d.pos.x, p.y - d.pos.y) < tol * 1.3;
+  }
   const a = m.chain[m.faultAfter];
   const b = m.chain[m.faultAfter + 1];
   const seg = m.segs.find((s) => s.from === a && s.to === b)!;
@@ -116,7 +175,7 @@ export const trace: PuzzleDef = {
   term: 'Open circuit: a break in the path. Everything past it goes dead.',
   seconds: (tier) => 70 + tier * 10,
   mount(host, p) {
-    const m = generateTrace(p.seed, p.tier, p.tools, p.context?.job);
+    const m = generateTrace(p.seed, p.tier, p.tools, p.context?.job, p.context?.site);
     const tone = p.tools.includes('toneTracer');
     const fish = p.tools.includes('fishTape');
     const st = stage(host.el);
@@ -236,7 +295,7 @@ export const trace: PuzzleDef = {
         if (d > 0 && m.devices[d].kind !== 'jbox' && !m.showStates && !tested.has(d)) {
           tested.add(d);
           tests++;
-          m.devices[d].live ? host.fx.snap() : host.fx.fault();
+          (m.warm ? (m.temps?.[d] ?? 0) < 110 : m.devices[d].live) ? host.fx.snap() : host.fx.fault();
           status();
           return;
         }
@@ -275,7 +334,7 @@ export const trace: PuzzleDef = {
       const a = area();
       backdrop(ctx, a.w, a.h);
       label(ctx, m.symptom, 14, 20, { size: 14, weight: 800, align: 'left' });
-      label(ctx, p.context?.job === 'hangar' ? 'Hangar wall cutaway · studs every 16 in' : 'Drywall cutaway · studs every 16 in', 14, 38, { size: 11, color: C.inkSoft, align: 'left' });
+      label(ctx, `${p.context?.job === 'hangar' ? 'Hangar wall cutaway' : 'Drywall cutaway'} · ${m.amps} A circuit${m.warm ? ' · IR thermometer' : ''}`, 14, 38, { size: 11, color: C.inkSoft, align: 'left' });
       // wall
       roundRect(ctx, a.x, a.y, a.pw, a.ph, 12);
       ctx.fillStyle = '#efe6d6';
@@ -328,7 +387,7 @@ export const trace: PuzzleDef = {
           ctx.fill();
           ctx.fillStyle = C.ink;
           ctx.fillRect(s.x - 8, s.y - 6, 16, 12);
-          label(ctx, 'CB 12', s.x, s.y + 26, { size: 10, weight: 800 });
+          label(ctx, `${m.amps} A`, s.x, s.y + 26, { size: 10, weight: 800 });
           return;
         }
         const known = m.showStates || tested.has(i) || finished;
@@ -355,14 +414,23 @@ export const trace: PuzzleDef = {
         } else if (fish) {
           label(ctx, '→', s.x, s.y, { size: 12, weight: 900 });
         }
-        if (known && d.kind !== 'jbox') {
+        if (known && d.kind !== 'jbox' && m.warm) {
+          // the IR reading at the plate: a hot termination is well above the rest
+          const t = m.temps?.[i] ?? 78;
+          const hot = t >= 110;
+          ctx.fillStyle = hot ? C.rust : C.palm;
+          ctx.beginPath();
+          ctx.arc(s.x + 13, s.y - 16, 6, 0, Math.PI * 2);
+          ctx.fill();
+          label(ctx, `${t}°F`, s.x, s.y + 28, { size: 10, weight: 900, color: hot ? C.rust : C.inkSoft });
+        } else if (known && d.kind !== 'jbox') {
           ctx.fillStyle = d.live ? C.palm : C.inkSoft;
           ctx.beginPath();
           ctx.arc(s.x + 13, s.y - 16, 6, 0, Math.PI * 2);
           ctx.fill();
           label(ctx, d.live ? '120' : '0', s.x, s.y + 28, { size: 10, weight: 900, color: d.live ? C.palm : C.inkSoft });
         } else if (d.kind !== 'jbox' && mode === 'trace') {
-          label(ctx, 'test', s.x, s.y + 28, { size: 10, weight: 800, color: C.sea });
+          label(ctx, m.warm ? 'IR' : 'test', s.x, s.y + 28, { size: 10, weight: 800, color: C.sea });
         }
       });
       wrongSpots.forEach((w) => {
@@ -384,7 +452,7 @@ export const trace: PuzzleDef = {
         ctx.beginPath();
         ctx.arc(q.x, q.y, 24, 0, Math.PI * 2);
         ctx.stroke();
-        label(ctx, 'loose backstab', q.x, q.y - 32, { size: 11, weight: 800, color: correctSpot ? C.palm : C.rust });
+        label(ctx, m.warm ? 'loose termination (hot)' : 'loose backstab', q.x, q.y - 32, { size: 11, weight: 800, color: correctSpot ? C.palm : C.rust });
       }
       if (tracing) {
         const s = S(tracing);
@@ -405,13 +473,15 @@ export const trace: PuzzleDef = {
         ctx.fill();
         label(ctx, t, 12 + i * (bw + 12) + bw / 2, by + 26, { size: 15, weight: 800, color: mode === k ? C.white : C.ink });
       });
-      if (m.showStates && !finished) label(ctx, 'Green = live. The open is after the last live device.', a.w / 2, a.y + a.ph + 12, { size: 11, color: C.inkSoft, weight: 700 });
+      if (m.showStates && !finished)
+        label(ctx, m.warm ? 'Everything works: the loose joint is the hot plate. Mark it.' : 'Green = live. The open is after the last live device.', a.w / 2, a.y + a.ph + 12, { size: 11, color: C.inkSoft, weight: 700 });
     }
 
     function makeResult(): PuzzleResult {
       const tracedFrac = m.segs.filter((_, i) => revealed.has(i)).length / m.segs.length;
       const sc = scoreTrace(m, { wrongMarks, correct: !!correctSpot, tests, tracedFrac });
-      const parts = [correctSpot ? (wrongMarks ? `fault found after ${wrongMarks} wrong call${wrongMarks > 1 ? 's' : ''}` : 'fault found first try') : 'fault not found'];
+      const what = m.warm ? 'hot joint' : 'fault';
+      const parts = [correctSpot ? (wrongMarks ? `${what} found after ${wrongMarks} wrong call${wrongMarks > 1 ? 's' : ''}` : `${what} found first try`) : `${what} not found`];
       if (!m.showStates) parts.push(`${tests} tests (best ${m.optimalTests})`);
       return result(sc, parts.join(', '));
     }

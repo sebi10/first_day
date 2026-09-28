@@ -1,5 +1,9 @@
 // End-to-end playtest in a real browser: create a pass-and-play island,
-// play week 0 for all three seats, play week 1, resolve, review.
+// play week 0 for all three seats (the techs walk one alert through the job
+// flow), play week 1 across the seats (the techs take alerts through the
+// manual, the IPC or catalog, stock and Send; the mechanic asks Stores for a
+// line; the analyst sees it at once and buys it, approves the cards, hires),
+// resolve, and check week 2 (the line landed: on hand), the review and board.
 //   BASE=http://localhost:5173 node scripts/e2e.mjs out-dir [desktop]
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -44,13 +48,194 @@ const finishPuzzle = async () => {
   await click('Continue', { wait: 300 });
 };
 
-process.on('unhandledRejection', async (e) => {
+const onFail = async (e) => {
   console.log('FAILED:', String(e).split('\n')[0]);
   console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors');
-  await page.screenshot({ path: `${out}/zz-failure.png` });
+  await page.screenshot({ path: `${out}/zz-failure.png` }).catch(() => {});
   await browser.close();
   process.exit(1);
-});
+};
+// a throw after a top-level await surfaces as an uncaught exception
+process.on('unhandledRejection', onFail);
+process.on('uncaughtException', onFail);
+const fail = (msg) => {
+  throw new Error(msg);
+};
+
+// --- the job flow's sheet (src/ui/flow): drive one alert from wherever it opens to Send, at the teaching tier
+const sheet = () => page.locator('.jf-sheet').first();
+const sheetOpen = async () => (await page.locator('.jf-sheet').count()) > 0;
+const closeSheet = async () => {
+  const x = page.locator('.jf-sheet .jf-x[aria-label="Close"]').first();
+  if (await x.count()) await x.click();
+  await page.waitForTimeout(300);
+};
+/**
+ * Investigate → Manual (the likely task) → Use this task → each slot's likely row (a slot with no marked row
+ * is an "if needed" one this fault doesn't need: back out of it) → Check stock → Send. Returns what Send said.
+ */
+const driveAlert = async () => {
+  const skipped = new Set();
+  let slot = '';
+  for (let step = 0; step < 24; step++) {
+    await page.waitForTimeout(250);
+    const b = (name) => sheet().getByRole('button', { name });
+    if (await b(/^Send ▸/).count()) {
+      const label = (await b(/^Send ▸/).first().innerText()).trim();
+      await b(/^Send ▸/).first().click();
+      await page.waitForTimeout(700);
+      const banner = (await page.locator('.jf-sheet .jf-note.ok').first().innerText().catch(() => '')).trim();
+      return { label, banner };
+    }
+    if (await b(/^Find the (task|procedure)/).count()) {
+      await b(/^Find the (task|procedure)/).first().click();
+      continue;
+    }
+    if (await b(/^Use this task/).count()) {
+      await b(/^Use this task/).first().click();
+      continue;
+    }
+    // a slot open on its search (the IPC or the catalog): the likely row, else back out of it
+    const back = sheet().locator('.jf-back');
+    if (slot && (await back.count())) {
+      const likely = sheet().locator('.jf-row.likely');
+      if (await likely.count()) await likely.first().click();
+      else {
+        skipped.add(slot);
+        await back.first().click();
+      }
+      slot = '';
+      continue;
+    }
+    // the Parts step: the next empty slot not skipped, else on to Stock
+    const empty = sheet().locator('.jf-slot-main', { has: page.locator('.jf-fill.empty') });
+    let opened = false;
+    for (let i = 0; i < (await empty.count()); i++) {
+      const label = (await empty.nth(i).getAttribute('aria-label')) ?? String(i);
+      if (skipped.has(label)) continue;
+      slot = label;
+      await empty.nth(i).click();
+      opened = true;
+      break;
+    }
+    if (opened) continue;
+    if (await b(/^Check stock/).count()) {
+      await b(/^Check stock/).first().click();
+      continue;
+    }
+    // the Manual step's list: the likely task, else the first
+    const likely = sheet().locator('.jf-row.likely');
+    const rows = sheet().locator('.jf-row');
+    if (await likely.count()) await likely.first().click();
+    else if (await rows.count()) await rows.first().click();
+    else break;
+  }
+  return null;
+};
+/**
+ * a tech's first Your move row that isn't a Start: open it, make a hazard safe, plan it. A finding that can't
+ * duplicate the fault ("It's the dryer", "Could not duplicate") has no job to plan: the next alert, else close that
+ * one with no fault found
+ */
+const planFirst = async (tag) => {
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  // an alert's row (the week's revenue work, a load sheet or a ground power start, is a row of its own: not an alert)
+  const rows = page.locator('.jf-your .jf-arow:not(.rev):not(:has(.jf-start)) .jf-arow-main');
+  const count = await rows.count();
+  let nff = -1;
+  for (let i = 0; i < count; i++) {
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
+    await rows.nth(i).click();
+    await page.waitForTimeout(500);
+    if (!(await sheetOpen())) fail(`${tag}: the alert row opened no job sheet`);
+    if (await sheet().getByRole('button', { name: 'No fault found · close' }).count()) {
+      if (nff < 0) nff = i;
+      await closeSheet();
+      continue;
+    }
+    await shot(`${tag}-alert`);
+    const safe = sheet().getByRole('button', { name: 'Make it safe' });
+    if (await safe.count()) {
+      await safe.click();
+      await sheet().getByRole('button', { name: /: off and tag it$/ }).first().click(); // the alert's own breaker ("The kitchen's 20 A breaker: off and tag it")
+      await page.waitForTimeout(500);
+      await shot(`${tag}-made-safe`);
+    }
+    const sent = await driveAlert();
+    await shot(`${tag}-sent`);
+    await closeSheet();
+    return sent;
+  }
+  if (nff < 0) return null;
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  await rows.nth(nff).click();
+  await page.waitForTimeout(500);
+  await shot(`${tag}-alert-nff`);
+  await sheet().getByRole('button', { name: 'No fault found · close' }).click();
+  await sheet().getByRole('button', { name: 'Close it: no fault found' }).click();
+  await page.waitForTimeout(700);
+  const banner = (await page.locator('.jf-sheet .jf-note.ok').first().innerText().catch(() => '')).trim();
+  await shot(`${tag}-nff-closed`);
+  await closeSheet();
+  return { label: 'No fault found', banner };
+};
+/** Start a ready job from Your move (the host runs the install check) and hand in the puzzle */
+const startReady = async (tag) => {
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  const start = page.locator('.jf-your .jf-start').first();
+  if (!(await start.count())) return false;
+  await start.click();
+  await page.waitForTimeout(600);
+  // radio work (and a ground power start) needs a charged cart hooked up to the plane: the carts' sheet opens
+  // instead of the job. Hook one up, close the sheet and start again
+  const gse = page.locator('.sheet', { hasText: 'Ground power' });
+  if (await gse.count()) {
+    await shot(`${tag}-needs-cart`);
+    const hook = gse.getByRole('button', { name: /^Hook up to / });
+    if (!(await hook.count())) return false;
+    await hook.first().click();
+    await page.waitForTimeout(400);
+    const close = page.locator('.sheet').getByRole('button', { name: 'Close', exact: true });
+    if (await close.count()) await close.first().click();
+    await page.waitForTimeout(400);
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
+    await page.locator('.jf-your .jf-start').first().click();
+    await page.waitForTimeout(600);
+  }
+  if (await page.locator('.sheet', { hasText: 'Work stopped' }).count()) {
+    await shot(`${tag}-stopped`);
+    await page.keyboard.press('Escape');
+    return false;
+  }
+  await shot(`${tag}-puzzle`);
+  await finishPuzzle();
+  return true;
+};
+const endTurn = async () => {
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  await click('End turn', { wait: 400 });
+  if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).last().click();
+  await page.waitForTimeout(600);
+};
+const passTo = async (label) => {
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  await page.locator('button:has-text("Pass")').first().click();
+  await page.waitForTimeout(300);
+  await page.locator('.sheet button', { hasText: label }).first().click();
+  await page.waitForTimeout(600);
+};
+/** the mechanic's Stores: the first shelf row (its P/N and how many are on hand) */
+const storesRow = async (pn) => {
+  await page.locator('.jf-stores').first().scrollIntoViewIfNeeded();
+  await page.locator('.jf-stores').first().click();
+  await page.waitForTimeout(500);
+  const rows = page.locator('.sheet .jf-inv-row', { has: page.locator('.jf-badge') });
+  const row = pn ? rows.filter({ hasText: pn }).first() : rows.first();
+  const text = (await row.innerText()).replace(/\n/g, ' | ');
+  const m = /(\d+)(?: [a-z]+)? on hand/.exec(text);
+  return { row, text, pn: text.split(' ')[0], on: m ? Number(m[1]) : 0 };
+};
+
 await page.goto(base + '/');
 await page.evaluate(() => localStorage.clear());
 await page.goto(base + '/');
@@ -71,11 +256,17 @@ for (const seat of ['mech', 'elec', 'fin']) {
   if (seat === 'fin') {
     await click('Approve', { exact: true });
     await click('Next: buy a part');
+    await finishPuzzle();
   } else {
-    await page.waitForTimeout(1800);
-    await click('Do the job');
+    // the job flow's walk-through: one scripted alert, on a copy of the island (nothing is written)
+    await click('Open the alert');
+    await page.waitForTimeout(400);
+    const sent = await driveAlert();
+    if (!sent) fail(`week 0 (${seat}): the walk-through never reached Send`);
+    await page.waitForTimeout(400);
+    await shot(`week0-${seat}-walkthrough`);
+    await click('Next', { exact: true });
   }
-  await finishPuzzle();
   await click('Got it');
   await click('Finish week 0', { wait: 600 });
   if (seat !== 'fin') {
@@ -87,64 +278,135 @@ for (const seat of ['mech', 'elec', 'fin']) {
     await page.waitForTimeout(500);
   }
 }
+await shot('week1-fin-first-look');
+
+// --- week 1, the mechanic: an alert through the flow, a ready job started, a line asked of Stores
+await passTo('Mechanic');
+await shot('week1-mech');
+const dockMech = (await page.locator('.dock .primary').first().innerText()).replace(/\n/g, ' | ');
+// an alert, or this week's revenue work first when no alert is due this week (the load sheet, a ground power start)
+if (!/^Next: |^Start: |^Load sheet · |^Ground power start · /.test(dockMech)) fail(`the mechanic's Dock should lead to an alert or this week's revenue work, got "${dockMech}"`);
+const mechSent = await planFirst('mech');
+console.log('mechanic sent:', JSON.stringify(mechSent));
+if (!mechSent) fail('the mechanic could not take an alert to Send');
+await startReady('mech');
+const before = await storesRow();
+await shot('mech-stores');
+await before.row.getByRole('button', { name: 'Request' }).click();
+await page.waitForTimeout(300);
+await page.locator('.sheet').getByRole('button', { name: /^Send the request/ }).click();
+await page.waitForTimeout(500);
+await shot('mech-stores-requested');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+console.log(`mechanic asked for 1 × ${before.pn} (${before.on} on hand)`);
+await endTurn();
+
+// --- the analyst: the request is on the desk at once; buy it, approve the cards, hire, a desk task
+await passTo('Analyst');
 await shot('week1-fin-desk');
-await page.mouse.wheel(0, 700);
-await shot('week1-fin-desk-scrolled');
-await page.mouse.wheel(0, -2000);
-// analyst: approve two cards, set a rate
+const dockFin = (await page.locator('.dock .primary').first().innerText()).replace(/\n/g, ' | ');
+if (!/to approve/.test(dockFin)) fail(`the analyst's Dock should count the request, got "${dockFin}"`);
+await page.evaluate(() => document.getElementById('approvals')?.scrollIntoView());
+await page.waitForTimeout(300);
+const desk = await page.locator('.pdesk').first().innerText();
+if (!desk.includes(before.pn)) fail(`the mechanic's request for ${before.pn} isn't on the analyst's desk`);
+await shot('fin-request-on-desk');
+for (let i = 0; i < 4; i++) {
+  const b = page.getByRole('button', { name: /^Approve \$/ });
+  if (!(await b.count())) break;
+  await b.first().click();
+  await page.waitForTimeout(500);
+}
+const reqBtn = page.getByRole('button', { name: /^Approve \d+ ·/ });
+if (!(await reqBtn.count())) fail('no Approve button for the requests');
+await reqBtn.first().click();
+await page.waitForTimeout(600);
+await shot('fin-after-approvals');
 for (let i = 0; i < 2; i++) {
   const b = page.getByRole('button', { name: 'Approve', exact: true });
-  if (await b.count()) {
-    await b.first().click();
-    await page.waitForTimeout(450);
-  }
+  if (!(await b.count())) break;
+  await b.first().click();
+  await page.waitForTimeout(450);
 }
-await shot('fin-after-approvals');
-// do one desk task
+// the Staff tab: the payroll and the hiring board; hire the first candidate
+await page.locator('.pd-tabs button', { hasText: 'Staff' }).first().click();
+await page.waitForTimeout(400);
+await shot('fin-staff');
+const crewBefore = await page.locator('.st-list .st-row').count();
+const hire = page.locator('.st-cand').getByRole('button', { name: 'Hire', exact: true });
+if (await hire.count()) {
+  await hire.first().click();
+  await page.waitForTimeout(300);
+  await page.locator('.sheet').getByRole('button', { name: /^Hire .+ · \$/ }).click();
+  await page.waitForTimeout(500);
+  const crewAfter = await page.locator('.st-list .st-row').count();
+  if (crewAfter !== crewBefore + 1) fail(`the hire didn't join the crew (${crewBefore} → ${crewAfter})`);
+  await shot('fin-hired');
+}
+await page.locator('.pd-tabs button', { hasText: 'Approvals' }).first().click();
+await page.waitForTimeout(300);
 const task = page.locator('.order.ready').first();
 if (await task.count()) {
   await task.click();
   await finishPuzzle();
 }
-await click('End turn', { wait: 400 });
-if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).click();
-await page.waitForTimeout(500);
+await endTurn();
 
-// mechanic
-await page.locator('button:has-text("Pass")').first().click();
-await page.locator('.sheet button', { hasText: 'Mechanic' }).first().click();
-await page.waitForTimeout(500);
-await shot('week1-mech');
-const mo = page.locator('.order.ready').first();
-if (await mo.count()) {
-  await mo.click();
-  await page.waitForTimeout(400);
-  await shot('mech-puzzle');
-  await finishPuzzle();
-}
-await click('End turn', { wait: 400 });
-if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).click();
-await page.waitForTimeout(500);
-
-// electrician ends → week resolves
-await page.locator('button:has-text("Pass")').first().click();
-await page.locator('.sheet button', { hasText: 'Electrician' }).first().click();
-await page.waitForTimeout(500);
+// --- the electrician ends the week: an alert through the flow, a ready job started
+await passTo('Electrician');
 await shot('week1-elec');
-const eo = page.locator('.order.ready').first();
-if (await eo.count()) {
-  await eo.click();
-  await finishPuzzle();
-}
-await click('End turn', { wait: 400 });
-if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).click();
+const elecSent = await planFirst('elec');
+console.log('electrician sent:', JSON.stringify(elecSent));
+if (!elecSent) fail('the electrician could not take an alert to Send');
+await startReady('elec');
+await endTurn();
 await page.waitForTimeout(900);
 await shot('review');
+const reviewText = await page.locator('.overlay').first().innerText().catch(() => '');
 if (await page.getByRole('button', { name: 'Onward' }).count()) await click('Onward');
+if (await page.locator('.overlay button[aria-label="Close"]').count()) await page.locator('.overlay button[aria-label="Close"]').first().click();
+await page.waitForTimeout(300);
 await shot('week2-home');
-await click('Board');
+
+// --- week 2: the line the analyst bought landed at the resolve: the badge says it's on hand
+await passTo('Mechanic');
+const after = await storesRow(before.pn);
+await shot('week2-mech-stores');
+console.log(`week 2: ${before.pn} ${before.on} → ${after.on} on hand`);
+if (after.on <= before.on) {
+  // about one OEM part line in 50 comes without its paperwork and receiving quarantines it a week (stock.ts
+  // receivePo): the review said why, Stores says it lands tonight, and it's on hand once week 2 resolves
+  const why = /quarantined|waits a week/.test(reviewText);
+  console.log(`${before.pn} is held a week (the review said why: ${why}): ending week 2 to see it land`);
+  if (!why || !/on order, lands tonight/.test(after.text)) fail(`the request for ${before.pn} didn't land: ${before.on} → ${after.on} on hand (${after.text})`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await endTurn();
+  await passTo('Electrician');
+  await endTurn();
+  await passTo('Analyst');
+  await endTurn();
+  await page.waitForTimeout(900);
+  if (await page.getByRole('button', { name: 'Onward' }).count()) await click('Onward');
+  if (await page.locator('.overlay button[aria-label="Close"]').count()) await page.locator('.overlay button[aria-label="Close"]').first().click();
+  await page.waitForTimeout(300);
+  await passTo('Mechanic');
+  const landed = await storesRow(before.pn);
+  await shot('week3-mech-stores');
+  console.log(`week 3: ${before.pn} ${before.on} → ${landed.on} on hand`);
+  if (landed.on <= before.on) fail(`the request for ${before.pn} didn't land after its week in quarantine (${landed.text})`);
+}
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+// the bottom tabs themselves: an alert row's name can hold the word ("the outboard shoulder")
+const tab = async (name) => {
+  await page.locator('nav.tabs button', { hasText: new RegExp(`^${name}`) }).first().click();
+  await page.waitForTimeout(200);
+};
+await tab('Board');
 await shot('board');
-await click('Me');
+await tab('Me');
 await shot('me');
 await page.mouse.wheel(0, 900);
 await shot('me-scrolled');

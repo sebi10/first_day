@@ -514,6 +514,290 @@ Before: three friends missed tier 5 in 22 / 29 / 25 / 18 games (now 75 of 360, b
 
 **Knobs:** `GSE.weakChance` (0.35), `GSE.weakFrom` (2), `GSE.avionicsDrain` / `busWear` (5 / 3); `CHAIN.plantedChance` (0.9), `offPlant` (0.3), `wiringShare` (0.3), `noPaperwork` (0.12).
 
+## Real job flow (docs/JOBFLOW.md)
+
+The trades' work comes from alerts now (a squawk, a trend, a due item, a guest's complaint, a code notice), each with a hidden cause. A tech finds the task in the manual and the parts in the IPC or the materials list; what's on the shelf is reserved and the trade's work budget approves it at once; anything to buy is a card for the analyst, who runs real stock (purchase orders, receiving, payment net 7, min/max, bins) instead of kits. Wrong tasks and wrong parts come back later. Four packages: A the engine and data, B the technicians' screens, C the analyst's desk, D the NPC staff.
+
+### Engine and data (A)
+
+What A delivers: the item catalog (every IPC row of every model, fig 79-20, the shop's consumables, the electrician's materials with their NEC basis, tools, building materials), the tasks, the search, the symptom tables, `stdPick` and the judges, the reducer's flow moves (`plan`, `nff`, `mel`, `melExtend`, `makeSafe`, `askBench`, `repick`, `dropJob`, `request`, `cancelReq`, `approve` on a flow card, `approveReq`, `deferReq`, `buy`, `setStock`, `scrap`, `nudge`, `setStanding`), the week's new steps (standing approvals, receiving, the payment run, replenishment, the ledger), `migrate()`, the staff constants and stubs, the flow selectors in `select.ts` (`flowMove`, `flowMoves`, `dueNow`, `yourMoves`, `dockNext`, `endTurnChecks`, `openTarget`), the bots and autopilot, and the tests. The UI still draws today's screens; B, C and D draw the new ones on this engine.
+
+Where A departs from the spec, and why:
+
+- **No-fault-found rate.** `ALERTS.nff` is 0.2 a week for the mechanic and 0.4 for the electrician (the spec: 0.125 and 0.25). The spec's own rates give an NFF share of 8%, under its 10–20% target; these give 12–13%. Alert volume stays within ±10% of the base engine's orders (mechanic −2.5%, electrician −4.6%; `tests/flow.test.ts`).
+- **The bots' misses.** A missed call turns into a wrong move at `BOT_MISS` (task 0.15, pick 0.15, a real fault closed NFF 0.1, 0.3 when it looks NFF), times (1 − hit), one roll for the whole pick. The spec's rates (1 − hit, 0.25, 0.6) doubled the three friends' hidden defects. The bots stand for players who search, and the search puts a fixing task and the book's line in the top three at the teaching tiers.
+- **The bots read a plain finding.** At alert tier 2 and below the finding of a radio or generator fault says which it is ("It's the unit."), so the mechanic bot plans the unit at once and asks the electrician only for the wiring. At tier 3 and up it always asks. The electrician bot does the check first thing in its turn (a plane waits on it).
+- **A placard running out is urgent.** The fin bot and autopilot approve a card whose MEL placard runs out within a week as they would one whose alert grounds a plane (`dueJob` in `stock.ts`); before, the card waited until the plane was down, and its part then landed a week late.
+- **Autopilot doesn't let the island rot.** An absent analyst's autopilot also approves a card that has waited three weeks, while spendable cash stays above the $2,000 freeze. The electrician's tier-1 jobs often need a tool or a lot, their cards are dear, and at the $4,000 floor they waited forever, failing 60% of weeks at 3 × their labour. The analyst-absent team went from 71 weeks below $0 to 16.
+- **The fin bot's first insurance spare** is at most $400 (`BOT_SPARE_MAX`): four linings or a tire, not a $950 radio or a $760 alternator. The placard and a lead-1 order cover those.
+- **Stock.** `STOCK.coverWeeks` 2 (a suggested max is the ROP plus two weeks of the family's use; the spec's four held too much cash), `STOCK.lotMaxUnit` $150 (the broker's lot is shop stock the island draws, never a rotable, a lot, a tool or a building material). The starter stock adds the cargo plane's linings at tier 2 (4 · 0/4), as the twin and the float have theirs.
+- **The teaching weeks give a week.** An alert raised in the first two weeks of the flow (a new island's weeks 1–2, a migrated island's first two) is due next week at the earliest. Otherwise a new crew opened week 1 to the twin flying restricted and a cottage closed for alerts nobody had yet been able to plan, and the first review was a D.
+- **MEL extension.** The analyst's one extension can be given in the week after the placard at the latest (`That placard has run out.` after that), so a placard from the mechanic's turn can still be extended before the next week's flights.
+- **Timing.** A replenishment is placed at the resolve, after receiving: its lines land at the next resolve (`eta` W + 1). A line received for a job resets that job's deferral clock (waiting on parts isn't a deferral).
+- **Nothing flew.** A week with no flight at all brings the PO of the job that has waited longest (safety work first) on a mainland boat at the AOG price, as the base engine's kit boat did; otherwise a fleet grounded for want of a part could never get one. The POs that wait a week are one review line per carrier.
+- **Doc size.** The week reports keep 26 weeks (was 40; every screen reads 12 at most), the ledger 26 rows with the week in progress, and a migrated island's backfill 25. A 52-week island peaks at about 110–125 KB (budget 150 KB; `tests/docsize.test.ts`). The spec's "today about 35 KB" was wrong: the base engine's doc is about 110 KB at week 52, almost all of it week reports.
+- **Fixes found by the new tests:** the memoized analytics (families, velocity, classes, flags) could be read part way through a move and go stale (`apply()` now forgets them before handing the state on); `mel`, `makeSafe` and `askBench` checked the alert's trade, not the mover's; a pending card's lines to buy raise the order flag (urgent, its one tap approves the card); a key set to `undefined` in the chain's bench record kept its place in memory but not through JSON, so the doc stringified differently after a round trip.
+- **Money per job.** `kitValue` is 300 at tier 1 (the spec: 340). The labour band test (0.85–1.25 × today's card, 7,558 combinations) exempts the ICA picks, dearer by design: cargo 23-10-01 (island seed 3), 24-30-01 (31), 32-40-02 (8); float 23-10-01 (14), 24-30-01 (6), 24-30-02 (6), 29-10-01 (17), 32-40-02 (19); twin 23-10-01 (3), 24-30-01 (9), 24-30-02 (9), 29-10-01 (8), 32-40-02 (27).
+- **Overhead.** `TIERS[].overhead` is $150 lower at tiers 2–5 (the spec's first lever), so `TIERS[].fixed` is 1,500 / 2,150 / 2,850 / 6,850 / 9,350 with the standard crew's payroll (760 / 1,080 / 1,080 / 1,260 / 1,320).
+
+#### Balance (26 weeks × 30 seeds, medians)
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk |
+| --- | --- | --- | --- | --- | --- |
+| All good | 5 / 8 / 16 / 21 | 99% | $6,740 | 0 | $11,583 |
+| All average | 7 / 12 / 16 / **22** | 94% | $5,554 | **0** | $9,575 |
+| **Three friends** | 8 / 12 / 16 / **22** | 92% | $5,792 | **0** | $9,105 |
+| Naive analyst | stays at tier 3 (dead stock, bins over the cap from returns) | 97% | $3,590 | 0 | $4,885 |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 40% / 86% / 94% | −$685 / −$9,034 / −$82,060 | 2 / 42 / 16 | |
+| Every solo team, nobody | stay at tier 1 | | | | |
+
+The three friends reach tier 5 by week 26 in 24 of 30 seeds (the pacing guard needs 23). Before the job flow: 22 / 22 / 21 for the three friends / all average / all good, $2,273 / $5,016 / $6,742 minimum.
+
+The job flow's numbers, three friends: weeks from an alert to its sign-off 0.68 (the base engine's order to sign-off: 0.64); plane-weeks AOG on an alert per game 3.2 (not stocked 1.9, waiting on approval 0.5, not planned 0.7, the carrier 0.1; the base engine's chain AOG: 3.2); the only guest plane restricted 0.7 weeks a game; fill rate by value 27% (weeks 8–26; the spec expected 45–80%: the fin bot stocks lean, a line gets a min/max only after three uses, and every dollar on the shelf is a dollar short of the $60,000 tier 5 needs); job-weeks waiting on parts 0.11 a week; stock at week 26 $9,711, 73% of the bins; payroll 100% of the standard crew's. A 26-week sim takes 230 ms.
+
+Robust (90 seeds × 4 crews):
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 24 / 24 / 24 / 24 | 25 / 27 / 24 / 23 | 18 / 1 / 0 / 1 | −$39,804 / −$5,850 / $3,079 / −$1,742 |
+| All average | – / a / b / c | 22 / 23 / 23 / 23 | 14 / 11 / 12 / 16 | 0 / 0 / 0 / 0 | $1,157 / $3,593 / $1,123 / $2,614 |
+
+Before the job flow: three friends 23 / 24 / 23 / 23, missed 75 of 360 with 17 weeks below $0; all average 22 in every crew, missed 37 with 2. In the robust sweep the flow is about half a week slower to tier 5 and misses it in 99 and 53 games. Over 22 weeks (60 seeds) the three friends take $7,100 less revenue (the only guest plane flying restricted, houses closed for a hazard) and spend $7,600 more on jobs and stock (the money per job band, the twin's and the turbine's dearer cards, tools, and $6,000 of stock built up), against $5,700 less overhead. The three friends' negative weeks are mostly one game (seed 50: an early storm claim, then the analyst and the mechanic away for weeks at under $4,000, the twin worn out by two deferral incidents in one week), 20 in all against 17 before; the average crews have none (2 before).
+
+**Knobs:** `ALERTS.nff` (0.2 / 0.4), `ALERTS.looksNff` 0.3; `BOT_MISS` (0.15 / 0.15 / 0.1 / 0.3), `BOT_SPARE_MAX` $400; `KIT.base` 300; `STOCK.coverWeeks` 2, `z` 1.28, `lotMaxUnit` $150; `TIERS[].overhead` (−$150 at tiers 2–5); `FREIGHT.aog` $350; the work budgets $500 and the standing limit (their sum).
+
+### Technicians' screens (B)
+
+What B delivers: the job-flow screens in `src/ui/flow/` (one component for both trades: *Your move* and the inbox, the job sheet with its five steps, the AMM / reference search, the airplane's IPC, the supply catalog, the Stock step and its badges, the job view with its lines, the stop sheet, Stores with requests, What's new), all driven by a pure model (`steps.ts`: the steps, the draft and its reducer, what Send dispatches, what it comes to, the tap counts); the ops panel's asset chip row, inbox and `ic:open` / `ic:flow` host (`ops.tsx`); the flow job in the order detail (`orders.tsx`); the reference and generator manual cards (`manual.tsx`); the flow-opened chain's words (`chain.tsx`); the pick line in the puzzle host; week 0's walk-through; the puzzles' pick labels (`conduit.ts` with `takeUp(size)`, `wireup.ts`, `panel.ts`) and the meter's two places; `tests/flowui.test.ts` and `tests/conduit.test.ts`. Played end to end on a 390 × 844 phone and at 1280 × 820 for both trades: a stock hit, a requisition through the analyst's approval to the part landing and the job starting, a no-fault-found close, a one-tap inspection, a hazard made safe, a take-off, a tier-3 job, Stores with a request, and week 0.
+
+Where B departs from the spec, and why:
+
+- **The labour before Send comes from the draft, not the alert.** The Stock step prices labour from the slots the tech has filled (today's card less their standard parts); the engine prices the card from the fault's hidden needs. Reading the needs would tell the tech which slots the fault needs before a single part is picked. So the two can differ when the pick doesn't match the fault (a tire without its tube: the preview's labour is the tube's price higher), and at the edge of the work budget the preview can say *ready now* while the job lands as a card, or the other way round. The banner after Send says what really happened. `tests/flowui.test.ts` holds the preview identical for two alerts that differ only in their cause.
+- **Send says what the card comes to.** *"Pull 0 · buy 1 · labour $1,080: a card for Cy, about $1,118 in all"*: the buys in whole packs at the default supplier's price, plus the labour. The analyst's supplier choice or AOG freight can change it.
+- **The flow moves on by itself.** Filling the last required slot opens Stock (the 17.2 tap counts assume it: 10 taps for the tier-3 tire, 7 for the GFCI). A task whose slots are all *if needed* (the tire task: which one the fault needs is hidden) moves on once every slot is filled; *Check stock* is always there.
+- **The protection slot lights up late.** *Needed here* shows on the protection slot only once the device is chosen and still doesn't give the protection the room needs; before that a note says where it can come from (the device, or a breaker in the protection slot). Lit from the start, it pointed a bathroom's GFCI replacement at an AFCI / DF breaker.
+- **"Likely" is per slot.** The teaching tiers mark the standard pick's line for that slot only, so the spa's connectors slot marks the raintight connector, not the EMT stick in the same category (it marked both, and the wire slot marked the EGC's gauge).
+- **Three stock states everywhere.** A search row with nothing in stores says *none in stores* (quiet, so the IPC's own badges stay the loud ones). On-order dates say when the line lands (*lands tonight*, *lands next week*, *lands wk 9*): a PO's `eta` is the week whose resolve delivers it, and *here wk 1* in week 1 read as a mistake. Stores reads a line wholly held for jobs as amber (*1 on hand · all for jobs*), not rust.
+- **After Send the sheet stays on the job**, with the toast the spec asks for and a banner that stays, so *Start ▸* is the next tap. A closed no-fault-found shows only Investigate done (the other dots struck through) and says what it risks: the fault, if there was one, comes back as a new alert due at once.
+- **A flow-opened chain says research, not AOG.** Its banner reads *"Research: the {item} on {plane} isn't in the IPC"*, the order's chip *Research · part chain*, and the plane's downtime words show only when the job's alert grounds it (13).
+- **Lend a hand on a flow job runs the install check first**; a stop is a toast, never the puzzle.
+- **Week 0's walk-through.** The techs' second step walks one scripted alert (the worn tire on the twin, the bathroom GFCI that trips) through the real job sheet, raised on a copy of the island: nothing is written, and Send says what would have happened. It replaces the techs' *Nobody wins alone* card and second practice puzzle (the analyst's week 0 is unchanged), and marks What's new as seen. The sheet sits above week 0's overlay.
+- **The conduit's stick is physical, its labels aren't.** `TAKE_UP` became `takeUp(size)` (1/2 in: 5 in, 3/4 in: 6 in) and the pipe radius follows the stick (0.35 / 0.46 in): a 3/4 in stub marked with the 1/2 in take-up stands an inch short. The stick, connector and wire labels appear only for an EMT pick, along the scene's bottom edge; the fuel dock's lot (no EMT) keeps today's plain 1/2 in stick. A test holds the score identical with and without labels, and every generated 3/4 in instance solvable.
+- **Where the labels sit.** The wire-up prints the device's P/N on the device face (the space under the box is the strip tray's); the host's *Your pick* line under the title names the lines in full. The panel names the panelboard a lot brings under its title.
+- **The stepper fits a phone.** Five equal columns that may use the head's side padding, 11 px words: *Investigate* beside the electrician's *Reference* overlapped at 390 px with the fallback font.
+- **Storage.** A draft lives in sessionStorage per island and alert (`jf:{island}:{alert}`) and is dropped when it no longer fits (its task out of the set, the alert closed, the job done). The asset list's fold and What's new seen are per-viewer conveniences in localStorage. Every access is guarded.
+
+Seen while playing, in other packages' files (for Integrate):
+
+- The Dock's *Start: …* on a flow order calls `onPlay` directly (`home.tsx`), skipping the install check that Your move's Start runs; it should go through `openTarget` for a flow order.
+- `alertShort` lowercases the first letter (*r/H main tire* in the Dock), a finding reads *"The fix: gfci replacement"*, a wear alert *"change within 1 weeks"*.
+- The belt task (24-30-02) is priced off the alternator kind's card: labour $1,080 for a $38 belt.
+- `tests/tasks.test.ts` (money per job, 5.8 s) and `tests/consequences.test.ts` time out at vitest's 5 s default when the machine is busy; both pass alone. They need the `vi.setConfig({ testTimeout: 30000 })` the other whole-matrix tests have.
+- `scripts/e2e.mjs`'s week-0 step for the techs (*Do the job*) needs the walk-through instead: *Open the alert*, the five steps, Send, *Next*.
+
+### The analyst's desk (C)
+
+What C delivers: `src/ui/purchasing/` (a pure view model in `model.ts`; the approval cards, the requests, the stock planner with its flags, needs, item and buy sheets and receiving; the Money tab and its charts; What's new), the desk's four tabs in `desk.tsx` (Approvals, Stock, Money, and Staff hosting D's `StaffDesk`), the cost lines on the board, the auction's real lot, the three-way match on real POs, and `tests/purchasing.test.ts`.
+
+- **Families by what they share.** A family holds the right P/N and its near misses, and A names it after its first P/N ("Stop stocking Duplex receptacle, tamper-resistant…"), which reads as one of them. The desk names it by what they have in common (`FAM_LABEL`: "GFCI receptacles 20 A", "THWN-2 #8"; a lot by what it's for) and writes the stop flag in those words with the ledger's own length ("no use in 11 wk": A's text says 26 weeks on an 11-week island).
+- **One flag a job.** A's order flag comes a line at a time; a card short of four P/Ns is one flag naming them all, with one approval.
+- **The one-tap min/max only for a P/N that moved.** A fast family's near-miss P/N has no use of its own: its flag opens the sheet instead of stocking it.
+- **The AOG boat only when it's faster.** A lead-1 line lands tonight on the week's carrier, so $350 of boat buys nothing. The card, the buy sheet and the requests offer the boat when a line would come later, including a line due tonight whose carrier plane is out of service (receiving slips it a week). The requests split each trade's batch: the lines the boat speeds up go on one `approveReq` with the boat, the rest scheduled.
+- **The carrier down, in words.** A PO due tonight whose carrier can't fly (the cargo plane for bulk, every plane for the rest) reads "slips to wk N unless it's flying by the resolve"; its job's line in Needs and the card's scheduled option say it too.
+- **MEL placards** say where they stand: "runs out at this week's resolve", "ran out last week: the plane is grounded at this resolve unless you extend it", "ran out wk N" (A's one extension can come the week after).
+- **Payroll adds up.** A's stub charges the tier's standard crew whoever is on the list: a tier-2 island with the tier-1 crew pays $1,080 for $760 of staff. The Money and Staff tabs name the difference ("Open post of the standard crew (1 pilot)"); under D's payroll it goes away, or reads as hires starting and notice pay. The overhead lines are whole dollars that add up to the tier's overhead.
+- **Charts.** Revenue and cash out share one axis: revenue up and cash out down from one baseline, never a second scale; week-end cash is its own line with the $2,000 freeze as a reference line when cash comes near it. The categorical colors are a validated set (blue, amber, violet, gray for context), every multi-series chart has a legend, every chart a readout on tap, hover or focus and a table view. The runway chip is short; a note says what it covers (overhead, payroll, insurance, the loan), since the header's *Fixed* is overhead and payroll only.
+- **The auction's lot.** A's `launchFor` passes today's one-kit market with the lot, so `lotMarket` takes the lot's fair and caps the bid at 92% of the lot at list, or at the kit's cap when that one is cash-bound (under 1.2 × its fair). Each line is priced from the catalog's unit price: `launchFor` prices a line by the pack (a $65 can of 20 uses read $1,300 in a $102 lot). Lines read in the packs they come in ("a can of 20 uses"). A real lot is one lot at every tier, bid in $5 steps when it's small.
+- **The three-way match on real POs.** The PO and RCVD columns are the island's own and never altered; the issues go on the invoice side (billed over received, a price over tolerance, freight over the PO, discount terms). A PO over three lines becomes several invoices ("po14 (1/2)"); the batch is padded to the tier's count from the resort's own vendors; no sales tax; tier 0 shows the clean ones first. The run's cash is labelled *Float*: it's the puzzle's pot, not the island's cash. The engine still books the match against the week's leak, not per PO (A leaves `PO.caught` unset).
+- **What's new** opens only on an island played before the job flow (`flowSince > 1`). A new island starts with the flow, so nothing is new, and a sheet over the desk would block the first week.
+- **The tabs.** The bar sticks under the top of the screen; a tab picked while it's stuck opens at its top. The tab chosen lasts the session; the Dock's Next opens Approvals or Stock (`ic:open`). The Staff tab shows the crew read-only while D's `StaffDesk` renders nothing.
+- **Part-chain cards** keep A's end-of-turn lock. A chain the job flow's research opened doesn't ground its plane by itself, so its card says the job waits a week and the plane flies.
+- **Not in v1:** shelf life and expiry (the engine keeps no lots), core deposits (an exchange unit's core goes back in its box), per-P/N forecasts and spend budgets by category.
+
+### Staff (D)
+
+What D delivers: `src/sim/staff.ts` behind the hooks A wired (who flies what and the pilots' cap, tours, tire wear and write-ups by the pilot, hard landings, the housekeepers' turnovers and reviews, the payroll, the builders' week and its materials, the hiring board, the effect statements, `hire` / `letGo` / `build`, the fin bot and autopilot), the analyst's *Staff and payroll* desk section and the builders' line on Home (`src/ui/staff/`), the staff on the island (`src/ui/island/staff.tsx`) with the placard, no-entry and tag bubbles, four island-lab scenes, and `tests/staff.test.ts` (26 tests). With the standard crew and hard landings off, every week of a season resolves exactly as with A's stubs (`tests/staff.test.ts`); with the stubs on, the game plays as before the staff update (`tests/staffstub.test.ts`).
+
+Where D departs from the spec, and why:
+
+- **The contractor commissions a new tier.** The week a tier arrives (its crew project finishes during a turn), the standard crew's increase for it is flown and cleaned by the mainland contractor: a ferry pilot's 6 flights, a skill-3 housekeeper's turnovers (`commissioning`). From the next week the island's own staff do it. Without this, every tier-up lost flights and bookings in the week before the analyst could see a board with the new places on it. That week the desk says so (*"the contractor's ferry pilot flies the new plane this week only. From week 7 that's your crew: one more pilot."*), and the effect statements look at the week after.
+- **The first site's lots come with the island.** A new island has the t2 site's materials on the shelf (`newIslandStaff`): the builders start in week 1, and the analyst first meets the buying on the second site. Without them a tier-1 island spent $640 before its first B+ weeks.
+- **A candidate drawn for a need can fill it.** A pilot for the guest planes is skill 3+, anyone else 2+; the rest of the board draws 25 / 30 / 25 / 15 / 5 %. With the plain draw, a pilot need was often a skill 1 who can't fly guests.
+- **Pacing the builders' materials (the fin bot).** The next tier's site work two units at a time; a site two tiers ahead all at once when the next tier's crew project opens, or earlier while the cash stays over that tier's cash gate after the buy; three tiers ahead (the builders ran ahead) it waits. A's `finStock` bought the next two units whenever the builders idled (`buyBuildUnits` in `src/sim/bots.ts`: that one line removed, in A's file). It spent the tier-3 $18,000 gate on the villas' materials and put tier 3 back about a week. Tried and dropped: buying ahead of a tier with no cash gate (the Lodge's materials at tier 3, the generator house's at tier 1) put tier 5 back 0.3–0.7 week for all average; a three-unit villa site (decking, ties and shutters as one unit) cut the late villa sites from 13 to 9 of 30 but cost a seed of tier 5.
+- **The spec's "no new building below today's health in 90% of games" isn't met.** A tier's site work is short when the tier arrives in about half the games (three friends: 16 of 30). The villas and dock are short in 13 (8 lower on average), the generator house in 3 (7.5 lower), the Lodge in 2 (4 lower). The villa site is the tight one: its materials wait for the tier-3 cash gate, and tier 4 follows tier 3 by about four weeks. Having all of it on time costs tier 5 more than the late site work costs the new buildings (two to three weeks of the electrician's upkeep). An analyst who buys ahead when the cash allows, or hires a second builder for the villa site, is on time; the desk shows the cash gate beside the buy.
+- **Effect statements.** Each is `projectWeek` with and without the person, as specified, plus:
+  - a hire that adds no revenue this week (a builder, a spare) says *"no new income"* instead of repeating its wage as the net;
+  - a pilot whose gap a grounded or restricted plane hides this week shows it on the full schedule (*"every flight this week has a pilot; on the full schedule +2 flights a week"*);
+  - a builder's finish week counts a skill 4–5 hire's notice week, and says *"either way: no sooner with them"* when it wouldn't move.
+  - The spec's *"new villas start at 81 instead of 84"* needs the crew project's quality and the week the tier comes, and neither is known at the hire. While the build's tier's crew project is open (the tier can come at this week's resolve), the statement gives the difference: *"if tier 4 comes this week, its new buildings start 4 higher"*.
+- **The fin bot's crew.** Only guest-qualified pilots (skill 3+) count toward its standard crew. It hires the best candidate who starts now (then the most skilled, then the cheapest) asking at most 1.25 × the skill-3 wage.
+- **The naive analyst** hires every skill 4–5 candidate while the wages (hires giving notice included) stay under 1.8 × the standard payroll. In a crunch (spendable under $4,000) it lets the dearest hire above the standard crew go, severance and all. It ends at 171% of the standard payroll, stays at tier 2 (tier 3 before the staff update) and has 3 weeks below $0: over-hiring costs something now.
+- **Idle builders.** A site two tiers ahead waiting on materials on purpose says so once, as information (*"Builders idle: the site work on the villas and the seaplane dock (tier 4) waits for materials. Buy them on the desk (Staff) when the cash allows."*), not every week as a fault, and Home offers no one-tap buy for it.
+- **Extra cottages.** Plots `h8` and `h9` in the lagoon grove; the grove's young palms on a plot in use are cleared. `COTTAGE_SHELL` is $17,000: at tiers 3–4 a cottage rents a median $800–900 a week when the guests outnumber the houses, a payback of 21–27 weeks. The start sheet prices a housekeeper in when every turnover is taken, and says when the cottage would sit empty (*"3 of 4 houses are booked"*). The `cottages` variant (three friends, an analyst who starts one at tier 4 over $40,000) starts one in 28 of 30 games and finishes it by week 26 in 20. It reaches tier 5 in 12 of 30 games (the plain three friends: 25), with 0 weeks below $0: a cottage is an investment for an island that keeps playing, not a shortcut.
+- **A's files touched (for the merge):**
+  - `src/sim/bots.ts`: the one line above.
+  - `tests/staffstub.test.ts`: it tests the stubs, so it sets `STAFF_TEST.stubs` in `beforeAll`.
+  - `tests/flow.test.ts`: the staff moves' refusals are the real ones now (*"That candidate took another job."*, *"They have already left."*, *"Extra cottages open at tier 3."*).
+  - `tests/gse.test.ts`: `withCargo()` and `weakWeek()` add the tier-2 second pilot, since one pilot can't fly the cargo plane's four flights too.
+- **Left for A:**
+  - `nextTierProgress` has no *"Site work (builders): 2.5 of 4"* line yet (15.5).
+  - The review's *"2 flights lost: the pilots fly 6 a week. Hire a pilot?"* (and its housekeeping twin) still asks when a hire starts next week.
+  - `PROJECTS[2].jobs.fin.title` *"Pay the builders (three-way match)"* now reads as paying the island's own builders; it's the mainland contractor's invoice.
+
+**On the island.** Up to 8 figures, each a `<use>` of one of three symbols drawn once (`StaffDefs`, kept in `staff.tsx` beside the figures rather than in `LifeDefs`):
+
+- builders in hard hats and hi-vis on the open site, with a two-frame hammer when motion is on;
+- a pilot by the lead guest plane and one by the cargo plane (none by a plane that's down, or by the floatplane on the water);
+- a housekeeper at up to two open houses.
+
+None are out in a storm or at night; at night one figure works late in the lit office window. A site shows the further of the crew project's stage and the builders' (`⌊3 × done / need⌋`). The restricted plane gets a sunflower placard bubble, a house closed by a hazard the no-entry bubble, a made-safe house a small tag. The beaten scene is 1,390 SVG nodes (budget 1,500; `scripts/island-shots.mjs` now fails over it). New island-lab scenes: `staff`, `staff-night`, `staff-alerts` (placard, no entry, tag, a cottage going up) and `staff-cottages`.
+
+#### Balance (26 weeks × 30 seeds, medians)
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk | Payroll @26 | Late site work |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| All good | 5 / 9 / 16 / 21 | 99% | $6,739 | 0 | $11,525 | 104% | 30% of games |
+| All average | 7 / 12 / 16 / **22** | 95% | $5,554 | **0** | $9,668 | 104% | 53% |
+| **Three friends** | 8 / 12 / 16 / **23** | 91% | $5,792 | **0** | $9,226 | 103% | 53% |
+| Naive analyst | 5 / – (tier 2 at week 26) | 93% | −$1,174 | 3 | $4,456 | 171% | 3% |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 40% / 85% / 94% | −$687 / −$9,035 / −$82,076 | 2 / 44 / 16 | | 100% | |
+| Every solo team, nobody | stay at tier 1 | | | | | 100% | |
+
+Against the same code with the staff stubbed (A's table): tier 5 in 25 of 30 games for the three friends (stubbed 24), mean week 23.3 (23.3); all average 27 of 30 (27), 22.6 (22.3); all good 30 of 30, 21.0 (21.1). That is within the spec's ±0.5 week. The pacing guard holds (it needs 23), and no solo or absent team leaves tier 1. Where the money goes per game (90 seeds): about $2,100 of building materials, $520 of payroll over the standard crew's (hires ask 0.95–1.1 × the wage, and skill 4 costs 1.2 ×), 0.4 flights and 0.2 bookings lost to a crew short for a week, 0.4 hard landings and 1.3 builder-weeks of rework.
+
+Robust (90 seeds × 4 crews), beside the same code stubbed:
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash | Stubbed: wk → T5 / miss / weeks < $0 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 24 / 24 / 25 / 25 | 30 / 26 / 34 / 32 | 18 / 4 / 1 / 1 | −$38,286 / −$23,294 / −$2,996 / −$5,499 | 24 / 24 / 24 / 24 · 25 / 27 / 24 / 23 · 18 / 1 / 0 / 1 |
+| All average | – / a / b / c | 23 / 24 / 24 / 24 | 19 / 19 / 19 / 22 | 1 / 0 / 0 / 4 | −$424 / $3,592 / $1,137 / −$10,701 | 22 / 23 / 23 / 23 · 15 / 11 / 12 / 16 · 0 / 0 / 0 / 0 |
+
+The robust sweep shows the cost the 30-seed table hides: half a week (three friends) to a week (all average) later to tier 5 at the median, and 23 and 25 more of 360 games missing it by week 26. That is the $3,000 above, at the $60,000 gate, in games that were already making it by a week or less. The staff don't slow the job flow: the latency stays at 0.66–0.69 weeks (A's standard run: 0.68). If it needs buying back, the spec's levers come in order: `TIERS[].overhead` (A already took $150 off at tiers 2–5), then the `BUILDS` quantities.
+
+**Knobs:** `STAFF` (wages 320 / 180 / 260, skill wage × 0.7 / 0.85 / 1 / 1.2 / 1.45, severance 2 weeks, duty 6, guest pilots skill 3+, charter 0.04, hard landings 0.8% / 0.5% / 0.3% / 0.2% / 0.1% a flight, −2 health, turnovers 2–6, reviews 0.025, builder output 0.6 / 0.8 / 1 / 1.25 / 1.5, rework 20% / 12% / 6% / 3% / 1%, the standard crews, the board 3 / 4 from tier 3, at most 10 staff); `BUILDS` as specified; `COTTAGE_SHELL` $17,000.
+
+### Integration: the four packages together
+
+The branches merged in order (engine, the technicians' screens, the analyst's desk, the staff) with one text conflict (`docs/ONBOARDING.md`: the analyst's calls and the section numbers). What the integration changed so the flows work across the seats, and why:
+
+- **The Dock's Start on a job-flow job goes through the ops panel's host** (`openTarget({ order })`), so the install check runs first and a stop shows its sheet, as *Your move*'s Start does; before, the Dock called the puzzle directly. Other orders keep today's direct start.
+- **The analyst's Dock says "2 to approve ▸"** (the legacy cards too). *"Review 1 card · 1 requisition ▸"* was cut to *"Review 1 card · 1 …"* on a 390 px phone; the desk and the End-turn check say what they are.
+- **MEL on the island and the board.** A plane flying on a placard gets a small placard bubble (the same glyph as the restricted plane's, small, as a made-safe house's tag is small beside the closed house's no-entry sign), and the week's review says it: *"Twin N-12 flew with com 1 dead on transmit placarded INOP (MEL C, to week 2, extended). Fix it by then, or it flies restricted."* (`melOn` in `econ.ts`). Make-safe already showed on both (the tag, *"rented at 75%"*).
+- **A card that comes in after the analyst ended the turn** says honestly whether it goes through tonight. The tech's toast and job view, and the analyst's push, compare it with the standing limit and the freeze (`standingWords` in `select.ts`); the review now says why a late card waited (*"over the standing limit ($1,000 left), so it waits for Cy"*). Before, the toast promised tonight for a $1,714 card over a $1,000 limit.
+- **The analyst's nudge shows on the tech's row** (*Cy nudged*, this week), beside the push and the feed line.
+- **Staff in the rest of the game.** The desk's Staff tab is D's desk alone (C's read-only fallback went). The tier checklist on the Board shows the builders' site work (*"Site work (builders): 2 of 3"*, with what it means for the new buildings); it is information and never gates the tier (`tierUnlocked` reads the unlock lines only). The review's *"Hire a pilot?"* / *"Hire a housekeeper?"* names the hire giving notice instead (*"Oskar H. starts week 7."*). The tier-3 project's analyst job reads *"Pay the contractor (three-way match)"*. The purchasing test's payroll case follows D's real payroll (the stub case is kept under `STAFF_TEST.stubs`).
+- **Wording.** `lowerFirst` keeps a side or an acronym as written mid-sentence (*"R/H brake pedal…"*, *"The fix: GFCI replacement"*; they read *"r/H"* and *"gfci"*), and *"1 weeks"* reads *"1 week"*. The write-up sheet says *"+ parts"* instead of the retired kit.
+- **Labour for a cheap fix under a dear kind is capped** at `LABOR.capX` = 4 × the book hours. A belt priced off the alternator's card was $1,080–1,270 of labour for a $38 belt, a com connector or a unit-less avionics write-up $1,020–1,100, which the A&P and the analyst would both call out. Now $360. The band test exempts exactly those causes (and a tube under the tire's card at the top tiers) and pins the list; every other job keeps today's card. The balance moved a little the right way (below).
+- **The auction's lot.** `launchFor` prices the lot's lines at the catalog's unit price (it priced them by the pack: a $65 can of 20 uses read $1,300) and passes the lot's own market (fair, and a cap at 92% of the lot at list or spendable less the freeze), which the puzzle's `lotMarket` takes as it is.
+- **Stock flags.** A slow line used in the last four weeks isn't flagged to stop; the stop text counts the ledger's own weeks (*"no use in 11 weeks"* on an 11-week island); the no-min/max flag names only a P/N that moved itself, never the near-miss beside it. The bots don't read these flags.
+- **Week 0's step survives a remount** (sessionStorage per island and seat, cleared when the seat finishes week 0): in the online run a sync blip once re-rendered Mia's week 0 from its first card.
+- **Tests and scripts.** `tests/tasks.test.ts` and `tests/consequences.test.ts` get the 30 s timeout the other whole-matrix runs have. `scripts/e2e.mjs` walks week 0's alert for the techs, then week 1 across the seats: the mechanic takes an alert through the flow and asks Stores for a line, the analyst finds the request on the desk at once and buys it (the run fails if not), approves the cards and hires, the electrician makes a hazard safe and plans; after the resolve the requested line reads one more on hand (the run fails if not). `scripts/e2e-online.mjs` does the same across devices on the emulator: the laptop's plan is seen on the phone, the request on the analyst's laptop, and the line on hand on the phone after the week resolves everywhere. When receiving quarantines that line for its paperwork (an OEM part, about 1 line in 50 on a fresh island's seed), the review must say so and the phone must read *"on order, lands tonight"*; the run then ends week 2 and finds it on hand in week 3.
+
+Left as the packages recorded them: the three-way match books against the week's leak and doesn't hold a PO's payment (`PO.caught` stays unset; since fixed, see *Job flow review fixes*); shelf life, cores and per-P/N forecasts are v2; the stores can go a bin or two over the cap after approvals (the desk shows it in rust); the staff's *"no new building below today's health in 90% of games"* is missed as D recorded.
+
+#### Balance after the integration (26 weeks × 30 seeds, medians)
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk | Payroll @26 |
+| --- | --- | --- | --- | --- | --- | --- |
+| All good | 5 / 9 / 16 / 21 | 99% | $6,739 | 0 | $11,507 | 104% |
+| All average | 7 / 12 / 16 / **22** | 95% | $5,783 | **0** | $9,469 | 104% |
+| **Three friends** | 8 / 12 / 16 / **23** | 92% | $5,882 | **0** | $9,189 | 103% |
+| Naive analyst | 5 / – (tier 2 at week 26) | 93% | −$1,174 | 2 | $4,444 | 173% |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 40% / 87% / 92% | −$2,067 / −$8,522 / −$82,076 | 6 / 36 / 31 | | 100% |
+| Every solo team, nobody | stay at tier 1 | | | | | 100% |
+
+The analyst-absent team's weeks below $0 went from 16 to 31 in the 30 seeds: one seed (24) now falls into receivership where it didn't (seed 15 falls either way). It is the absent analyst's known cliff (an early claim, cards the autopilot won't approve, then deferral incidents), not the cap: over 90 seeds the same team has 129 weeks below $0 with the cap and 148 without (seeds 50 and 89 no longer fall).
+
+Robust (90 seeds × 4 crews): three friends reach tier 5 at 24 / 24 / 25 / 25 and miss it in 31 / 27 / 30 / 30 games (118 of 360; D's run 122, A's stubbed 99), with 13 / 4 / 1 / 0 weeks below $0 (D: 18 / 4 / 1 / 1); all average 23 / 23 / 24 / 23, missing in 18 / 18 / 17 / 21 (74; D 79), 1 / 0 / 0 / 0 weeks below $0 (D 1 / 0 / 0 / 4). A 26-week sim takes 259 ms; the standard run 1 min 27 s, the robust sweep 4 min 52 s.
+
+## Job flow review fixes (round 1)
+
+Three review lenses played the integrated job flow: the trades' (an A&P's, an electrician's and an FP&A reader's eye on the content and the money), a player's (all three seats on a phone and at 1280 px) and a systems one (the engine, the migration of live islands, the paper sim). What changed, and why.
+
+### The trades' calls
+
+- **No fault found only on a "could not duplicate" finding.** `nff` is refused when the finding at the alert's tier shows the fault (*"The finding shows the fault: fix it, placard it or make it safe."*), and Investigate hides the button there. An NFF close over a measured fault was a free deferral: the comeback raised no incident, so on a week-13 island a guest's shock complaint closed NFF made $5,454 against $4,089 left open, and a float plane's dead com closed NFF made $11,200 against $2,541. The finding already says which case it is, so the gate gives nothing away. An intermittent that hides at tier 3+ (`looksNff`) can still be closed wrongly, and comes back due at once.
+- **The only guest plane's findings are within limits.** Each sole-plane cause has a `soleFinding`: *"Two prop bolts at the bottom of the torque band, stripes intact, no fretting"*, *"linings 0.12 in (limit 0.10)"*, *"the wire is nicked at the twist, not parted"*, the drain plug's wire loose with the plug tight, paint cracked at two rivets with the fairing firm, the accumulator at the low end of its card's band. What the mechanic reads is now a squawk an IA would let fly to its due week, which the decision to soften the sole plane's squawks assumed.
+- **A take-off's site line names the equipment, not the conductors** (*"Spa: 240 V, needs a 60 A GFCI disconnect · pad 43 ft from the panel"*). *"60 A breaker, 6 AWG"* answered the take-off's question, and the judge's undersized rule could never catch anyone. A repair on an existing circuit keeps its breaker and wire: reading them is the job.
+- **The puzzles are the alert's site** (`PuzzleContext.site`, from `puzzleSite` in `launchFor`): the trace names the alert's room and breaker; a receptacle on an individual circuit is one outlet; a warm plate or plug is an IR-thermometer hunt among live devices (the hot joint reads 130–160 °F); a flicker is the meter's loose neutral under load (at the panel it is the lug screw). A hall's warm switch used to launch *"Kitchen is dead"*.
+- **Content** a working A&P or electrician would call out: the prop bolts are a re-torque case (stripes moved, no fretting); the engine trends justify the pull (38/80 against a master orifice of 46 with the exhaust valve eroded; a scored barrel with iron in the filter); penetrant results are left to the job; the accumulator prints its card's precharge (from the airplane's S/N block); 32-40-01 takes the in-lb wrench, the relining a lining rivet tool (`T-RIVET`), Type I fluorescent penetrant a UV-A lamp (`T-UVA`; both in the starter tools); the com wiring cause is a transmit-side sag (*"27.8 V at the tray unkeyed, 20 V keyed: a loose power pin sags under the transmit load"*), so the squawk is *"dead on transmit; it receives fine"* for both causes; LOT-DIST is a 600 A panelboard, the generator site's switch 60 A and LOT-XFER 200 A; the judge computes conduit fill from Chapter 9 Table 5 for the conductors actually picked, with the real count, and calls a feed oversized only past the next standard size (240.4(B)); a heater cause's site is the heater's 30 A 2-pole circuit and the make-safe names the breaker it tags; *"the leg to the villas"*; R-GRND's *"8 AWG copper up to a 2 AWG service"*.
+- **The MEL extension is the maintenance side's call.** The mechanic asks (*"Ask Cy to extend the MEL (once)"*), the analyst approves the cost (the card or the Needs list), and the feed names both. A placard covers the item to its due week (`until = max(week, due)`): placarding a week early spent it on a week when nothing was due. The mechanic's End turn says what the MEL still allows (placard it, tag it, ask for the extension, waiting on the analyst).
+- **Stores shows the techs on hand and on order, not the min/max**, which pointed at the effective P/N beside its near miss.
+
+### The analyst's money
+
+- **Scheduled freight is charged per shipment**: `FREIGHT.sched` $35 a mechanic's, $25 an electrician's, $0 for the yard's building materials. One supplier's lines on one carrier landing the same week ride one shipment, however many POs they are on, so the week's buys and the replenishment run consolidate for nothing extra; a broker's lot and the migration's POs carry none. It is what makes stocking ahead pay on an island: before, a lead-1 line bought per job was free and landed that night. The card, the buy sheet and the request queue show it (*"+$35 freight: its own shipment"*). The crews pay about $1,400 a game more in freight (the average crew: $470 → $1,890 a game, the AOG boat included).
+- **Safety work due this week or next goes through the standing approval whatever the limit** (down to $0 spendable, and it doesn't use the limit up). In pass-and-play the analyst often plays first: a $1,120 alternator card on the only guest plane waited a week over a $1,000 limit and the twin flew 1 of 4. The Stock step's preview uses the card's total (freight included) and says which it will be; the analyst's End turn warns that the techs haven't played, with a one-tap raise on Home.
+- **Cash in stock** is inventory less payables (the vendors finance what came in unpaid); open POs show apart as *Committed, not yet paid*. The old *"cash tied up"* counted received-unpaid stock twice and open POs as cash, about 40% over. *Cash out, 4 weeks* replaces *Where it went* (stock bought is working capital, not opex), and labour reads *Shop charges (overtime, call-outs, outside help)*.
+- **The three-way match**: the vendors overbill about 3% of the POs matched (at least $60), plus a plainly bad invoice ($100–240) in about 2 weeks of 5, seeded per week (it was 8% plus $80–220: 26% of a week's POs). The overbilling sits on the POs (`PO.over`); the match's result sets `PO.caught`, so the payable and the payment run drop by what it found.
+- **Planner and auction**: no stop flag while the forecast, an open job, a part chain or an open PO draws the family, or on a slow family never used yet; the spa panel isn't an insurance spare, and a spare's bench consumables (lining rivets) count with it; a broker's lot is one trade's.
+- **Staff**: reviews count the housekeepers who turn the bookings over, best first, so a spare moves nothing (*"reviews down: −$33 a week"* for a spare who cleans nothing is gone); the hiring board sorts by what a hire nets and folds the ones who'd cost more than they bring; a cottage is priced on an 8-week average of flights and bookings (a week with two planes AOG priced a $17,000 shell at $11 a week).
+- **Needs**: a scheduled inspection reads *Scheduled* with no nudge; *"(1 flight)"*.
+
+### Whose move
+
+- **The research branch is a tap away**: *Open the logbooks ▸* (or the IPC, or the circuit check) on the job, the chain banner, the Dock (*"Open the logbooks · Cargo C-7 ▸"*) and Your move, whose chip reads *Your move: logbooks* on the viewer's own row, never *Waiting on* themselves.
+- **A chain's plane is AOG only when it is grounded** (`chainGrounds`, `chainTag`): otherwise it *flies restricted*, *flies on its MEL placard to wk N* or *flies meanwhile*. End turn, the pushes and the desk's chip said AOG beside *"flies meanwhile"*, and an analyst would have paid for the AOG boat on it.
+- **An empty required slot is named before Send** (Materials unticked, *"Pick the GFCI device first"*, a button back to the slot, Send refused): Send used to say *"Ready: start it now"* and the start refused it.
+- **The week's revenue work** (the load sheet, a ground power start) shows in Your move and the Dock (ahead of an alert not due this week), and End turn names what skipping it costs (*"No load sheet: half of Twin N-12's charters stay on the ramp."*).
+- **Smaller**: the seat chips read *"you wait on Ben"* in a neutral tone until that seat has ended (red *"blocking you"* before a friend had played read as blame); no toast after Send (it covered the sheet and repeated the banner); the taskline drops a repeated task number; the IPC's negative badges test first (*not effective* was green); an NFF alert's search chips come from its own words; the Dock skips a job the per-turn cap would refuse; a desktop tab switch opens the tab at its top; a new island's analyst gets the desk's intro in week 0 (the mechanic's tire as the real approval card, on a copy of the island) instead of the legacy practice card; the move chip takes a second line rather than losing its word on a phone.
+
+### Systems
+
+- **Wiring causes occur.** The generator never produced one (a kind's pairs held only that kind's causes), so the circuit check's wiring branch had never run in play. `pairsFor` now gives a bench symptom its unit and wiring pairs: about 1 bench alert in 4 is the wiring in the paper sim. A wiring alert fills its unit's slot (`slotKind`).
+- **A wrong "unit" call plants nothing**: it shows at the install (the new unit makes no difference, the check comes back), and once the wiring is fixed and signed off nothing comes back. It used to plant a hidden defect that surfaced after the plane had been fixed. A wrong "wiring" call on a dead unit is still a sure hidden defect. `tests/flowbench.test.ts` drives the whole path with the electrician present and away.
+- **Migrated islands' analytics count the flow's weeks only** (`flowRows`, `flowWeeks` from `flowSince`): a backfilled ledger has no item use, so every migrated island's stock was *dead* and its families classed on empty weeks. Classes need 8 flow weeks, *dead* 25. A week-0 island migrates with `flowSince = 1`; What's new says how the kits' store credit was valued ($300 at tier 1 to $420 at tier 5, not the list price paid); a com write-up needs the radio.
+- **The bots and autopilot placard a bench item while it waits on the electrician's check** (MEL C, where the model has it), not only when a part must be bought. A com wiring fault on the only guest plane, with the electrician away for a week, flew the twin restricted for five weeks and emptied the cottages: one of the three friends' collapses in the robust sweep.
+- **Money edges**: dropping a never-started job gives its labour back (a wrong task re-planned paid twice); a part reserved in the old P/N stays that P/N when the rest arrives superseded (the pick is split); a trade keeps at most 12 open stock requests, a repeat folds into the open one, a requisition or a won lot needs a free bin, and a late request that waits gets its review line.
+- **The mistakes crew** (`npm run balance`): the three friends with a human's slips, a near-miss or wrong-model pick on one plan in ten and a stock request a week between the techs. Per game: 0.7 receiving returns, 1.8 install stops, 22 requests, $27 of restocking fees; tier 5 at week 26 (median) against the three friends' 23, and a minimum of $2,382 with no week below $0. The bots don't make these mistakes, so the balance never priced them: about three weeks of tier-5 pace.
+- **Bundle**: the analyst's desk, the job sheet and week 0 are chunks of their own (`src/ui/lazy.tsx`, fetched when the seat's screen first shows, the job sheet on idle): the main chunk is 70 KB (it was 742 KB and tripped the 700 KB warning) and a phone's first load 1,340 KB (469 KB gzip) instead of 1,467 KB (505 KB). The service worker still precaches every chunk; a chunk that fails after a deploy reloads the page (`ic:stale`).
+- **CI**: `vi.setConfig({ testTimeout: 30000 })` in `tests/chainmoney.test.ts` (2.8 s in the full suite on a dev box).
+- **The e2e scripts** follow the new words and the random islands they meet: the make-safe button names its breaker (*"The kitchen's 20 A breaker: off and tag it"*), a tech's alert rows skip the week's revenue work (`.jf-arow.rev`), the Dock may lead to the load sheet, a Start that needs a ground power cart hooks one up first, and the pass-and-play run, like the online one, follows a requested line that receiving quarantined for its paperwork into week 3.
+
+### Left as they are
+
+- **Payroll scale** (open question 4): wages 2.5–3× with the overhead cut to match would make a hire real money. It changes every island's P&L, so it waits for the owner's call.
+- **Cores and shelf life**: v2, as recorded.
+- **The only guest plane past due** still flies restricted (a near-miss a flight). A mainland sub-charter instead is a new economy line; the softened findings answer the trades' point.
+- **The builders on Home**: zooming the island to the build site needs a zoom box of its own and bigger figures under the 1,500-node budget: not a cheap fix.
+- `STAFF_TEST` stays a test-only flag (default off).
+
+### Balance
+
+**The lever**: `TIERS[].overhead` is another $150 a week lower at tiers 3–5 (1,620 / 5,440 / 7,880), and `TIERS[].fixed` with it (2,700 / 6,700 / 9,200: the standard crew's payroll is unchanged). It pays back the new freight (about $1,400 a game) and a little more.
+
+Standard (`npm run balance`, 26 weeks × 30 seeds, medians):
+
+| Team | Wk → T2 / T3 / T4 / T5 | % weeks B+ | Min cash | Weeks < $0 | Revenue / wk | Payroll @26 |
+| --- | --- | --- | --- | --- | --- | --- |
+| All good | 5 / 9 / 16 / 21 | 99% | $6,530 | 0 | $11,583 | 105% |
+| All average | 7 / 12 / 16 / **23** | 93% | $5,791 | **0** | $9,304 | 104% |
+| **Three friends** | 8 / 12 / 16 / **23** | 91% | $6,271 | **0** | $9,114 | 103% |
+| Mistakes (the three friends' slips) | 8 / 13 / 16 / 24 | 90% | $2,382 | 0 | $8,364 | 102% |
+| Naive analyst | 5 / – (tier 2 at week 26) | 94% | −$33,118 | 8 | $4,478 | 170% |
+| Mechanic / electrician / analyst absent | stay at tier 1 | 44% / 88% / 96% | −$981 / −$12,288 / −$10,830 | 3 / 46 / 3 | | 100% |
+| Every solo team, nobody | stay at tier 1 | | | | | 100% |
+
+Before the fixes: three friends 8 / 12 / 16 / 23 with $5,882 minimum, all average tier 5 in week 22 with $5,783. The analyst-absent team falls below $0 in one seed again (seed 15, 3 weeks: the known cliff of cards the autopilot won't approve, then deferral incidents at tier 1), which the run before the fixes happened to miss. Absent seats aren't sensible play, and it never leaves tier 1. A 26-week sim takes 280 ms.
+
+Robust (`npm run balance -- robust`, 90 seeds × 4 crews):
+
+| Team | Crew | Wk → T5 | Miss T5 (of 90) | Weeks < $0 | Min cash |
+| --- | --- | --- | --- | --- | --- |
+| Three friends | – / a / b / c | 24 / 24 / 24 / 24 | 24 / 24 / 31 / 17 | 1 / 1 / 1 / 4 | −$729 / −$8,674 / −$1,685 / −$3,294 |
+| All average | – / a / b / c | 23 / 23 / 23 / 23 | 18 / 20 / 18 / 24 | 0 / 0 / 0 / 0 | $1,753 / $3,570 / $3,347 / $4,016 |
+
+The review measured the branch at 118 and 74 misses (medians 24/24/25/25 and 23/23/24/23) against Phase B's 75 and 37 (23 and 22). Now 96 and 80, with the three friends' weeks below $0 down from 18 to 7 and none for the average crew. **Phase B's numbers aren't reached**, and money isn't what's missing. On 180 games (seeds 1–45 × 4 crews, before the bots' MEL fix) the overhead cut at tiers 3–5 bought this:
+
+| Overhead cut, tiers 3–5 | Three friends: median / misses | All average: median / misses |
+| --- | --- | --- |
+| none | 24 / 43 | 24 / 44 |
+| −$150 (taken) | 24 / 37 | 23 / 41 |
+| −$300 | 24 / 37 | 23 / 36 |
+| −$450 | 24 / 37 | 23 / 34 |
+
+The branch before the fixes did 24 / 49 and 23 / 40 on the same games; freight turned off is worth 3 of them for the average crew. What misses now: (1) the crew project, which needs a job from every seat, sat through a long absence (the three friends' crew *b*: the mechanic away weeks 21–26 with $70,000 in the bank); (2) the electrician's tier-4 overload, when four cottages' code notices, storm damage and a feeder come due together at 3 jobs a turn and the houses decay past 45 into must-do work (the average crew's late collapses, cash falling from $42,000 to $12,000 in six weeks). Neither is bought back with overhead. The next levers are there: stagger the code notices per house, and let the tier-4 generator hold back when a trade's ready jobs pile up. They change play, so they wait for the owner's call.
+
 ## Balance (paper sim, `npm run balance`): 26 weeks × 30 seeds, medians
 
 Retuned after the balance and systems critiques, then re-run after crew projects, the credit curve and the functional fixes (Sep 26). The table below predates the consequences above; the current numbers are in *Phase B review fixes*.

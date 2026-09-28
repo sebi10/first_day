@@ -14,6 +14,7 @@ import { markInput, suspendLoops } from '../puzzles/kit';
 import { PASS, type PuzzleContext, type PuzzleId, type PuzzleInstance, type PuzzleResult } from '../puzzles/types';
 import { TOOLS } from '../sim/data';
 import { REWORK_BELOW, workCredit } from '../sim/econ';
+import { itemById, unitWords } from '../sim/items';
 import { fx, type Fx } from './feedback';
 import { Btn, Icon, TierDots } from './kit';
 import { settings } from './settings';
@@ -44,6 +45,21 @@ export type PuzzleLaunch = {
 };
 
 const SEEN = 'ic.seen.';
+
+/**
+ * The job flow's pick in a line (display only): "OG-65010-8 · OG-T65010",
+ * "KG20-TR", "150 ft THWN-8 · 3 × EMT-34". Three lines at most, then "+2 more".
+ */
+export function pickWords(pick: PuzzleContext['pick']): string | null {
+  if (!pick?.length) return null;
+  const one = (l: NonNullable<PuzzleContext['pick']>[number]) => {
+    const x = itemById(l.pn);
+    if (x && x.unit !== 'ea') return `${unitWords(x, l.qty)} ${l.pn}`;
+    return l.qty > 1 ? `${l.qty} × ${l.pn}` : l.pn;
+  };
+  const shown = pick.slice(0, 3).map(one);
+  return pick.length > 3 ? `${shown.join(' · ')} · +${pick.length - 3} more` : shown.join(' · ');
+}
 
 /** The how-to's tools: only this puzzle's, by the names the Me tab shows (never the ids). */
 const TOOL_NAME = new Map(Object.values(TOOLS).flat().map((x) => [x.id, x]));
@@ -77,6 +93,8 @@ export function PuzzleHost({
   const [confirm, setConfirm] = useState(false);
   const [oops, setOops] = useState(0);
   const blind = !!launch.blind;
+  /** what the job flow's pick put in this job (display only: the score never reads it) */
+  const picked = pickWords(launch.context?.pick);
   /** blind: the job is sealed the moment it's handed in, so its finish animation can't give a verdict away */
   const [sealed, setSealed] = useState(false);
   const sealedRef = useRef(false);
@@ -263,6 +281,11 @@ export function PuzzleHost({
                 {def.title} · <TierDots tier={launch.tier} />
                 {launch.subtitle ? ` · ${launch.subtitle}` : ''}
               </span>
+              {picked && (
+                <span class="label" title={picked} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: '100%' }}>
+                  Your pick: <span class="mono">{picked}</span>
+                </span>
+              )}
             </div>
             <div class="row" style={{ gap: 6 }}>
               <button

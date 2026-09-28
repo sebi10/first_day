@@ -7,13 +7,17 @@
 // matching the S/N and the SB status is the mechanic's job. On an assembly an
 // STC or a field approval replaced, the alteration's ICA governs: its values are
 // printed first, and the airframe manual's are kept, marked replaced.
-import { externalPower, fmtDate, fmtTorque, icaCardFor, type Aircraft, type AmmTask, type IcaCard } from '../sim/aircraft';
+import { ammTaskFor, externalPower, fmtDate, fmtTorque, icaCardFor, type Aircraft, type AmmTask, type IcaCard } from '../sim/aircraft';
 import { islandAircraft, openChain, taskCardFor } from '../sim/chain';
 import { launchTier } from '../sim/econ';
-import type { IslandState, Order } from '../sim/types';
+import { acOf } from '../sim/flow';
+import { itemById } from '../sim/items';
+import { benchFor, slotQty, slotsAt, taskById, type Task } from '../sim/tasks';
+import type { Alert, IslandState, Order } from '../sim/types';
+import { siteAnswer } from './flow/steps';
 
 /** the alteration on this airplane whose ICA replaces an assembly (an STC or a field approval; a PMA part alters nothing) */
-const alterationOf = (ac: Aircraft) => (ac.plant && ac.plant.via !== 'pma' ? icaCardFor(ac, ac.plant.ata) : undefined);
+export const alterationOf = (ac: Aircraft) => (ac.plant && ac.plant.via !== 'pma' ? icaCardFor(ac, ac.plant.ata) : undefined);
 
 /** The plate: what a mechanic reads off the airplane and its records before the job. */
 export function DataPlate({ ac }: { ac: Aircraft }) {
@@ -198,7 +202,7 @@ export function TaskCard({ t, marked, ica }: { t: AmmTask; marked: boolean; ica?
 const PART_TASK: Record<string, string> = { lining: 'brake', propBolt: 'prop', filter: 'powerpack', resCap: 'powerpack', radio: 'radio', generator: 'alternator' };
 
 /** A ground power start: the flight manual's procedure and this airplane's external power placard. */
-function ExternalPowerCard({ ac, marked }: { ac: Aircraft; marked: boolean }) {
+export function ExternalPowerCard({ ac, marked }: { ac: Aircraft; marked: boolean }) {
   const ep = externalPower(ac);
   const gen = ep.turbine ? 'Generator' : 'Alternator';
   const steps = [
@@ -250,15 +254,59 @@ function ExternalPowerCard({ ac, marked }: { ac: Aircraft; marked: boolean }) {
   );
 }
 
-/** The Manual section of a mechanic job on a plane: its data plate and task card (none for jobs the manual module has no card for). */
+/**
+ * The task card a job-flow task works to: its own `card` key (the six AMM cards
+ * and the short ones the flow added: bleed, wheel halves, safety wire, oil,
+ * belt, cylinder, spar, inspection), else the card a kind or job maps to.
+ */
+export function cardForTask(ac: Aircraft, t: Pick<Task, 'card'> | undefined, job?: string): AmmTask | undefined {
+  if (t?.card) {
+    try {
+      return ammTaskFor(ac, t.card);
+    } catch {
+      /* not a card key: fall through */
+    }
+  }
+  return job ? taskCardFor(ac, job) : undefined;
+}
+
+/** The Manual section of a job: a plane's data plate and task card, or the electrician's reference entry (none for jobs with neither). */
 export function ManualSection({ s, o }: { s: IslandState; o: Order }) {
   const asset = s.assets.find((a) => a.id === o.assetId);
+  const flowTask = o.flow ? taskById(o.flow.task) : undefined;
+  // the electrician's flow job: the code and procedure reference it was planned from
+  if (asset && flowTask && flowTask.book === 'REF' && o.role === 'elec') {
+    const al = s.alerts?.find((x) => x.id === o.flow!.alert);
+    const marked = launchTier(s, o, 'elec') <= 2;
+    return (
+      <details class="card manual" open>
+        <summary>
+          <span class="label">Reference</span> <b>{flowTask.no} · {flowTask.short}</b>
+        </summary>
+        <div class="col" style={{ gap: 10, marginTop: 8 }}>
+          <RefCard t={flowTask} answer={marked && al ? siteAnswer(s, al, flowTask) : undefined} />
+        </div>
+      </details>
+    );
+  }
+  if (asset && flowTask && flowTask.book === 'GSM') {
+    return (
+      <details class="card manual" open>
+        <summary>
+          <span class="label">Manual</span> <b>GSM {flowTask.no} · {flowTask.short}</b>
+        </summary>
+        <div class="col" style={{ gap: 10, marginTop: 8 }}>
+          <GsmCard t={flowTask} />
+        </div>
+      </details>
+    );
+  }
   if (!asset || asset.kind !== 'plane' || o.role !== 'mech') return null;
   const ac = islandAircraft(s.seed, asset);
   // a part chain's lookup, research, check or card: the part's own task, not the card of the job that found it
   const ch = o.chain && o.chain.step !== 'job' ? openChain(s) : null;
   const part = ch && ch.id === o.chain!.id ? PART_TASK[ch.tag] : undefined;
-  const t = taskCardFor(ac, part ?? o.job ?? o.kind);
+  const t = part ? taskCardFor(ac, part) : cardForTask(ac, flowTask, o.job ?? o.kind);
   const gpu = o.kind === 'gpustart';
   const alt = alterationOf(ac);
   const ica = t && alt && alt.ata === t.ata ? alt : undefined;
@@ -286,6 +334,80 @@ export function ManualSection({ s, o }: { s: IslandState; o: Order }) {
         )}
       </div>
     </details>
+  );
+}
+
+/** The electrician's code and procedure reference entry: its rule in plain English and its NEC basis; tiers 0-2 add the answer for this job's site. */
+export function RefCard({ t, answer }: { t: Task; answer?: string }) {
+  return (
+    <div class="col task-card ref-card" style={{ gap: 8 }}>
+      <div class="row spread" style={{ alignItems: 'baseline' }}>
+        <b>{t.no}</b>
+        <span class="label">{t.chapter}</span>
+      </div>
+      <span style={{ fontWeight: 700 }}>{t.title}</span>
+      {t.nec && t.nec.length > 0 && (
+        <div class="row wrap" style={{ gap: 6 }}>
+          {t.nec.map((n) => (
+            <span key={n} class="chip">
+              {/^(Table|Chapter)/.test(n) ? n : `NEC ${n}`}
+            </span>
+          ))}
+        </div>
+      )}
+      {t.summary && <p style={{ margin: 0, fontSize: 15 }}>{t.summary}</p>}
+      {answer && (
+        <div class="amm-caut">
+          <b>THIS JOB</b> {answer}
+        </div>
+      )}
+      {!t.kind && <span class="label">Reference only: it explains the rule. The procedure that does the work is its own entry.</span>}
+    </div>
+  );
+}
+
+/** The standby generator's service manual: its steps. */
+export function GsmCard({ t }: { t: Task }) {
+  return (
+    <div class="col task-card" style={{ gap: 8 }}>
+      <div class="row spread" style={{ alignItems: 'baseline' }}>
+        <b>GSM {t.no}</b>
+        <span class="label">Harborline 60 kW diesel</span>
+      </div>
+      <span style={{ fontWeight: 700 }}>{t.title}</span>
+      {t.steps && (
+        <ol class="gsm-steps">
+          {t.steps.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/** What a task draws: the slots the tech picks, its own bench stock (the card's consumables) and its shop tools. */
+export function TaskDraws({ s, a, t }: { s: IslandState; a: Alert; t: Task }) {
+  const asset = s.assets.find((x) => x.id === a.assetId);
+  const ac = acOf(s, asset);
+  const slots = slotsAt(t, null).filter((m) => !m.outdoor);
+  const bench = asset ? benchFor(t, ac, asset) : [];
+  const name = (id: string) => {
+    const x = itemById(id);
+    return x ? (x.trade === 'mech' ? x.nomen.split(',')[0].toLowerCase() : x.nomen.split(',')[0]) : id;
+  };
+  if (!slots.length && !bench.length && !t.tools.length && !t.fixed) return null;
+  return (
+    <div class="col jf-draws" style={{ gap: 4 }}>
+      {t.fixed && <span class="label">Pre-filled line: the {t.book === 'REF' ? "supply house's job lot" : "engine maker's exchange unit"}</span>}
+      {slots.length > 0 && (
+        <span class="label">
+          You pick: {slots.map((m) => `${m.label} × ${typeof m.qty === 'number' ? m.qty : slotQty(m, ac, null)}${m.optional ? ' (if needed)' : ''}`).join(' · ')}
+        </span>
+      )}
+      {bench.length > 0 && <span class="label">Drawn on its own: {bench.map((l) => name(l.item)).join(', ')}</span>}
+      {t.tools.length > 0 && <span class="label">Tools: {t.tools.map((id) => itemById(id)?.nomen.split(',')[0] ?? id).join(', ')}</span>}
+    </div>
   );
 }
 

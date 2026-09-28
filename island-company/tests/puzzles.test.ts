@@ -221,6 +221,38 @@ describe('circuit trace', () => {
     expect(generateTrace(1, 2).showStates).toBe(true);
     expect(generateTrace(1, 3).showStates).toBe(false);
   });
+  it("from the alert's site: the named room and its breaker, one receptacle on an individual circuit, and a warm plate is the hot joint on a live run", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const hall = generateTrace(seed, 3, [], undefined, { room: 'Living room', amps: 15, fault: 'dead' });
+      expect(hall.symptom).toMatch(/^Living room is dead/);
+      expect(hall.chain.slice(1).every((i) => hall.devices[i].name.startsWith('Living room '))).toBe(true);
+      expect(hall.amps).toBe(15);
+      expect(hall.devices[0].name).toBe('Breaker 15 A');
+      const single = generateTrace(seed, 4, [], undefined, { room: 'Bedroom', amps: 20, single: true, appliance: 'window unit', fault: 'dead' });
+      expect(single.chain).toHaveLength(2);
+      expect(single.devices).toHaveLength(2);
+      expect(single.symptom).toBe("The window unit's outlet is dead");
+      expect(isFaultMark(single, single.devices[1].pos)).toBe(true);
+      const warm = generateTrace(seed, 4, [], undefined, { room: 'Hall', amps: 20, device: 'switch', fault: 'warm' });
+      expect(warm.warm).toBe(true);
+      expect(warm.devices.every((d) => d.live)).toBe(true);
+      const hot = warm.devices[warm.chain[warm.faultAfter]];
+      expect(hot.kind).toBe('switch');
+      expect(warm.symptom).toBe(`A ${hot.name.toLowerCase()} plate is warm`);
+      expect(warm.temps![hot.id]).toBeGreaterThanOrEqual(130);
+      expect(Math.max(...warm.temps!.filter((_, i) => i !== hot.id))).toBeLessThan(100);
+      expect(isFaultMark(warm, hot.pos)).toBe(true);
+      for (const id of warm.chain.slice(1)) if (id !== hot.id) expect(isFaultMark(warm, warm.devices[id].pos)).toBe(false);
+      expect(scoreTrace(warm, { wrongMarks: 0, correct: true, tests: warm.optimalTests, tracedFrac: 1 })).toBe(1);
+      // the appliance's own plug running warm: the one receptacle
+      const plug = generateTrace(seed, 4, [], undefined, { room: 'Kitchen', amps: 20, single: true, appliance: 'microwave', fault: 'warm' });
+      expect(plug.symptom).toBe("The microwave's plug runs warm");
+      expect(isFaultMark(plug, plug.devices[1].pos)).toBe(true);
+    }
+    // no site: the stock scenario (a 20 A circuit)
+    expect(generateTrace(2, 3).amps).toBe(20);
+    expect(generateTrace(2, 3).warm).toBeUndefined();
+  });
 });
 
 describe('wire-up', () => {

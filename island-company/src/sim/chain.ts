@@ -122,7 +122,7 @@ const ITEMS: Record<string, ItemDef> = {
   // a new element is the whole fix for a clogged one; metal in it would mean a pump coming apart, and a flush
   filter: { name: () => 'hydraulic filter element', how: 'damaged', found: () => 'clogged: bypass indicator extended at the scheduled change; the element cut open shows fine sludge, no metal' },
   resCap: { name: () => 'hydraulic reservoir filler cap', how: 'missing', found: () => 'missing: the reservoir was left open under the panel' },
-  radio: { name: () => 'com radio', how: 'gone', found: () => 'is dead on transmit, and receive is weak' },
+  radio: { name: () => 'com radio', how: 'gone', found: () => 'is dead on transmit (it receives fine)' },
   generator: {
     name: (m) => (m === 'cargo' ? 'starter-generator' : 'alternator'),
     how: 'gone',
@@ -363,7 +363,7 @@ export function chainSteps(c: PartChain): { key: string; label: string; state: '
 // The manual: the task card a job works to
 
 /** the fastener a job's torque step is about, by task card */
-const TORQUE_STEP: Record<AmmTaskKey, (model: string) => string> = {
+const TORQUE_STEP: Partial<Record<AmmTaskKey, (model: string) => string>> = {
   wheel: () => 'tieNut',
   brake: () => 'backPlateBolt',
   prop: () => 'propBolt',
@@ -404,7 +404,9 @@ export function manualCard(ac: Aircraft, job: string, puzzle: string, marked: bo
   };
   const icaText = ica ? `${ica.doc} · ${ica.approval}` : '';
   if (puzzle === 'torque') {
-    const key = TORQUE_STEP[t.key](ac.model);
+    const step = TORQUE_STEP[t.key];
+    if (!step) return undefined;
+    const key = step(ac.model);
     const oem = t.torques.filter((q) => q.key === key);
     const it = ica?.torques.find((q) => q.key === key);
     if (!oem.length && !it) return undefined;

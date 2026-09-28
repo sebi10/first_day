@@ -9,7 +9,8 @@ import { MODELS, TIERS, ECON } from './sim/data';
 import { gseCarts } from './sim/econ';
 import { apply, createIsland } from './sim/engine';
 import { developmentOf } from './sim/growth';
-import type { IslandState, Order, Role, Weather, WeekReport } from './sim/types';
+import { BUILDS, COTTAGE, wageAt } from './sim/staff';
+import type { Alert, IslandState, NpcRole, Order, Role, Weather, WeekReport } from './sim/types';
 import { Island } from './ui/island';
 
 type Phase = 'dawn' | 'day' | 'golden' | 'night';
@@ -54,6 +55,23 @@ function order(s: IslandState, role: Role, done: boolean): string {
   const id = `lab-${role}`;
   s.orders.push({ id, role, kind: 'project', assetId: null, title: 'Crew project part', puzzle: 'torque', tier: 3, cost: 0, parts: 0, gain: 0, createdWeek: s.week, deferrals: 0, lastDeferredWeek: null, status: done ? 'done' : 'ready', seed: 1 } as Order);
   return id;
+}
+
+/** the island's staff for a scene (role and skill each, all at work) */
+function staffed(s: IslandState, crew: [NpcRole, 1 | 2 | 3 | 4 | 5][]) {
+  s.staff = crew.map(([role, skill], i) => ({ id: `n${900 + i}`, name: `Crew ${i + 1}`, role, skill, wage: wageAt(role, skill), hired: 0, start: 0 }));
+}
+
+/** the builders' site work: tier 4's (the villas and the seaplane dock) part done, or finished and a cottage under way in the grove */
+function sitework(s: IslandState, t4: number, cottage?: number) {
+  const d = BUILDS.find((b) => b.tier === 4)!;
+  s.builds = [{ id: d.id, what: d.what, tier: 4, done: t4, drawn: Math.ceil(t4), need: d.units.length, started: s.week - 4, ...(t4 >= d.units.length ? { finished: s.week - 1 } : {}) }];
+  if (cottage !== undefined) s.builds.push({ id: 'cottage-h8', what: COTTAGE.what, cottage: 'h8', done: cottage, drawn: Math.ceil(cottage), need: COTTAGE.units.length, started: s.week - 2 });
+}
+
+/** an open alert, as the engine raises it (a hazard on a house, a squawk due now on a plane) */
+function alertOn(s: IslandState, id: string, assetId: string, sym: string, role: 'mech' | 'elec', o: Partial<Alert> = {}) {
+  s.alerts = [...(s.alerts ?? []), { id, role, assetId, sym, src: role === 'mech' ? 'squawk' : 'guest', week: s.week - 1, due: s.week, seed: 5, kind: 'repair', cause: 0, status: 'open', ...o } as Alert];
 }
 
 const SCN: Scn[] = [
@@ -145,6 +163,50 @@ const SCN: Scn[] = [
       gse(s);
       s.gse![0].hookedTo = 'p3';
       s.chain = { id: 'lab-chain', orderId: 'lab-job', assetId: 'p3', title: 'Replace alternator', ata: '24-30', tag: 'generator', item: 'alternator', how: 'gone', by: 'Seb', week: s.week - 1, step: 'lookup', returns: 0, rejects: 0, spent: 0, aogWeeks: 1 };
+    },
+  },
+  // the staff (docs/JOBFLOW.md 15.10): three builders on the villa site, a pilot by the twin and one by the cargo plane, two housekeepers
+  {
+    id: 'staff',
+    note: 'Tier 3 with its staff: three builders on the villa and dock site (1.4 of 4 units), a pilot by the twin and one by the cargo plane, housekeepers at two booked houses',
+    tier: 3,
+    phase: 'day',
+    tweak: (s) => {
+      staffed(s, [['pilot', 3], ['pilot', 2], ['housekeeper', 3], ['housekeeper', 4], ['builder', 3], ['builder', 4], ['builder', 2]]);
+      sitework(s, 1.4);
+    },
+  },
+  {
+    id: 'staff-night',
+    note: 'The same at night: the staff are off, one figure works late in the lit office window',
+    tier: 3,
+    phase: 'night',
+    tweak: (s) => {
+      staffed(s, [['pilot', 3], ['pilot', 2], ['housekeeper', 3], ['housekeeper', 4], ['builder', 3], ['builder', 4], ['builder', 2]]);
+      sitework(s, 1.4);
+    },
+  },
+  {
+    id: 'staff-alerts',
+    note: 'Tier 3: the twin flies restricted (placard), Cottage 2 closed by a hazard (no entry), Cottage 3 made safe (tag), two builders on Cottage 5 in the grove',
+    tier: 3,
+    phase: 'day',
+    tweak: (s) => {
+      staffed(s, [['pilot', 3], ['pilot', 3], ['housekeeper', 3], ['builder', 3], ['builder', 3]]);
+      sitework(s, 4, 2.2);
+      alertOn(s, 'a1', 'p1', 'M_BRAKE_SOFT', 'mech', { kind: 'brakes' });
+      alertOn(s, 'a2', 'h2', 'E_WARM_OUTLET', 'elec', { kind: 'outlet' });
+      alertOn(s, 'a3', 'h3', 'E_WARM_OUTLET', 'elec', { kind: 'outlet', safe: { how: 'breaker', week: s.week, by: 'Mia' } });
+    },
+  },
+  {
+    id: 'staff-cottages',
+    note: 'Tier 4: the two extra cottages the analyst had built, in the lagoon grove (Cottage 5 and 6)',
+    tier: 4,
+    phase: 'day',
+    tweak: (s) => {
+      staffed(s, [['pilot', 3], ['pilot', 3], ['housekeeper', 3], ['housekeeper', 3], ['builder', 3]]);
+      for (const [id, name] of [['h8', 'Cottage 5'], ['h9', 'Cottage 6']]) s.assets.push({ id, kind: 'house', model: 'cottage', name, health: 84, touchedWeek: s.week - 2, inspectionUntil: s.week + 8 });
     },
   },
   {

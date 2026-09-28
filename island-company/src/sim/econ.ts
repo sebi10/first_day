@@ -1,6 +1,8 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
-import { CATALOG_BY_KIND, DEFECT, ECON, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
-import type { Asset, CableBand, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
+import { soleGuest, symptomOf } from './alerts';
+import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
+import { charterMult, housekeepingCap, payroll, pilotCap, reviewMult } from './staff';
+import type { Alert, Asset, CableBand, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round10 = (v: number) => Math.round(v / 10) * 10;
@@ -33,13 +35,46 @@ export function charterLoad(s: IslandState, rate: number, week = s.week) {
 
 /** safety calls: a grounded plane or a red-tagged house is out of service this week */
 export const isTagged = (s: IslandState, id: string) => !!s.tags?.[id];
-/** a plane waiting on a part (the open part chain): not airworthy until it's installed */
-export const isAog = (s: IslandState, id: string) => !!s.chain && s.chain.step !== 'done' && s.chain.assetId === id;
-/** out of service (a safety call, or AOG for a part): no flights or guests, and nothing can fail in service */
+/** a plane waiting on a part (the open part chain): not airworthy until it's installed. A chain the job flow's research opened doesn't ground by itself (its alert does, if it is an airworthiness one) */
+export const chainAog = (s: Pick<IslandState, 'chain'>, id: string) => !!s.chain && s.chain.step !== 'done' && s.chain.assetId === id && !s.chain.flow;
+
+/** an open or planned (not signed off) airworthiness alert on the plane, due by `week`, not placarded through it */
+function groundingAlert(s: Pick<IslandState, 'alerts'>, planeId: string, week: number): Alert | undefined {
+  return (s.alerts ?? []).find((a) => a.assetId === planeId && a.status !== 'closed' && a.kind !== 'repair' && !!symptomOf(a)?.aw && a.due <= week && !(a.mel && a.mel.until >= week));
+}
+/** the alert that grounds a plane (10): never on the only guest plane, which flies restricted instead */
+export function alertAog(s: Pick<IslandState, 'alerts' | 'assets'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
+  if (soleGuest(s, planeId)) return undefined;
+  return groundingAlert(s, planeId, week);
+}
+/** the only guest plane past due on an airworthiness alert: it flies half its flights, a near-miss each */
+export function restrictedBy(s: Pick<IslandState, 'alerts' | 'assets'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
+  if (!soleGuest(s, planeId)) return undefined;
+  return groundingAlert(s, planeId, week);
+}
+/** an open or planned alert on the plane placarded INOP under the MEL (category C) through `week`: it flies on the placard */
+export function melOn(s: Pick<IslandState, 'alerts'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
+  return (s.alerts ?? []).find((a) => a.assetId === planeId && a.status !== 'closed' && !!a.mel && a.mel.until >= week);
+}
+/** an open or planned hazard alert on a house (it closes the house until it's made safe or fixed) */
+export function hazardOn(s: Pick<IslandState, 'alerts'>, houseId: string): Alert | undefined {
+  return (s.alerts ?? []).find((a) => a.assetId === houseId && a.status !== 'closed' && !!symptomOf(a)?.hazard);
+}
+/** 0.75 while a made-safe hazard is open on the house, else 1 */
+export const rentFactor = (s: Pick<IslandState, 'alerts'>, h: Pick<Asset, 'id'>) => (hazardOn(s, h.id)?.safe ? 0.75 : 1);
+
+/** not airworthy: the part chain's AOG, or an airworthiness alert past due */
+export const isAog = (s: IslandState, id: string) => chainAog(s, id) || !!alertAog(s, id);
+/** out of service (a safety call, or AOG): no flights or guests, and nothing can fail in service */
 export const outOfService = (s: IslandState, id: string) => isTagged(s, id) || isAog(s, id);
 export function capOf(s: IslandState, p: Asset, weather: Weather = s.weather) {
-  return outOfService(s, p.id) ? 0 : planeCapacity(p, s.tier, weather);
+  if (outOfService(s, p.id)) return 0;
+  // restricted: half its flights, as at 40-59 health
+  return planeCapacity(restrictedBy(s, p.id) ? { ...p, health: Math.min(p.health, 59) } : p, s.tier, weather);
 }
+
+/** the fixed cost a week: the tier's overhead plus the staff's payroll (the stubs: today's fixed cost) */
+export const fixedNow = (s: IslandState) => tierDef(s.tier).overhead + payroll(s);
 
 export const rateBounds = (base: number, receivership: boolean) => ({
   min: Math.round(base * ECON.rateFloor),
@@ -72,12 +107,15 @@ export function powered(s: IslandState) {
 }
 
 export function houseRentable(s: IslandState, h: Asset, week = s.week) {
-  return !isTagged(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week;
+  const hz = hazardOn(s, h.id);
+  return !isTagged(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week && !(hz && !hz.safe);
 }
 
 export function houseBlocker(s: IslandState, h: Asset, week = s.week): string | null {
   if (isTagged(s, h.id)) return 'red-tagged';
   if (!powered(s).on) return 'no power';
+  const hz = hazardOn(s, h.id);
+  if (hz && !hz.safe) return 'hazard';
   if (h.health < 40) return `reliability ${Math.round(h.health)}`;
   if ((h.inspectionUntil ?? 0) < week) return 'inspection lapsed';
   return null;
@@ -222,29 +260,70 @@ export function urgency(s: IslandState, o: Order) {
     (o.kind === 'repair' ? 40 : 0) +
     (o.redo ? 15 : 0) +
     // a plane is down until the part chain is through
-    (o.chain ? 120 : 0)
+    (o.chain ? 120 : 0) +
+    // the job flow: an airworthiness or hazard alert, due now (it grounds, restricts or closes at this resolve)
+    flowUrgency(s, o)
   );
 }
 
-/** Expected revenue for the current week with no noise (analyst desk preview). */
+function flowUrgency(s: IslandState, o: Order): number {
+  if (!o.flow) return 0;
+  const a = s.alerts?.find((x) => x.id === o.flow!.alert);
+  const sym = a ? symptomOf(a) : undefined;
+  if (!a || !sym) return 0;
+  // only what bites at this resolve jumps the queue (a load sheet still goes before next week's work)
+  return (!!sym.aw || !!sym.hazard) && a.due <= s.week ? 150 : 0;
+}
+
+/**
+ * The fleet's flights this week, as the resolve flies them (step 2): each
+ * plane's capacity, then the pilots' caps (D: `pilotCap`) on the guest planes
+ * and on the whole fleet, taking flights off the cargo plane first so guests
+ * keep flying. Returns the flights per plane.
+ */
+export function capFleet(s: IslandState, caps: { plane: Asset; n: number }[]): { plane: Asset; n: number }[] {
+  const cap = pilotCap(s);
+  const out = caps.map((c) => ({ ...c }));
+  const guest = out.filter((c) => !MODELS[c.plane.model].cargo);
+  let over = guest.reduce((n, c) => n + c.n, 0) - cap.guest;
+  for (const c of [...guest].reverse()) {
+    if (over <= 0) break;
+    const cut = Math.min(c.n, over);
+    c.n -= cut;
+    over -= cut;
+  }
+  over = out.reduce((n, c) => n + c.n, 0) - cap.total;
+  for (const c of [...out].sort((a, b) => Number(!!MODELS[b.plane.model].cargo) - Number(!!MODELS[a.plane.model].cargo))) {
+    if (over <= 0) break;
+    const cut = Math.min(c.n, over);
+    c.n -= cut;
+    over -= cut;
+  }
+  return out;
+}
+
+/** Expected revenue for the current week with no noise (analyst desk preview): the same caps as the resolve (pilots, housekeeping, reviews, tours, a made-safe house's rent). */
 export function projectWeek(s: IslandState, rates = s.rates) {
   const td = tierDef(s.tier);
-  const pax = planes(s).filter((p) => !MODELS[p.model].cargo);
-  const paxFlights = pax.reduce((n, p) => n + capOf(s, p), 0);
+  const fleet = capFleet(
+    s,
+    planes(s).map((p) => ({ plane: p, n: capOf(s, p) })),
+  );
+  const pax = fleet.filter((c) => !MODELS[c.plane.model].cargo);
+  const paxFlights = pax.reduce((n, c) => n + c.n, 0);
   const rentable = houses(s)
     .filter((h) => houseRentable(s, h))
     .sort((a, b) => b.health - a.health);
-  const booked = rentable.slice(0, paxFlights + td.ferry);
-  const occ = occupancy(s, rates.nightly);
-  const rental = booked.reduce((n, h) => n + 7 * rates.nightly * (MODELS[h.model].mult ?? 1) * occ, 0);
+  const booked = rentable.slice(0, Math.min(paxFlights + td.ferry, housekeepingCap(s)));
+  const occ = clamp(occupancy(s, rates.nightly) * reviewMult(s, booked.length), 0, 1);
+  const rental = booked.reduce((n, h) => n + 7 * rates.nightly * (MODELS[h.model].mult ?? 1) * occ * rentFactor(s, h), 0);
   let guestNeed = Math.max(0, booked.length - td.ferry);
-  const load = charterLoad(s, rates.charter);
+  const load = charterLoad(s, rates.charter) * charterMult(s);
   let charter = 0;
-  for (const p of [...pax].sort((a, b) => (MODELS[a.model].mult ?? 1) - (MODELS[b.model].mult ?? 1))) {
-    const n = capOf(s, p);
-    const used = Math.min(guestNeed, n);
+  for (const c of [...pax].sort((a, b) => (MODELS[a.plane.model].mult ?? 1) - (MODELS[b.plane.model].mult ?? 1))) {
+    const used = Math.min(guestNeed, c.n);
     guestNeed -= used;
-    charter += (n - used) * rates.charter * (MODELS[p.model].mult ?? 1) * load;
+    charter += (c.n - used) * rates.charter * (MODELS[c.plane.model].mult ?? 1) * load;
   }
   return {
     revenue: Math.round(rental + charter),
@@ -256,7 +335,7 @@ export function projectWeek(s: IslandState, rates = s.rates) {
     occ,
     load,
     budget: td.budget,
-    fixed: td.fixed,
+    fixed: fixedNow(s),
   };
 }
 
@@ -270,8 +349,23 @@ export function downtimeOf(s: IslandState, assetId: string): { flights: number; 
   const p = s.assets.find((a) => a.id === assetId);
   if (!p) return { flights: 0, usd: 0, cargo: false };
   const flights = planeCapacity({ ...p, health: Math.max(p.health, 60) }, s.tier, 'clear');
-  if (MODELS[p.model].cargo) return { flights, usd: s.parts.inTransit > 0 ? ECON.boatKit : 0, cargo: true };
-  const up = projectWeek({ ...s, chain: s.chain?.assetId === assetId ? null : s.chain, tags: { ...(s.tags ?? {}), [assetId]: undefined as never } }).revenue;
+  if (MODELS[p.model].cargo) {
+    // the cargo plane down holds its bulk POs due this week: the AOG boat for any that carries a line for safety work, else nothing
+    const safety = (orderId?: string) => {
+      const o = orderId ? s.orders.find((x) => x.id === orderId) : undefined;
+      const a = o?.flow ? s.alerts?.find((x) => x.id === o.flow!.alert) : undefined;
+      const sym = a ? symptomOf(a) : undefined;
+      return !!sym && (!!sym.aw || !!sym.hazard);
+    };
+    const boats = (s.pos ?? []).filter((po) => po.status === 'open' && po.carrier === 'bulk' && po.freight === 'sched' && po.eta <= s.week && po.lines.some((l) => safety(l.order))).length;
+    return { flights, usd: boats * FREIGHT.aog, cargo: true };
+  }
+  const up = projectWeek({
+    ...s,
+    chain: s.chain?.assetId === assetId ? null : s.chain,
+    alerts: (s.alerts ?? []).filter((a) => a.assetId !== assetId),
+    tags: { ...(s.tags ?? {}), [assetId]: undefined as never },
+  }).revenue;
   const down = projectWeek({ ...s, tags: { ...(s.tags ?? {}), [assetId]: 'mech' }, chain: s.chain }).revenue;
   return { flights, usd: Math.max(0, up - down), cargo: false };
 }

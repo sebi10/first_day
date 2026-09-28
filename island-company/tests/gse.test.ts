@@ -12,6 +12,7 @@ import { simulate, TEAMS } from '../src/sim/bots';
 import { CABLE_BAND, CABLE_REPORT, DEFECT_RULES, GSE, REPORTS, REPORT_BY_KEY, incidentText } from '../src/sim/data';
 import { cableBand, cableReport, gseCarts, gseForStart } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
+import { repairTask } from '../src/sim/flow';
 import { hashSeed } from '../src/sim/rng';
 import type { GseCart, IslandState, Order, Role } from '../src/sim/types';
 
@@ -34,6 +35,8 @@ function withCargo(w = 4, float = false): IslandState {
   s.week = w;
   s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 80, touchedWeek: 0, sinceInspection: 2 });
   if (float) s.assets.push({ id: 'p3', kind: 'plane', model: 'float', name: 'Float F-3', health: 80, touchedWeek: 0, sinceInspection: 2 });
+  // a second pilot, as the tier that brings the cargo plane has (the pilots' duty caps the fleet's flights)
+  s.staff!.push({ id: 'n900', name: 'Kai M.', role: 'pilot', skill: 3, wage: 320, hired: 0, start: 0 });
   return s;
 }
 
@@ -401,8 +404,15 @@ describe('cable wear: hidden until inspected, and it shows up later', () => {
     expect(inc.title).toBe(incidentText(DEFECT_RULES['gpu:arc'], 2, 'Cargo C-7'));
     expect(inc.from!.traced).toBe('the ground power start on a worn cart cable Ana signed off in week 4');
     expect(s.assets.find((a) => a.id === 'p2')!.health).toBeLessThan(h0);
-    const rep = s.orders.find((x) => x.kind === 'repair' && x.repair?.defect.id === d.id)!;
-    expect(rep).toMatchObject({ puzzle: 'teardown', job: 'receptacle' });
+    // the repair is an alert (planned like any): its job is the receptacle's teardown
+    const al = s.alerts!.find((x) => x.repair?.defect.id === d.id)!;
+    expect(al).toMatchObject({ role: 'mech', assetId: 'p2', kind: 'repair', src: 'again' });
+    const task = repairTask(s, al)!;
+    s.week = al.week;
+    const planned = apply(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick: [], week: s.week }, NOW);
+    expect(planned.error).toBeUndefined();
+    const rep = planned.s.orders.find((x) => x.flow?.alert === al.id)!;
+    expect(rep).toMatchObject({ kind: 'repair', puzzle: 'teardown', job: 'receptacle' });
   });
 
   it('arcs follow the wear: a good or cracked cable never arcs; pitted ones do, more the worse they are', () => {
@@ -479,12 +489,18 @@ describe('flight days on a weak battery: the cart chore most weeks', () => {
       s = apply(s, { t: 'join', uid: 'c', name: 'Cy', role: 'fin' }, NOW).s;
       for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'week0Done', role: r }, NOW).s;
       s.assets.push({ id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 90, touchedWeek: 0, sinceInspection: 0 });
+      // and its pilot (the pilots' duty caps the fleet's flights)
+      s.staff!.push({ id: 'n900', name: 'Kai M.', role: 'pilot', skill: 3, wage: 320, hired: 0, start: 0 });
       s.week = GSE.weakFrom;
       s.deadline = NOW;
       // resolve the week before: its week-open rolls this one's weak battery
       s.week = GSE.weakFrom - 1;
       const x = resolve(s);
-      if (x.weakBattery?.week === x.week && x.assets.find((a) => a.id === x.weakBattery!.assetId)?.model === model) return x;
+      if (x.weakBattery?.week === x.week && x.assets.find((a) => a.id === x.weakBattery!.assetId)?.model === model) {
+        // the week's alerts aside (an airworthiness one due now would restrict the twin): the battery is what's on trial
+        x.alerts = [];
+        return x;
+      }
     }
     throw new Error('no weak battery');
   }

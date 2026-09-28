@@ -11,7 +11,7 @@
 // there: it only senses AC.
 import { hashSeed, rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, ease, label, loop, pointer, roundRect, settle as settleResult, shade, stage } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { result, type PuzzleDef, type PuzzleResult, type PuzzleSite } from './types';
 
 export type Cond = 'H' | 'N' | 'G';
 export type FaultKind = 'openHot' | 'openNeutral' | 'looseHot' | 'looseNeutral' | 'mwbcNeutral' | 'unit';
@@ -58,6 +58,8 @@ export type MeterModel = {
   band: { lo: number; hi: number; ng: number };
   /** an aircraft 28 V DC circuit (the part chain's check): its words. The last item is the unit */
   dc?: DcProfile;
+  /** the branch circuit's breaker (the alert's own; 20 A otherwise) */
+  amps?: number;
 };
 
 export type Reading = { a: number; b: number; load: boolean };
@@ -86,7 +88,9 @@ const DC_TERM: Record<FaultKind, string> = {
   mwbcNeutral: 'lost return',
   unit: 'the unit itself (wiring good)',
 };
-export const faultTerm = (m: Pick<MeterModel, 'dc' | 'fault'>) => (m.dc ? DC_TERM : FAULT_TERM)[m.fault.kind];
+export const faultTerm = (m: Pick<MeterModel, 'dc' | 'fault'> & { items?: MeterModel['items'] }) =>
+  // a loose neutral at the panel is the lug screw on the neutral bar, not a receptacle's push-in
+  !m.dc && m.fault.kind === 'looseNeutral' && m.items?.[m.fault.at]?.name.startsWith('Neutral lug') ? 'loose neutral (lug screw)' : (m.dc ? DC_TERM : FAULT_TERM)[m.fault.kind];
 
 export const faultConductor = (k: FaultKind): 'H' | 'N' => (k === 'openHot' || k === 'looseHot' || k === 'unit' ? 'H' : 'N');
 
@@ -138,7 +142,7 @@ const DC_PLACES: Record<string, DcPlace> = {
       { name: 'Tray connector', kind: 'jbox' },
     ],
     unit: 'Com 1 radio',
-    symptom: 'Com 1 is dead on transmit, and receive is weak.',
+    symptom: 'Com 1 is dead on transmit; it receives fine.',
     loose: true,
     profile: { circuit: '28 V DC · com 1 power and ground', bus: 'Avionics bus (GPU)', load: { on: 'Keyed', off: 'Not keyed', sub: 'transmit' }, heads: DC_HEADS, words: { H: '+ power', N: '− ground' } },
   },
@@ -264,6 +268,32 @@ const PLACES: Record<string, { receps: string[]; jboxes: string[]; lights: strin
       looseNeutral: ['The 28 V ground power drops out whenever the avionics load it up.', 'The bay lights dim and the 28 V supply cuts out under load.'],
     },
   },
+  // the job flow's shower tingle (R-WH): the bath and the hall on the way to the heater closet, the water heater last
+  heater: {
+    receps: ['Bath outlet', 'Hall outlet', 'Vanity outlet', 'Linen-closet outlet', 'Laundry outlet', 'Bedroom outlet', 'Utility outlet', 'Hall-end outlet'],
+    jboxes: ["Heater closet's J-box"],
+    lights: ['Hall light', 'Bath light', 'Closet light'],
+    last: 'Water heater',
+    symptoms: {
+      openHot: ['No hot water, and the bath outlets are dead. Breaker is on.'],
+      openNeutral: ['The bath outlets are dead, but the pen tester beeps.'],
+      looseHot: ['The bath lights flicker whenever the water heater cycles on.'],
+      looseNeutral: ['The hall lights dim when the water heater kicks on, and there was a tingle at the shower valve.'],
+    },
+  },
+  // the job flow's grounding and bonding (R-GRND): the panel's ground bar, the water entrance, the heater's piping
+  bond: {
+    receps: ['Panel ground bar', 'Water entrance', "Heater's piping", 'Kitchen outlet', 'Bath outlet', 'Laundry outlet', 'Hose-bib outlet', 'Hall outlet'],
+    jboxes: ['Water-entrance J-box', "Heater closet's J-box"],
+    lights: ['Bath light', 'Hall light', 'Porch light'],
+    last: 'Shower valve',
+    symptoms: {
+      openHot: ['Dead outlets along the plumbing wall. Breaker is on.'],
+      openNeutral: ['Outlets on the plumbing wall are dead, but the pen tester beeps.'],
+      looseHot: ['A tingle at the shower valve, and the bath lights flicker.'],
+      looseNeutral: ['A tingle at the shower valve when the heater runs; the lights dim with it.'],
+    },
+  },
   office: {
     receps: ['Printer outlet', 'Desk outlet', 'Copier outlet', 'Kettle outlet', 'Monitor outlet', 'Filing-room outlet', 'Router outlet', 'Window outlet'],
     jboxes: ['Ceiling J-box', 'Wall J-box', 'Floor box'],
@@ -285,16 +315,32 @@ function pickFault(r: ReturnType<typeof rng>, tier: number): FaultKind {
   return 'mwbcNeutral';
 }
 
-export function generateMeter(seed: number, tier: number, _tools: string[] = [], job?: string, bench?: { fault: 'unit' | 'wiring' }): MeterModel {
+/**
+ * A flicker on the alert's circuit (the job flow's R-FLICK, context.site): the branch neutral loose at its lug on
+ * the panel's neutral bar. Everything works; under load the neutral rises and the voltage at every device swings
+ * (112-128 V): the first point that moves under load is the lug. The room's own devices, the circuit's own breaker.
+ */
+function roomPlace(room: string): { receps: string[]; jboxes: string[]; lights: string[] } {
+  const r = room.toLowerCase();
+  return {
+    receps: [`${room} outlet`, `${room} wall outlet`, `${room} corner outlet`, `${room} TV outlet`, `${room} lamp outlet`, `${room} window outlet`, `${room} desk outlet`, `${room} door outlet`],
+    jboxes: [`${room} J-box`, 'Attic J-box', 'Wall J-box'],
+    lights: [`${room} ceiling light`, `${room} fan light`, `Light by the ${r} door`],
+  };
+}
+
+export function generateMeter(seed: number, tier: number, _tools: string[] = [], job?: string, bench?: { fault: 'unit' | 'wiring' }, site?: PuzzleSite): MeterModel {
   const dcPlace = job ? DC_PLACES[job] : undefined;
   if (dcPlace) return generateDc(seed, tier, dcPlace, bench);
-  const place = job ? PLACES[job] : undefined;
+  const place = job && PLACES[job] ? PLACES[job] : site?.room ? roomPlace(site.room) : undefined;
   const r = rng(seed);
   const t = clamp(Math.round(tier), 0, 5);
   const n = [3, 4, 5, 6, 7, 8][t];
-  const kind = pickFault(r, t);
+  // the alert's own complaint: a loose neutral that only shows under load
+  const neutral = site?.fault === 'neutral' && !PLACES[job ?? ''];
+  const kind: FaultKind = neutral ? 'looseNeutral' : pickFault(r, t);
   const mwbc = kind === 'mwbcNeutral';
-  const withAnomaly = t >= 4;
+  const withAnomaly = t >= 4 && !neutral;
 
   // names: receptacles, plus a splice (tier 2+) and a light (tier 3+)
   const recs = r.shuffle([...(place?.receps ?? RECEPS)]);
@@ -309,11 +355,14 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [],
     switchedOff: false,
   }));
   // the complaint's own device ends the run (a receptacle, whatever was drawn there)
-  if (place?.last) items[n - 1] = { ...items[n - 1], name: place.last, kind: 'recep' };
+  const last = place && 'last' in place ? (place as { last?: string }).last : undefined;
+  if (last) items[n - 1] = { ...items[n - 1], name: last, kind: 'recep' };
+  // a flicker: the circuit's neutral lug on the panel's bar is the first point on the run
+  if (neutral) items[0] = { name: 'Neutral lug (panel)', kind: 'term', leg: 0, switchedOff: false };
 
   // the fault sits past at least one healthy item; past the anomaly by one more;
-  // on an MWBC both legs must show symptoms past the break
-  const at = r.int(withAnomaly ? 2 : 1, mwbc ? n - 2 : n - 1);
+  // on an MWBC both legs must show symptoms past the break (a flicker's loose lug: at the panel)
+  const at = neutral ? 0 : r.int(withAnomaly ? 2 : 1, mwbc ? n - 2 : n - 1);
   let anomaly = -1;
   if (withAnomaly) {
     // a receptacle upstream of a healthy item that is itself upstream of the fault
@@ -321,7 +370,8 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [],
     items[anomaly].switchedOff = true;
     items[anomaly].name = 'Switched outlet';
   }
-  const drop = kind === 'looseHot' || kind === 'looseNeutral' ? (t <= 3 ? r.range(22, 32) : r.range(16, 24)) : 0;
+  // a flicker's loose lug swings the voltage 112-128 V under load (the finding's reading)
+  const drop = neutral ? r.range(6, 9) : kind === 'looseHot' || kind === 'looseNeutral' ? (t <= 3 ? r.range(22, 32) : r.range(16, 24)) : 0;
   const supply = Math.round(r.range(119.2, 122.8) * 10) / 10;
 
   const points: TestPoint[] = [{ item: -1, cond: 'H', leg: 0 }];
@@ -342,15 +392,21 @@ export function generateMeter(seed: number, tier: number, _tools: string[] = [],
     anomaly,
     mwbc,
     supply,
-    loadable: t >= 2,
+    loadable: t >= 2 || neutral,
     askConductor,
     par,
     maxCalls: t === 0 ? 5 : 3,
-    symptom: r.pick(place?.symptoms[kind] ?? SYMPTOMS[kind] ?? SYMPTOMS.openHot),
-    hints: HINTS[t] ?? [],
+    symptom: neutral
+      ? `The ${site!.room ? site!.room.toLowerCase() : 'house'} lights flicker and dim when a big load starts.`
+      : r.pick((place && 'symptoms' in place ? (place as { symptoms: Partial<Record<FaultKind, string[]>> }).symptoms[kind] : undefined) ?? SYMPTOMS[kind] ?? SYMPTOMS.openHot),
+    hints: neutral ? NEUTRAL_HINTS : (HINTS[t] ?? []),
     band: AC_BAND,
+    ...(site ? { amps: site.amps } : {}),
   };
 }
+
+/** a flicker's teaching lines (a loose neutral shows only under load) */
+const NEUTRAL_HINTS = ['Load on: a loose neutral shows only under load', 'N–G rising under load, H–N falling: the neutral', 'The first point that moves under load is loose'];
 
 /** Signed voltage to ground (L1 = +, L2 = −, 180° apart) at a test point. */
 export function pointVolts(m: MeterModel, p: TestPoint, load: boolean, ignoreSwitch = false): number {
@@ -543,7 +599,7 @@ export const meter: PuzzleDef = {
     context?.job && DC_JOBS.includes(context.job) ? 'On 28 V DC the first dead point is the break; good all the way and no output: the unit.' : undefined,
   seconds: (tier) => 70 + clamp(tier, 0, 5) * 10,
   mount(host, p) {
-    const m = generateMeter(p.seed, p.tier, p.tools, p.context?.job, p.context?.bench);
+    const m = generateMeter(p.seed, p.tier, p.tools, p.context?.job, p.context?.bench, p.context?.site);
     // a non-contact tester senses AC only: no use on an airplane's DC circuit
     const hasPen = p.tools.includes('nonContact') && !m.dc;
     const code = (c: Cond) => (m.dc ? m.dc.heads[c] : CODE[c]);
@@ -1056,7 +1112,7 @@ export const meter: PuzzleDef = {
       const heads = m.mwbc ? ['A', 'B', 'N', 'G'] : [code('H'), code('N'), code('G')];
       const hy = Math.max(top + 12, g.rowY(0) - g.rowH / 2 - 4);
       heads.forEach((hd, k) => label(ctx, hd, g.colX(k), hy, { size: 10.5, weight: 800, color: C.inkSoft }));
-      label(ctx, m.dc ? m.dc.circuit : m.mwbc ? 'MWBC · shared neutral' : '20 A branch circuit', g.pad + 8, hy, {
+      label(ctx, m.dc ? m.dc.circuit : m.mwbc ? 'MWBC · shared neutral' : `${m.amps ?? 20} A branch circuit`, g.pad + 8, hy, {
         size: 10.5,
         weight: 700,
         align: 'left',
@@ -1108,7 +1164,7 @@ export const meter: PuzzleDef = {
         ctx.stroke();
         ctx.setLineDash([]);
         drawIcon(g.pad + 20, y, it, gleam, r === 0);
-        const name = r === 0 ? (m.dc ? m.dc.bus : m.mwbc ? 'Panel · 2-pole 20 A' : 'Panel · 20 A breaker') : `${r}  ${it!.name}`;
+        const name = r === 0 ? (m.dc ? m.dc.bus : m.mwbc ? `Panel · 2-pole ${m.amps ?? 20} A` : `Panel · ${m.amps ?? 20} A breaker`) : `${r}  ${it!.name}`;
         const nameW = g.colX(0) - 22 - (g.pad + 40);
         ctx.save();
         ctx.beginPath();

@@ -25,8 +25,21 @@ export function orderXp(tier: number, credit: number, perfect: boolean) {
 
 export const isMentor = (p: Player | undefined) => !!p && levelOf(p.xp) >= 30;
 
-/** What the next tier needs, as a short checklist for the UI */
-export function nextTierProgress(s: IslandState): { name: string; items: { label: string; ok: boolean }[] } | null {
+/** What the next tier needs, as a short checklist for the UI. An `info` line (the builders' site work) doesn't gate the tier */
+export function nextTierProgress(s: IslandState): { name: string; items: { label: string; ok: boolean; info?: boolean }[] } | null {
+  const p = unlockProgress(s);
+  if (!p) return null;
+  // the builders' site work for that tier (docs/JOBFLOW.md 15.5): it sets how the new buildings start, never when the tier comes
+  const b = (s.builds ?? []).find((x) => x.tier === s.tier + 1);
+  if (b && b.need > 0) {
+    const done = Math.min(b.done, b.need);
+    const words = Math.abs(done - Math.round(done)) < 0.05 ? String(Math.round(done)) : done.toFixed(1);
+    p.items.push({ label: `Site work (builders): ${words} of ${b.need}`, ok: done >= b.need - 1e-9, info: true });
+  }
+  return p;
+}
+
+function unlockProgress(s: IslandState): { name: string; items: { label: string; ok: boolean; info?: boolean }[] } | null {
   if (s.tier >= 5) return null;
   const next = TIERS[s.tier];
   const st = s.stats;
@@ -69,6 +82,6 @@ function cleanStreak(recent: number[]) {
 }
 
 export function tierUnlocked(s: IslandState): boolean {
-  const p = nextTierProgress(s);
+  const p = unlockProgress(s);
   return !!p && p.items.every((i) => i.ok);
 }

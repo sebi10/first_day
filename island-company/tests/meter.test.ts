@@ -179,3 +179,28 @@ describe('meter puzzle model', () => {
     }
   });
 });
+
+describe("the flicker on the alert's circuit (the job flow's R-FLICK)", () => {
+  it('the loose neutral at its panel lug, shown only under load, among the room’s own devices on its own breaker', () => {
+    for (let t = 0; t <= 5; t++) {
+      const m = generateMeter(3 + t, t, [], 'flicker', undefined, { room: 'Living room', amps: 15, fault: 'neutral' });
+      expect(m.fault).toMatchObject({ kind: 'looseNeutral', at: 0 });
+      expect(m.items[0].name).toBe('Neutral lug (panel)');
+      expect(m.items.some((it) => it.name.startsWith('Living room'))).toBe(true);
+      expect(m.loadable).toBe(true);
+      expect(m.amps).toBe(15);
+      expect(m.anomaly).toBe(-1);
+      expect(m.symptom).toBe('The living room lights flicker and dim when a big load starts.');
+      // unloaded it reads healthy; under load the neutral rises at the lug and past it
+      expect(itemHealthy(m, 0, false)).toBe(true);
+      expect(itemHealthy(m, 0, true)).toBe(false);
+      expect(itemHealthy(m, m.items.length - 1, true)).toBe(false);
+      // a real tech: load on, the lug's N to G proves it
+      const ng: Reading = { a: pointIndex(m, 0, 'N'), b: pointIndex(m, 0, 'G'), load: true };
+      expect(readVolts(m, ng.a, ng.b, true)).toBeGreaterThanOrEqual(6);
+      expect(narrowing(m, [ng])).toBe(1);
+    }
+    // the stock scenario without a site is unchanged (and carries no breaker of its own)
+    expect(generateMeter(3, 2, [], 'flicker').amps).toBeUndefined();
+  });
+});

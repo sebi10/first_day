@@ -3,13 +3,17 @@
 // quarantined at receiving for its paperwork, a card that came in after the
 // analyst ended the turn, and paperwork that no grid outage, botch or blind
 // sign-off should get wrong.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { islandAircraft, plantFor, rightPn } from '../src/sim/chain';
-import { CHAIN, DEFECT, ECON } from '../src/sim/data';
+import { raiseAlert } from '../src/sim/alerts';
+import { CHAIN, DEFECT, ECON, FREIGHT } from '../src/sim/data';
 import { downtimeOf } from '../src/sim/econ';
 import { apply, chainCardCost, chainWouldOpen, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
-import { ROLES, type Asset, type IslandState, type Order } from '../src/sim/types';
+import { ROLES, type Asset, type IslandState, type Order, type PurchaseOrder } from '../src/sim/types';
+
+// 600 islands in one test: the CI runner is about 1.5x slower than a dev box
+vi.setConfig({ testTimeout: 30000 });
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 const CARGO: Asset = { id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 70, touchedWeek: 5, sinceInspection: 0 };
@@ -70,10 +74,15 @@ describe('the freight is on the PO, and the analyst chooses it', () => {
     expect(chainCardCost(s, card, 'boat')).toBe(card.cost + ECON.boatKit);
     expect(chainCardCost(s, card, 'flight')).toBe(card.cost);
     // what the downtime costs, for the card: the cargo plane carries no guests, so its week down costs the
-    // kits it would have flown in (each one comes by boat instead)
+    // bulk POs due this week that carry a line for safety work (each one comes on the AOG boat instead)
     const d = downtimeOf(s, 'p2');
     expect(d).toMatchObject({ flights: 4, usd: 0, cargo: true });
-    expect(downtimeOf({ ...s, parts: { ...s.parts, inTransit: 2 } }, 'p2').usd).toBe(ECON.boatKit);
+    const al = raiseAlert(s, { role: 'mech', asset: s.assets.find((a) => a.id === 'p2')!, sym: 'M_BRAKE_SOFT', cause: 1 }, NOW);
+    const o: Order = { ...card, id: 'o-bulk', chain: undefined, status: 'waiting_part', flow: { alert: al.id, task: 'amm:cargo:32-40-02', pick: [], bench: [], tools: [], bom: 0 } };
+    const po: PurchaseOrder = { id: 'po-bulk', week: s.week, vendor: 'oem', freight: 'sched', eta: s.week, lines: [{ item: '066-22500', qty: 4, unit: 60, order: o.id }], cost: 240, freightCost: 0, by: 'fin', status: 'open', carrier: 'bulk' };
+    expect(downtimeOf({ ...s, orders: [...s.orders, o], pos: [po] }, 'p2').usd).toBe(FREIGHT.aog);
+    // a stock PO (no job waits on it) just slips
+    expect(downtimeOf({ ...s, orders: [...s.orders, o], pos: [{ ...po, lines: [{ ...po.lines[0], order: undefined }] }] }, 'p2').usd).toBe(0);
     // a guest plane's week down is the revenue it would have flown
     const g = downtimeOf(s, 'p1');
     expect(g.cargo).toBe(false);

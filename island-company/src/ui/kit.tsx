@@ -43,7 +43,25 @@ const P: Record<string, string> = {
   gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm8 3-2-.6-.6-1.5 1-1.8-1.5-1.5-1.8 1-1.5-.6L13 4h-2l-.6 2-1.5.6-1.8-1-1.5 1.5 1 1.8L6 10.4 4 11v2l2 .6.6 1.5-1 1.8 1.5 1.5 1.8-1 1.5.6.6 2h2l.6-2 1.5-.6 1.8 1 1.5-1.5-1-1.8.6-1.5 2-.6z',
   star: 'M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4 6.5 20.3l1-6.2L3 9.7l6.2-.9z',
   pen: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
+  // the job flow (docs/JOBFLOW.md 17.1): alert sources, purchasing, stores and staff
+  squawk: 'M4 5h16v10H9l-5 4zM8 9h8M8 12h5',
+  trend: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+  wear: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 3v5M12 16v5M3 12h5M16 12h5',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+  guest: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-6 9a6 6 0 0 1 12 0M17 10h4v7h-4zM18 10V8h2v2',
+  meter: 'M6 3h12v18H6zM9 6h6v4H9zM12 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+  takeoff: 'M8 3h8v3H8zM6 4.5H4V21h16V4.5h-2M8 11h8M8 15h8M8 18h4',
+  truck: 'M2 7h11v9H2zM13 10h4l4 3v3h-8M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm11 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  boat: 'M3 15h18l-3 5H6zM12 3v12M12 4l6 8h-6',
+  tag: 'M3 12V3h9l9 9-9 9zM7.5 7.5h.01',
+  placard: 'M4 4h16v10H4zM12 14v6M8 20h8M8 8h8M8 11h5',
+  hardhat: 'M3 17h18v2.5H3zM5 17a7 7 0 0 1 14 0M10 6h4v5h-4z',
+  people: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20a6 6 0 0 1 12 0M13 20a5.5 5.5 0 0 1 9 0',
+  bin: 'M3 8h18v12H3zM5 4h14l2 4H3zM9 13h6',
 };
+
+/** every icon name kit.tsx draws (the packages pick from these) */
+export const ICON_NAMES = Object.keys(P);
 
 export function Icon({ name, size = 20, color = 'currentColor', stroke = 2 }: { name: string; size?: number; color?: string; stroke?: number }) {
   const fill = name === 'plane' || name === 'house' || name === 'bolt' || name === 'star';

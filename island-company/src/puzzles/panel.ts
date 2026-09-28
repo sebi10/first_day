@@ -6,7 +6,7 @@
 // 6→50 A) and do the load math yourself; from tier 4 loads come in watts.
 import { rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, fitLabel, label, loop, pointer, roundRect, settle, stage } from './kit';
-import { result, type PuzzleDef, type PuzzleResult } from './types';
+import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult } from './types';
 
 export const AMPACITY: Record<number, number> = { 14: 15, 12: 20, 10: 30, 8: 40, 6: 50 };
 export const SIZES = [15, 20, 30, 40, 50];
@@ -29,7 +29,20 @@ export type PanelModel = {
   sizing: boolean; // player picks breaker size (tier >= 3)
   wattsOnly: boolean; // loads shown in watts (tier >= 4)
   liveTotals: boolean; // teaching tiers show leg totals
+  /** the panelboard the job flow's pick brings ("400 A distribution panelboard · LOT-DIST"): display only */
+  picked: string | null;
 };
+
+/**
+ * The panelboard (or the transfer switch) in the job flow's pick, in a few
+ * words: a lot's name after its colon, up to the first comma, and its P/N.
+ */
+export function pickedPanel(pick: PuzzleContext['pick']): string | null {
+  const l = pick?.find((x) => /panelboard|transfer switch|load center/i.test(x.nomen));
+  if (!l) return null;
+  const words = (l.nomen.includes(':') ? l.nomen.slice(l.nomen.indexOf(':') + 1) : l.nomen).split(',')[0].trim();
+  return `${words} · ${l.pn}`;
+}
 
 const LOADS_120 = [
   { name: 'Kitchen counter', awg: 12, lo: 900, hi: 1700 },
@@ -51,7 +64,7 @@ const LOADS_240 = [
   { name: 'Hot tub heater', awg: 8, lo: 5000, hi: 6500 },
 ];
 
-export function generatePanel(seed: number, tier: number, _tools: string[] = [], job?: string): PanelModel {
+export function generatePanel(seed: number, tier: number, _tools: string[] = [], job?: string, pick?: PuzzleContext['pick']): PanelModel {
   const r = rng(seed);
   const generator = job === 'transfer';
   const n120 = tier <= 0 ? 3 : tier <= 2 ? 4 + tier : tier === 3 ? 6 : tier === 4 ? 7 : 8;
@@ -87,6 +100,7 @@ export function generatePanel(seed: number, tier: number, _tools: string[] = [],
     sizing: tier >= 3 || job === 'codeprep',
     wattsOnly: tier >= 4 || generator, // a generator is rated in kW
     liveTotals: tier <= 2,
+    picked: pickedPanel(pick),
   };
 }
 
@@ -134,7 +148,7 @@ export const panel: PuzzleDef = {
   term: 'Split-phase: two 120 V legs. 240 V loads draw from both. Breaker protects the wire.',
   seconds: (tier) => 70 + tier * 10,
   mount(host, p) {
-    const m = generatePanel(p.seed, p.tier, p.tools, p.context?.job);
+    const m = generatePanel(p.seed, p.tier, p.tools, p.context?.job, p.context?.pick);
     const clampMeter = p.tools.includes('clampMeter');
     const st = stage(host.el);
     const { ctx } = st;
@@ -281,6 +295,8 @@ export const panel: PuzzleDef = {
       const g = geo();
       backdrop(ctx, g.w, g.h);
       label(ctx, m.title, 16, 22, { size: 14, weight: 800, align: 'left' });
+      // the panelboard the electrician's job brings in (the job flow's pick)
+      if (m.picked) label(ctx, m.picked, 16, 38, { size: 10, weight: 700, color: C.inkSoft, align: 'left' });
       // panel box + bus
       roundRect(ctx, g.px, g.py, g.pw, g.ph, 12);
       ctx.fillStyle = '#9aa5a9';
