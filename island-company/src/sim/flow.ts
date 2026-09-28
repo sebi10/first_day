@@ -693,7 +693,8 @@ export type Card = {
 };
 
 /** resolves the asset spends out (AOG, closed) waiting on lines that land at `eta`'s resolve (the job is done the week after) */
-function outWeeks(s: IslandState, a: Alert | undefined, eta: number): number {
+/** the resolves an alert's asset is out (AOG, closed) when the fix's parts land at `eta`'s resolve (from stock: `W - 1`) */
+export function outWeeks(s: IslandState, a: Alert | undefined, eta: number): number {
   if (!a) return 0;
   const f = alertFlags(s, a);
   if (!f.aw && !f.hazard) return 0;

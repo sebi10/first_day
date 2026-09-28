@@ -81,7 +81,7 @@ export function Needs({ ctl }: { ctl: Ctl }) {
                       {p.askedBy ? `Approve ${p.askedBy}’s extension` : 'Approve the extension'}
                     </Btn>
                   ) : (
-                    <span class="chip">{p.ext ? 'Extended' : p.until < s.week - 1 ? 'Ran out' : 'Not asked yet'}</span>
+                    <span class="chip">{p.ext ? 'Extended' : p.until < s.week - 1 ? 'Ran out' : `${s.players.mech?.name ?? 'The mechanic'} asks first`}</span>
                   )}
                 </div>
               ))}

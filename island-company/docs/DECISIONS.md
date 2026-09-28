@@ -1181,3 +1181,81 @@ Robust (the final row above), with what still misses (same trace; `5532631` → 
 ### Tests
 
 `tests/robusttail.test.ts` (15): L1 (a new island's two cottages a week apart; the renewal from the booked date, lapsed and early; one house a week with the 3-week slip; the engine's sign-off; four cottages in step spread to four weeks; the live chain doc spreads), B (on schedule until due, then carried from the due week exactly as the unplanned alert; a non-flow job unchanged), L3 (covered at the second away resolve at 50% with the tier and the building health; a returning seat does its own part; a 4-week-absent seat isn't covered; the live doc's project; the absent teams stay at tier 1 over seeds 1–6), L4 (a covered prep renews; a covered 100-hour is logged). `tests/staff.test.ts`: a built cottage is booked the first free week from 8 out. The pacing guard and "no role can win alone" pass unchanged. 763 tests in all (748 before).
+
+## 2026-09-28: gap fixes, review round 1
+
+Branch `gaps` (on `2241f22`). Three read-only reviews (trades, play, systems) of the gap fixes and the robust tail: 6 majors, 30 minors. Every major is fixed; the minors are fixed or rejected below with the reason. Not pushed, not deployed. It ships under the branch's v4 gate (no further bump).
+
+### Majors
+
+- **The sub-charter's cover is what the twin would have flown** (`subCharterNeed`, econ.ts). It used the twin's schedule at health 100 with no pilot cap, so grounding a worn twin paid better than flying it. Reproduced on the engine (seed 42, week 5, clear): tier 2, twin at 35, tagged +$1,965 against −$2,024 flying (+$3,989 a week, 4/4 houses against 0/4, grade B against C); twin at 50, +$1,558; tier 1 at 35, +$2,098; tier 3 at 35, +$1,891. An unfixed past-due item paid the same. Now the cover is the twin's own schedule at its real airworthiness in that weather, as the island's pilots crew it (`capFleet`): a twin at 50 is covered for 2 of its 4, one under 40 for none (and no fee). The same runs after the fix: tagged or unfixed is never better (tier 2 at 50: −$333; at 35: $0, both empty). The empty-house lines read the same `cap`. Test: tiers 1–3 × health 0–100 in 10s, tagged against flying and unfixed against fixed, never more cash, guests or grade. The design note's "a twin below 40 flies nothing and empties the houses" is true again.
+- **The floatplane isn't free when the analyst is away** (`coverProject`, engine.ts). Autopilot's cover of *Win the floatplane at auction* now buys it at the fair price (`FLOAT_AUCTION.fair`, $4,800) and says so (*"…won at the fair price, $4,800."*). If that would take spendable cash under the freeze line ($2,000), the part waits and the review says why. Both follow-ups too:
+  - a lost bid no longer completes the part: nothing is bought, the part stays open, the same week refuses a second go (`Order.rebid`, optional, a new sale's seed), and the next floatplane comes up at next week's auction. The Home card says *Outbid this week*.
+  - the paper-sim bots bid for it as they bid for a lot (fair × (1.15 − 0.25 × score), capped at $5,600) and pay what they bid. Before, `bots.ts` completed it with no data, so the sim never paid the deposit a human pays. The win (and autopilot's buy) is booked in the ledger as `building` (the analyst's trade); before, the deposit left the bank with no ledger line.
+- **The feeder's re-test shows its number, blind too** (trace.ts close-out). Step 3 is now *"Megger again (110.7): L1, L2, N 380 MΩ to ground"* after the dig that re-made the failed splice (any dig so far), *"… 0.4 MΩ …"* after a wrong one, in plain ink at every tier. Two calls, the same look: **Dig again** and **Re-energize**. Dig again backfills that hole (drawn as fresh soil) and goes back to Dig here; a wrong dig was already counted as a wrong mark, and the clock runs. **Rejected part of the fix:** "the only button is Dig again" while it reads low. Knowing that 0.4 MΩ means don't close it (110.7) is the trade the scene tests; a button that disappears would tell a non-electrician the answer. Re-energizing at 0.4 MΩ is the low score and the `FEEDER_REDIG` defect later, as before. Mistakes still surface later on workmanship: split bolts plant `elec:noburial`, and the quality roll `FEEDER_REDIG`.
+- **The MEL ask is on the sent job's sheet and on End turn** (`MelNote.tsx`, JobView, home.tsx). Reproduced: with the job sent (the card with the analyst), the only ask was behind *Change the pick* → Investigate. Now the job sheet shows the MEL/airworthiness note (with the sub-charter clause) and *Ask Cy to authorize the one-time extension* whenever the placard runs out at this resolve or ran out at the last one (`canAskMel`, select.ts, the engine's `melExtend` window); the End turn lines that name the ask carry the same button (`EndCheck.melAsk`). Checked on a 390 px phone: one tap from the job sheet and from End turn, then the note reads *"Ana asked Cy to authorize the one extension"*.
+- **The hangar row at 360 px** (ops.tsx). The column keeps *AOG* (or *GND*) and the inspection count; why it's down is one short word (*for a part*, *past due*); the sub-charter gets its own full-width line under the row (*"Its guests fly in on a mainland sub-charter (2 × $270 this week) until it's back in service."*). At 360 px the name wraps to 3 lines in 113 px with a 113 px health bar and nothing overlaps (was: the label over the name and the bar).
+- **One missed evening isn't two** (`projectCoverWeek`, econ.ts). Autopilot now covers a crew project part only when the seat has missed every resolve of the wait (2 in a row), not whenever it happens to be away two weeks after the project opened. The cover week is the earliest resolve that could happen from here: never before the project has waited 2 weeks, this week's if the seat missed the last one, next week's if it hasn't, two weeks on once it has ended this week's turn; so the cards never point at a week gone by. The review line is from the real streak (*"Ben was away 2 weeks running: …"*). Test: Ben plays the week after it opened, misses the next, not covered; misses again, covered. **Owner call** (a pillar-level rule): HANDOFF §1.
+
+### Minors fixed
+
+- Feeder: one plausible trench (east along the path with a gentle, one-way drift, then down the east side to the cottages; hand holes at even spacing, a section down the side the same length on the drawn yard as one along the top). The dock-light circuit (tier 4) crosses the pedestal's tap to the dock instead of ending at the cottages. A dig counts as at a hand hole within 0.9 × the tap tolerance of it (its 26 px lid), so the shorter sections still leave a 36 px or longer dig target at tier 5 on a phone. Close-out wording: *"Re-made the failed splice with the slack: DBS-2 × 4"* (one splice re-made on each of L1, L2, N and the EGC, not a length spliced in); *"Backfill to 24 in (Table 300.5), warning ribbon above"* (the ribbon's 300.5(D)(3) is for services: R-FEED now calls it good practice). A blind hand-in draws only the runs you traced (both scenes).
+- MEL words: *"Ask Cy to authorize the one-time extension (the company's call and cost)"*; ONBOARDING says the analyst stands in for the certificate holder's management. A non-airworthiness MEL item (the intermittent com) no longer says it grounds the plane: past the placard it's an open write-up again, with deferral risk (Investigate, the analyst's Needs row). The airworthiness note reads *"at week 3's resolve, Twin N-12 is grounded unless it's signed off by then"*.
+- End turn, due now with no MEL relief: *"Fix it this week (no MEL relief), or from this resolve Twin N-12 is grounded …"* (no *or tag it*: the safety call grounds it too).
+- The approval card's *Waiting a week* counts the week a deferral would ground the plane: the extra resolves out (`outWeeks` at the picked freight's arrival a week later) × the downtime. A tier-1 card due next week with its part landing tonight: the deferral cost plus the $540+ of downtime (before: the deferral cost only).
+- The analyst's desk words the sub-charter as a projection while it can still be avoided (*"Twin N-12 is grounded at this resolve unless Ana signs off Brake linings: … −$540"*, chip *Sub-charter −$540 unless fixed*), else what holds it (the safety call, the part).
+- The review's AOG line counts the flights the weather allowed (the on-time grade's): *"… 3 flights cancelled"* in wind.
+- The forecast's hints add *"Sub-charter −$540/wk while Twin N-12 is down"*.
+- The sub-charter fee is booked on the twin (`asset`) and on the side that kept it down: the analyst's for an approval, stock or carrier AOG (`aogCause`), the mechanic's for the plan, a part chain or the safety call.
+- Home's island hint adds *"· a builder: the site"* when builders are drawn (it stays inside the island, ellipsized).
+- The inspector story card still passes every house in one visit, but books each renewal through the county's calendar (`bookInspection` from W + 8), so the notices never all come back in one week. Its option says so.
+- `bookInspection` books the nearest free week at or before the date first (up to the notice, 2 weeks early), and only later (up to 3 weeks) when none of those is free. A certificate no longer outlives its 8 weeks because the county is busy (the reviewer counted 59 of 349 renewals made 9–11 weeks); the notice just comes earlier.
+- Autopilot's covered code prep and 100-hour are signed at the pass mark (`SIGNOFF`, 60%), not 50%: a human's 50% fails the sign-off at a teaching tier, so autopilot passing at 50% made being away better than a poor attempt. (The fix's other option, passing only where a blind sign-off would, would lapse every absent seat's houses at tier 1; that's the absence-cost question for Seb below.)
+- `scripts/reverse-skew.ts`: the live engine's own reducer against docs this build wrote. It extracts nothing itself: `git archive <live sha> island-company | tar -x` into scratch (no repo worktree), then it plays one move on every fixture with this engine and asks the live one for every seat's end of turn, the resolve, a rename, each approval and each alert's NFF. On bd1e1d2: 173 of 173 moves on 19 docs refused, every doc untouched.
+
+### Minors rejected (reasons)
+
+- **Overdue 100-hour grounds the plane** (predates the branch). Right in principle (14 CFR 91.409(b)), but it isn't a wording or a cap: the 100-hour would need an airworthiness alert tied to the flight count, the generator and the bots changed with it, and its own balance run and skew test. It belongs in its own change. Logged in HANDOFF §7.
+- **Hand holes labelled by landmark.** A site plan numbers hand holes from the source (HH-1 nearest the panel); the locator still matters for the pedestal's tap and the dock-light circuit. The trench now reads as one run, which was the realism problem.
+- **Sub-charter fee at the incremental cost (~$170–200).** Kept at $270 as a deliberate price: the sim carries the twin's avgas, oil, reserves and landing fees in fixed overhead, not per flight, so nothing is saved while it sits and the island's extra cost is the whole fee. Said here; the number is Seb's to move.
+- **Regenerating the three `v3-bd1e1d2-restricted-*` fixtures.** Tried on the live engine (every team, seeds 0–9, the state after the week's last seat with the mechanic away and `restrictedBy` on the twin): no byte match with gap-charter's uncommitted capture. They stay as they are, with their provenance in `scripts/fixtures-v3.ts`; the reverse-skew script covers them.
+- **Absence cheaper (L4) and the robust tail.** Not code: HANDOFF §1 puts both to Seb with the numbers.
+
+### Balance (medians; `2241f22` → this commit)
+
+Standard (26 weeks × 30 seeds). Every CLAUDE.md target holds.
+
+| Team | Wk → T2 / T3 / T4 / T5 | Min cash | Weeks < $0 |
+|---|---|---|---|
+| All good | 5 / 9 / 16 / 21 → same | $7,088 → $7,088 | 0 → 0 |
+| All average | 7 / 12 / 16 / 22 → 7 / 12 / 16 / 23 | $5,805 → $5,805 | 0 → 0 |
+| Three friends | 8 / 11 / 16 / 22 → 8 / 11 / 16 / 23 | $6,271 → $6,271 | 0 → 0 |
+| Mistakes | 8 / 13 / 16 / 24 → 8 / 13 / 16 / 25 | $3,932 → $4,079 | 0 → 0 |
+| Mech / elec / fin absent | tier 1 | $3,172 / $7,410 / $4,847 → $2,305 / $7,410 / $4,847 | 0 / 0 / 0 |
+| Solo mech / elec / fin, nobody | tier 1 | | 43 / 274 / 4 / 350 → 35 / 263 / 12 / 362 |
+
+Robust (90 seeds × 4 crews = 360 games a team; misses by crew − / a / b / c):
+
+| Run | Three friends: miss T5 | weeks < $0 | All average: miss T5 | weeks < $0 |
+|---|---|---|---|---|
+| `2241f22` | 75 (18+19+21+17) | 2 | 51 (16+10+14+11) | 0 |
+| **this commit** | **102 (27+25+24+26)** | **1** | **77 (19+18+19+21)** | **0** |
+| this commit, bots pay no floatplane deposit (as before) | 69 (17+18+18+16) | 1 | 62 (15+12+15+20) | 0 |
+| this commit, the county's old booking (next free week after) | 94 (24+21+25+24) | 1 | 71 (22+17+16+16) | 0 |
+| this commit, the old L3 rule | 102 (identical) | 1 | 77 (identical) | 0 |
+
+- **The tail got worse because the sim got honest.** The bots now pay the floatplane deposit a human pays (about $4,560 at their bids): +33 and +15 misses. The deposit comes out at tier 4, from the cash the tier-5 gate counts ($60,000 and 20 weeks); a per-game trace of which gate each extra miss hit wasn't run. The live game didn't get harder for a human who wins the auction: it was always this price. Like for like (no deposit) this commit's other changes are 69 against 75 and 62 against 51 (the booking change is about +8 / +6 of it; the rest is within the ±3 noise per crew seen before, plus the cheaper certificates).
+- The L3 change doesn't move the sim: a present bot always does its project part the week it's there, so "played but skipped the part" only happens to people.
+- **Median week to tier 5** 22 → 23 for both target teams (inside 21–23).
+- The weeks below $0: three friends' 1 is crew a (seed 3, the mechanic away weeks 11–19, as before).
+- **Not fixed: the tail.** Both targets are missed (≤ 75 and ≤ 37). The levers left are Seb's (HANDOFF §1): count the floatplane at its book value toward the tier-5 cash gate (it's capex the island owns), or finance it, and the line-crew NPC (an electrician's helper) for the tier-4 overload. No gate, price or payroll changed here.
+
+### Old docs and the version gate
+
+- One new optional field, `Order.rebid` (the week a floatplane bid was lost); nothing else stored changes shape. These change what a resolve does (the cover, the booking, the sub-charter's cover, autopilot's inspections), which the branch's v4 gate already covers: `ENGINE_VERSION` 4, `DOC_VERSION` 4, rules `v == 4`. No further bump. Every fixture passes the skew and migration tests unchanged, and `scripts/reverse-skew.ts` shows the live engine refusing every move on them once this build has written them.
+- When it ships: the push deploys hosting and rules together, then `docs/handoff/probe-gate.mts` with OLD_V=3 NEW_V=4 (want v:3 permission-denied, v:4 not-found), then the crew closes and reopens the app.
+
+### Checks
+
+- `npx tsc --noEmit -p .`; 781/781 tests (45 files; 763 before): `tests/subcharter.test.ts` (the cover sweep, the worn and pilot-capped cover, the fee's side and asset, the card's waiting cost, the wind AOG line, the forecast hint, the MEL ask on a sent job), `tests/feeder.test.ts` (the blind re-test right and wrong, dig again, the route stays as traced, one trench over 40 seeds × 3 tiers), `tests/robusttail.test.ts` (one miss isn't two, the cover week, the floatplane won / outbid / covered / waiting, the inspector card, the booking), `tests/whosemove.test.ts`, `tests/staff.test.ts`.
+- `npm run build`; balance standard and robust (above); the pass-and-play e2e on a 390 × 844 phone and at 1280 × 820 (only the Manrope 403s); the island lab (beaten scene 1,390 nodes); scripted phone checks at 390 and 360 px of the hangar row, the job sheet's and End turn's MEL ask, the crew project card, the desk's projection, the island hint, and the feeder's blind close-out in the lab (wrong dig 0.4 MΩ → dig again → 380 MΩ → re-energize: 70%, one wrong call).

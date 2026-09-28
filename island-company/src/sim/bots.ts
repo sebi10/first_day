@@ -3,7 +3,7 @@
 import { planeModel, type Ata } from './aircraft';
 import { alertFlags, alertTier, causeOf, fixesOf, liveAlerts, needsOf, siteOf, symptomOf } from './alerts';
 import { botChainData, islandAircraft, needsFreight, openChain, wrongPn } from './chain';
-import { ECON, GSE, STOCK, TIERS } from './data';
+import { ECON, FLOAT_AUCTION, GSE, STOCK, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
 import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
 import { cardOf, judgeSlot, planTask, repairTask, stdPick } from './flow';
@@ -228,7 +228,13 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     .sort((a, b) => Number(b.kind === 'report') - Number(a.kind === 'report') || (b.leak ?? 0) - (a.leak ?? 0));
   for (const o of tasks) {
     const sc = score(r, skill);
-    if (o.kind === 'auction') {
+    if (o.kind === 'project' && o.puzzle === 'auction') {
+      // the floatplane (fix round 1): the bot bids as it does for a lot, and a win pays its bid, as a human's does.
+      // Outbid (or no cash for it), the part stays open for next week's sale
+      const bid = Math.min(FLOAT_AUCTION.cap, Math.round(FLOAT_AUCTION.fair * (1.15 - sc * 0.25)));
+      const win = sc > 0.5 && s.cash - ECON.freezeBelow >= bid && spendable(s) - bid > reserve;
+      s = step(s, { t: 'complete', role: 'fin', orderId: o.id, score: sc, perfect: sc >= 0.95, data: { kits: win ? 1 : 0, spent: win ? bid : 0 } }, now);
+    } else if (o.kind === 'auction') {
       // the lot at the broker's price: a good bid wins it under fair, when the cash is there
       const fair = o.lot?.fair ?? (ECON.partMarket.low + ECON.partMarket.high) / 2;
       const bid = Math.round(fair * (1.15 - sc * 0.25));

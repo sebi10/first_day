@@ -5,7 +5,7 @@ import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
 import { isChainStep } from '../sim/chain';
 import { soleGuest } from '../sim/alerts';
-import { gseForStart, hangarJobs, hazardOn, houseBlocker, isAog, isTagged, orderCost, orderTier, planeCapacity, powered, startCart, SUB_FEE, subCharterOn } from '../sim/econ';
+import { chainAog, gseForStart, hangarJobs, hazardOn, houseBlocker, isAog, isTagged, orderCost, orderTier, planeCapacity, powered, startCart, SUB_FEE, subCharterOn } from '../sim/econ';
 import { squawkable } from '../sim/engine';
 import { installCheck } from '../sim/flow';
 import type { Asset, IslandState, Order, Role } from '../sim/types';
@@ -79,10 +79,16 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                   </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     <b class={`num ${cap === 0 && !grounded ? 'fault' : ''}`}>{grounded ? 'GND' : cap === 0 ? 'AOG' : `${cap} fl`}</b>
-                    {(aog || (grounded && subbed)) && <span class="label fault">{subbed ? 'guests on the sub-charter' : 'for a part'}</span>}
+                    {/* short in the column (a 360 px phone): why it's down; the sub-charter gets its own line below the row */}
+                    {aog && !subbed && <span class="label fault">{chainAog(s, p.id) ? 'for a part' : 'past due'}</span>}
                     <span class="label num">{p.sinceInspection ?? 0}/{ECON.planeInspectionFlights} insp</span>
                   </span>
                   <SafetyCall ctl={ctl} role={role} id={p.id} on={grounded} word="Ground" sub={soleGuest(s, p.id)} />
+                  {subbed && (
+                    <span class="label fault asset-note">
+                      Its guests fly in on a mainland sub-charter{sub!.flights ? ` (${sub!.flights} × $${sub!.fee} this week)` : ''} until it's back in service.
+                    </span>
+                  )}
                 </div>
               );
             })}

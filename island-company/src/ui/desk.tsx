@@ -8,7 +8,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { needsFreight, openChain } from '../sim/chain';
 import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
 import { chainCardCost } from '../sim/engine';
-import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, logistic, occupancy, openReports, projectWeek, rateBounds, season, SUB_FEE } from '../sim/econ';
+import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, isTagged, logistic, occupancy, openReports, projectWeek, rateBounds, season, SUB_FEE, subCharterOn } from '../sim/econ';
+import { alertShort } from '../sim/alerts';
 import { committed, spendable } from '../sim/ledger';
 import { urgentJob } from '../sim/stock';
 import type { Insurance, IslandState, Order } from '../sim/types';
@@ -29,6 +30,23 @@ import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
 
 const TAB_KEY = (island: string) => `ic.desk.tab.${island}`;
+/**
+ * Why the only guest plane is down this week, as a projection until the resolve (fix round 1): "Twin N-12 is grounded at
+ * this resolve unless Ana signs off Replace brake linings" (its fix is ready), else what holds it. `unless`: it can still
+ * be avoided this week.
+ */
+function subWhy(s: IslandState): { text: string; unless: boolean } | null {
+  const sub = subCharterOn(s);
+  if (!sub) return null;
+  const mech = s.players.mech?.name ?? 'the mechanic';
+  const plane = sub.plane.name;
+  if (isTagged(s, sub.plane.id)) return { text: `${plane} is grounded this week (${mech}'s safety call)`, unless: false };
+  if (!sub.alert) return { text: `${plane} is grounded until its part is on`, unless: false };
+  const o = sub.alert.order ? s.orders.find((x) => x.id === sub.alert!.order) : undefined;
+  if (o?.status === 'ready') return { text: `${plane} is grounded at this resolve unless ${mech} signs off ${o.title}`, unless: true };
+  return { text: `${plane} is grounded at this resolve: ${alertShort(s, sub.alert)} isn't fixed`, unless: false };
+}
+
 function savedTab(island: string): DeskTab | null {
   try {
     const v = sessionStorage.getItem(TAB_KEY(island));
@@ -122,11 +140,11 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
           </span>
           <span class="chip num">Fixed −{usd(fixedNow(s))}</span>
           {leakTotal > 0 && <span class="chip rust num">Open reports −{usd(leakTotal)}/wk</span>}
-          {proj.subCharter > 0 && <span class="chip rust num">Sub-charter −{usd(proj.subCharter)} this week</span>}
+          {proj.subCharter > 0 && <span class="chip rust num">Sub-charter −{usd(proj.subCharter)}{subWhy(s)?.unless ? ' unless fixed' : ' this week'}</span>}
         </div>
         {proj.subCharter > 0 && (
           <span class="label" style={{ color: C.rust }}>
-            The only guest plane is grounded: a mainland sub-charter flies the guests in ({proj.subFlights} flight{proj.subFlights > 1 ? 's' : ''} at {usd(SUB_FEE)}) until it's back in service.
+            {subWhy(s)?.text}: a mainland sub-charter flies the guests in ({proj.subFlights} flight{proj.subFlights > 1 ? 's' : ''} at {usd(SUB_FEE)}, −{usd(proj.subCharter)}) until it's back in service.
           </span>
         )}
         {leaks.map((o) => (

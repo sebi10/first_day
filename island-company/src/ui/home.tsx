@@ -1,5 +1,6 @@
 // The island screen: header, island view, crew, numbers, role panel, dock.
 // Mobile: one column, thumb-zone dock. Desktop: island left, work right.
+import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import type { PuzzleResult } from '../puzzles/types';
@@ -262,6 +263,8 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
           ) : (
             <span class="island-hint">
               {s.weather === 'clear' ? '☀' : s.weather === 'wind' ? '〰 wind' : '⛈ storm'} · tap to {zoom ? 'see the island' : 'zoom to your zone'}
+              {/* a builder figure is a tap target of its own (fix round 1: a tap near one opened the site unannounced) */}
+              {site && !zoom ? ' · a builder: the site' : ''}
             </span>
           )}
         </div>
@@ -446,28 +449,41 @@ export function CrewProject({ ctl, onPlay }: { ctl: Ctl; onPlay?(o: Order): void
           ) : (
             <span class="label" style={{ textAlign: 'right' }}>
               to do
-              {/* the week autopilot does it at 50% if that seat is still away (a seat played in the last month) */}
-              {projectCoverWeek(s, r) !== null && r !== role && <div>autopilot wk {projectCoverWeek(s, r)} if away</div>}
+              {/* the resolve autopilot does it at 50% if that seat is away every week till then (a seat played in the last month) */}
+              {projectCoverWeek(s, r) !== null && r !== role && <div>{coverWords(s, r)}</div>}
+              {o?.rebid === s.week && <div>outbid this week</div>}
             </span>
           )}
         </div>
       ))}
-      {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && !held && (
+      {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && !held && mine.rebid !== s.week && (
         <Btn block onClick={() => onPlay(mine)}>
           Do your part ▸
         </Btn>
+      )}
+      {mine && mine.status === 'ready' && mine.rebid === s.week && (
+        <span class="label fault">Outbid this week: nothing was bought, and the next floatplane comes up at next week’s auction.</span>
       )}
       {mine && mine.status === 'ready' && onPlay && !s.turns[role!]?.ended && held && (
         <span class="label fault">You've hit this turn's job limit: your part waits for next turn.</span>
       )}
       <span class="label">
-        Tier {p.tier} opens the moment all three are done. Each of you does your own part (lend-a-hand can't). A part that has waited two weeks on someone who's
-        away is done by autopilot at 50% at that week's resolve, so nobody waits for good, but it lowers the new buildings. They start at 60–90 health, set by
-        your average score.
-        {mine && mine.status === 'ready' && projectCoverWeek(s, role!) !== null && ` Yours: do it by week ${projectCoverWeek(s, role!)} or autopilot does it at 50%.`}
+        Tier {p.tier} opens the moment all three are done. Each of you does your own part (lend-a-hand can't). If someone is away two weeks running, their
+        part is done by autopilot at 50% at the second week's resolve, so nobody waits for good, but it lowers the new buildings. They start at 60–90 health,
+        set by your average score.
+        {mine && mine.status === 'ready' && projectCoverWeek(s, role!) !== null &&
+          (projectCoverWeek(s, role!)! <= s.week
+            ? ` Yours: you were away last week, so if this week's turn isn't ended, autopilot does it at 50% at this resolve (it lowers the new buildings).`
+            : ` Yours: if you're away every week till then, autopilot does it at 50% at week ${projectCoverWeek(s, role!)}'s resolve (it lowers the new buildings).`)}
       </span>
     </div>
   );
+}
+
+/** "autopilot at this resolve if away" / "autopilot wk 9 if away": when a crewmate's part is covered if they're away till then */
+function coverWords(s: IslandState, r: Role): string {
+  const w = projectCoverWeek(s, r);
+  return w === null ? '' : w <= s.week ? 'autopilot this resolve if away' : `autopilot wk ${w} if away till then`;
 }
 
 function Lobby({ ctl, onPass }: { ctl: Ctl; onPass(): void }) {
@@ -525,7 +541,8 @@ function Dock({
   const [confirm, setConfirm] = useState(false);
   const turn = s.turns[r];
   // a ground power start waiting on a cart isn't something to start yet
-  const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready' && !gseForStart(s, o).blocker).sort((a, b) => urgency(s, b) - urgency(s, a));
+  // (nor is the floatplane auction lost this week: the next sale is next week's)
+  const readyList = s.orders.filter((o) => o.role === r && o.status === 'ready' && !gseForStart(s, o).blocker && o.rebid !== s.week).sort((a, b) => urgency(s, b) - urgency(s, a));
   const ready = readyList.length;
   // legacy cards (no job flow) keep today's count; the flow's cards and requisitions come from dockNext
   const approvals = r === 'fin' ? s.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.lastDeferredWeek !== s.week && !o.flow).length : 0;
@@ -654,9 +671,21 @@ function Dock({
         <div class="col" style={{ gap: 12 }}>
           <h2>End your turn?</h2>
           {checks.map((c, i) => (
-            <span key={`c${i}`} class={c.urgent ? 'fault' : 'muted'} style={c.urgent ? { fontWeight: 700 } : undefined}>
-              {c.text}
-            </span>
+            <Fragment key={`c${i}`}>
+              <span class={c.urgent ? 'fault' : 'muted'} style={c.urgent ? { fontWeight: 700 } : undefined}>
+                {c.text}
+              </span>
+              {c.melAsk && (
+                <Btn
+                  kind="soft"
+                  onClick={() =>
+                    void ctl.dispatch({ t: 'melExtend', role: 'mech', alert: c.melAsk! }).then((ok) => ok && toast(`Asked ${s.players.fin?.name ?? 'the analyst'} to authorize the one-time MEL extension.`))
+                  }
+                >
+                  <Icon name="placard" size={18} /> Ask {s.players.fin?.name ?? 'the analyst'} to authorize the one-time extension
+                </Btn>
+              )}
+            </Fragment>
           ))}
           {checks.some((c) => c.standing) && standingLimit(s) < 5000 && (
             <Btn

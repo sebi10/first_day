@@ -291,6 +291,8 @@ export interface Order {
   bench?: string;
   /** the parts auction's lot (the analyst's desk task): what a win places on a broker PO */
   lot?: { lines: { item: ItemId; qty: number }[]; fair: number; list: number };
+  /** the crew project's floatplane auction lost in this week (fix round 1): the part stays open, the next floatplane comes up at next week's auction. Older docs: none */
+  rebid?: number;
 }
 
 export interface Player {

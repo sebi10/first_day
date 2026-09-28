@@ -8,7 +8,7 @@
 import { alertFlags, liveAlerts, soleGuest, symptomText } from '../../sim/alerts';
 import { DEFAULT_SUPPLIER, FREIGHT, MODELS, ROLE_LABEL, STOCK, SUPPLIERS } from '../../sim/data';
 import { expectedDeferralCost, fixedNow, groundsFrom, outOfService, projectWeek, subCharterNeed, subCharterOn, tierDef, urgency } from '../../sim/econ';
-import { cardOf, repairTask, type Card } from '../../sim/flow';
+import { cardOf, outWeeks, repairTask, type Card } from '../../sim/flow';
 import { allItems, buyUnits, famOf, itemById, priceAt } from '../../sim/items';
 import { assetSpend, capitalCost, cashInStock, committed, fillRate, payable, poOwed, runway, spendable, spendSeries, stockBuiltUsed, tradeSpend, waitWeeks, type OutCat } from '../../sim/ledger';
 import { search, supplyIndex } from '../../sim/search';
@@ -352,7 +352,12 @@ export function cardVM(s: IslandState, o: Order, buy?: BuyChoice): CardVM {
   if (card.mel) chips.push(card.mel.until >= W ? { text: `MEL to wk ${card.mel.until}${card.mel.ext ? ' (extended)' : ''}`, tone: 'ink' } : { text: `MEL ran out wk ${card.mel.until}`, tone: 'rust' });
   const st = outState(s, a);
   const exp = expectedDeferralCost(s, o).cost;
-  const bite = card.aog || card.shut ? Math.round((card.downtime?.usd ?? 0) * (st?.share ?? 1)) : 0;
+  // what one more week of waiting keeps the asset out: the week it's out now, or the week a deferral pushes the fix past
+  // its due week (fix round 1: a card due next week on the only guest plane, deferred, grounds it at that resolve)
+  const f = card.freight.pick === 'aog' && card.freight.aog ? card.freight.aog : card.freight.sched;
+  const base = card.toBuy.length + card.tools.length > 0 ? f.eta : W - 1;
+  const extraOut = a ? Math.max(0, outWeeks(s, a, base + 1) - outWeeks(s, a, base)) : 0;
+  const bite = st ? Math.round((card.downtime?.usd ?? 0) * st.share * extraOut) : 0;
   const waitCost = exp + bite;
   if (waitCost > 0) chips.push({ text: `Waiting a week ≈ ${usd(waitCost)}`, tone: waitCost > card.total ? 'amber' : '' });
   const trade = role === 'mech' ? 'Mech' : 'Elec';
@@ -889,10 +894,11 @@ export function flagsVM(s: IslandState): FlagVM[] {
 export const melExtendable = (m: NonNullable<Alert['mel']>, W: number) => !m.ext && !!m.ask && m.until >= W - 1;
 
 /** where an MEL placard stands: it covers the resolve of its last week; the one extension can come a week late */
-export function melWords(W: number, until: number, canExtend: boolean): string {
+export function melWords(W: number, until: number, canExtend: boolean, aw = true): string {
   if (until > W) return `placarded to wk ${until}`;
   if (until === W) return 'runs out at this week’s resolve';
-  if (until === W - 1 && canExtend) return 'ran out last week: the plane is grounded at this resolve unless the extension goes through';
+  // only an airworthiness item grounds its plane; another MEL item is an open write-up again (fix round 1)
+  if (until === W - 1 && canExtend) return aw ? 'ran out last week: the plane is grounded at this resolve unless the extension goes through' : 'ran out last week: an open write-up again unless the extension goes through';
   return `ran out wk ${until}`;
 }
 
@@ -960,7 +966,7 @@ export function needsVM(s: IslandState): { unplanned: NeedVM[]; waiting: WaitVM[
       ...(a.mel!.ask ? { askedBy: a.mel!.ask.by } : {}),
       canExtend: melExtendable(a.mel!, W),
       runsOut: a.mel!.until <= W,
-      when: melWords(W, a.mel!.until, !a.mel!.ext && !!a.mel!.ask),
+      when: melWords(W, a.mel!.until, !a.mel!.ext && !!a.mel!.ask, !!alertFlags(s, a).aw),
     }))
     .sort((a, b) => a.until - b.until);
   return { unplanned, waiting, placards };

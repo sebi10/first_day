@@ -1421,7 +1421,7 @@ export const STORIES = [
     title: 'County inspector in town',
     body: 'She can do every house this week if you pay the call-out.',
     options: [
-      { key: 'book', label: 'Book her', effect: '−$400, all inspections renewed 8 weeks' },
+      { key: 'book', label: 'Book her', effect: '−$400, every house passes now; the county books each renewal a week of its own, about 8 weeks out' },
       { key: 'wait', label: 'Wait', effect: 'Nothing changes' },
     ],
   },
@@ -1470,6 +1470,13 @@ export const STORIES = [
  * nobody plays): the tier gates before the project still need the full crew, so no role wins alone.
  */
 export const PROJECT_COVER = { wait: 2, recent: 4, score: 0.5 };
+
+/**
+ * The tier-4 crew project's floatplane auction (the analyst's part): its market ($3,000-7,000, fair $4,800), and the
+ * walk-away cap (never more than $5,600, never below the freeze line). The winning bid is the deposit that leaves the
+ * bank; autopilot covering an away analyst buys it at `fair` (fix round 1). A lost bid leaves the part open.
+ */
+export const FLOAT_AUCTION = { low: 3000, high: 7000, fair: 4800, cap: 5600 };
 
 /** Each new tier is built together: one real job per trade. */
 export const PROJECTS: Record<number, { title: string; jobs: Record<Role, { title: string; puzzle: PuzzleId }> }> = {

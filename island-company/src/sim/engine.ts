@@ -13,6 +13,7 @@ import {
   defectVariant,
   ECON,
   FIN_TASKS,
+  FLOAT_AUCTION,
   FREIGHT,
   GSE,
   incidentText,
@@ -341,8 +342,11 @@ function startProject(s: IslandState) {
 }
 
 /**
- * An away seat's crew project part, at the resolve (step 1): once it has waited PROJECT_COVER.wait weeks, autopilot does
- * it by the book at 50%, for a seat played in the last PROJECT_COVER.recent weeks. The tier arrives at step 16.
+ * An away seat's crew project part, at the resolve (step 1): once it has waited PROJECT_COVER.wait weeks and the seat
+ * has missed every resolve of that wait (projectCoverWeek), autopilot does it by the book at 50%, for a seat played in
+ * the last PROJECT_COVER.recent weeks. The tier arrives at step 16. The floatplane auction (the analyst's tier-4 part)
+ * is bought at the fair price, as a human winner pays the bid: when that would take spendable cash under the freeze
+ * line, it waits, and the review says why (fix round 1).
  */
 function coverProject(s: IslandState, role: Role, line: (role: ReportLine['role'], tone: ReportLine['tone'], text: string) => void) {
   // (at step 1, before this week's miss is counted: "played in the last 4 weeks" is a streak under 4 so far)
@@ -350,9 +354,21 @@ function coverProject(s: IslandState, role: Role, line: (role: ReportLine['role'
   const p = s.players[role];
   if (from === null || s.week < from || !p) return;
   const o = s.orders.find((x) => x.id === s.project!.orders[role])!;
+  const away = p.missedStreak + 1;
+  let paid = '';
+  if (o.puzzle === 'auction') {
+    const fair = FLOAT_AUCTION.fair;
+    if (spendable(s) - fair < ECON.freezeBelow) {
+      line('all', 'bad', `${p.name} was away ${away} weeks running, but autopilot can't buy the floatplane at the fair price (${usd(fair)}) without taking spendable cash under ${usd(ECON.freezeBelow)}: ${o.title} waits.`);
+      return;
+    }
+    s.cash -= fair;
+    book(s, 'building', fair, { trade: 'fin' });
+    paid = `, won at the fair price, ${usd(fair)}`;
+  }
   o.status = 'done';
   o.result = { score: PROJECT_COVER.score, perfect: false, credit: PROJECT_COVER.score, by: role, week: s.week, auto: true };
-  line('all', 'info', `${p.name} was still away: autopilot did ${p.name}'s part of the crew project by the book, at ${Math.round(PROJECT_COVER.score * 100)}%: ${o.title}. It had waited ${s.week - o.createdWeek} weeks.`);
+  line('all', 'info', `${p.name} was away ${away} weeks running: autopilot did ${p.name}'s part of the crew project by the book, at ${Math.round(PROJECT_COVER.score * 100)}%: ${o.title}${paid}.`);
 }
 
 function finishProjectIfDone(s: IslandState, now: number) {
@@ -862,6 +878,19 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   const cap = covered ? null : reportCap(s, a.role);
   if (cap && turn.done >= cap.limit) return fail(cap.text);
 
+  // the crew project's floatplane auction (fix round 1): outbid, nothing is bought and the part stays open, and the next
+  // floatplane comes up at next week's auction (a new sale: a new seed). A bid lost this week can't be run again
+  if (o.kind === 'project' && o.puzzle === 'auction') {
+    if (o.rebid === s.week) return fail('Outbid this week: the next floatplane comes up at next week’s auction.');
+    if (!(Number(a.data?.kits ?? 0) > 0)) {
+      o.rebid = s.week;
+      o.seed = hashSeed(o.seed, 'rebid', s.week);
+      turn.done += 1;
+      feed(s, 'fin', 'info', `${player.name} was outbid for the floatplane: ${o.title} stays open for next week's auction.`, now);
+      return { s };
+    }
+  }
+
   // the job flow: the box is opened at the start. A part that doesn't fit, a short slot or a missing tool stops the work
   // (not an error: nothing is signed off, nothing leaves stock, and the tech repicks)
   if (o.flow && !o.flow.wired) {
@@ -961,8 +990,12 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   if (o.kind === 'report') {
     closeReport(s, o, a.role, player.name, a.score, now);
   } else if (o.kind === 'project') {
-    // the floatplane auction is real capex: the winning deposit leaves the bank
-    if (o.puzzle === 'auction' && Number(a.data?.kits ?? 0) > 0) s.cash -= Math.max(0, Number(a.data?.spent ?? 0));
+    // the floatplane auction is real capex: the winning deposit leaves the bank (in the ledger as the tier's build)
+    if (o.puzzle === 'auction' && Number(a.data?.kits ?? 0) > 0) {
+      const spent = Math.max(0, Math.round(Number(a.data?.spent ?? 0)));
+      s.cash -= spent;
+      book(s, 'building', spent, { trade: 'fin' });
+    }
     feed(s, o.role, blind ? 'info' : 'good', blind ? `${player.name} signed off their part: ${o.title}.` : `${player.name} finished their part: ${o.title} (${Math.round(a.score * 100)}%).`, now);
     finishProjectIfDone(s, now);
   } else if (o.kind === 'auction') {
@@ -3023,11 +3056,15 @@ function decideStory(s: IslandState, key: string, now: number): ApplyResult {
       s.cash -= 900;
       s.modifiers.push({ kind: 'demand', mult: 1.15, until: W + 4, label: 'Blogger feature' });
       break;
-    case 'inspector:book':
+    case 'inspector:book': {
       s.cash -= 400;
-      // one visit inspects every house (the notices come together again; their renewals book a week each)
-      for (const h of houses(s)) h.inspectionUntil = W + ECON.houseInspectionWeeks;
+      // one visit inspects every house this week, and the county books each renewal a week of its own from 8 weeks out
+      // (fix round 1: every notice coming back in the same week was the code-prep pile-up the calendar removed)
+      const hs = houses(s);
+      for (const h of hs) h.inspectionUntil = 0;
+      for (const h of hs) h.inspectionUntil = bookInspection(s, h.id, W + ECON.houseInspectionWeeks);
       break;
+    }
     case 'rival:ads':
       s.cash -= 600;
       break;
@@ -3372,7 +3409,11 @@ function autoRun(s: IslandState, role: Role) {
       cart.wear = Math.min(100, cart.wear + GSE.busWear);
     }
     o.status = 'done';
-    o.result = { score: 0.5, perfect: false, credit: 0.5, by: role, week: s.week, auto: true };
+    // an inspection autopilot covers is signed at the pass mark (SIGNOFF): by the book, a bare pass, which renews it at
+    // any tier as a human's pass would (fix round 1: at a teaching tier a human's 50% fails the sign-off, and autopilot's
+    // 50% passing it made being away better than a poor attempt). Its other jobs stay at 50%
+    const sc = o.kind === 'codeprep' || o.kind === 'inspect100' ? SIGNOFF : 0.5;
+    o.result = { score: sc, perfect: false, credit: sc, by: role, week: s.week, auto: true };
     const asset = assetOf(s, o);
     if (cart && asset) {
       // the manual is kept, but a worn cable is a worn cable
@@ -3381,7 +3422,7 @@ function autoRun(s: IslandState, role: Role) {
       cart.charging = true;
     }
     if (asset) {
-      asset.health = clamp(asset.health + o.gain * 0.5, 0, 100);
+      asset.health = clamp(asset.health + o.gain * sc, 0, 100);
       asset.touchedWeek = s.week;
       // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
       // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
@@ -3667,6 +3708,10 @@ export function resolveWeek(s: IslandState, now: number) {
   // sub-charter flies the island's guests in on its own plane and crew, the flights the guests need, paid at step 11
   const sub = subCharterOn(s, W, s.weather);
   const subFlights = sub?.flights ?? 0;
+  // whose side the fee lands on in the Money tab: why the plane is down (the analyst's approval, stock or carrier; the
+  // mechanic's plan, part chain or safety call), read now, before receiving readies anything
+  const subCause = sub?.alert ? aogCause(s, sub.alert, W) : null;
+  const subTrade: 'mech' | 'fin' = subCause && subCause !== 'plan' ? 'fin' : 'mech';
   for (const p of planes(s)) {
     const grounded = isTagged(s, p.id);
     // waiting on a part (the part chain), or an airworthiness alert past due: not airworthy, no flights. Its flights
@@ -3677,21 +3722,23 @@ export function resolveWeek(s: IslandState, now: number) {
     // on-time is judged against what the weather allows, not against a clear sky. A plane AOG is off the schedule, but
     // not the only guest plane when the sub-charter flies its guests: its schedule is the island's guest service, and
     // the island's own flights on it are what the on-time grade reads (0 of 4, the sub-charter's aren't the island's)
-    if (!aog || sub?.plane.id === p.id) scheduled += planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
+    // (its schedule in this week's weather: the flights an AOG line calls cancelled are the ones the on-time grade counts)
+    const sched = planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
+    if (!aog || sub?.plane.id === p.id) scheduled += sched;
     const healthCap = grounded || aog ? 0 : planeCapacity(p, s.tier, 'clear');
     let cap = capOf(s, p);
     // a flight day on a weak battery: the first start is on the cart hooked up to it, or the first flight is lost
     if (cap > 0 && s.weakBattery?.week === W && s.weakBattery.assetId === p.id) cap -= flightDayStart(s, p, line);
     if (grounded) line('mech', 'info', `${p.name} grounded by the mechanic this week (safety call).`);
-    else if (chainDown) line('mech', 'bad', `${p.name} AOG: grounded until the ${s.chain!.item} ${isAre(s.chain!.item)} ${s.chain!.wired ? 'fixed' : 'on'} (${perPlane} flight${perPlane > 1 ? 's' : ''} cancelled).`);
+    else if (chainDown) line('mech', 'bad', `${p.name} AOG: grounded until the ${s.chain!.item} ${isAre(s.chain!.item)} ${s.chain!.wired ? 'fixed' : 'on'} (${sched} flight${sched !== 1 ? 's' : ''} cancelled).`);
     else if (alertDown) {
       const ran = alertDown.mel && alertDown.mel.until < W;
       line(
         'mech',
         'bad',
         ran
-          ? `${p.name}'s MEL C for ${shortText(s, alertDown)} ran out in week ${alertDown.mel!.until}: grounded until it's fixed (${perPlane} flight${perPlane > 1 ? 's' : ''} cancelled).`
-          : `${p.name} AOG: ${shortText(s, alertDown)} (due week ${alertDown.due}, not fixed): ${perPlane} flight${perPlane > 1 ? 's' : ''} cancelled.`,
+          ? `${p.name}'s MEL C for ${shortText(s, alertDown)} ran out in week ${alertDown.mel!.until}: grounded until it's fixed (${sched} flight${sched !== 1 ? 's' : ''} cancelled).`
+          : `${p.name} AOG: ${shortText(s, alertDown)} (due week ${alertDown.due}, not fixed): ${sched} flight${sched !== 1 ? 's' : ''} cancelled.`,
       );
       bookAog(s, aogCause(s, alertDown, W));
     } else if (healthCap < perPlane)
@@ -4125,9 +4172,10 @@ export function resolveWeek(s: IslandState, now: number) {
   book(s, 'overhead', overhead, { trade: 'fin' });
   book(s, 'payroll', pay, { trade: 'fin' });
   if (carried) book(s, 'carry', carried, { trade: 'fin' });
-  // the mainland sub-charter's flights this week (the flight ops side of the business: the mechanic's trade)
+  // the mainland sub-charter's flights this week, on the plane it stood in for, and on the side of the business that
+  // kept it down (step 2: the analyst's approval, stock or carrier; else the mechanic's plan, chain or safety call)
   const subCost = sub ? sub.usd : 0;
-  if (subCost) book(s, 'subcharter', subCost, { trade: 'mech' });
+  if (subCost) book(s, 'subcharter', subCost, { trade: subTrade, asset: sub!.plane.id });
   const premium = Math.round(INSURANCE[s.insurance].premium * (1 + 0.25 * (s.tier - 1)));
   const grossIncidents = incidents.reduce((n, i) => n + i.cost, 0) + weatherCost;
   const netIncidents = Math.round(grossIncidents * (1 - INSURANCE[s.insurance].cover));
@@ -4317,6 +4365,9 @@ export function forecastContext(s: IslandState) {
     projection.push(Math.round(c / 10) * 10);
   }
   const hints: string[] = [];
+  // the only guest plane down: the sub-charter is a weekly cost until it's back (fix round 1: the forecast says so)
+  const sub = subCharterOn(s);
+  if (sub && sub.usd > 0) hints.push(`Sub-charter −${usd(sub.usd)}/wk while ${sub.plane.name} is down`);
   if (pending) hints.push(`Pending approvals ${usd(pending)}`);
   const next = season(s.week + 2, s.seed) - season(s.week, s.seed);
   hints.push(next > 0.03 ? 'Season: bookings rising' : next < -0.03 ? 'Season: bookings easing' : 'Season: flat');

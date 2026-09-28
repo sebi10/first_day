@@ -14,7 +14,11 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
    - already live before it: the island art, blind sign-off with hidden defects, cross-trade reports, the part chain (IPC → logbooks → engineering approval), AMM task cards with S/N effectivity, the crack / hydraulics / ground power puzzles with interactive carts, the crew board and DMs, and the doc version gate
    - numbers: 689 tests; `DOC_VERSION` 3; `ENGINE_VERSION` 3; `firestore.rules` `v == 3`. Live v2 islands migrate on first read (kits become store credit, a starter shelf, a What's new sheet).
 2. **In flight in the cloud:** nothing. The swarm landed (§3).
-   - **Local, not pushed:** branch `gaps` has the four job-flow gap fixes (the known gaps in §3) and the **v4 version gate** (`ENGINE_VERSION` 4, `DOC_VERSION` 4, rules `v == 4`). It ships with more v4 engine work later; the proof is in `docs/DECISIONS.md` "2026-09-28: integrating the job-flow gap fixes; the v4 version gate". After that deploy: `probe-gate.mts` with OLD_V=3 NEW_V=4, and tell the crew to close and reopen the app.
+   - **Local, not pushed:** branch `gaps` has, all under one **v4 version gate** (`ENGINE_VERSION` 4, `DOC_VERSION` 4, rules `v == 4`; proof in `docs/DECISIONS.md` "2026-09-28: integrating the job-flow gap fixes; the v4 version gate"):
+     - the four job-flow gap fixes (the known gaps in §3)
+     - the robust-tail work (`2241f22`): L1 the county's inspection calendar, B a job planned ahead of its due week is on schedule, L3 a crew project part covered by autopilot at 50% after a two-week absence, L4 autopilot's covered inspections pass. L2 (throttling the generator) was tried and rejected: no effect.
+     - review round 1 ("Gap fixes: review round 1", DECISIONS 2026-09-28): the sub-charter's cover capped at what the twin would have flown, the floatplane auction paid for (by autopilot at the fair price, by the bots at their bid; a lost bid leaves the part open), the feeder's blind re-test shows its reading, the MEL ask on the sent job and on End turn, L3 needs two missed resolves in a row, and 20-odd wording and layout fixes
+     - After that deploy: `probe-gate.mts` with OLD_V=3 NEW_V=4, and tell the crew to close and reopen the app. `island-company/scripts/reverse-skew.ts` re-runs the old engine against docs this build writes (on bd1e1d2: 173 of 173 moves refused).
 3. **First local tasks:**
    - set up the machine (§4), then `git pull`
    - make the scripts' Chromium path portable (§4.3)
@@ -24,6 +28,9 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
    - **Builders speed-up:** should NPC builders be able to speed up a tier, by up to 2 weeks when staffed and supplied, but never delay it? Live default: no. Builders set how good new buildings start and can build extra cottages, but never change when a tier arrives.
    - **Wages scale** (`docs/JOBFLOW.md` §23, question 4): a skill-3 pilot is $320 a week and a builder $260. Scale 2.5–3× with overhead cut to match, so a hire is real money? Live default: as is, tune after a playtest. It changes every island's P&L.
    - The spec's other open questions (§23, 1–3 and 5–7) run on their bracketed defaults.
+   - **Crew project cover (branch `gaps`, a pillar-level rule):** a friend away **two resolves in a row** gets their part of the tier done by autopilot at 50% (it lowers the new buildings by about 4 health), so nobody waits for good; one missed evening doesn't. Before the branch nobody could do your part. Default as built. Alternatives: 3 weeks, or never (the old rule).
+   - **Absence got cheap (branch `gaps`, L4 + the sub-charter):** autopilot's covered code prep and 100-hour pass (at the 60% pass mark), so an away seat's island stays solvent at tier 1. Weeks below $0 summed over the standard run (30 seeds × 26 weeks), before the tail work (`5532631`) → `gaps` now: elec absent 45 → 0 (mech and fin absent 0 → 0), solo mech 321 → 35, solo elec 331 → 263, solo fin 379 → 12, nobody 459 → 362. Every absent and solo team still ends at tier 1 in every seed: tiers still need the full crew. Default as built ("autopilot keeps an away seat's island solvent; tiers still need the full crew"). If absence should sting: a covered inspection renews for 4 weeks, not 8, or autopilot's jobs cost labour at the contractor rate.
+   - **Robust tail (not met):** three friends miss tier 5 in 102 of 360 robust games (target ≤ 75), all average in 77 (target ≤ 37); weeks below $0 1 and 0. Most of the jump from 75 / 51 is the sim getting honest: the bots now pay the floatplane deposit a human pays (about $4,560; without it, 69 and 62). Levers, all yours: count the floatplane at book value toward the tier-5 cash gate ($60,000; it's capex the island owns) or finance it; the line-crew NPC (an electrician's helper the analyst hires, JOBFLOW v2) for the electrician's tier-4 overload (a bots-only ceiling test with one extra electrician job a turn gave 67 and 47 before this round). No gate, price or payroll was changed to buy the tail back.
 
 ---
 
@@ -66,7 +73,7 @@ The rules that don't change are in `CLAUDE.md`. This file is the state of play a
     - three friends: median week 24, 96 of 360 games miss tier 5, 7 weeks below $0 across all games
     - all average: median week 23, 80 of 360 miss, 0 weeks below $0
     - the previous build had 75 and 37 misses
-    - the misses come from crew projects stalled by long absences and the electrician's tier-4 overload, not cash; the levers are in `docs/DECISIONS.md` (stagger code notices, throttle the generator)
+  - **on branch `gaps`** (not live): standard three friends 8/11/16/23 and all average 7/12/16/23, both 0 weeks below $0, solo and absent teams at tier 1. Robust after the tail work (`2241f22`): 75 and 51 misses; after review round 1: **102 and 77** (weeks below $0: 1 and 0), because the bots now pay the floatplane deposit (69 and 62 without it). Targets not met; see §1.4 and DECISIONS "2026-09-28: gap fixes, review round 1".
 - **Known gaps** (also in §7). All five are fixed on branch `gaps` (not deployed; live still has them):
   - Past due, the only guest plane still flies restricted; there's no mainland sub-charter. *Fixed (`gap-charter`): grounded like any plane, and a sub-charter flies its guests at $270 a flight.*
   - The builders' zoom on Home needs its own zoom box. *Fixed (`gap-zoom`): `siteBox`; the beaten scene is still 1,390 nodes.*
@@ -229,7 +236,7 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
 
 1. **Crew playtest on real phones.** Nothing has had a human playtest since the island art, and the job flow changes every seat. Collect friction points per seat.
 2. **Owner decisions** (§1): builders speed-up; wages scale.
-3. **Job flow follow-ups from review and QA** (§3 "Known gaps"). All five are done on branch `gaps`, waiting on the v4 release:
+3. **Job flow follow-ups from review and QA** (§3 "Known gaps"). All five are done on branch `gaps`, with review round 1's fixes, waiting on the v4 release:
    - the MEL wording for the only guest plane
    - the feeder re-splice launching the branch-circuit trace puzzle
    - a mainland sub-charter for the only guest plane when past due
@@ -245,7 +252,8 @@ Put this in `.claude/settings.local.json` (personal, don't commit) or `~/.claude
    - a tow / wing-tip symptom (57-30)
    - THWN take-offs for the transfer switch and fuel dock
    - MEL category B
-5. **Robust-sweep tail:** three friends miss tier 5 in 96 of 360 robust games (target about 75) and all average in 80 (about 37). Causes: crew projects stalled by long absences, the electrician's tier-4 overload, and rare week 24–26 collapses below $0 after long electrician absences (grid + generator down). The levers are in `docs/DECISIONS.md` (stagger code notices, throttle the generator).
+5. **Robust-sweep tail:** on branch `gaps` three friends miss tier 5 in 102 of 360 robust games (target ≤ 75) and all average in 77 (≤ 37). Tried and kept: the inspection calendar, on-schedule early jobs, the crew-project cover, autopilot's inspections passing (DECISIONS "the robust tail"). Tried and rejected: throttling the generator (no effect). What's left is an owner call (§1.4): the floatplane against the tier-5 cash gate, and the line-crew NPC for the electrician's tier-4 overload.
+   - Also from review round 1, not done: **an overdue 100-hour should ground the plane** (14 CFR 91.409(b); today it flies for hire at −6 health a week past its allowance). It needs the 100-hour tied to an airworthiness alert and the flight count, the bots and generator with it, a balance run and a skew test: its own change (a v5 gate if v4 has shipped by then).
 6. **Portable Chromium path** in the scripts (§4.3).
 7. **Keep `docs/DECISIONS.md` and `docs/ONBOARDING.md` current** with every feature.
 

@@ -155,15 +155,22 @@ describe('the MEL on End turn (10)', () => {
     const tire = raise(s, 'M_TIRE_PRESSURE', 0, 'p2', 5);
     const com = raise(s, 'M_COM_DEAD', 0, 'p2', 5);
     const lines = endTurnChecks(s, 'mech').map((x) => x.text);
-    expect(lines.some((t) => /^Fix it or tag it this week \(no MEL relief\), or Cargo C-7 is AOG: /.test(t))).toBe(true);
-    expect(lines.some((t) => /^Fix it or placard it \(MEL C\) this week, or Cargo C-7 is AOG: /.test(t))).toBe(true);
+    // no MEL relief: only the fix (a safety call grounds it too, so it's no way out)
+    expect(lines.some((t) => /^Fix it this week \(no MEL relief\), or from this resolve Cargo C-7 is AOG: /.test(t))).toBe(true);
+    expect(lines.some((t) => /or tag it/.test(t))).toBe(false);
+    expect(lines.some((t) => /^Fix it or placard it \(MEL C\) this week, or from this resolve Cargo C-7 is AOG: /.test(t))).toBe(true);
+    expect(endTurnChecks(s, 'mech').some((x) => x.melAsk)).toBe(false);
     void tire;
-    // placarded in week 5: covers week 5; in week 6 it has run out: ask Cy for the extension
+    // placarded in week 5: covers week 5; in week 6 it has run out: ask Cy for the extension, from the line itself
     s = ok(s, { t: 'mel', role: 'mech', alert: com.id, week: 5 });
-    expect(endTurnChecks(s, 'mech').some((x) => /MEL placard runs out at this resolve: fix it, or ask Cy to extend it \(once\)\.$/.test(x.text))).toBe(true);
+    const runsOut = endTurnChecks(s, 'mech').find((x) => /MEL placard runs out at this resolve: fix it, or ask Cy to authorize the one-time extension\.$/.test(x.text));
+    expect(runsOut?.melAsk).toBe(com.id);
     s.week = 6;
-    expect(endTurnChecks(s, 'mech').some((x) => /^The MEL placard ran out: ask Cy to extend it \(once\), or fix it, or Cargo C-7 is AOG: /.test(x.text))).toBe(true);
-    s = ok(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 6 });
-    expect(endTurnChecks(s, 'mech').some((x) => /^Cy hasn't approved the MEL extension yet: /.test(x.text))).toBe(true);
+    const ran = endTurnChecks(s, 'mech').find((x) => /^The MEL placard ran out: ask Cy to authorize the one-time extension, or fix it, or Cargo C-7 is AOG: /.test(x.text));
+    expect(ran?.melAsk).toBe(com.id);
+    // the line's button is the mechanic's ask
+    s = ok(s, { t: 'melExtend', role: 'mech', alert: ran!.melAsk!, week: 6 });
+    expect(endTurnChecks(s, 'mech').some((x) => /^Cy hasn't authorized the MEL extension yet: /.test(x.text))).toBe(true);
+    expect(endTurnChecks(s, 'mech').some((x) => x.melAsk)).toBe(false);
   });
 });

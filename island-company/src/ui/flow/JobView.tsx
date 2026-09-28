@@ -11,6 +11,7 @@ import type { Action, Alert, IslandState, Order } from '../../sim/types';
 import { ChainOrigin } from '../chain';
 import { Btn, usd } from '../kit';
 import { chainStepOrder, flowMove, shipWords, standingWords } from '../select';
+import { MelNote } from './MelNote';
 import { lineWords, taskFor } from './steps';
 import { landsWords, nameOf } from './words';
 
@@ -112,6 +113,8 @@ export function JobView({
           <span class="label">{label}</span> {t.no !== label && <b>{t.no}</b>} {o.title}
         </div>
       )}
+      {/* the placard and what past it means, and the one extension to ask for while the job waits (fix round 1) */}
+      {open && !demo && <MelNote s={s} a={a} run={run} can={!ended} />}
       {o.flow?.wired && <div class="jf-note">{nameOf(s, 'elec')}'s check found the fault in the wiring and fixed it: no part. Inspect the splice, ops-check it and sign the airplane back into service.</div>}
       {stop && (
         <div class="jf-note warn">

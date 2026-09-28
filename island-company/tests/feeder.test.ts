@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markInput } from '../src/puzzles/kit';
-import { faultSeg, generateTrace, trace } from '../src/puzzles/trace';
+import { faultSeg, generateTrace, megWords, trace } from '../src/puzzles/trace';
 import type { PuzzleContext, PuzzleResult } from '../src/puzzles/types';
 import { raiseAlert } from '../src/sim/alerts';
 import { DEFECT_RULES, FEEDER_REDIG, defectRule } from '../src/sim/data';
@@ -210,13 +210,16 @@ const mid = (pts: { x: number; y: number }[]) => {
   }
   return pts[pts.length - 1];
 };
+/** the close-out's two calls: dig again (left), re-energize (right) */
+const REENERGIZE = { x: W * 0.75, y: H - 48 };
+const DIG_AGAIN = { x: W * 0.25, y: H - 48 };
 /** Dig here, dig at `at` (normalised), then re-energize */
 function dig(run: Run, at: { x: number; y: number }, reenergize = true) {
   run.tap(W * 0.75, H - 48);
   const q = S(at);
   run.tap(q.x, q.y);
   if (reenergize) {
-    run.tap(W / 2, H - 48);
+    run.tap(REENERGIZE.x, REENERGIZE.y);
     run.step(1);
   }
 }
@@ -331,12 +334,13 @@ describe('the scene: dig, close it up, re-energize; blind gives nothing away', (
     run.tap(q.x, q.y);
     expect(run.drew('Close it up')).toBe(true);
     expect(run.drew(/: split bolts and tape, cracked$/)).toBe(true);
-    expect(run.drew('Cut out the bad length; re-spliced: DBS-2 × 4')).toBe(true);
-    expect(run.drew(/^Megger again from the panel: L1, L2, N [\d,]+ MΩ to ground$/)).toBe(true);
-    expect(run.drew('Backfill: 24 in of cover, a warning ribbon 12 in above (300.5)')).toBe(true);
-    expect(run.drew('Re-energize the feeder')).toBe(true);
+    expect(run.drew('Re-made the failed splice with the slack: DBS-2 × 4')).toBe(true);
+    expect(run.drew(`Megger again (110.7): L1, L2, N ${megWords(m.feeder!.whole)} MΩ to ground`)).toBe(true);
+    expect(run.drew('Backfill to 24 in (Table 300.5), warning ribbon above')).toBe(true);
+    expect(run.drew('Re-energize')).toBe(true);
+    expect(run.drew('Dig again')).toBe(true);
     expect(run.held).toBeNull();
-    run.tap(W / 2, H - 48);
+    run.tap(REENERGIZE.x, REENERGIZE.y);
     run.step(1);
     expect(run.held?.r.data).toEqual({ defect: 'feeder' });
     expect(run.held?.r.summary).toMatch(/^failed splice found after 1 wrong call/);
@@ -349,9 +353,12 @@ describe('the scene: dig, close it up, re-energize; blind gives nothing away', (
     const blindRight = mount({ seed: SEED, tier: TIER, blind: true, context: ctx });
     dig(blindRight, right, false);
     expect(blindRight.drew(/^Dug between HH\d and (HH\d|the cottages), down to the cable at 24 in$/)).toBe(true);
-    expect(blindRight.drew('Megger L1, L2 and N again before re-energizing (110.7)')).toBe(true);
-    expect(blindRight.drew(/split bolts/)).toBe(false);
-    blindRight.tap(W / 2, H - 48);
+    // the re-test before it goes back on shows its number (the whole run, re-made), in plain ink, with both calls
+    expect(blindRight.drew(`Megger again (110.7): L1, L2, N ${megWords(m.feeder!.whole)} MΩ to ground`)).toBe(true);
+    expect(blindRight.drew('Re-made the splice there, with the slack: DBS-2 × 4')).toBe(true);
+    expect(blindRight.drew('Dig again') && blindRight.drew('Re-energize')).toBe(true);
+    expect(blindRight.drew(/split bolts|failed splice/)).toBe(false);
+    blindRight.tap(REENERGIZE.x, REENERGIZE.y);
     blindRight.step(1);
     expect(blindRight.held?.r).toEqual(open.held?.r);
     const blindWrong = mount({ seed: SEED, tier: TIER, blind: true, context: ctx });
@@ -366,6 +373,70 @@ describe('the scene: dig, close it up, re-energize; blind gives nothing away', (
       for (const v of ['bad', 'fault', 'flourish']) expect(run.sounds, v).not.toContain(v);
       for (const t of run.texts) expect(t.text, t.text).not.toMatch(ROOM);
     }
+  });
+
+  it('blind, a wrong dig: the re-test still reads 0.4 MΩ; dig again at the right section and it reads the whole run (one wrong call on the score)', () => {
+    const run = mount({ seed: SEED, tier: TIER, blind: true, context: ctx });
+    dig(run, wrong, false);
+    expect(run.drew(`Megger again (110.7): L1, L2, N ${megWords(m.feeder!.fault)} MΩ to ground`)).toBe(true);
+    // the same card, the same two calls: nothing but the number says it
+    expect(run.drew('Dig again') && run.drew('Re-energize')).toBe(true);
+    expect(run.drew(/failed splice|wrong|split bolts/)).toBe(false);
+    run.clear();
+    run.tap(DIG_AGAIN.x, DIG_AGAIN.y);
+    expect(run.drew('Close it up')).toBe(false);
+    const q = S(right);
+    run.tap(q.x, q.y);
+    expect(run.drew(`Megger again (110.7): L1, L2, N ${megWords(m.feeder!.whole)} MΩ to ground`)).toBe(true);
+    run.tap(REENERGIZE.x, REENERGIZE.y);
+    run.step(1);
+    expect(run.held?.ms).toBe(700);
+    // the same true score as the open run that took one wrong call
+    const open = mount({ seed: SEED, tier: TIER, blind: false, context: ctx });
+    open.tap(W * 0.75, H - 48);
+    const w = S(wrong);
+    open.tap(w.x, w.y);
+    open.tap(q.x, q.y);
+    open.tap(REENERGIZE.x, REENERGIZE.y);
+    open.step(1);
+    expect(run.held?.r.score).toBe(open.held?.r.score);
+    expect(run.held?.r.summary).toMatch(/^failed splice found after 1 wrong call/);
+    for (const v of ['bad', 'fault', 'flourish']) expect(run.sounds, v).not.toContain(v);
+    expect(run.inks.some((i) => i === C.rust || i === C.palm)).toBe(false);
+  });
+
+  it('blind, a wrong dig re-energized at 0.4 MΩ: the failed splice stays in the ground (a low score, the feeder defect later)', () => {
+    const run = mount({ seed: SEED, tier: TIER, blind: true, context: ctx });
+    dig(run, wrong);
+    expect(run.held?.r.score).toBeLessThan(0.3);
+    expect(run.held?.r.data).toEqual({ defect: 'feeder' });
+  });
+
+  it('blind hand-in: the route stays as traced (no reveal of the buried run); open: the whole run is drawn', () => {
+    const TRENCH = '#6f5438';
+    const blindRun = mount({ seed: SEED, tier: TIER, blind: true, context: ctx });
+    dig(blindRun, right);
+    blindRun.clear();
+    blindRun.step(0.2);
+    expect(blindRun.inks).not.toContain(TRENCH);
+    const openRun = mount({ seed: SEED, tier: TIER, blind: false, context: ctx });
+    dig(openRun, right);
+    openRun.clear();
+    openRun.step(0.2);
+    expect(openRun.inks).toContain(TRENCH);
+  });
+
+  it('the trench: one run heading east then down to the cottages, never back and forth across the yard', () => {
+    for (let seed = 1; seed <= 40; seed++)
+      for (const t of [1, 3, 5]) {
+        const g = generateTrace(seed, t, [], 'feeder');
+        const run = g.chain.map((id) => g.devices[id].pos);
+        // x never goes back west, and y turns direction at most once (the corner down the east side)
+        for (let i = 1; i < run.length; i++) expect(run[i].x, `seed ${seed} t${t}`).toBeGreaterThanOrEqual(run[i - 1].x - 1e-9);
+        const dys = run.slice(2).map((q, i) => Math.sign(Math.round((q.y - run[i + 1].y) * 100)));
+        const turns = dys.filter((d, i) => i > 0 && d !== 0 && dys[i - 1] !== 0 && d !== dys[i - 1]).length;
+        expect(turns, `seed ${seed} t${t}`).toBeLessThanOrEqual(1);
+      }
   });
 
   it('time up before the dig: the failed splice is still in the ground (a low score, the same defect)', () => {

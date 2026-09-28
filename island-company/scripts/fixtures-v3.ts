@@ -15,6 +15,14 @@
 // first doc that matches each state below. Every doc is written by the live
 // engine's reducer: the script only dispatches moves (a bot's turn, an end of
 // turn, the resolve), it never edits a doc by hand.
+//
+// Not from this script: tests/fixtures/v3-bd1e1d2-restricted-{t1,t2,mel}.json (the only guest plane flying
+// restricted mid-week, the mechanic not ended), which gap-charter captured from the live engine's paper-sim crews
+// (`simulate`: ids sim-0 and sim-4, players M, E, F) with a capture it didn't commit. Fix round 1 tried to
+// regenerate them here (every team, seeds 0-9, the state after the week's last seat ended with the mechanic away and
+// `restrictedBy` on the twin): no byte match, so they stay as they are. They are live-engine docs all the same: on
+// bd1e1d2, restrictedBy returns their alert, migrate() leaves them unchanged and the engine resolves them flying
+// restricted. The version gate's other half runs on every fixture here: scripts/reverse-skew.ts.
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { soleGuest } from '../src/sim/alerts';

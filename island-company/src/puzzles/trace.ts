@@ -18,11 +18,13 @@
 // failed splice read hundreds of MΩ, from the failed splice on it reads what
 // the whole run read (0.4 MΩ). Dig the section between the last good hand hole
 // and the first bad one (the splice in the ground, not a hand hole), then close
-// it up: cut it out, re-splice with the kits the job flow picked, megger again
-// before re-energizing, backfill with 24 in of cover and a warning ribbon.
-// Tiers 0-2 show every reading and colour it; from tier 3 you megger it
-// yourself and the readings are plain numbers (knowing 0.4 MΩ is a failed
-// splice is the trade). Blind: where you dig is where you re-splice.
+// it up: cut the splice out, re-make it with the kits the job flow picked,
+// megger again before re-energizing (110.7), backfill to 24 in of cover with a
+// warning ribbon. Tiers 0-2 show every reading and colour it; from tier 3 you
+// megger it yourself and the readings are plain numbers (knowing 0.4 MΩ is a
+// failed splice is the trade). Blind: where you dig is where you re-splice, and
+// the re-test shows its number too (the whole run's, or still 0.4 MΩ): you
+// re-energize or dig again, and nothing says which is right.
 import { hashSeed, rng } from '../sim/rng';
 import { C, FONT, backdrop, clamp, fitLabel, label, loop, pointer, roundRect, stage, settle } from './kit';
 import { result, type PuzzleContext, type PuzzleDef, type PuzzleResult, type PuzzleSite } from './types';
@@ -174,17 +176,53 @@ function generateFeeder(seed: number, tier: number, site?: PuzzleSite): TraceMod
   // the points past the panel: the hand holes, then the cottages
   const n = tier <= 1 ? 4 : tier === 2 ? 5 : tier <= 4 ? 6 : 7;
   const devices: Device[] = [{ id: 0, kind: 'jbox', pos: { x: 0.08, y: 0.1 }, live: true, name: `Feeder breaker ${amps} A` }];
+  // one plausible trench (fix round 1): out of the panel, east along the path with a gentle drift, then a turn down
+  // the east side to the cottages, the way a run follows a path or a property line; never a zig-zag across the yard.
+  // The hand holes sit along it at even spacing (HH1 nearest the panel, as a site plan numbers them)
+  const eastY = r.range(0.22, 0.32);
+  const drift = r.range(0, 0.07);
+  const cornerX = r.range(0.78, 0.86);
+  const path: P[] = [
+    devices[0].pos,
+    { x: 0.16, y: eastY },
+    { x: (0.16 + cornerX) / 2 + r.range(-0.06, 0.06), y: eastY + drift * r.range(0.3, 0.7) },
+    { x: cornerX, y: eastY + drift },
+    { x: cornerX + r.range(0.02, 0.06), y: r.range(0.74, 0.82) },
+  ];
+  // spaced by distance on the drawn yard, which is taller than wide on a phone (about 1.5 : 1 in the lab), so
+  // a section down the east side isn't twice the length of one along the top
+  const legs = path.slice(1).map((q, i) => Math.hypot(q.x - path[i].x, (q.y - path[i].y) * 1.5));
+  const total = legs.reduce((a, b) => a + b, 0);
+  /** the point `f` of the way along the trench, and the leg it's on */
+  const along = (f: number): { q: P; leg: number } => {
+    let d = f * total;
+    for (let i = 0; i < legs.length; i++) {
+      if (d <= legs[i] || i === legs.length - 1) {
+        const t = legs[i] ? Math.min(1, d / legs[i]) : 0;
+        return { q: { x: path[i].x + (path[i + 1].x - path[i].x) * t, y: path[i].y + (path[i + 1].y - path[i].y) * t }, leg: i };
+      }
+      d -= legs[i];
+    }
+    return { q: path[path.length - 1], leg: legs.length - 1 };
+  };
   const chain = [0];
+  const at: { q: P; leg: number }[] = [{ q: path[0], leg: 0 }];
   for (let i = 1; i <= n; i++) {
-    const x = 0.1 + (i / (n + 0.3)) * 0.85;
-    const y = i % 2 ? r.range(0.26, 0.4) : r.range(0.56, 0.74);
-    devices.push({ id: i, kind: i === n ? 'cottages' : 'handhole', pos: { x, y }, live: true, name: i === n ? 'East cottages' : `HH${i}` });
+    const pt = i === n ? { q: path[path.length - 1], leg: legs.length - 1 } : along(i / n);
+    at.push(pt);
+    devices.push({ id: i, kind: i === n ? 'cottages' : 'handhole', pos: pt.q, live: true, name: i === n ? 'East cottages' : `HH${i}` });
     chain.push(i);
   }
-  // a buried run between hand holes is near enough straight: a dog-leg around a palm or a path
-  const route = (a: P, b: P): P[] => [a, { x: (a.x + b.x) / 2 + r.range(-0.03, 0.03), y: (a.y + b.y) / 2 + r.range(-0.07, 0.07) }, b];
   const segs: Seg[] = [];
-  for (let i = 1; i < chain.length; i++) segs.push({ from: chain[i - 1], to: chain[i], pts: route(devices[chain[i - 1]].pos, devices[chain[i]].pos), circuit: 1 });
+  // a section follows the trench between its two points, round its corners
+  for (let i = 1; i < chain.length; i++) {
+    const a = at[i - 1];
+    const b = at[i];
+    const pts: P[] = [a.q];
+    for (let k = a.leg + 1; k <= b.leg; k++) pts.push(path[k]);
+    pts.push(b.q);
+    segs.push({ from: chain[i - 1], to: chain[i], pts, circuit: 1 });
+  }
   // a splice pedestal at the first hand hole taps off to the cottage nearest the panel (tier 3+): it stays good
   if (tier >= 3) {
     const at = chain[1];
@@ -197,9 +235,10 @@ function generateFeeder(seed: number, tier: number, site?: PuzzleSite): TraceMod
   }
   // another buried circuit from the same panel crossing the yard (tier 4+): don't follow (or dig) the wrong cable
   if (tier >= 4) {
-    const a: Device = { id: devices.length, kind: 'light', pos: { x: 0.9, y: 0.9 }, live: true, name: 'Dock lights (other circuit)' };
+    // (it leaves the panel beside the feeder, crosses the pedestal's tap and heads for the dock, south of the yard)
+    const a: Device = { id: devices.length, kind: 'light', pos: { x: 0.68, y: 0.94 }, live: true, name: 'Dock lights (other circuit)' };
     devices.push(a);
-    segs.push({ from: 0, to: a.id, pts: [{ x: 0.12, y: 0.12 }, { x: 0.12, y: 0.48 }, { x: 0.86, y: 0.48 }, a.pos], circuit: 2 });
+    segs.push({ from: 0, to: a.id, pts: [{ x: 0.1, y: 0.13 }, { x: 0.1, y: 0.6 }, { x: 0.64, y: 0.6 }, a.pos], circuit: 2 });
   }
   const faultAfter = r.int(1, chain.length - 2);
   for (let k = faultAfter + 1; k < chain.length; k++) devices[chain[k]].live = false;
@@ -227,11 +266,14 @@ function generateFeeder(seed: number, tier: number, site?: PuzzleSite): TraceMod
   };
 }
 
+/** a dig this close to a hand hole (x the tap tolerance) is at the hand hole: its lid is 26 px across */
+export const HOLE_R = 0.9;
+
 /** Is a mark at `p` inside the fault region (segment between last live and first dead, incl. both devices; warm: the hot device)? */
 export function isFaultMark(m: TraceModel, p: P, tol = 0.05) {
   if (m.feeder) {
     // the failed splice is buried in the section, not in a hand hole: a dig at a hand hole re-makes good splices
-    if (m.devices.some((d, i) => i > 0 && Math.hypot(p.x - d.pos.x, p.y - d.pos.y) < tol * 1.3)) return false;
+    if (m.devices.some((d, i) => i > 0 && Math.hypot(p.x - d.pos.x, p.y - d.pos.y) < tol * HOLE_R)) return false;
     return distToPoly(p, faultSeg(m).pts) < tol;
   }
   if (m.warm) {
@@ -307,6 +349,8 @@ export const trace: PuzzleDef = {
     // the feeder: where it was dug, and the close-out before it's re-energized
     let dug: P | null = null;
     let closing = false;
+    /** the feeder, blind: earlier digs, re-made and backfilled after the re-test (drawn as patches of fresh soil) */
+    const holes: P[] = [];
     /** a finger down on a testable device: a test if it comes up there, a trace if it drags */
     let press: { d: number; x: number; y: number } | null = null;
 
@@ -328,7 +372,7 @@ export const trace: PuzzleDef = {
       if (F)
         return host.status(
           closing
-            ? `${m.symptom} · close it up, then re-energize`
+            ? `${m.symptom} · megger it again: re-energize, or dig again`
             : `${m.symptom} · ${mode === 'trace' ? 'trace + megger' : p.blind ? 'tap where to dig (one dig: you re-splice there)' : 'tap where to dig'}${m.showStates ? '' : ` · ${tests} tests`}`,
         );
       host.status(`${m.symptom} · ${mode === 'trace' ? 'trace + test' : p.blind ? 'tap the fault (one mark: you open the wall there)' : 'tap the fault'}${m.showStates ? '' : ` · ${tests} tests`}`);
@@ -406,10 +450,12 @@ export const trace: PuzzleDef = {
         if (finished || host.paused()) return;
         const a = area();
         if (pt.y > a.h - 84) {
-          // the feeder's close-out: one button, re-energize
+          // the feeder's close-out: dig again (left) or re-energize (right). The re-test's reading is on the card and
+          // nothing says which: an electrician doesn't close a 0.4 MΩ feeder (110.7), whoever else might
           if (closing) {
             host.fx.tap();
-            finish();
+            if (pt.x < a.w / 2) digAgain();
+            else finish();
             return;
           }
           // mode toggle buttons
@@ -468,6 +514,15 @@ export const trace: PuzzleDef = {
       host.fx.tap();
       status();
     }
+    /** the re-test didn't satisfy you: that dig is re-made and backfilled, and you dig somewhere else (a wrong dig was
+     * already counted when you dug it; a dig again after the right one re-makes good splices for nothing, and the clock runs) */
+    function digAgain() {
+      if (dug) holes.push(dug);
+      dug = null;
+      closing = false;
+      mode = 'mark';
+      status();
+    }
 
     const stop = loop(() => (F ? drawYard(F) : draw()));
 
@@ -486,7 +541,8 @@ export const trace: PuzzleDef = {
       ctx.fillRect(a.x, a.y + 6, a.pw, 8);
       // cables (only what you've traced shows)
       m.segs.forEach((s, i) => {
-        const prog = finished ? 1 : segProgress[i];
+        // blind: no end-of-job reveal of the route either (only what you traced)
+        const prog = finished && !p.blind ? 1 : segProgress[i];
         if (prog <= 0) return;
         const color = s.circuit === 2 ? C.fin : '#d9d3c7';
         ctx.strokeStyle = color;
@@ -671,7 +727,7 @@ export const trace: PuzzleDef = {
         const d = distToPoly(q, s.pts);
         if (d < best.d) best = { d, s };
       }
-      const at = m.devices.findIndex((d, i) => i > 0 && Math.hypot(q.x - d.pos.x, q.y - d.pos.y) < tolN() * 1.3);
+      const at = m.devices.findIndex((d, i) => i > 0 && Math.hypot(q.x - d.pos.x, q.y - d.pos.y) < tolN() * HOLE_R);
       if (at > 0) return `at ${devWord(at)}`;
       if (best.d > tolN() * 2) return 'off the run';
       if (best.s.circuit === 2) return 'on the dock-light circuit';
@@ -711,7 +767,8 @@ export const trace: PuzzleDef = {
       }
       // the buried runs the locator has followed: the trench line, the cable in it
       m.segs.forEach((s, i) => {
-        const prog = finished ? 1 : segProgress[i];
+        // blind: no end-of-job reveal of the route (with the readings taken, it would say whether the dig bracketed it)
+        const prog = finished && !p.blind ? 1 : segProgress[i];
         if (prog <= 0) return;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -726,6 +783,14 @@ export const trace: PuzzleDef = {
         ctx.setLineDash([]);
       });
       locatorPreview();
+      // earlier digs, backfilled
+      for (const h of holes) {
+        const q = S(h);
+        ctx.fillStyle = '#b89a72';
+        ctx.beginPath();
+        ctx.ellipse(q.x, q.y, 17, 11, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       // the dig (where you re-splice)
       if (dug) {
         const q = S(dug);
@@ -808,7 +873,7 @@ export const trace: PuzzleDef = {
           ctx.strokeStyle = C.ink;
           ctx.lineWidth = 1;
           ctx.stroke();
-          tag('Dock lights', s.x - 6, s.y - 16, { size: 10, weight: 800, color: C.inkSoft, align: 'right' });
+          tag('Dock lights', s.x + 14, s.y, { size: 10, weight: 800, color: C.inkSoft, align: 'left' });
         }
         if (known) {
           // the megger's reading, back to the panel: coloured only while the game teaches
@@ -846,14 +911,18 @@ export const trace: PuzzleDef = {
     /** after the dig: cut it out, re-splice with what the job picked, megger it again, backfill; then re-energize */
     function closeOut(f: NonNullable<TraceModel['feeder']>) {
       const a = area();
-      const kit = pickedSplice(p.context?.pick) ?? 'a direct-burial kit on each conductor';
+      const kit = pickedSplice(p.context?.pick) ?? 'a kit per conductor';
       const where = dug ? digWhere(dug) : 'down to the cable';
+      // the re-test before it goes back on (110.7): the whole run once the failed splice is re-made (any dig so far),
+      // else still the failed splice's reading. Blind shows it too, in plain ink: reading it is the trade (fix round 1)
+      const retest = correctSpot ? f.whole : f.fault;
       const lines = [
         // blind: what you dug and did, never whether it was the failed splice
         p.blind ? `Dug ${where}, down to the cable at 24 in` : `Dug ${where}: split bolts and tape, cracked`,
-        `Cut out the bad length; re-spliced: ${kit}`,
-        p.blind ? 'Megger L1, L2 and N again before re-energizing (110.7)' : `Megger again from the panel: L1, L2, N ${megWords(f.whole)} MΩ to ground`,
-        'Backfill: 24 in of cover, a warning ribbon 12 in above (300.5)',
+        // one splice re-made with the slack in the trench: a kit on each of L1, L2, N and the EGC
+        p.blind ? `Re-made the splice there, with the slack: ${kit}` : `Re-made the failed splice with the slack: ${kit}`,
+        `Megger again (110.7): L1, L2, N ${megWords(retest)} MΩ to ground`,
+        'Backfill to 24 in (Table 300.5), warning ribbon above',
       ];
       const cardH = 30 + lines.length * 19;
       const y0 = a.h - 84 - cardH - 6;
@@ -868,11 +937,17 @@ export const trace: PuzzleDef = {
         label(ctx, `${k + 1}`, 24, y0 + 36 + k * 19, { size: 11, weight: 900, color: C.sea, align: 'left' });
         fitLabel(ctx, t, 38, y0 + 36 + k * 19, a.w - 24 - 38, { size: 11.5, weight: 700, color: C.ink, align: 'left' });
       });
+      // two calls, the same look: dig again, or re-energize
       const by = a.h - 74;
-      roundRect(ctx, 12, by, a.w - 24, 52, 26);
+      const bw = (a.w - 36) / 2;
+      roundRect(ctx, 12, by, bw, 52, 26);
+      ctx.fillStyle = C.sandDeep;
+      ctx.fill();
+      label(ctx, 'Dig again', 12 + bw / 2, by + 26, { size: 15, weight: 800, color: C.ink });
+      roundRect(ctx, 24 + bw, by, bw, 52, 26);
       ctx.fillStyle = C.sea;
       ctx.fill();
-      label(ctx, 'Re-energize the feeder', a.w / 2, by + 26, { size: 15, weight: 800, color: C.white });
+      fitLabel(ctx, 'Re-energize', 24 + bw + bw / 2, by + 26, bw - 16, { size: 15, weight: 800, color: C.white });
     }
 
     function makeResult(): PuzzleResult {

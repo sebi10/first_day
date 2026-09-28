@@ -410,11 +410,14 @@ describe('builders and the site work', () => {
     buildWeek(s, rng(1), s.week, line);
     const h8 = s.assets.find((a) => a.id === 'h8')!;
     expect(h8).toMatchObject({ kind: 'house', model: 'cottage', name: 'Cottage 5', health: 80 });
-    // the county books it the first week from 8 out that no other house holds (it does one house a week)
+    // the county books it a week no other house holds, 8 weeks out or the nearest before it (it does one house a
+    // week; up to 2 weeks early, and only late when none of those is free)
     const taken = new Set(s.assets.filter((a) => a.kind === 'house' && a.id !== 'h8').map((a) => a.inspectionUntil));
-    let want = s.week + 8;
-    while (taken.has(want)) want++;
+    const early = [0, 1, 2].map((k) => s.week + 8 - k).find((w) => !taken.has(w));
+    let want = early ?? s.week + 9;
+    while (early === undefined && taken.has(want)) want++;
     expect(h8.inspectionUntil).toBe(want);
+    expect(want - s.week).toBeGreaterThanOrEqual(6);
     expect(want - s.week).toBeLessThanOrEqual(8 + 3);
     // it rents once someone turns it over
     expect(projectWeek(s).revenue).toBe(before);

@@ -3,7 +3,7 @@ import type { PuzzleId, PuzzleSite } from '../puzzles/types';
 import { alertFlags, alertShort, causeOf, liveAlerts, siteOf, soleGuest } from '../sim/alerts';
 import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { externalPower } from '../sim/aircraft';
-import { CABLE_REPORT, ECON, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
+import { CABLE_REPORT, ECON, FLOAT_AUCTION, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
 import { alertAog, cartOn, flightsAvailable, flightsPerPlane, groundsFrom, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, subCharterNeed, subCharterOn } from '../sim/econ';
 import { cardOf, flowStage } from '../sim/flow';
@@ -344,8 +344,14 @@ export function dockNext(s: IslandState, role: Role): { label: string; target: D
 }
 
 /** the End-turn confirm's flow lines (16); home adds today's ready jobs, owed moves and carts */
-export function endTurnChecks(s: IslandState, role: Role): { text: string; urgent: boolean; standing?: boolean }[] {
-  const out: { text: string; urgent: boolean; standing?: boolean }[] = [];
+/** the mechanic can still ask for the one MEL extension: placarded, not extended or asked yet, its placard runs out at this resolve or ran out at the last one (the engine's melExtend window) */
+export const canAskMel = (s: IslandState, a: Alert) => a.role === 'mech' && !!a.mel && !a.mel.ext && !a.mel.ask && a.mel.until <= s.week && a.mel.until >= s.week - 1 && a.status !== 'closed';
+
+/** a line on the End turn sheet; `melAsk`: the alert whose one MEL extension the mechanic can ask for from the line */
+export type EndCheck = { text: string; urgent: boolean; standing?: boolean; melAsk?: string };
+
+export function endTurnChecks(s: IslandState, role: Role): EndCheck[] {
+  const out: EndCheck[] = [];
   if (role === 'fin') {
     const cards = s.orders.filter((o) => o.flow && o.status === 'pending' && o.lastDeferredWeek !== s.week);
     const reqs = (s.reqs ?? []).filter((r) => r.status === 'open' && r.deferredWeek !== s.week);
@@ -381,21 +387,22 @@ export function endTurnChecks(s: IslandState, role: Role): { text: string; urgen
       else if (f.aw && asset?.kind === 'plane' && !(a.mel && a.mel.until >= s.week)) {
         const bite = groundWords(s, a);
         const fin = nameOf(s, 'fin');
-        // what the MEL still allows: a placard (category C), the one extension, or nothing (fix it or tag it)
+        // what the MEL still allows: a placard (category C), the one extension, or only the fix (a safety call grounds
+        // it too, so it's no way out: fix round 1)
         const text = !a.mel
           ? f.mel === 'C'
-            ? `Fix it or placard it (MEL C) this week, or ${name} ${bite}: ${alertShort(s, a)}.`
-            : `Fix it or tag it this week (no MEL relief), or ${name} ${bite}: ${alertShort(s, a)}.`
+            ? `Fix it or placard it (MEL C) this week, or from this resolve ${name} ${bite}: ${alertShort(s, a)}.`
+            : `Fix it this week (no MEL relief), or from this resolve ${name} ${bite}: ${alertShort(s, a)}.`
           : a.mel.ext || a.mel.until < s.week - 1
             ? `The MEL placard has run out: fix it this week, or ${name} ${bite}: ${alertShort(s, a)}.`
             : a.mel.ask
-              ? `${fin} hasn't approved the MEL extension yet: fix it, or ${name} ${bite} unless ${fin} does: ${alertShort(s, a)}.`
-              : `The MEL placard ran out: ask ${fin} to extend it (once), or fix it, or ${name} ${bite}: ${alertShort(s, a)}.`;
-        out.push({ text, urgent: true });
+              ? `${fin} hasn't authorized the MEL extension yet: fix it, or ${name} ${bite} unless ${fin} does: ${alertShort(s, a)}.`
+              : `The MEL placard ran out: ask ${fin} to authorize the one-time extension, or fix it, or ${name} ${bite}: ${alertShort(s, a)}.`;
+        out.push({ text, urgent: true, ...(canAskMel(s, a) ? { melAsk: a.id } : {}) });
       }
       // a placard running out at this resolve with the fix not ready: the one extension is the mechanic's to ask for
       if (a.mel && a.mel.until === s.week && !a.mel.ext && !a.mel.ask && o?.status !== 'ready')
-        out.push({ text: `${name}'s MEL placard runs out at this resolve: fix it, or ask ${nameOf(s, 'fin')} to extend it (once).`, urgent: false });
+        out.push({ text: `${name}'s MEL placard runs out at this resolve: fix it, or ask ${nameOf(s, 'fin')} to authorize the one-time extension.`, urgent: false, ...(canAskMel(s, a) ? { melAsk: a.id } : {}) });
       continue;
     }
     if (a.status === 'open') out.push({ text: `Plan it now so the parts come in time: ${alertShort(s, a)} on ${name} (due wk ${a.due}).`, urgent: a.due <= s.week + 1 });
@@ -660,8 +667,8 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
   // from tier 4. assetName: the hydraulic servicing placard names the aircraft.
   const context: PuzzleLaunch['context'] = { assetName: asset?.name, leak: o.leak, job: o.job ?? o.kind };
   if (o.kind === 'project' && o.puzzle === 'auction') {
-    // floatplane deposit: same auction, bigger stakes
-    context.market = { low: 3000, high: 7000, fair: 4800, cap: Math.min(5600, Math.max(0, s.cash - ECON.freezeBelow)) };
+    // floatplane deposit: same auction, bigger stakes (outbid, the part stays open for next week's sale)
+    context.market = { low: FLOAT_AUCTION.low, high: FLOAT_AUCTION.high, fair: FLOAT_AUCTION.fair, cap: Math.min(FLOAT_AUCTION.cap, Math.max(0, s.cash - ECON.freezeBelow)) };
   } else if (o.kind === 'auction' && o.lot) {
     // the broker's real lot (17.3): fair is the lot at the broker's price x 0.85; the bid is capped at 92% of the lot
     // at list, and never below the freeze line (the auction puzzle's lotMarket reads it as it is)
@@ -767,7 +774,9 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
             ? `How good it was shows up later: in ${asset.name}'s health, an inspection, or an incident.`
             : o.report
               ? `How good it was shows up later: if the fix doesn't hold, ${reporter} will be back.`
-              : o.kind === 'project'
+              : o.kind === 'project' && o.puzzle === 'auction'
+                ? 'Won: the deposit leaves the bank, and how good the buy was shows in what the crew project builds. Outbid: nothing is bought, and the next floatplane comes up at next week’s auction.'
+                : o.kind === 'project'
                 ? 'How good it was shows up later: in what the crew project builds.'
                 : 'How good it was shows up later: in the week’s numbers.',
         }

@@ -599,10 +599,10 @@ const REF: Task[] = [
     main: [{ slot: 'splice', label: 'Direct-burial splices (L1, L2, N, EGC)', cat: 'connectors', accepts: 'splice', qty: 4 }],
     bench: [],
     tools: ['T-MEGGER'],
-    nec: ['225', '300.5', '300.5(E)', '110.14(B)', '110.7'],
+    nec: ['225', 'Table 300.5', '300.5(E)', '110.14(B)', '110.7'],
     keywords: ['feeder', 'underground', 'buried', 'splice', 'megger', 'insulation', 'cottages', 'dropped', 'handhole'],
     summary:
-      'Lock the feeder out and open it at the cottages. Megger it: a failed splice reads well under 1 MΩ to ground, good cable hundreds of MΩ or more. Open the hand holes and megger back to the panel to find the section, dig it up, cut the splice out and re-splice with kits listed for direct burial (300.5(E), 110.14(B)). Megger again before it goes back on (110.7); backfill to 24 in of cover with a warning ribbon (300.5).',
+      'Lock the feeder out and open it at the cottages. Megger it: a failed splice reads well under 1 MΩ to ground, good cable hundreds of MΩ or more. Open the hand holes and megger back to the panel to find the section, dig it up, cut the failed splice out and re-make it with the slack in the trench, a kit listed for direct burial on each conductor (300.5(E), 110.14(B)). Megger again before it goes back on (110.7): still low, the failed splice is elsewhere. Backfill to 24 in of cover (Table 300.5), with a warning ribbon above it as good practice (required on services, 300.5(D)(3)).',
   }),
   ref('panel', {
     no: 'R-PANEL',

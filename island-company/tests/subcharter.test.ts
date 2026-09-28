@@ -16,8 +16,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { raiseAlert, soleGuest, SYMPTOMS } from '../src/sim/alerts';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
 import { SUBCHARTER } from '../src/sim/data';
-import { alertAog, capOf, downtimeOf, isAog, projectWeek, SUB_FEE, subCharterNeed, subCharterOn } from '../src/sim/econ';
-import { apply, createIsland, ENGINE_VERSION } from '../src/sim/engine';
+import { alertAog, capOf, downtimeOf, expectedDeferralCost, isAog, projectWeek, SUB_FEE, subCharterNeed, subCharterOn } from '../src/sim/econ';
+import { apply, createIsland, ENGINE_VERSION, forecastContext } from '../src/sim/engine';
 import { cardOf, fixTaskFor, stdPickFor } from '../src/sim/flow';
 import { spendSeries } from '../src/sim/ledger';
 import { hashSeed, rng } from '../src/sim/rng';
@@ -26,7 +26,7 @@ import { ROLES, type Action, type Alert, type Asset, type IslandState } from '..
 import { costLines } from '../src/ui/board';
 import { cardVM, carrierDown, needsVM } from '../src/ui/purchasing/model';
 import { allItems } from '../src/sim/items';
-import { blocks, crossMoves, endTurnChecks, launchFor, openOrders, teamNumbers, yourMoves } from '../src/ui/select';
+import { blocks, canAskMel, crossMoves, endTurnChecks, launchFor, openOrders, teamNumbers, yourMoves } from '../src/ui/select';
 import { flagsOf } from '../src/ui/flow/words';
 
 // whole-season runs: CI runners are about 1.5x slower
@@ -287,6 +287,134 @@ describe('the only guest plane past due: grounded, a mainland sub-charter flies 
     const moves = endTurnChecks(s, 'mech').map((m) => m.text);
     expect(moves.some((m) => /Twin N-12 is grounded and a mainland sub-charter flies the guests \(about \$[\d,]+ a week\)/.test(m))).toBe(true);
     expect(moves.some((m) => /restricted/.test(m))).toBe(false);
+  });
+});
+
+describe('fix round 1: what the crew is told about the sub-charter', () => {
+  it('waiting a week on a card due next week counts the week it grounds the twin (the parts would land too late)', () => {
+    let s = island(1);
+    const al = raise(s, 'M_TIRE_PRESSURE', 0, 'p1', 6);
+    const task = fixTaskFor(s, al)!;
+    const pick = stdPickFor(s, al, task);
+    for (const l of pick) delete s.inv![l.item];
+    s = ok(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick, week: 5 });
+    const o = s.orders.find((x) => x.flow?.alert === al.id && x.status !== 'cancelled')!;
+    const card = cardOf(s, o);
+    expect(card.aog).toBe(false);
+    // approved now its parts land at this resolve (or the next): the fix goes in by week 6; a week later they land after it
+    const vm = cardVM(s, o);
+    const exp = expectedDeferralCost(s, o).cost;
+    expect(card.freight.sched.eta).toBe(5);
+    expect(vm.waitCost).toBe(exp + card.downtime!.usd);
+    expect(card.downtime!.usd).toBeGreaterThanOrEqual(2 * SUB_FEE);
+    // two weeks out, waiting a week grounds nothing: only the deferral risk
+    let far = island(1);
+    const al2 = raise(far, 'M_TIRE_PRESSURE', 0, 'p1', 9);
+    const pick2 = stdPickFor(far, al2, task);
+    for (const l of pick2) delete far.inv![l.item];
+    far = ok(far, { t: 'plan', role: 'mech', alert: al2.id, task: task.id, pick: pick2, week: 5 });
+    const o2 = far.orders.find((x) => x.flow?.alert === al2.id && x.status !== 'cancelled')!;
+    expect(cardVM(far, o2).waitCost).toBe(expectedDeferralCost(far, o2).cost);
+  });
+
+  it('the review’s AOG line counts the flights the weather would have allowed (the ones the on-time grade counts)', () => {
+    let s = island(1);
+    s.weather = 'wind';
+    const al = raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
+    s = only(endWeek(s), al.id);
+    expect(says(s, 5, /^Twin N-12 AOG: .+ \(due week 5, not fixed\): 3 flights cancelled\.$/)).toBe(true);
+    expect(report(s, 5).flightsScheduled).toBe(3);
+  });
+
+  it('the forecast’s hints name the sub-charter while the twin is down', () => {
+    const s = island(1);
+    raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
+    expect(forecastContext(s).hints).toContain(`Sub-charter −$${(2 * SUB_FEE).toLocaleString('en-US')}/wk while Twin N-12 is down`);
+    expect(forecastContext(island(1)).hints.some((h) => /Sub-charter/.test(h))).toBe(false);
+  });
+
+  it('a sent job whose placard runs out this week still offers the mechanic the one extension (the job sheet and End turn)', () => {
+    let s = island(1);
+    const al = raise(s, 'M_COM_DEAD', 0, 'p1', 5);
+    s = ok(s, { t: 'mel', role: 'mech', alert: al.id, week: 5 });
+    const task = fixTaskFor(s, s.alerts!.find((a) => a.id === al.id)!)!;
+    const a = s.alerts!.find((x) => x.id === al.id)!;
+    const pick = stdPickFor(s, a, task);
+    for (const l of pick) delete s.inv![l.item];
+    s = ok(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick, week: 5 });
+    const sent = s.alerts!.find((x) => x.id === al.id)!;
+    expect(sent.status).toBe('job');
+    expect(canAskMel(s, sent)).toBe(true);
+    const line = endTurnChecks(s, 'mech').find((x) => x.melAsk === al.id);
+    expect(line?.text).toMatch(/MEL placard runs out at this resolve: fix it, or ask Cy to authorize the one-time extension\.$/);
+    s = ok(s, { t: 'melExtend', role: 'mech', alert: al.id, week: 5 });
+    expect(canAskMel(s, s.alerts!.find((x) => x.id === al.id)!)).toBe(false);
+  });
+});
+
+describe('the cover is what the twin would have flown (fix round 1): grounding it never pays better than flying it', () => {
+  const GRADE = { A: 4, B: 3, C: 2, D: 1 } as const;
+  /** one resolve of the same island, from the same state, as the twin is left (`fly`), tagged, or grounded on its unfixed item */
+  function week(tier: number, health: number, how: 'fly' | 'tag' | 'unfixed' | 'fixed', seed = 42) {
+    let s = island(tier, seed);
+    s.assets.find((a) => a.id === 'p1')!.health = health;
+    if (how === 'unfixed' || how === 'fixed') {
+      const al = raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
+      // fixed: signed off this week (the alert closes; the labour isn't the question here)
+      if (how === 'fixed') al.status = 'closed';
+    }
+    if (how === 'tag') s = ok(s, { t: 'tag', role: 'mech', assetId: 'p1', on: true, week: 5 });
+    const cash = s.cash;
+    s = endWeek(s);
+    const h = report(s, 5);
+    return { cash: s.cash - cash, grade: GRADE[h.grade], booked: h.housesBooked, sub: h.costs.subCharter ?? 0 };
+  }
+
+  it('at tiers 1-3, twin health 0-100 in steps of 10: a safety call, or an airworthiness item left past due, never nets more cash, more guests or a better grade', () => {
+    for (const tier of [1, 2, 3])
+      for (let health = 0; health <= 100; health += 10) {
+        const fly = week(tier, health, 'fly');
+        const fixed = week(tier, health, 'fixed');
+        for (const [down, up] of [
+          [week(tier, health, 'tag'), fly],
+          [week(tier, health, 'unfixed'), fixed],
+        ] as const) {
+          const at = `tier ${tier}, health ${health}`;
+          expect(down.cash, at).toBeLessThanOrEqual(up.cash);
+          expect(down.booked, at).toBeLessThanOrEqual(up.booked);
+          expect(down.grade, at).toBeLessThanOrEqual(up.grade);
+        }
+      }
+  });
+
+  it('a worn twin gets the cover its own flying would: at 50 it flies 2 of its 4, so the sub-charter flies 2; under 40, none (and no fee)', () => {
+    const s = island(2);
+    const twin = s.assets.find((a) => a.id === 'p1')!;
+    raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
+    twin.health = 50;
+    expect(subCharterOn(s)).toMatchObject({ flights: 2, cap: 2, usd: 2 * SUB_FEE });
+    twin.health = 35;
+    expect(subCharterOn(s)).toMatchObject({ flights: 0, cap: 0, usd: 0 });
+    // a healthy twin grounded for its item or the safety call: its whole schedule
+    twin.health = 90;
+    expect(subCharterOn(s)).toMatchObject({ flights: 4, cap: 4 });
+  });
+
+  it('the island’s pilots cap it as they would the twin: the cover is the schedule as crewed (no pilot on the books, no cover)', () => {
+    const s = island(2);
+    raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
+    expect(subCharterOn(s)!.flights).toBe(4);
+    s.staff = (s.staff ?? []).filter((n) => n.role !== 'pilot');
+    expect(subCharterOn(s)).toMatchObject({ flights: 0, cap: 0 });
+  });
+
+  it('the fee lands on the side that kept the plane down, and on the twin: the mechanic’s plan here', () => {
+    let s = island(1);
+    const al = raise(s, 'M_BRAKE_SOFT', 1, 'p1', 5);
+    s = only(endWeek(s), al.id);
+    const row = s.ledger!.find((r) => r.w === 5)!;
+    expect(row.as?.p1).toBeGreaterThanOrEqual(2 * SUB_FEE);
+    expect(row.tr.mech).toBeGreaterThanOrEqual(2 * SUB_FEE);
   });
 });
 

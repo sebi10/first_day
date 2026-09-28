@@ -74,17 +74,27 @@ export const SUB_FEE = round10(SUBCHARTER.ownPerFlight * SUBCHARTER.mult);
 
 /**
  * The flights a mainland sub-charter flies for the only guest plane's guests in a week it's down: the guests who
- * need a seat (the houses that can rent and the housekeepers can turn over, less the ferry's parties), up to the
- * plane's own schedule in that weather. null: not the only guest plane (another guest plane carries its guests).
- * The operator's own crew flies it, so the island's pilots don't cap it; it sells no day tours.
+ * need a seat (the houses that can rent and the housekeepers can turn over, less the ferry's parties), up to what
+ * the plane itself would have flown in service that week. null: not the only guest plane (another guest plane
+ * carries its guests). It sells no day tours.
+ *
+ * `cap`, the cover (fix round 1, 2026-09-28): the plane's own schedule at its real airworthiness in that weather, as
+ * the island's pilots would have crewed it (capFleet). The operator is contracted for the island's schedule, not for
+ * a better one: a twin at 50 flies 2 of its 4, so its cover is 2; a worn-out twin (under 40) flies none, so none. A
+ * healthy twin grounded for a past-due item or a safety call still gets its full schedule. So grounding a plane, or
+ * leaving its item unfixed, never pays better than flying it (tests/subcharter.test.ts sweeps it).
  */
 export function subCharterNeed(s: IslandState, planeId: string, weather: Weather = s.weather, week = s.week): { flights: number; cap: number; fee: number; usd: number } | null {
   const p = s.assets.find((a) => a.id === planeId);
   if (!p || !soleGuest(s, planeId)) return null;
   const rentable = houses(s).filter((h) => houseRentable(s, h, week)).length;
   const guests = Math.max(0, Math.min(rentable, housekeepingCap(s)) - tierDef(s.tier).ferry);
-  // `cap`: what the operator could fly in on the plane's schedule in that weather (the review's empty-house lines read it)
-  const cap = planeCapacity({ ...p, health: 100 }, s.tier, weather);
+  // `cap`: what the plane would have flown in service (the review's empty-house lines read it)
+  const inService = capFleet(
+    s,
+    planes(s).map((q) => ({ plane: q, n: q.id === p.id ? planeCapacity(p, s.tier, weather) : capOf(s, q, weather) })),
+  );
+  const cap = inService.find((c) => c.plane.id === p.id)?.n ?? 0;
   const flights = Math.min(guests, cap);
   return { flights, cap, fee: SUB_FEE, usd: flights * SUB_FEE };
 }
@@ -167,14 +177,19 @@ export const INSPECTION_SLIP = 3;
 
 /**
  * The week the county books a house's inspection for, from `target` (the robust tail, 2026-09-28): its inspector
- * does one of the island's houses a week, so a house whose date another house already holds goes to the next free
- * week, up to INSPECTION_SLIP weeks later (else the date as asked). Houses built together (a tier's pair) get their
- * notices a week apart instead of all at once, and an island whose houses are in step (a live doc, the inspector
- * story card's one visit) spreads out as they renew.
+ * does one of the island's houses a week, so a house whose date another house already holds gets a week of its own.
+ * Houses built together (a tier's pair) get their notices a week apart instead of all at once, and an island whose
+ * houses are in step (a live doc) spreads out as they renew.
+ *
+ * Fix round 1: the nearest free week at or before the date first, up to INSPECTION_NOTICE weeks early (the inspector
+ * comes before the certificate runs out, so it never outlives its 8 weeks because the county is busy: the notice just
+ * comes earlier); only if none of those is free, the next free week after it, up to INSPECTION_SLIP weeks later; else
+ * the date as asked.
  */
 export function bookInspection(s: Pick<IslandState, 'assets'>, id: string, target: number): number {
   const taken = new Set(s.assets.filter((a) => a.kind === 'house' && a.id !== id).map((a) => a.inspectionUntil));
-  for (let w = target; w <= target + INSPECTION_SLIP; w++) if (!taken.has(w)) return w;
+  for (let k = 0; k <= INSPECTION_NOTICE; k++) if (!taken.has(target - k)) return target - k;
+  for (let w = target + 1; w <= target + INSPECTION_SLIP; w++) if (!taken.has(w)) return w;
   return target;
 }
 
@@ -190,16 +205,25 @@ export function onSchedule(s: Pick<IslandState, 'alerts'>, o: Pick<Order, 'flow'
 }
 
 /**
- * The week's resolve at which autopilot does a seat's crew project part if that seat is still away (PROJECT_COVER),
- * or null when it won't: nothing of that seat's left to do, or a seat nobody has played for PROJECT_COVER.recent
- * weeks or more (then the part waits for its player, as before).
+ * The first resolve at which autopilot would do a seat's crew project part (PROJECT_COVER), if the seat misses every
+ * resolve from now to then; null when it won't: nothing of that seat's left to do, or a seat nobody has played for
+ * PROJECT_COVER.recent weeks or more (then the part waits for its player, as before).
+ *
+ * Fix round 1 (2026-09-28): the seat has to have missed every resolve of the wait (PROJECT_COVER.wait in a row), not
+ * just the one at the end of it. A friend who plays one week and misses the next isn't covered: one missed evening
+ * doesn't cost you your part of the tier. So it's never earlier than two weeks after the project opened, and never
+ * earlier than the seat's own streak allows: this week's resolve if it has missed the one before and misses this
+ * one, next week's if it has missed none yet, and from the week after next once it has ended this week's turn.
  */
-export function projectCoverWeek(s: Pick<IslandState, 'project' | 'orders' | 'players'>, role: Role): number | null {
+export function projectCoverWeek(s: Pick<IslandState, 'project' | 'orders' | 'players' | 'week' | 'turns'>, role: Role): number | null {
   const id = s.project?.orders[role];
   const o = id ? s.orders.find((x) => x.id === id) : undefined;
   const p = s.players[role];
   if (!o || o.status !== 'ready' || !p || p.missedStreak >= PROJECT_COVER.recent) return null;
-  return o.createdWeek + PROJECT_COVER.wait;
+  // the resolves still to miss from this week's on, this week's included
+  const played = !!s.turns?.[role]?.ended;
+  const toMiss = played ? PROJECT_COVER.wait : Math.max(1, PROJECT_COVER.wait - p.missedStreak);
+  return Math.max(o.createdWeek + PROJECT_COVER.wait, s.week + (played ? toMiss : toMiss - 1));
 }
 
 export function houseRentable(s: IslandState, h: Asset, week = s.week) {
