@@ -13,7 +13,7 @@ import { addStarter } from '../src/sim/stock';
 import { ROLES, type Alert, type Asset, type IslandState, type Order } from '../src/sim/types';
 import { missingSlot, newDraft, preview, reduceDraft, sendAction, stepper, type Draft, type DraftAct } from '../src/ui/flow/steps';
 import { moveChip } from '../src/ui/flow/words';
-import { chainStepOrder, chainTag, crossMoves, dockNext, endTurnChecks, lateSafeAlert, revenueMoves, standingWords } from '../src/ui/select';
+import { chainStepOrder, chainTag, crossMoves, dockNext, endTurnChecks, lateSafeAlert, revenueMoves, standingWords, yourMoves } from '../src/ui/select';
 
 vi.setConfig({ testTimeout: 30000 });
 
@@ -172,5 +172,40 @@ describe('the MEL on End turn (10)', () => {
     s = ok(s, { t: 'melExtend', role: 'mech', alert: ran!.melAsk!, week: 6 });
     expect(endTurnChecks(s, 'mech').some((x) => /^Cy hasn't authorized the MEL extension yet: /.test(x.text))).toBe(true);
     expect(endTurnChecks(s, 'mech').some((x) => x.melAsk)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stage 2 (docs/EXPANSION.md 4.11, 6.4, 6.5, 13.1): whose move a quick check's write-up and a flag are
+
+describe('stage 2: a flag is the receiver’s move, a check write-up the checker’s, and neither blocks a crewmate', () => {
+  it("a flag on the twin is Ana's move: her Your move row, the Dock, and End turn; nobody else waits on it", () => {
+    let s = island();
+    const crossBefore = crossMoves(s).length;
+    s = ok(s, { t: 'flag', role: 'fin', assetId: 'p1', week: s.week });
+    const al = s.alerts!.at(-1)!;
+    expect(al).toMatchObject({ role: 'mech', src: 'flag' });
+    expect(yourMoves(s, 'mech').some((x) => x.alert.id === al.id)).toBe(true);
+    expect(yourMoves(s, 'elec').some((x) => x.alert.id === al.id)).toBe(false);
+    expect(moveChip(s, al, 'mech').chip).toMatch(/Your move|Due now/);
+    expect(dockNext(s, 'mech')).not.toBeNull();
+    expect(endTurnChecks(s, 'mech').some((c) => c.text.includes('Plan it now'))).toBe(true);
+    // a flag is an alert for the trade, not a card or a cross-trade wait: the flagger isn't blocked
+    expect(crossMoves(s).length).toBe(crossBefore);
+  });
+
+  it("a quick check's write-up is the checker's own move, right call or wrong, and the check itself leaves nobody waiting", () => {
+    let s = island();
+    const crossBefore = crossMoves(s).length;
+    s = ok(s, { t: 'check', role: 'elec', assetId: 'h1', item: 'porch', week: s.week });
+    const al = s.alerts!.at(-1)!;
+    expect(al).toMatchObject({ role: 'elec', src: 'check', who: 'Ben' });
+    expect(yourMoves(s, 'elec').some((x) => x.alert.id === al.id)).toBe(true);
+    expect(moveChip(s, al, 'elec').chip).toMatch(/Your move|Due now/);
+    expect(crossMoves(s).length).toBe(crossBefore);
+    // "all serviceable" raises nothing for anyone
+    let t = island();
+    t = ok(t, { t: 'check', role: 'mech', assetId: 'p1', item: null, week: t.week });
+    expect(yourMoves(t, 'mech')).toEqual(yourMoves(island(), 'mech'));
   });
 });

@@ -15,6 +15,7 @@ import { apply, createIsland } from '../src/sim/engine';
 import { planTask, stdPick } from '../src/sim/flow';
 import { hashSeed, rng } from '../src/sim/rng';
 import { ROLES, type IslandState, type Order, type Role } from '../src/sim/types';
+import { baseCrew } from './crews';
 
 // whole-season sims below: CI runners are about 1.5x slower
 vi.setConfig({ testTimeout: 30000 });
@@ -157,7 +158,8 @@ describe('1. code inspections on the county calendar', () => {
     let s = load('v3-bd1e1d2-chain');
     const before = s.assets.filter((a) => a.kind === 'house').map((a) => a.inspectionUntil);
     expect(new Set(before).size).toBe(3);
-    const team = TEAMS['three friends'];
+    // the base crew (no quick checks or flags): the calendar's claim, not the crew's extra work (stage 2's T7 prices that)
+    const team = baseCrew(TEAMS['three friends']);
     // the paper-sim crew plays six weeks on this build: every house's prep comes due and is signed off once
     for (let w = 0; w < 6; w++) {
       const W = s.week;

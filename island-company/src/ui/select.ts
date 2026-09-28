@@ -15,6 +15,12 @@ import { spendable } from '../sim/ledger';
 import { taskById } from '../sim/tasks';
 import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Order, type PartChain, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
+import { flagCheck } from '../sim/checks';
+import { downtimeOf, houseRentable, houseWeekRevenue, rentFactor, tierDef } from '../sim/econ';
+import { invValue, runway } from '../sim/ledger';
+import { binsInUse, binsTotal, carryCost } from '../sim/stock';
+import { INSURANCE, REPORTS } from '../sim/data';
+import type { ObjectKind, ObjectRef, StationId } from './objects';
 
 /** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
 export type Block = { from: Role; to: Role; text: string; kind?: CrossMove['kind'] };
@@ -294,7 +300,8 @@ export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?
   return rows.sort((x, y) => Number(y.alert.due <= s.week) - Number(x.alert.due <= s.week) || rank(s, x.alert) - rank(s, y.alert) || x.alert.due - y.alert.due || (x.alert.id < y.alert.id ? -1 : 1));
 }
 
-export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' };
+/** `object`: an object's inspect sheet (stage 2, docs/EXPANSION.md 2.5; home.tsx opens it) */
+export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' } | { object: ObjectRef };
 
 /**
  * This week's work that earns the week's money but isn't an alert (16): the charter load sheet (no sheet, half a
@@ -816,4 +823,131 @@ export const roleName = (r: Role) => ROLE_LABEL[r];
 
 export function assetLine(s: IslandState, id: string | null) {
   return s.assets.find((a) => a.id === id)?.name ?? '';
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2 (docs/EXPANSION.md 6.2, 6.3, 14.3): the selectors the inspect sheets read. Home only; never hidden state
+// (no alert cause, no defect, never a quick check's truth).
+
+/**
+ * An asset's money: `revenue` is the week it carries this week, projected (a house's booking at the nightly rate; a
+ * plane's guests and tours, what a week on the ground would lose; the island doc keeps no per-asset revenue history).
+ * `parts` + `labour` is exact: everything booked on the asset over the last `weeks` ledger weeks (this one included);
+ * the split between them is estimated from each week's island-wide labour share (the ledger keeps one sum per asset).
+ */
+export function assetPnl(s: IslandState, assetId: string, weeks: number): { revenue: number; parts: number; labour: number; lease?: number; hull?: number; fuel?: number } {
+  const a = s.assets.find((x) => x.id === assetId);
+  if (!a) return { revenue: 0, parts: 0, labour: 0 };
+  let revenue = 0;
+  if (a.kind === 'house') revenue = houseRentable(s, a) ? houseWeekRevenue(s, a) * rentFactor(s, a) : 0;
+  else if (a.kind === 'plane' && !MODELS[a.model]?.cargo) revenue = downtimeOf(s, a.id).usd;
+  let parts = 0;
+  let labour = 0;
+  for (const row of s.ledger ?? []) {
+    if (row.w <= s.week - Math.max(1, weeks) || row.w > s.week) continue;
+    const spent = row.as?.[assetId] ?? 0;
+    if (!spent) continue;
+    const lab = row.sp.labor ?? 0;
+    const share = lab + (row.usedV ?? 0) > 0 ? lab / (lab + (row.usedV ?? 0)) : 1;
+    labour += spent * share;
+    parts += spent * (1 - share);
+  }
+  return { revenue: Math.round(revenue), parts: Math.round(parts), labour: Math.round(labour) };
+}
+
+/** the open alerts on an asset, by trade (any stage: a new one, a job not signed off yet) */
+export function openAlertsOn(s: IslandState, assetId: string): { mech: number; elec: number } {
+  const out = { mech: 0, elec: 0 };
+  for (const a of liveAlerts(s)) if (a.assetId === assetId) out[a.role]++;
+  return out;
+}
+
+/** Report a problem on an asset (6.5): whether this seat can flag it now, and to whom (the words when it can't) */
+export function flaggable(s: IslandState, role: Role, assetId: string): { ok: true; to: OpsRole } | { ok: false; why: string } {
+  return flagCheck(s, role, assetId);
+}
+
+/** the reports about a fixture (6.3, 6.5): hangar trouble, the office's outlets */
+const FIXTURE_REPORTS: Partial<Record<ObjectKind, string[]>> = {
+  hangar: ['hangarLights', 'compressor', 'charger', 'hangarGpu', 'gpuCable'],
+  office: ['officeOutlets'],
+  fuel: ['avgas'],
+  dock: [],
+};
+
+/** a fixture's facts for a seat (6.3): what it shows, in the seat's words. Home only in stage 2 (a station's: none yet) */
+export function fixtureFacts(s: IslandState, kind: ObjectKind, st: StationId, role: Role): { lines: string[] } {
+  if (st !== 'home') return { lines: [] };
+  const lines: string[] = [];
+  const reports = openReports(s).filter((o) => (FIXTURE_REPORTS[kind] ?? []).includes(o.report!.key));
+  const reportLine = (o: Order) => {
+    const def = REPORTS.find((d) => d.key === o.report!.key);
+    const fixer = nameOf(s, o.role);
+    const effect = o.report!.effect === 'leak' ? `costs $${o.report!.amount.toLocaleString('en-US')} a week` : o.report!.effect === 'gse' ? 'a cart tagged out' : `holds ${nameOf(s, o.report!.by)} to fewer jobs a turn`;
+    return `Open: ${def?.notice ?? o.title} (${o.role === role ? 'yours to fix' : `${fixer}'s to fix`}): ${effect}.`;
+  };
+  const W = s.history[s.history.length - 1];
+  switch (kind) {
+    case 'hangar': {
+      const pw = powered(s);
+      const carts = gseCarts(s);
+      if (role !== 'fin') lines.push(pw.gridDown ? `Hangar tools offline: the grid is down${role === 'mech' ? ' (one hangar job this turn)' : ''}.` : 'Hangar power on.');
+      if (role === 'mech') lines.push(`${carts.filter((c) => c.charging).length} of ${carts.length} ground power cart${carts.length > 1 ? 's' : ''} on the charger.`);
+      if (role === 'elec') lines.push("The GPU charger circuit: the charger outside the classified area, GFCI on the tool receptacles (NEC 513).");
+      if (role === 'fin') {
+        lines.push(`Stock $${Math.round(invValue(s)).toLocaleString('en-US')} in ${binsInUse(s)} of ${binsTotal(s)} bins; carrying it costs $${carryCost(s).toLocaleString('en-US')} a week.`);
+        const receiving = (s.pos ?? []).filter((p) => p.status === 'open' || p.status === 'held').length;
+        if (receiving) lines.push(`${receiving} purchase order${receiving > 1 ? 's' : ''} on the way to receiving.`);
+        if (W?.costs.power) lines.push(`Charging the carts cost $${Math.round(W.costs.power).toLocaleString('en-US')} last week.`);
+      } else lines.push(`Stores: ${binsInUse(s)} of ${binsTotal(s)} bins used.`);
+      break;
+    }
+    case 'office': {
+      if (role === 'fin') {
+        const rw = runway(s);
+        lines.push(`Cash $${Math.round(s.cash).toLocaleString('en-US')}; spendable covers ${rw.weeks} weeks of the fixed costs ($${rw.weekly.toLocaleString('en-US')} a week).`);
+      } else lines.push(`${nameOf(s, 'fin')}'s office.`);
+      break;
+    }
+    case 'runway': {
+      const night = tierDef(s.tier).nightFlights;
+      lines.push(night ? 'Night flights on: a flight more a plane a week while the edge lights are lit.' : 'Day flights only: night flights come with the Resort (tier 5).');
+      if (role === 'elec') lines.push(night ? 'The edge lights are on the island grid (the runway edge lights breaker).' : 'No edge lights yet.');
+      if (W && role !== 'elec') {
+        const lost = W.flightsScheduled - W.flightsFlown;
+        lines.push(`Last week: ${W.flightsFlown} of ${W.flightsScheduled} flights flown${lost > 0 ? `, ${lost} lost` : ''}.`);
+      }
+      break;
+    }
+    case 'fuel': {
+      if (role === 'mech') lines.push('Sumped this morning: no water.');
+      if (role === 'elec') {
+        const dock = liveAlerts(s).filter((a) => a.role === 'elec' && (a.sym === 'E_DOCK_TRIP' || a.sym === 'E_TAKEOFF_DOCK')).length;
+        lines.push(dock ? `${dock} open alert${dock > 1 ? 's' : ''} on the fuel-dock run.` : 'The fuel-dock pumps: on the fuel dock breaker, nothing open.');
+      }
+      if (role === 'fin') lines.push('Fuel is in the charter price: an avgas rise that the rates never follow is a money leak.');
+      break;
+    }
+    case 'dock': {
+      const ch = s.chain;
+      if (role === 'mech' && ch && ch.freight === 'boat' && ch.step !== 'done') lines.push(`The AOG boat is bringing the ${ch.item}.`);
+      if (role === 'fin') {
+        lines.push(tierDef(s.tier).ferry ? `The ferry brings ${tierDef(s.tier).ferry} guest parties a week.` : 'No ferry yet: it starts at tier 3.');
+        const boat = (s.pos ?? []).filter((p) => (p.status === 'open' || p.status === 'held') && p.carrier === 'boat').length;
+        if (boat) lines.push(`${boat} purchase order${boat > 1 ? 's' : ''} of building materials on the supply boat.`);
+      }
+      if (!lines.length) lines.push(tierDef(s.tier).ferry ? 'The ferry and the supply boat tie up here.' : 'The supply boat ties up here.');
+      break;
+    }
+    case 'windsock': {
+      lines.push(s.weather === 'clear' ? 'This week: clear skies.' : s.weather === 'wind' ? 'This week: wind, the flights at risk.' : 'This week: a storm, the electrician’s week.');
+      if (role === 'elec' && W?.weather === 'storm') lines.push('Last week’s storm: houses −6, grid −8.');
+      if (role === 'fin') lines.push(`Insurance: ${INSURANCE[s.insurance].label} (covers ${Math.round(INSURANCE[s.insurance].cover * 100)}% of a claim).`);
+      break;
+    }
+    default:
+      break;
+  }
+  for (const o of reports) lines.push(reportLine(o));
+  return { lines };
 }

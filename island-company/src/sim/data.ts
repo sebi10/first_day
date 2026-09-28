@@ -186,6 +186,11 @@ export type CatalogEntry = {
   weight(a: Asset, week: number): number;
   /** a per-model factor on today's card: the twin's 100-hour and oil change (two engines), the cargo plane's starter-generator */
   costBy?: Partial<Record<string, number>>;
+  /**
+   * stage 2 (docs/EXPANSION.md 2.3): the health below which the kind's weight is non-zero (the quick checks read it).
+   * Absent: checks.ts reads it off the weight function (today's `below(h, w)` lines)
+   */
+  wearFrom?: number;
 };
 
 const below = (h: number, w: number) => (a: Asset) => (a.health < h ? w : 0);

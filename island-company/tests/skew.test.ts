@@ -55,6 +55,9 @@ import { siteBox, H, W } from '../src/ui/island/geo';
 import { cardVM, needsVM } from '../src/ui/purchasing/model';
 import { blocks, crossMoves, dockNext, endTurnChecks, flowMoves, launchFor, openOrders, pushes, teamNumbers, yourMoves } from '../src/ui/select';
 import { buildLine, buildRows, doingNow } from '../src/ui/staff/model';
+import { canCheck, checkView } from '../src/sim/checks';
+import { FIXTURE_KINDS, HOME } from '../src/ui/objects';
+import { assetPnl, fixtureFacts, flaggable, openAlertsOn } from '../src/ui/select';
 
 // ten-week runs on each fixture: CI runners are about 1.5x slower
 vi.setConfig({ testTimeout: 30000 });
@@ -267,6 +270,19 @@ function screens(s: IslandState) {
     flowStage(s, a);
     flagsOf(s, a);
   }
+  // stage 2 (docs/EXPANSION.md 10.3): the inspect sheets' selectors, home only
+  for (const a of s.assets) {
+    openAlertsOn(s, a.id);
+    assetPnl(s, a.id, 13);
+    for (const role of ROLES) {
+      flaggable(s, role, a.id);
+      if (role !== 'fin') {
+        canCheck(s, role, a.id);
+        checkView(s, role, a.id);
+      }
+    }
+  }
+  for (const k of FIXTURE_KINDS) for (const role of ROLES) fixtureFacts(s, k, HOME, role);
   for (const a of s.assets) if (a.kind === 'plane') expect(Number.isFinite(downtimeOf(s, a.id).usd)).toBe(true);
   for (const h of s.history.slice(-3)) for (const [, usd] of costLines(h)) expect(Number.isFinite(usd)).toBe(true);
 }
@@ -286,6 +302,9 @@ describe('island docs written by the live job-flow build (bd1e1d2, engine 3)', (
       expect(r.s.cash).toBe(doc.cash);
       expect(r.s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
       expect(r.s.alerts).toEqual(doc.alerts);
+      // stage 2's fields are written only when first used (docs/EXPANSION.md 0.2 rule 2)
+      expect(r.s.checked).toBeUndefined();
+      expect(r.s.flagged).toBeUndefined();
       // the seats still playing finish the week (the paper-sim crew) and it resolves here
       let a = week(structuredClone(doc), name, false);
       let b = week(JSON.parse(JSON.stringify(doc)) as IslandState, name, true);

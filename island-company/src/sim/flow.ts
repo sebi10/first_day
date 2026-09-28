@@ -479,11 +479,17 @@ export const unitPrice = (id: ItemId) => {
 // ---------------------------------------------------------------------------
 // Money per job (8.3): labour plus the standard parts is today's card
 
-/** today's card for this kind on this asset: orderCost x the model's factor, plus the kit it needed */
-export function cardToday(s: Pick<IslandState, 'tier'>, kind: string, asset: Pick<Asset, 'model' | 'health'>): number {
+/**
+ * Stage 2 (docs/EXPANSION.md 6.4): an alert a quick check found early plays one order tier easier and is priced one
+ * tier lower (never under tier 1). Every other alert: 0.
+ */
+export const earlyLess = (a?: Pick<Alert, 'early'> | null): number => (a?.early ? 1 : 0);
+
+/** today's card for this kind on this asset: orderCost x the model's factor, plus the kit it needed; `less`: tiers off (an early catch) */
+export function cardToday(s: Pick<IslandState, 'tier'>, kind: string, asset: Pick<Asset, 'model' | 'health'>, less = 0): number {
   const c = CATALOG_BY_KIND[kind];
   if (!c) return 0;
-  return round10(orderCost(kind, orderTier(kind, asset as Asset, s.tier)) * (c.costBy?.[asset.model] ?? 1)) + (c.parts ? kitValue(s.tier) : 0);
+  return round10(orderCost(kind, Math.max(1, orderTier(kind, asset as Asset, s.tier) - less)) * (c.costBy?.[asset.model] ?? 1)) + (c.parts ? kitValue(s.tier) : 0);
 }
 
 /**
@@ -492,10 +498,10 @@ export function cardToday(s: Pick<IslandState, 'tier'>, kind: string, asset: Pic
  * never under the task's floor (LABOR). A pick that isn't standard costs what it
  * costs: labour doesn't change.
  */
-export function laborCost(s: IslandState, kind: string, task: Task, asset: Asset, site?: ElecSite | null, needs?: string[] | null): number {
+export function laborCost(s: IslandState, kind: string, task: Task, asset: Asset, site?: ElecSite | null, needs?: string[] | null, less = 0): number {
   const std = bomValue(linesFor(s, asset, task, stdPick(s, asset, task, site, needs)));
   const min = laborMin(task);
-  return round10(Math.min(LABOR.capX * min, Math.max(min, cardToday(s, kind, asset) - std)));
+  return round10(Math.min(LABOR.capX * min, Math.max(min, cardToday(s, kind, asset, less) - std)));
 }
 
 /** a repair's pre-filled line: RPR-{job} when its fix rule carries parts (an ipc:noteff repair carries the effective part instead) */

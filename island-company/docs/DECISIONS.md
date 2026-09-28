@@ -1379,3 +1379,63 @@ Three read-only critics (trade realism, game design, architecture) raised 81 poi
   - presets built on `gap-zoom`'s view state
 - **Absences:** after 2 missed analyst weeks, the analyst's autopilot guard trims round trips, returns a losing lease past its minimum, and mothballs a station losing over $1,000 a week. It never opens or leases.
 - **The contract** (§14.3) lists every cross-package symbol with its signature and a working home-only implementation. §4.2 decides every `planes`/`houses`/`grid`/`generator`/`powered` call site. File ownership now covers purchasing, staff, flow, board and crewboard, with an ownership check at Integrate.
+
+## Airline network
+
+The build log of `docs/EXPANSION.md`, one subsection per package (§14.2). Each package writes only in its own.
+
+### Engine and data (A)
+
+#### 2026-09-28: A1, the stage-2 contract: objects, quick checks, Report a problem
+
+Branch `stage2`, from `gaps` at `258d0d2` plus the spec (`expansion-spec`, `a608675`). Stage 1 (A0) is being built in parallel on `gaps`; the integrator merges both. Nothing is version-bumped here (engine 4, doc 4, rules `v == 4`): the stage-2 release needs its own bump (v5 if `gaps` + A0 ship as v4), because it adds two moves (`check`, `flag`), two alert sources the open work counts (`check`, `flag`) and `alert.early`, and an older open client would drop or mis-resolve them.
+
+**What's in it** (every symbol B1 and C1 build on, with a working home-only implementation; `tests/contract.test.ts` imports them all):
+- `types.ts`: `IslandState.checked` / `flagged` (written on first use), `Alert.early` (hidden), `AlertSrc` `'check' | 'flag'`, the `check` and `flag` actions, both in `WEEK_BOUND`.
+- `src/sim/checks.ts` (the logic) and `src/sim/checkdata.ts` (the zones, the home panel's breaker schedule, the houses' circuits, the pools, the write-up rows). The data is in its own file so `alerts.ts` can fold the rows into `SYMPTOMS` without an import cycle.
+- The engine's `check` and `flag` moves (`engine.ts`, one marked block), the early tier in `planAlert`, the review lines at resolve step 17b, and one line in `generateAlerts` (a wrong call holds a slot).
+- `src/ui/objects.ts`, the selectors in `select.ts` (`assetPnl`, `fixtureFacts`, `openAlertsOn`, `flaggable`, `DockTarget` `{ object }`), `openDm` in `crewboard.tsx`, the version-keyed `whatsnew.tsx` shell, and the mounts in `home.tsx`.
+- Stubs that render today's behaviour, for their owners to replace: `src/ui/map/MapView.tsx` (today's `<Island>` and toggle, moved out of Home unchanged; it never emits `onObject`), `src/ui/inspect/InspectSheet.tsx` (a plain sheet that proves the wiring: status, the check, Report a problem), `src/ui/inspect/WhatsNewMap.tsx` (no panels, so What's new shows nothing yet).
+- `ops.tsx` exports `WriteUp` and `SafetyCall` for C.
+
+**Decisions beyond the spec (reasons):**
+- **A right call and a wrong call raise the same write-up row.** Each check item has its own symptom row (`K_walk:rmain`, `K_ir:hangar`, `K_meter:kitchen1`; `auto`, never drawn by the slots): "Written up at Ana's walkaround: the R main." A right call carries the tell's cause (its finding and fix); a wrong call a no-fault cause. Both are `src: 'check'`. Why: the spec's right call raised the kind's usual symptom (`src: 'finding'`) and the wrong call a write-up, which would tell the tech at once which it was (pillar 3). Now it surfaces at Investigate, like any no-fault-found. Only an open `src: 'check'` alert with no cause counts as a held slot (`generateAlerts`, `openWork`).
+- **The plane walkaround rows are airworthiness items** (`aw`): a written-up discrepancy has to be cleared before flight, so an open write-up grounds the plane from its due week (2–3 weeks out, time to close it). The generator's, the panel's and the houses' rows close nothing and roll no incident (a no-fault cause never does).
+- **The tell's kind is drawn as the week's draw would weigh it** (seeded per asset and week, so the view holds all week), not "the highest weight". The spec's rule surfaced the heaviest kinds every week (a panel upgrade, a spar, a wheel half). On the robust sweep (90 seeds × 4 crews) it cost all average 20 more tier-5 misses (77 → 97) and three friends 11 (102 → 113). The weighted draw brought them to 81 and 107.
+- **An early catch is priced one tier lower as well as played one tier easier** (`earlyLess` in `flow.ts`: `cardToday`/`laborCost` take tiers off; the job flow's labour preview in `steps.ts` uses it too, so the card and the preview agree). Caught early, it's less work. It took the robust misses to 72 and 101, at or under the run without checks.
+- **`CHECK.detect` 0.7 → 0.5** (the spec's named lever, 11.5.3). The standard 30-seed median for all average sits on a 23/24 knife edge: with detect 0.7 it read 24 (T0 wants 21–23); 0.5 reads 23 and 23 for both target crews, and the robust sweep equals the run without checks. The 30-seed median moves ±1 week with any reshuffle (one extra alert changes every later seed), so read the robust numbers first.
+- **`CHECK.fromTier` stays 2** (the owner's default, 18.9). Tier 3 was tried: no better.
+- **The IR scan's layout.** Home's panel: the main (400 A, read for its continuous load: 82–95% is the upgrade's tell) and the tier's feeders (east and west cottages, hangar, office, fuel dock, then the transfer switch feed, the villas, the lodge, the runway edge lights). One distractor a scan: a branch at 85–95% load, 14–18 °C, normal for its load. The generator is scanned during its weekly test run: the generator-side and load-side lugs carry the same current, so the tell is the ΔT between similar components under similar load (NETA's method); the utility-side lugs are open (too light to judge).
+- **The meter check's layout.** A cottage's seven receptacle circuits (a villa or the lodge nine) and the service. Kitchen, bath, laundry and porch are 20 A 12 AWG GFCI; bedrooms, living room and hall 15 A 14 AWG. Run lengths are stable per house. The porch is the long run (120–150 ft), the look-alike: its 4.5–6 V drop is normal for its length. The job a right call raises is sited on that circuit (its breaker and conductors).
+- **`wearFrom` is read off the catalog's weight functions** (`wearFromOf`, probing health 0–100) unless a catalog line sets it; no catalog line was edited, so A0's changes merge cleanly.
+- **Flags.** The receiver is the asset's trade; the analyst's flag on the generator goes to the tech with more coming on it (the mechanic on a tie). "One received per trade a week" is read off this week's `src: 'flag'` alerts (nothing new stored). A flag is drawn from `guest`, `squawk` and `utility` rows of the receiver's trade, with the flagger's name ("Flagged by Seb on Twin N-12: …", a guest's "Guest at …:" dropped).
+- **The bots** (`Bot.checks`, `Bot.flags`, on unless false; 12.1): the tech checks the lowest-health checkable asset (the electrician the grid under 70 first) and calls it by `hit`. The analyst flags the house with the most revenue at risk, the electrician a plane under 60, both with nothing open on it, and **only when the receiver is under their open-work target** (a considerate crewmate: a swamped one gets a message, not a flag on top). Their draws have their own streams (`hashSeed(s.seed, 'bot-check', …)`), so with checks and flags off a run is the base build's. Autopilot never checks or flags.
+- **`assetPnl`**: revenue is this week's projected (a house's booking, a plane's guests and tours, what a week down would lose): the doc keeps no per-asset revenue history. Parts + labour is exact over the window; the split between them is estimated from each week's island-wide labour share, since the ledger keeps one sum per asset.
+- **MapView takes an optional `go: { preset, n }`** (not in 14.3): Home's builders' line still jumps the map to the build site and scrolls it into view.
+
+**The golden identity** (`tests/golden.test.ts`): with checks and flags off, 26 weeks of three friends (seeds 1–3) and all average (seed 1) hash (sha256 of the final doc's JSON) to what `258d0d2` gives, recorded in a throwaway worktree of it (removed after). Nothing stage 2 is written, and `migrate()` adds nothing. **After A0 merges, re-record them** on the merged base: `simulate(TEAMS[team], 26, seed)` there, then the hashes.
+
+**Four older sim tests reshuffled** (one extra alert changes every later seed): the alert-volume test now counts the check write-ups (they take the week's slots: right and wrong calls together keep each trade within ±10% of the base volume); the late-game test runs ten seeds, not five, at the same share; the county-calendar and staff-stub tests run the base crew (`tests/crews.ts`), since their claims are about the base game. The staff-stub one exposed a latent report bug, **not fixed here** (it would change the golden digests, and it's stage 1's resolve): when a crew project finishes at the resolve (autopilot's cover), `tierUp` is computed before `finishProjectIfDone`, so that week's review reports the new tier at the old tier's costs.
+
+**Balance (T7; 26 weeks; medians):**
+
+| Run | Team | T2/T3/T4/T5 | weeks < $0 | T5 misses | checks right/wrong/flags per game |
+|---|---|---|---|---|---|
+| standard, off | three friends | 8/11/16/23 | 0 | 6 / 30 | — |
+| standard, on | three friends | 8/11/16/23 | 0 | 7 / 30 | 9.7 / 1.3 / 2.0 |
+| standard, off | all average | 7/12/16/23 | 0 | 4 / 30 | — |
+| standard, on | all average | 7/12/16/23 | 0 | 3 / 30 | 10.8 / 1.2 / 1.8 |
+| robust, off | three friends | T5 23/24/23/24 | 1 | 102 / 360 | — |
+| robust, on | three friends | T5 24/24/23/24 | 1 | 102 / 360 | — |
+| robust, off | all average | T5 23/24/24/23 | 0 | 77 / 360 | — |
+| robust, on | all average | T5 23/24/24/24 | 0 | 78 / 360 | — |
+
+Solo, absent and nobody stay at tier 1 either way (their numbers are identical: checks start at tier 2). **The tier-3 unlock week doesn't move** (11 and 12, on and off). The pacing-guard test holds.
+
+**Checks:** `npx tsc --noEmit -p .`; 828 of 828 tests in 49 files (781 in 45 before): `tests/golden.test.ts`, `contract.test.ts`, `check.test.ts`, `flag.test.ts`, the stage-2 blocks in `whosemove.test.ts` and `skew.test.ts`. `npm run build`. The pass-and-play e2e at 390 × 844 and 1280 × 820 (only the Manrope 403s). A scripted phone run (390 and 360 px) and a desktop run on a crafted save (`scripts/stage2-save.ts`): Home as before, the zone toggle, the walkaround in the stub sheet and its write-up, the analyst's flag, a fixture's facts, and `openDm` opening the DM prefilled.
+
+### The map (B)
+
+### Objects (C)
+
+### The network desk (D)

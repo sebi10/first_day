@@ -3,9 +3,10 @@
 import { planeModel, type Ata } from './aircraft';
 import { alertFlags, alertTier, causeOf, fixesOf, liveAlerts, needsOf, siteOf, symptomOf } from './alerts';
 import { botChainData, islandAircraft, needsFreight, openChain, wrongPn } from './chain';
+import { botCall, canCheck, checkKindFor, flagCheck, openWork } from './checks';
 import { ECON, FLOAT_AUCTION, GSE, STOCK, TIERS } from './data';
 import { apply, createIsland, forecastContext } from './engine';
-import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
+import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, houseWeekRevenue, logistic, needsCart, occupancy, startCart, urgency } from './econ';
 import { cardOf, judgeSlot, planTask, repairTask, stdPick } from './flow';
 import { allItems, buyUnits, itemById, priceAt } from './items';
 import { spendable } from './ledger';
@@ -34,6 +35,12 @@ export type Bot = {
    */
   slips?: number;
   requests?: boolean;
+  /**
+   * stage 2 (docs/EXPANSION.md 12.1): the techs' quick check a week, and Report a problem (the analyst's and the
+   * electrician's). On unless false; the golden test turns them off (the tier 1-5 identity proof, 11.5)
+   */
+  checks?: boolean;
+  flags?: boolean;
 };
 export type Team = Record<Role, Bot>;
 
@@ -116,6 +123,9 @@ function playOps(s: IslandState, role: 'mech' | 'elec', bot: Bot, r: Rng, now: n
       s = step(s, { t: 'gse', role, cart: c.id, op: 'inspect', call: worn === right ? 'tag' : 'ok' }, now);
     }
   }
+  // stage 2 (12.1): the week's quick check, then (the electrician) a flag, before the alerts are planned
+  s = botCheck(s, role, bot, now);
+  if (role === 'elec') s = botFlag(s, 'elec', bot, now);
   // the job flow: stopped jobs repicked, then every open alert of the trade called and planned (18.1)
   s = flowTurn(s, role, bot, r, now);
   const ready = s.orders.filter((o) => o.role === role && o.status === 'ready').sort((a, b) => urgency(s, b) - urgency(s, a));
@@ -189,6 +199,8 @@ function chainData(s: IslandState, o: IslandState['orders'][number], skill: numb
 
 function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
   if (!bot.naive) s = step(s, { t: 'setRates', ...bestRates(s) }, now);
+  // stage 2 (12.1): the analyst flags the house with the most revenue at risk to the electrician
+  s = botFlag(s, 'fin', bot, now);
   if (s.pendingBonus) s = step(s, { t: 'allocateBonus', choice: 'reserve' }, now);
   if (s.story && !s.story.chosen) s = step(s, { t: 'story', key: s.story.options[s.cash > 12000 ? 0 : 1].key, role: 'fin' }, now);
 
@@ -621,6 +633,40 @@ function naiveStock(s: IslandState, r: Rng, now: number): IslandState {
   void STOCK;
   void TIERS;
   return s;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2 (docs/EXPANSION.md 12.1): the quick checks and Report a problem. Their draws have their own streams
+// (never the seat's week `r`), so a run with them off plays exactly as before they existed.
+
+const nothingOpen = (s: IslandState, id: string) => !liveAlerts(s).some((a) => a.assetId === id) && !s.orders.some((o) => o.assetId === id && open(o));
+
+/** the tech's quick check: the checkable asset with the lowest health (the electrician: the grid under 70 first), called by `hit` */
+function botCheck(s: IslandState, role: 'mech' | 'elec', bot: Bot, now: number): IslandState {
+  if (bot.checks === false) return s;
+  const cands = s.assets.filter((a) => checkKindFor(s, role, a) && canCheck(s, role, a.id).ok);
+  if (!cands.length) return s;
+  const grid = role === 'elec' ? cands.find((a) => a.kind === 'grid' && a.health < 70) : undefined;
+  const a = grid ?? cands.reduce((m, x) => (x.health < m.health ? x : m));
+  const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
+  const h = hit(skill, alertTier(s, { assetId: a.id }, role));
+  const item = botCall(s, role, a.id, h, rng(hashSeed(s.seed, 'bot-check', role, s.week)));
+  return step(s, { t: 'check', role, assetId: a.id, item, week: s.week }, now);
+}
+
+/** a flag: the analyst's on the house with the most revenue at risk (under 60, nothing open on it), the electrician's on a plane under 60 with nothing open */
+function botFlag(s: IslandState, role: 'fin' | 'elec', bot: Bot, now: number): IslandState {
+  if (bot.flags === false) return s;
+  const pool =
+    role === 'fin'
+      ? s.assets.filter((a) => a.kind === 'house' && a.health < 60 && nothingOpen(s, a.id)).sort((x, y) => houseWeekRevenue(s, y) - houseWeekRevenue(s, x))
+      : s.assets.filter((a) => a.kind === 'plane' && a.health < 60 && nothingOpen(s, a.id)).sort((x, y) => x.health - y.health);
+  const a = pool.find((x) => flagCheck(s, role, x.id).ok);
+  if (!a) return s;
+  // a considerate crewmate: a trade already at its open-work target gets a message, not a flag on top
+  const to = flagCheck(s, role, a.id) as { ok: true; to: 'mech' | 'elec' };
+  const w = openWork(s, to.to);
+  return w.open < w.target ? step(s, { t: 'flag', role, assetId: a.id, week: s.week }, now) : s;
 }
 
 /** One seat's turn as a bot plays it: the sim's week loop, and tests that start from an island they set up. */

@@ -1,7 +1,7 @@
 // Crew board: a persistent message board for the three of you, plus direct
 // messages between any two seats. It lives in the island itself, so it syncs to
 // every phone and computer and works offline.
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, type IslandRef } from '../net/session';
 import { ROLE_LABEL } from '../sim/data';
 import { BOARD } from '../sim/engine';
@@ -29,6 +29,24 @@ function seenFor(ref: IslandRef, me: Role, t: Thread) {
 function unreadIn(s: IslandState, ref: IslandRef, me: Role, t: Thread) {
   const seen = seenFor(ref, me, t);
   return (s.board ?? []).filter((p) => p.id > seen && p.role !== me && inThread(p, me, t)).length;
+}
+
+/**
+ * Open the DM thread to a seat with a message started (stage 2, docs/EXPANSION.md 6.5: an inspect sheet's "Message
+ * Mia about the hangar"). Home switches to the Board tab; the crew board opens that thread with the text prefilled
+ * (a board not on screen yet takes it when it mounts).
+ */
+export function openDm(role: Role, prefill: string): void {
+  if (typeof window === 'undefined') return;
+  dmAsked = { role, prefill };
+  window.dispatchEvent(new CustomEvent('ic:dm', { detail: dmAsked }));
+}
+let dmAsked: { role: Role; prefill: string } | null = null;
+/** the DM asked for before the board was on screen, once */
+function takeDmAsked() {
+  const d = dmAsked;
+  dmAsked = null;
+  return d;
 }
 
 /** Messages to this seat (crew board + DMs) this device hasn't seen yet. */
@@ -62,6 +80,24 @@ export function CrewBoard({ ctl }: { ctl: Ctl }) {
   const shown = all ? recent : recent.slice(0, 6);
   const newest = posts.reduce((n, p) => Math.max(n, p.id), 0);
   const peer = thread === 'crew' ? null : s.players[thread];
+  // a DM asked for by openDm (an inspect sheet): that thread, the message started, the composer in view
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const take = (d: { role: Role; prefill: string } | null) => {
+      if (!d || d.role === me || !s.players[d.role]) return;
+      setThread(d.role);
+      setText(d.prefill);
+      setAll(false);
+      requestAnimationFrame(() => {
+        box.current?.scrollIntoView?.({ block: 'center' });
+        box.current?.focus();
+      });
+    };
+    take(takeDmAsked());
+    const on = (e: Event) => take(takeDmAsked() ?? (e as CustomEvent<{ role: Role; prefill: string }>).detail);
+    window.addEventListener('ic:dm', on);
+    return () => window.removeEventListener('ic:dm', on);
+  }, [me]);
 
   // reading a thread marks it seen for this seat on this device
   useEffect(() => {
@@ -166,6 +202,7 @@ export function CrewBoard({ ctl }: { ctl: Ctl }) {
       )}
       <div class="composer">
         <textarea
+          ref={box}
           value={text}
           maxLength={BOARD.maxLength}
           rows={2}

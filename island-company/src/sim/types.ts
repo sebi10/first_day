@@ -562,6 +562,12 @@ export interface IslandState {
   builds?: Build[];
   /** the week the job flow started on this island (teaching weeks follow it). Old islands: the migration week */
   flowSince?: number;
+
+  // --- stage 2 (docs/EXPANSION.md 2.4, 6.4, 6.5): written only when first used; absent = never used ---
+  /** week of each tech's last quick check (one a week) */
+  checked?: Partial<Record<OpsRole, number>>;
+  /** week of each seat's last flag, "Report a problem" (one a week) */
+  flagged?: Partial<Record<Role, number>>;
 }
 
 /** moves that belong to one week: stamped at dispatch, stale ones are rejected */
@@ -598,6 +604,9 @@ export const WEEK_BOUND = [
   'hire',
   'letGo',
   'build',
+  // stage 2 (docs/EXPANSION.md 7): the quick check and Report a problem
+  'check',
+  'flag',
 ] as const;
 
 /** What the mechanic can do with a ground power cart. */
@@ -682,6 +691,14 @@ export type Action =
   | { t: 'nudge'; alert: string; week?: number }
   /** the standing limit a week (late cards approved at the resolve) */
   | { t: 'setStanding'; amount: number }
+  // --- stage 2 (docs/EXPANSION.md 6.4, 6.5, 7) ---
+  /**
+   * a quick check (one a week per tech, from tier 2): the mechanic's walkaround, the electrician's IR scan or meter
+   * check. `item`: the zone, breaker or circuit written up (one of checkView's items), or null ("all serviceable")
+   */
+  | { t: 'check'; role: OpsRole; assetId: string; item: string | null; week?: number }
+  /** Report a problem (from week 3): a write-up alert for the trade that owns the asset, one a week per seat, one received per trade */
+  | { t: 'flag'; role: Role; assetId: string; week?: number }
   // --- NPC staff (package D implements; 15.9) ---
   | StaffAction;
 
@@ -881,7 +898,8 @@ export interface EaRecord {
 
 export type AlertSrc =
   | 'squawk' | 'trend' | 'wear' | 'due' | 'ad' | 'finding' | 'again' | 'landing' // mech
-  | 'guest' | 'utility' | 'code' | 'takeoff'; // elec (plus 'finding', 'again')
+  | 'guest' | 'utility' | 'code' | 'takeoff' // elec (plus 'finding', 'again')
+  | 'check' | 'flag'; // stage 2 (docs/EXPANSION.md 6.4, 6.5): a quick check's write-up (right or wrong call alike), a crewmate's flag
 
 export interface Alert {
   /** 'a31' */
@@ -922,6 +940,8 @@ export interface Alert {
   task?: TaskId;
   /** the only guest plane's early-sign wording was raised (5.6) */
   sole?: boolean;
+  /** HIDDEN (stage 2, docs/EXPANSION.md 6.4): found early by a quick check's right call: its job plays one order tier easier (never under 1) */
+  early?: true;
 }
 
 /** the resolve's review-line writer, shared with the staff hooks */

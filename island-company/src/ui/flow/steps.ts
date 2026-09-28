@@ -11,7 +11,7 @@
 // show (A's hintsFor and pickCheck). The UI keeps the draft in sessionStorage.
 import { alertFlags, alertTier, causeOf, lowerFirst, prefilledTask, protectionNeeded, siteOf } from '../../sim/alerts';
 import { ECON, ROLE_LABEL } from '../../sim/data';
-import { acOf, judgeSlot, laborCost, planTask, repairLabor, stdPickFor } from '../../sim/flow';
+import { acOf, earlyLess, judgeSlot, laborCost, planTask, repairLabor, stdPickFor } from '../../sim/flow';
 import { buyUnits, itemById, priceAt, unitWords } from '../../sim/items';
 import { hintsFor, ipcIndex, manualIndex, search, supplyIndex, type Doc } from '../../sim/search';
 import { available, isSafetyJob, onOrderFree, owned, reservedFor, schedFreight, spendable, toolComing, vendorFor } from '../../sim/stock';
@@ -512,7 +512,8 @@ export function labourOf(s: IslandState, a: Alert, d: Draft): number {
   }
   if (!t.kind) return 0;
   const slots = [...new Set(d.pick.map((l) => l.slot).filter((z): z is string => !!z)), ...(d.research ? [d.research] : [])];
-  return laborCost(s, t.kind, t, asset, siteOf(s, a), slots);
+  // (a quick check's early catch is priced a tier lower, as the engine prices it: stage 2)
+  return laborCost(s, t.kind, t, asset, siteOf(s, a), slots, earlyLess(a));
 }
 
 /** Send's summary: what comes off the shelf, what goes on a card, the labour, and what will happen */
