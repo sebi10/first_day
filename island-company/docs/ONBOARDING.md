@@ -53,7 +53,7 @@ Every puzzle follows the real procedure. Tiers 0–2 teach; from tier 3 the hint
 - **Extra cottages (tier 3+).** Up to two in the lagoon grove: a $17,000 prefab shell, then the builders' site work. The desk says what one would rent at this week's bookings and when it pays back; with a house already empty, it wouldn't.
 - On autopilot your seat fills an empty place in the standard crew and buys the next tier's materials. It never lets anyone go or starts a cottage.
 
-You'll see them on the island: builders in hard hats on the site, a pilot by the planes, a housekeeper at a booked house, and at night someone working late in the office window.
+You'll see them on the island: builders in hard hats on the site, a pilot by the planes, a housekeeper at a booked house, and at night someone working late in the office window. To watch the builders, tap their line on Home (*Builders: …* ›) or a builder on the island: the island zooms to their site. *See the island*, or a tap on the island, goes back.
 
 The week resolves at **20:00 island time**, or as soon as all three have ended their turn. Everyone gets the board review. Miss a day and your role runs on autopilot at 50%: nothing is lost, but that week doesn't count toward unlocks.
 

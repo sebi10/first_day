@@ -976,3 +976,25 @@ The underground feeder to the east cottages (`E_FEEDER_DROP`, `ref:feeder`, the 
   - Rules: `v: 2` update → permission-denied, `v: 3` → not-found (passes the rules), list → permission-denied.
   - Real emulator writes: create `v: 2` refused, create `v: 3` written, update `v: 2` refused, update `v: 3` written.
 - **No version bump. Balance unchanged:** no sim code was touched.
+
+## 2026-09-28: the builders' site gets its own zoom box
+
+HANDOFF §3 "Known gaps": the island on Home zoomed only to the viewer's own trade zone (`focusBox(role, tier)`). The builders' site work had no view of its own.
+
+- **How you get there.** Tap the builders' line on Home. With a build open it is a button now, with a › like an alert row, and the analyst's *Buy* stays a separate button beside it. Or tap a builder on the island. The tap is hit-tested in code, within 22 CSS px of the figure's middle (a 44 px target), so the figures need no extra SVG nodes. On a phone the island scrolls back into view. To leave, tap the 44 px *See the island* button in the island's corner, or anywhere on the zoomed island. Home's zoom is now `view: 'zone' | 'site' | null`. A tap on the island away from any builder still toggles the zone zoom as before.
+- **The box.** `siteBox(s)` in `src/ui/island/geo.tsx` is a pure function of `builds` and `tier`, like `focusBox`, so the planned free camera can use it as a preset. It frames `workSites(s)`: each site's drawn extent (the dug plot, the frame, the tower crane at its tallest, the lumber, the barrier and the builders) plus 10 units, clamped to the map. `zoomK` caps it at 3.2, a 250 × 188-unit view. With no build open it returns null and the whole island shows. That includes old docs with no `builds` field.
+- **The builders work one unit at a time.** This changes where they stand. On the tier-4 build they do the villas' footings and shutters at the villas, and the dock's pilings and marine decking at the dock. Before, the crew was split across the dock and both villas. The standard crew's one builder always stood at the dock, even for the villas' footings. A box around all three sites was a 1.3× zoom with 8 px figures on a phone. The dock gets a third crew spot for a crew of three. The other builds have one site, or two cottages side by side.
+- **Fix on the way.** The generator site's middle builder stood behind its frame: its spot was 1.2 units above the site's sort point. Every crew spot now stands at least 2 units in front of its site.
+- **No version bump.** It's UI only: no state field, no action, no engine change. Balance is unchanged, since nothing in `src/sim` changed.
+- **Numbers.**
+  - SVG nodes: the beaten island-lab scene has 1,390 before and after (budget 1,500). The staff scene has 1,240 before and after. On Home the island has the same node count zoomed or not.
+  - Cart tap targets under the site zoom: 63 × 63 CSS px on a phone's 358 px island and 105.6 × 105.6 on a 600 px desktop island. The minimum is 44; `cartHit` now goes through `hitUnits(px, cssW, box)`.
+- **Tests.** Six island-lab scenes: `site-t2`, `site-t3`, `site-t4-villas`, `site-t4-dock`, `site-t5` and `site-cottage`. `tests/sitebox.test.ts` has 11 tests. For every tier build at every half unit, worked one and two tiers ahead, and for both cottage plots at every unit, it checks:
+  - the box lies inside the map
+  - the zoom is at least 2×
+  - the view shows every work site and every builder figure
+  - the carts stay at least 44 CSS px from 320 to 720 px wide
+  - which site each tier-4 unit is worked at
+  - the tier build is framed before a queued cottage
+  - there is no box with no build open or on a doc without builds
+  - every crew spot stands in front of its site

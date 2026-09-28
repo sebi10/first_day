@@ -1,8 +1,10 @@
 // Island geometry: the map layout (every zone, asset and flourish has a fixed
 // spot so nothing ever collides), smooth-curve helpers, a tiny oblique
 // projection for buildings and a seeded scatter with exclusion zones.
+import { TIERS } from '../../sim/data';
 import { rng } from '../../sim/rng';
-import type { Role } from '../../sim/types';
+import { buildDef, openBuild } from '../../sim/staff';
+import type { IslandState, Role } from '../../sim/types';
 
 export type Pt = [number, number];
 export const W = 800;
@@ -259,6 +261,70 @@ export function viewOf(b: Box | null): Box {
   const k = zoomK(b);
   const [cx, cy] = viewCentre(b, k);
   return [cx - W / 2 / k, cy - H / 2 / k, cx + W / 2 / k, cy + H / 2 / k];
+}
+/** a tap target of `px` CSS px in drawing units, under a zoom box, on a drawing `cssW` CSS px wide */
+export const hitUnits = (px: number, cssW: number, b: Box | null) => (px * W) / (Math.max(1, cssW) * zoomK(b));
+
+// ------------------------------------------------ the builders' site ---
+// The builders' zoom (docs/JOBFLOW.md 15.5): a box around the open build's
+// site, where the builders stand and the site shows its stage. A pure function
+// of the state, like focusBox, so a camera can use it as a preset.
+
+/** what a build site looks like, from the catalog model of what goes up there */
+export type SiteKind = 'house' | 'villa' | 'lodge' | 'gen';
+export const siteKindOf = (model: string): SiteKind | null =>
+  model === 'cottage' ? 'house' : model === 'villa' ? 'villa' : model === 'lodge' ? 'lodge' : model === 'gen' ? 'gen' : null;
+/** one place the builders work: a new building's plot (its front-centre ground point), or the seaplane dock (its root on the beach) */
+export type WorkSite = { id: string; kind: SiteKind | 'dock'; at: Pt };
+/** a site's screen extent around its ground point [x0, y0, x1, y1], as sites.tsx draws it: the dug plot, the
+ *  frame, the tower crane at its tallest, the lumber, the barrier and the builders on it */
+const SITE_EXTENT: Record<WorkSite['kind'], Box> = {
+  house: [-38, -80, 45, 26],
+  villa: [-49, -72, 50, 24],
+  lodge: [-49, -62, 52, 24],
+  gen: [-28, -48, 48, 14],
+  // the stakes on the stem, the piles under the T-head, the buoy, the lumber and the builders on the beach
+  dock: [-42, -60, 64, 18],
+};
+/** the materials that go into the seaplane dock (its pilings and marine decking): a unit that draws one is worked at the dock */
+const DOCK_ITEMS = ['BLD-PILE', 'BLD-MDECK'];
+
+/**
+ * Where the open build's work is: an extra cottage's plot, or the tier build's
+ * new buildings. The builders work one unit at a time, so on the villas and
+ * the seaplane dock (tier 4) they are at the dock for its pilings and decking
+ * and at the villas for their footings and shutters. Empty with no build open.
+ */
+export function workSites(s: Pick<IslandState, 'builds' | 'tier'>): WorkSite[] {
+  const b = openBuild(s);
+  if (!b) return [];
+  if (b.cottage) return PLOT[b.cottage] ? [{ id: b.cottage, kind: 'house', at: PLOT[b.cottage] }] : [];
+  const all: WorkSite[] = [];
+  for (const a of TIERS[(b.tier ?? 0) - 1]?.adds ?? []) {
+    const kind = a.id === 'p3' ? 'dock' : siteKindOf(a.model);
+    const at = a.id === 'p3' ? DOCK.root : POS[a.id];
+    if (kind && at) all.push({ id: a.id, kind, at });
+  }
+  const unit = buildDef(b.id)?.units[Math.max(0, Math.min(b.need - 1, Math.floor(b.done + 1e-9)))];
+  const atDock = !!unit && Object.keys(unit).some((i) => DOCK_ITEMS.includes(i));
+  const here = all.filter((w) => (w.kind === 'dock') === atDock);
+  return here.length ? here : all;
+}
+
+/** the builders' zoom box: the open build's work sites with a margin, inside the map; null with no build open */
+export function siteBox(s: Pick<IslandState, 'builds' | 'tier'>): Box | null {
+  const ws = workSites(s);
+  if (!ws.length) return null;
+  const pad = 10;
+  const b: Box = [W, H, 0, 0];
+  for (const { kind, at } of ws) {
+    const e = SITE_EXTENT[kind];
+    b[0] = Math.min(b[0], at[0] + e[0] - pad);
+    b[1] = Math.min(b[1], at[1] + e[1] - pad);
+    b[2] = Math.max(b[2], at[0] + e[2] + pad);
+    b[3] = Math.max(b[3], at[1] + e[3] + pad);
+  }
+  return [Math.max(0, b[0]), Math.max(0, b[1]), Math.min(W, b[2]), Math.min(H, b[3])];
 }
 
 /** flourish spots (growth.ts), placed clear of every asset and path */

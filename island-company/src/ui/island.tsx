@@ -18,11 +18,14 @@ import {
   APRON_PROPS, ApronLights, ApronProps, BeachBar, Bench, Boardwalk, Confetti, Dock, Festoon, Fireworks, FishingBoats, Fountain, GardenBeds, Lamp, Lighthouse, Market, NewFlags,
   Observatory, Statue, Bunting, buntingBulbs, YachtAt, YachtLights,
 } from './island/extras';
-import { along, AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, OFFICE, P, PATHS, PLOT, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, SPOT, viewOf, W, zoomK, zoomOf, type Pt } from './island/geo';
+import {
+  along, AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, hitUnits, OFFICE, P, PATHS, PLOT, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, siteBox, siteKindOf, SPOT, viewOf, W, workSites, zoomK,
+  zoomOf, type Pt,
+} from './island/geo';
 import { blob } from './island/rocks';
 import { Clouds, DawnGrade, GoldenGrade, Gulls, Guy, LifeDefs, NightGrade, NightSky, Rain, SeaLife, StormGrade, Wind } from './island/life';
 import { K } from './island/paint';
-import { crewSpots, DOCK_CREW, DockSite, Site, type SiteKind } from './island/sites';
+import { crewSpots, DOCK_CREW, DockSite, Site } from './island/sites';
 import { NpcFigure, OfficeLate, StaffDefs } from './island/staff';
 import { Bubble, bubbleK, NewBadge, spread, type Icon, type KeepOut, type Rect, type Tone } from './island/status';
 import { COAST_LINE, Terrain, TerrainDefs } from './island/terrain';
@@ -133,8 +136,6 @@ function useStill(ref: { current: SVGSVGElement | null }) {
 }
 
 const MODELS_CARGO = (p: Asset) => p.model === 'cargo';
-const siteKind = (model: string): SiteKind | null =>
-  model === 'cottage' ? 'house' : model === 'villa' ? 'villa' : model === 'lodge' ? 'lodge' : model === 'gen' ? 'gen' : null;
 
 /** the runway's markings: bubbles are pushed off it */
 const RUNWAY_BOX: Rect = [RUNWAY.a[0] - 6, Math.min(RUNWAY.a[1], RUNWAY.b[1]) - RUNWAY.w / 2 - 4, RUNWAY.b[0] + 6, Math.max(RUNWAY.a[1], RUNWAY.b[1]) + RUNWAY.w / 2 + 4];
@@ -164,14 +165,18 @@ export function Island({
   focus,
   onTap,
   onCart,
+  onBuilders,
   reduceMotion,
   phase: phaseProp,
 }: {
   s: IslandState;
-  focus: Role | null;
+  /** zoomed to a seat's zone, to the builders' site (geo.tsx siteBox), or the whole island */
+  focus: Role | 'site' | null;
   onTap?: () => void;
   /** a ground power cart was tapped: open its sheet */
   onCart?: (id: string) => void;
+  /** a builder at work was tapped (a 44 px target around each figure): frame their site */
+  onBuilders?: () => void;
   reduceMotion: boolean;
   phase?: Phase;
 }) {
@@ -210,10 +215,10 @@ export function Island({
   const flying = planes.some((p) => !tagged(p) && planeCapacity(p, s.tier, s.weather) > 0 && !p.model.includes('cargo'));
   const rentable = houses.filter((h) => houseRentable(s, h));
   const booked = rentable.length;
-  const z = focus ? focusBox(focus, s.tier) : null;
+  const z = focus === 'site' ? siteBox(s) : focus ? focusBox(focus, s.tier) : null;
   const bscale = z ? 1.3 / zoomK(z) : 1;
   // 44 CSS px in drawing units, under the zoom (never smaller than the cart's own 44-unit box)
-  const cartHit = Math.max(44, (44 * W) / (Math.max(1, cssW) * zoomK(z)));
+  const cartHit = Math.max(44, hitUnits(44, cssW, z));
   const newIds = new Set(dev.justBuilt ? TIERS[dev.justBuilt - 1].adds.map((a) => a.id) : []);
   const paved = has('paved-paths');
   const carrying = pw.gridDown && pw.genOK;
@@ -450,8 +455,9 @@ export function Island({
     const k = Math.min(2, Math.floor((3 * b.done) / Math.max(1, b.need) + 1e-9)) as 0 | 1 | 2;
     return b.finished !== undefined || b.done > 0 || (b === building && onSite) ? k : -1;
   };
-  /** where the builders stand: the open build's sites, one each (up to 3) */
+  /** where the builders stand: the sites of the open build's unit they work, one each (up to 3) */
   const crewAt: Pt[] = [];
+  const worked = new Set(workSites(s).map((w) => w.id));
   for (const t of TIERS.filter((t) => t.n > s.tier)) {
     const b = (s.builds ?? []).find((x) => x.tier === t.n);
     const stage = Math.max(cons && cons.tier === t.n ? cons.stage : -1, buildStage(b)) as -1 | 0 | 1 | 2;
@@ -459,15 +465,15 @@ export function Island({
     for (const a of t.adds) {
       if (a.id === 'p3') {
         flat.push(<DockSite key="dock" stage={stage} motion={motion} />);
-        spots.push(DOCK_CREW);
+        if (worked.has(a.id)) spots.push(DOCK_CREW);
         continue;
       }
-      const kind = siteKind(a.model);
+      const kind = siteKindOf(a.model);
       if (!kind || !POS[a.id]) continue;
       if (stage < 0 && t.n > s.tier + 2) continue; // far future: nothing staked out yet
       const [x, y] = POS[a.id];
       items.push({ y, el: <Site key={`site${a.id}`} x={x} y={y} kind={kind} stage={stage} /> });
-      spots.push(crewSpots(kind, x, y));
+      if (worked.has(a.id)) spots.push(crewSpots(kind, x, y));
     }
     // one builder to each of the build's sites in turn
     if (b && b === building && onSite) for (let i = 0; i < 3; i++) if (spots.length) crewAt.push(spots[i % spots.length][Math.floor(i / spots.length)] ?? spots[0][0]);
@@ -522,10 +528,13 @@ export function Island({
   // ---- the staff at work (docs/JOBFLOW.md 15.10): builders on the site they work, a pilot by the lead guest plane
   // and one by the cargo plane, a housekeeper at a booked house; up to 8, none in a storm or at night (then one
   // figure works late at the office window)
+  /** the builders drawn at work (a tap on one frames their site) */
+  const drawnBuilders: Pt[] = [];
   if (!storm && !night) {
     builders.slice(0, 3).forEach((_, i) => {
       const p = crewAt[i];
       if (p) items.push({ y: p[1], el: <NpcFigure key={`bld${i}`} kind="builder" x={p[0]} y={p[1]} flip={i % 2 === 1} motion={motion} /> });
+      if (p) drawnBuilders.push(p);
     });
     const seats = pilotSeats(s);
     const lead = planes.find((p) => !MODELS_CARGO(p) && !isDown(p) && !tagged(p) && (seats.get(p.id) ?? []).length);
@@ -608,7 +617,7 @@ export function Island({
       viewBox={`0 0 ${W} ${H}`}
       role={onCart ? 'group' : 'img'}
       aria-label={describe(s, pw, rentable.length, dev)}
-      onClick={onTap}
+      onClick={(e) => (onBuilders && drawnBuilders.length && svgRef.current && onBuilder(e, svgRef.current, viewOf(z), drawnBuilders) ? onBuilders() : onTap?.())}
     >
       {defs}
       <g class="island-zoom" style={{ transform: zoomOf(z) }}>
@@ -718,6 +727,16 @@ function NavLights() {
 }
 
 const At = ({ p, children }: { p: Pt; children: JSX.Element }) => <g transform={`translate(${p[0]} ${p[1]})`}>{children}</g>;
+
+/** did a tap land within 22 CSS px (a 44 px target) of a builder figure's middle? Hit-tested here, so the figures need no extra nodes */
+function onBuilder(e: MouseEvent, el: SVGSVGElement, view: [number, number, number, number], at: Pt[]) {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const mx = view[0] + ((e.clientX - r.left) / r.width) * (view[2] - view[0]);
+  const my = view[1] + ((e.clientY - r.top) / r.height) * (view[3] - view[1]);
+  const rad = (22 * (view[2] - view[0])) / r.width;
+  return at.some(([x, y]) => Math.hypot(mx - x, my - (y - 7)) <= rad);
+}
 
 /** Every light's glow in a handful of nodes: each lit window gets a soft halo
  *  that follows its own shape (a wide stroke on the windows' merged path), and

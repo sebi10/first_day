@@ -4,11 +4,11 @@
 // 0 stakes, string lines and lumber, 1 slabs poured, 2 timber frames and
 // scaffolding (and a tower crane on the houses). The builders on it are the
 // island's own staff, drawn by the island at crewSpots().
-import { DOCK, lin, P, type Pt, type V3 } from './geo';
+import { DOCK, lin, P, type Pt, type SiteKind, type V3 } from './geo';
 import { K, mix } from './paint';
 import { box, post, seg } from './solid';
 
-export type SiteKind = 'house' | 'villa' | 'lodge' | 'gen';
+export type { SiteKind };
 const DIM: Record<SiteKind, { w: number; d: number; h: number }> = {
   house: { w: 20, d: 26, h: 18 },
   villa: { w: 30, d: 32, h: 32 },
@@ -104,12 +104,16 @@ export function crewSpots(kind: SiteKind, x: number, y: number): Pt[] {
   const big = kind === 'villa' || kind === 'lodge';
   const k = big ? 1 : 1.2;
   const [ox, oy] = kind === 'gen' ? [7, -6] : [0, 0];
-  return ([[-w * 0.4, 10], [w * 0.6, 4], [w * 0.05, 15]] as Pt[]).map(([lx, ly]) => [x + ox + k * lx, y + oy + k * ly]);
+  // every spot stands in front of the site's ground point, so the island draws the builder over the works, never
+  // behind the frame (the generator's works sit 6 up the plot: its middle spot would fall behind them)
+  return ([[-w * 0.4, 10], [w * 0.6, 4], [w * 0.05, 15]] as Pt[]).map(([lx, ly]) => [x + ox + k * lx, y + Math.max(2, oy + k * ly)]);
 }
-/** the floatplane dock's site: builders on the stem, by the pilings */
+/** the floatplane dock's site: builders on the stem, by the pilings, and one on the beach behind them (the whole crew
+ *  works here for the dock's pilings and decking: geo.tsx workSites) */
 export const DOCK_CREW: Pt[] = [
   [DOCK.root[0] - 12, DOCK.root[1] + 4],
   [DOCK.root[0] + 12, DOCK.root[1] + 8],
+  [DOCK.root[0] + 1, DOCK.root[1] + 14],
 ];
 
 /** a little board on a post: what will be built here */

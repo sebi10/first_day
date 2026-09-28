@@ -14,7 +14,7 @@ import type { Alert, IslandState, NpcRole, Order, Role, Weather, WeekReport } fr
 import { Island } from './ui/island';
 
 type Phase = 'dawn' | 'day' | 'golden' | 'night';
-type Scn = { id: string; note: string; tier: number; phase: Phase; weather?: Weather; focus?: Role | null; tweak?: (s: IslandState) => void };
+type Scn = { id: string; note: string; tier: number; phase: Phase; weather?: Weather; focus?: Role | 'site' | null; tweak?: (s: IslandState) => void };
 
 function build(tier: number, weather: Weather = 'clear') {
   const now = Date.UTC(2026, 8, 26, 10);
@@ -68,6 +68,15 @@ function sitework(s: IslandState, t4: number, cottage?: number) {
   s.builds = [{ id: d.id, what: d.what, tier: 4, done: t4, drawn: Math.ceil(t4), need: d.units.length, started: s.week - 4, ...(t4 >= d.units.length ? { finished: s.week - 1 } : {}) }];
   if (cottage !== undefined) s.builds.push({ id: 'cottage-h8', what: COTTAGE.what, cottage: 'h8', done: cottage, drawn: Math.ceil(cottage), need: COTTAGE.units.length, started: s.week - 2 });
 }
+
+/** the builders on one open build, zoomed to it (geo.tsx siteBox): a tier's build by id, or 'cottage-h8' / 'cottage-h9' */
+function openSite(s: IslandState, id: string, done: number, builders: number) {
+  const cottage = id.startsWith('cottage-') ? id.slice(8) : undefined;
+  const d = cottage ? COTTAGE : BUILDS.find((b) => b.id === id)!;
+  s.builds = [{ id, what: d.what, ...(d.tier ? { tier: d.tier } : {}), ...(cottage ? { cottage } : {}), done, drawn: Math.ceil(done), need: d.units.length, started: s.week - 3 }];
+  staffed(s, [['pilot', 3], ['pilot', 3], ['housekeeper', 3], ...Array.from({ length: builders }, (): [NpcRole, 3] => ['builder', 3])]);
+}
+const siteScn = (id: string, note: string, tier: number, build: string, done: number, builders: number): Scn => ({ id, note, tier, phase: 'day', focus: 'site', tweak: (s) => openSite(s, build, done, builders) });
 
 /** an open alert, as the engine raises it (a hazard on a house, a squawk due now on a plane) */
 function alertOn(s: IslandState, id: string, assetId: string, sym: string, role: 'mech' | 'elec', o: Partial<Alert> = {}) {
@@ -168,7 +177,7 @@ const SCN: Scn[] = [
   // the staff (docs/JOBFLOW.md 15.10): three builders on the villa site, a pilot by the twin and one by the cargo plane, two housekeepers
   {
     id: 'staff',
-    note: 'Tier 3 with its staff: three builders on the villa and dock site (1.4 of 4 units), a pilot by the twin and one by the cargo plane, housekeepers at two booked houses',
+    note: "Tier 3 with its staff: three builders at the seaplane dock (1.4 of 4 units: the dock's pilings), a pilot by the twin and one by the cargo plane, housekeepers at two booked houses",
     tier: 3,
     phase: 'day',
     tweak: (s) => {
@@ -209,6 +218,13 @@ const SCN: Scn[] = [
       for (const [id, name] of [['h8', 'Cottage 5'], ['h9', 'Cottage 6']]) s.assets.push({ id, kind: 'house', model: 'cottage', name, health: 84, touchedWeek: s.week - 2, inspectionUntil: s.week + 8 });
     },
   },
+  // the builders' zoom on Home (tap the builders' line, or a builder): every build tier and a cottage plot
+  siteScn('site-t2', "Zoomed to the builders' site: cottages 3 and 4 (1.2 of 3 units, slabs poured), the tier-1 crew's one builder", 1, 't2', 1.2, 1),
+  siteScn('site-t3', "Zoomed to the builders' site: the generator house (1.5 of 2 units, framed), two builders", 2, 't3', 1.5, 2),
+  siteScn('site-t4-villas', "Zoomed to the builders' site: the villas' shutters (3.3 of 4 units, framed, cranes up), three builders", 3, 't4', 3.3, 3),
+  siteScn('site-t4-dock', "Zoomed to the builders' site: the seaplane dock's pilings (1.4 of 4 units), three builders", 3, 't4', 1.4, 3),
+  siteScn('site-t5', "Zoomed to the builders' site: the Lodge on its terrace (2.5 of 4 units), two builders", 4, 't5', 2.5, 2),
+  siteScn('site-cottage', "Zoomed to the builders' site: Cottage 6 in the lagoon grove (2.2 of 5 units), three builders, a ground power cart on the apron (its tap target stays 44 px)", 3, 'cottage-h9', 2.2, 3),
   {
     id: 'beaten',
     note: 'Beat the game: tier 5 at night, 8 straight A weeks, the crew statue, observatory, bunting',
