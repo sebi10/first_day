@@ -132,27 +132,52 @@ const driveAlert = async () => {
   }
   return null;
 };
-/** a tech's first Your move row that isn't a Start: open it, make a hazard safe, plan it */
+/**
+ * a tech's first Your move row that isn't a Start: open it, make a hazard safe, plan it. A finding that can't
+ * duplicate the fault ("It's the dryer", "Could not duplicate") has no job to plan: the next alert, else close that
+ * one with no fault found
+ */
 const planFirst = async (tag) => {
   await page.evaluate(() => window.scrollTo({ top: 0 }));
   // an alert's row (the week's revenue work, a load sheet or a ground power start, is a row of its own: not an alert)
-  const row = page.locator('.jf-your .jf-arow:not(.rev):not(:has(.jf-start)) .jf-arow-main').first();
-  if (!(await row.count())) return null;
-  await row.click();
-  await page.waitForTimeout(500);
-  if (!(await sheetOpen())) fail(`${tag}: the alert row opened no job sheet`);
-  await shot(`${tag}-alert`);
-  const safe = sheet().getByRole('button', { name: 'Make it safe' });
-  if (await safe.count()) {
-    await safe.click();
-    await sheet().getByRole('button', { name: /: off and tag it$/ }).first().click(); // the alert's own breaker ("The kitchen's 20 A breaker: off and tag it")
+  const rows = page.locator('.jf-your .jf-arow:not(.rev):not(:has(.jf-start)) .jf-arow-main');
+  const count = await rows.count();
+  let nff = -1;
+  for (let i = 0; i < count; i++) {
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
+    await rows.nth(i).click();
     await page.waitForTimeout(500);
-    await shot(`${tag}-made-safe`);
+    if (!(await sheetOpen())) fail(`${tag}: the alert row opened no job sheet`);
+    if (await sheet().getByRole('button', { name: 'No fault found · close' }).count()) {
+      if (nff < 0) nff = i;
+      await closeSheet();
+      continue;
+    }
+    await shot(`${tag}-alert`);
+    const safe = sheet().getByRole('button', { name: 'Make it safe' });
+    if (await safe.count()) {
+      await safe.click();
+      await sheet().getByRole('button', { name: /: off and tag it$/ }).first().click(); // the alert's own breaker ("The kitchen's 20 A breaker: off and tag it")
+      await page.waitForTimeout(500);
+      await shot(`${tag}-made-safe`);
+    }
+    const sent = await driveAlert();
+    await shot(`${tag}-sent`);
+    await closeSheet();
+    return sent;
   }
-  const sent = await driveAlert();
-  await shot(`${tag}-sent`);
+  if (nff < 0) return null;
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  await rows.nth(nff).click();
+  await page.waitForTimeout(500);
+  await shot(`${tag}-alert-nff`);
+  await sheet().getByRole('button', { name: 'No fault found · close' }).click();
+  await sheet().getByRole('button', { name: 'Close it: no fault found' }).click();
+  await page.waitForTimeout(700);
+  const banner = (await page.locator('.jf-sheet .jf-note.ok').first().innerText().catch(() => '')).trim();
+  await shot(`${tag}-nff-closed`);
   await closeSheet();
-  return sent;
+  return { label: 'No fault found', banner };
 };
 /** Start a ready job from Your move (the host runs the install check) and hand in the puzzle */
 const startReady = async (tag) => {
@@ -374,9 +399,14 @@ if (after.on <= before.on) {
 }
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
-await click('Board');
+// the bottom tabs themselves: an alert row's name can hold the word ("the outboard shoulder")
+const tab = async (name) => {
+  await page.locator('nav.tabs button', { hasText: new RegExp(`^${name}`) }).first().click();
+  await page.waitForTimeout(200);
+};
+await tab('Board');
 await shot('board');
-await click('Me');
+await tab('Me');
 await shot('me');
 await page.mouse.wheel(0, 900);
 await shot('me-scrolled');
