@@ -227,7 +227,8 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'flicker', log: 'flicker diagnosis', role: 'elec', title: 'Diagnose flickering lights', puzzle: 'meter', tier: 1, cost: 90, parts: 0, gain: 12, targets: ['cottage', 'villa', 'lodge'], weight: below(94, 4) },
   { kind: 'hottub', log: 'hot-tub conduit run', role: 'elec', title: 'Run conduit to the hot tub', puzzle: 'conduit', tier: 2, cost: 460, parts: 1, gain: 16, targets: ['cottage', 'villa', 'lodge'], weight: below(86, 2) },
   // Electrician — grid + generator
-  { kind: 'feeder', log: 'feeder trace', role: 'elec', title: 'Trace a dead cottage feeder', puzzle: 'trace', tier: 2, cost: 420, parts: 0, gain: 16, targets: ['panel'], weight: below(90, 4) },
+  // the trace puzzle's own underground scene (job 'feeder': megger the buried run at the hand holes, dig, re-splice), never a room
+  { kind: 'feeder', log: 'feeder re-splice', role: 'elec', title: 'Find and re-splice the cottage feeder', puzzle: 'trace', tier: 2, cost: 420, parts: 0, gain: 16, targets: ['panel'], weight: below(90, 4) },
   { kind: 'panelUp', log: 'panel upgrade', role: 'elec', title: 'Panel upgrade', puzzle: 'panel', tier: 3, cost: 2100, parts: 1, gain: 30, targets: ['panel'], weight: below(66, 8) },
   { kind: 'genService', log: 'generator engine service', role: 'mech', title: 'Generator engine service', puzzle: 'torque', tier: 2, cost: 380, parts: 0, gain: 15, targets: ['gen'], weight: below(90, 3) },
   { kind: 'transfer', log: 'transfer panel install', role: 'elec', title: 'Generator transfer panel', puzzle: 'panel', tier: 3, cost: 1150, parts: 1, gain: 22, targets: ['gen'], weight: below(78, 4) },
@@ -872,10 +873,11 @@ export const FLOW_RULES: Record<string, DefectRule> = {
     redo: false,
     sure: true,
   },
+  // the fix is the feeder job itself, in its own scene (job 'feeder'): megger it, dig it up, re-splice with a listed kit
   'elec:noburial': {
     incident: ['{a}: the east cottages flicker again, the feeder splice in the ground is failing', 'The buried feeder splice at {a} failed: two cottages dark'],
     found: 'split bolts and tape buried in the feeder trench',
-    fix: { puzzle: 'trace', title: 'Cut it out and re-splice with a direct-burial kit' },
+    fix: { puzzle: 'trace', title: 'Cut it out and re-splice with a direct-burial kit', job: 'feeder' },
     redo: false,
     sure: true,
   },
@@ -889,6 +891,21 @@ export const FLOW_RULES: Record<string, DefectRule> = {
   },
 };
 for (const [k, v] of Object.entries(FLOW_RULES)) DEFECT_RULES[k] = v;
+
+/**
+ * The underground feeder's own defect: a failed splice still in the ground (the dig went to a good section) or
+ * a new one letting water in. Its repair is the same job in the same scene, dug up and made again: every other
+ * electrician's puzzle is a branch circuit in a room (the one exception to "a repair is a different puzzle").
+ * The feeder scene reports it as the variant 'feeder' (a repair or redo of the feeder has it too); the kind row
+ * covers a result without it (autopilot, the paper sim, a client from before the scene).
+ */
+export const FEEDER_REDIG: DefectRule = {
+  incident: ['{a}: the east cottages flicker in the rain again: a feeder splice in the ground is still failing', 'A feeder splice in the ground at {a} failed: two cottages dark'],
+  found: 'a feeder splice in the ground still failing its insulation test',
+  fix: { puzzle: 'trace', title: 'Megger the feeder, dig up the failing splice and re-splice it with a direct-burial kit', job: 'feeder' },
+  redo: false,
+};
+DEFECT_RULES['trace:feeder'] = FEEDER_REDIG;
 
 /** Per work-order kind: checked before the puzzle row. A repair's own defect uses the puzzle row. */
 export const DEFECT_RULES_BY_KIND: Record<string, DefectRule> = {
@@ -957,11 +974,8 @@ export const DEFECT_RULES_BY_KIND: Record<string, DefectRule> = {
     found: 'a storm-damaged splice left in a junction box',
     fix: { puzzle: 'wireup', title: 'Replace the scorched box and re-splice the storm run', job: 'outlet' },
   },
-  feeder: {
-    incident: ['Two cottages flicker when the {a} feeder is loaded: a loose splice', 'A loose splice on the {a} feeder arced and dropped two cottages'],
-    found: 'a loose wire-nut splice in the feeder junction box',
-    fix: { puzzle: 'wireup', title: 'Replace the burnt splice on the feeder', job: 'outlet' },
-  },
+  // the underground feeder: a missed or badly made re-splice is dug up and made again (FEEDER_REDIG)
+  feeder: FEEDER_REDIG,
   transfer: {
     incident: ['{a}: the transfer panel tripped under load in a test, a breaker oversized for its wire', '{a}: the transfer panel overheated in a real outage, scorched conductors and houses dark'],
     found: 'a transfer-panel breaker oversized for its wire',

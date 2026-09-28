@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { generateCrack } from '../src/puzzles/crack';
 import { generateTeardown } from '../src/puzzles/teardown';
-import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
+import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, FEEDER_REDIG, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
 import { defectChance, defectSeverity, gseCarts, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { protectionNeeded, raiseAlert, siteOf } from '../src/sim/alerts';
@@ -368,9 +368,12 @@ describe('hidden defects', () => {
     expect(defectRule('winch', 'mech').fix.puzzle).toBe('teardown');
     expect(defectRule('winch', 'elec').fix.puzzle).toBe('meter');
     expect(defectRule('winch', 'mech', 'bucketBoom')).toBe(defectRule('winch', 'mech'));
-    // every repair is a different puzzle from the job it corrects (variant rows are keyed `<puzzle>:<variant>`)
-    for (const [p, rule] of Object.entries(DEFECT_RULES)) expect(rule.fix.puzzle, p).not.toBe(p.split(':')[0]);
-    for (const c of CATALOG) expect(defectRule(c.puzzle, c.role, c.kind).fix.puzzle, c.kind).not.toBe(c.puzzle);
+    // every repair is a different puzzle from the job it corrects (variant rows are keyed `<puzzle>:<variant>`), but
+    // the underground feeder: its repair is the same job dug up again, in its own scene (never a room)
+    for (const [p, rule] of Object.entries(DEFECT_RULES)) if (rule !== FEEDER_REDIG) expect(rule.fix.puzzle, p).not.toBe(p.split(':')[0]);
+    for (const c of CATALOG) if (defectRule(c.puzzle, c.role, c.kind) !== FEEDER_REDIG) expect(defectRule(c.puzzle, c.role, c.kind).fix.puzzle, c.kind).not.toBe(c.puzzle);
+    expect(defectRule('trace', 'elec', 'feeder')).toBe(FEEDER_REDIG);
+    expect(FEEDER_REDIG.fix).toMatchObject({ puzzle: 'trace', job: 'feeder' });
     // per-kind wording where the part matters, and a [write-up, failure] pair everywhere
     expect(defectRule('crack', 'mech', 'spar').fix).toMatchObject({ title: 'Spar-cap doubler repair per the SRM', parts: 1 });
     expect(defectRule('crack', 'mech', 'corrosion').fix.parts).toBe(1);

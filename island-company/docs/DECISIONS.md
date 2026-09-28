@@ -867,3 +867,66 @@ Spec phase-0 exit tests, automated in `tests/engine.test.ts`:
 - **Deadline hour:** 20:00 creator time. If the three of you span time zones, change `resolveHour` in `createIsland`.
 - **Difficulty:** if weeks feel too easy by tier 3, raise `ECON.decay` from 5 to 6. That is the single biggest knob.
 - **Trust model:** anyone with the island code can play an open seat. That's fine for friends. Don't post the code publicly.
+
+## 2026-09-28: the feeder re-splice gets its own hands-on scene
+
+The underground feeder to the east cottages (`E_FEEDER_DROP`, `ref:feeder`, the catalog's `feeder`) used to launch the branch-circuit trace: *"Bedroom is dead · Drywall cutaway"*, outlets and a loose backstab. A licensed electrician spots that at once. Now every feeder launch plays its own scene.
+
+**The call: a scene inside the trace puzzle, picked by the job (`Order.job === 'feeder'`), not a new puzzle id and not the meter.**
+- Live orders already store `puzzle: 'trace'` with `job: 'feeder'` (flow jobs, the split-bolt repair, redos; a migrated legacy order gets `job = kind`). Picking the scene by job fixes every one of them with no migration and no version bump.
+- A new `PuzzleId` in the doc would crash a tab still on the live build when it opened that job (`PUZZLES[id]` undefined), and the old stored `'trace'` orders would still need remapping.
+- The meter (option b) is a 120 V branch-circuit voltage scene: no insulation-resistance readings, and it would have needed the same rewrite.
+- The trace's mechanics are the real procedure: follow the run from the source, test at the access points, half-split, mark the one place to open up.
+
+**The scene** (`src/puzzles/trace.ts`, `generateFeeder`, `drawYard`):
+- A site plan of the yard: the distribution panel with the feeder breaker off, locked and tagged, and the cottages' disconnects open. Its header says *"Feeder to the east cottages: 0.4 MΩ"*, the reading the alert's finding gave.
+- The cable locator follows the buried run from the panel (a drag), and a tap on a hand hole opens it and meggers back to the panel at 1000 V.
+  - Before the failed splice it reads hundreds to thousands of MΩ, lower the more cable it takes in (sections in parallel). From the failed splice on, it reads 0.4 MΩ.
+- **Dig here:** tap the section between the last good hand hole and the first bad one. The failed splice is buried in the section. A dig at a hand hole re-makes good splices and counts as wrong.
+- **Close it up** (after the dig, before the verdict):
+  1. what was dug
+  2. cut out and re-spliced with the kits the job flow picked (display only: *"DBS-2 × 4"*, or *"SPLIT-4 × 4"*)
+  3. megger again before re-energizing (110.7)
+  4. backfill with 24 in of cover and a warning ribbon 12 in above (300.5)
+  Then **Re-energize the feeder** hands it in.
+- **Tiers and blind:**
+  - tiers 0–2 show and colour every reading
+  - from tier 3 you megger it yourself, and the numbers are plain ink: knowing 0.4 MΩ is a failed splice is the trade
+  - tier 3 adds a splice pedestal tapping Cottage 2 (it reads good); tier 4 adds the dock lights, another buried circuit, to not follow or dig
+  - blind: one dig, no X, no reveal, the close-out never says whether it was the failed splice, and the hand-in time is the same 700 ms right or wrong
+- Its own name, first-encounter card and term (`PuzzleDef.titleFor` / `howToFor` / `termFor`): *"Underground feeder"*, *"Follow the buried run, megger each hand hole, dig the bad section."* The first-encounter card is remembered per scene. It gets 10 s more than the room, for the close-out.
+- The same scoring as the room (`scoreTrace`): a first-try dig with the fewest tests is perfect.
+
+**Defects:**
+- **The material still decides first.** Split bolts and tape in the ground are the sure `elec:noburial` defect at the sign-off, as before (`flow.ts` 11.3). It replaces the scene's quality roll. Its repair, *"Cut it out and re-splice with a direct-burial kit"*, now names `job: 'feeder'`, so it plays the scene.
+- **The scene's own miss or poor work** reports the variant `'feeder'` → `FEEDER_REDIG`: *"a feeder splice in the ground still failing its insulation test"*. Its repair is *"Megger the feeder, dig up the failing splice and re-splice it with a direct-burial kit"*, in the same scene.
+  - The kind row `DEFECT_RULES_BY_KIND.feeder` is the same rule. It covers autopilot, the paper sim and a result from a client on the live build. It used to be *"a loose wire-nut splice in the feeder junction box"* → a receptacle wire-up.
+  - A feeder repair that goes wrong again stays the feeder's defect, not the room's loose backstab (`DEFECT_RULES.trace`).
+  - `redo: false`: the re-splice is the job, so there's nothing to redo.
+- **The one exception to "a repair is a different puzzle".** For a buried feeder, the damage and the job are the same hole in the ground, and every other electrician's puzzle is a branch circuit in a room. The invariant test exempts exactly `FEEDER_REDIG`.
+
+**Two fixes to the room's trace, found on the way:**
+- Blind no longer reveals every device's live/dead state at the hand-in. It showed where the open really was.
+- Blind now hands in at 700 ms whatever the score. A perfect run's 1000 ms flourish gave it away.
+- In both scenes a tap on a device tests it and a drag that starts on one follows the cable. Before, a drag starting on an outlet (or a hand hole) counted as a test and traced nothing.
+
+**Also:**
+- The catalog `feeder` is now *"Find and re-splice the cottage feeder"* (log *"feeder re-splice"*). Stored orders keep their old titles.
+- `R-FEED`'s summary is the whole procedure: lock out, megger, sectionalize at the hand holes, dig, re-splice with direct-burial kits (300.5(E), 110.14(B)), megger again (110.7), backfill to 24 in with a ribbon (300.5).
+- The lab takes `&job=feeder` and `&pick=DBS-2:4`.
+
+**No version bump.** No state field is new, and nothing stored changes shape. An old tab on the live build still plays the room for a feeder job, and its result (no variant) takes the kind row. It resolves defects with its own rows. Nothing corrupts.
+
+**Balance** (the paper sim, this branch against `1f92356`):
+- **Standard** (26 weeks × 30 seeds), unchanged. Three friends reach tiers 2/3/4/5 in weeks 8/12/16/23 and all average in 7/12/16/23, both with 0 weeks below $0. Solo, absent and nobody teams stay at tier 1.
+- **Robust** (90 seeds × 4 crews = 360 games a team):
+  - three friends: unchanged at 96/360 missing tier 5 (24 + 24 + 31 + 17 by crew –, a, b, c) and 7 weeks below $0
+  - all average: 79/360 missing tier 5 (17 + 19 + 18 + 25), against 80 (18 + 20 + 18 + 24); 0 weeks below $0
+- The paper sim's bots score the same whatever the puzzle, so the one economic change is the dropped redo after a feeder re-dig: one game in 360 for one team, which is noise. The robust tail is still open (HANDOFF §7.5).
+
+**Checks:**
+- `npx tsc --noEmit`, and 703/703 tests: the 689 before, plus `tests/feeder.test.ts` (9) and 5 feeder model tests in `tests/puzzles.test.ts`
+- `npm run build`
+- the pass-and-play e2e on phone and desktop
+- the scene in the lab on a 390×844 phone at tiers 1, 3 and 5 (open and blind) and at 1280×820
+- the real app, pass and play: the feeder alert through Investigate, Reference, Materials, Stock and Send, then the job started from Your move into the scene, on phone and desktop. With split bolts picked, the `noburial` defect is planted.
