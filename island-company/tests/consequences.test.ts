@@ -8,7 +8,7 @@ import { generateTeardown } from '../src/puzzles/teardown';
 import { CATALOG, DEFECT, DEFECT_RULES, DEFECT_RULES_BY_KIND, defectRule, defectVariant, incidentText, INSPECTS, REPORT, REPORTS } from '../src/sim/data';
 import { defectChance, defectSeverity, gseCarts, isBlind, isRework, launchTier, reportCap, round10 } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
-import { protectionNeeded, raiseAlert, siteOf } from '../src/sim/alerts';
+import { protectionNeeded, raiseAlert, siteOf, SYMPTOMS } from '../src/sim/alerts';
 import { fixTaskFor, judgeElecPick, judgeSlot, planTask, repairLabor, repairTask, stdPickFor } from '../src/sim/flow';
 import { itemById } from '../src/sim/items';
 import { taskById } from '../src/sim/tasks';
@@ -93,6 +93,15 @@ const complete = (s: IslandState, role: Role, o: Order, score: number) => apply(
 const complete2 = (s: IslandState, role: Role, o: Order, score: number, cover: boolean) => apply(s, { t: 'complete', role, orderId: o.id, score, perfect: score >= 0.95, cover }, NOW);
 const resolve = (s: IslandState) => apply(s, { t: 'resolve', week: s.week }, s.deadline! + 1).s;
 const lastReport = (s: IslandState) => s.history[s.history.length - 1];
+/**
+ * the week generator's airworthiness alerts on the twin, dropped: this crew never plans them, and past due they'd
+ * ground it (the only guest plane too, its guests on the sub-charter), and a plane out of service can't fail in
+ * service or fly with a known defect. The tests that use it are about the defect, not the flow
+ */
+const quietTwin = (s: IslandState) => {
+  s.alerts = (s.alerts ?? []).filter((a) => a.assetId !== 'p1' || !!a.repair || a.src === 'again' || !SYMPTOMS[a.sym]?.aw);
+  return s;
+};
 /** every seat plays (and does nothing) and ends the turn: the week resolves with no autopilot */
 const endAll = (s: IslandState) => {
   for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'endTurn', role: r, week: s.week }, NOW).s;
@@ -405,7 +414,7 @@ describe('hidden defects', () => {
   });
 
   it('a known defect left in service is a near-miss; grounded, it is not', () => {
-    const s = atWeek(4);
+    const s = quietTwin(atWeek(4));
     plant(s, { week: 3, dueWeek: 9 });
     const insp = addOrder(s, { role: 'mech', kind: 'inspect100', puzzle: 'crack', assetId: 'p1', tier: 2, cost: 180, gain: 10 });
     const r = complete(s, 'mech', insp, 0.9).s;
@@ -825,7 +834,7 @@ describe('the job flow’s wrong choices surface later (11)', () => {
     expect(d.alert).toMatchObject({ alert: r.al.id, sym: 'M_BELT_SQUEAL' });
     expect(s.alerts!.find((a) => a.id === r.al.id)!.status).toBe('closed');
     // it surfaces at its due week: an incident in the symptom's words, and the alert again, due now
-    for (let i = 0; i < 4 && s.alerts!.every((a) => a.src !== 'again'); i++) s = endAll(s);
+    for (let i = 0; i < 4 && s.alerts!.every((a) => a.src !== 'again'); i++) s = endAll(quietTwin(s));
     const back = s.alerts!.find((a) => a.src === 'again' && a.sym === 'M_BELT_SQUEAL')!;
     expect(back).toBeTruthy();
     expect(back.due).toBe(back.week);

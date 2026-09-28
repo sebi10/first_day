@@ -281,7 +281,7 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
                 {nums.flights}
                 <span class="label">/{nums.flightsMax}</span>
               </div>
-              <div class="l">flights available</div>
+              <div class="l">{nums.subFlights ? `flights · +${nums.subFlights} sub-charter` : 'flights available'}</div>
             </div>
             <div class="stat" style={{ ['--tint' as string]: C.elec }}>
               <div class="v">

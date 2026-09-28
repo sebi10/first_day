@@ -7,7 +7,7 @@
 // family's, a need has no P/N.
 import { alertFlags, liveAlerts, soleGuest, symptomText } from '../../sim/alerts';
 import { DEFAULT_SUPPLIER, FREIGHT, MODELS, ROLE_LABEL, STOCK, SUPPLIERS } from '../../sim/data';
-import { expectedDeferralCost, fixedNow, outOfService, projectWeek, tierDef, urgency } from '../../sim/econ';
+import { expectedDeferralCost, fixedNow, groundsFrom, outOfService, projectWeek, subCharterNeed, subCharterOn, tierDef, urgency } from '../../sim/econ';
 import { cardOf, repairTask, type Card } from '../../sim/flow';
 import { allItems, buyUnits, famOf, itemById, priceAt } from '../../sim/items';
 import { assetSpend, capitalCost, cashInStock, committed, fillRate, payable, poOwed, runway, spendable, spendSeries, stockBuiltUsed, tradeSpend, waitWeeks, type OutCat } from '../../sim/ledger';
@@ -181,6 +181,9 @@ export function carrierDown(s: IslandState, p: Pick<PurchaseOrder, 'carrier' | '
   const cargo = planes.filter((a) => MODELS[a.model]?.cargo);
   const rides = p.carrier === 'bulk' && cargo.length ? cargo : planes;
   if (!rides.length || rides.some((a) => !outOfService(s, a.id))) return null;
+  // the only guest plane down: the mainland sub-charter's flights carry what a guest flight would (receive: flew.guest)
+  const sub = subCharterOn(s);
+  if (sub && sub.flights > 0 && !(p.carrier === 'bulk' && cargo.length)) return null;
   return rides.length === 1 ? `${rides[0].name} is down` : 'no plane is flying';
 }
 
@@ -267,12 +270,21 @@ export function lateWords(s: IslandState, at: number | undefined, total: number)
     : `Came after you ended your turn, over your standing limit (${usd(limit)}): it waits for you.`;
 }
 
-/** what the asset does while the fix waits: AOG, restricted (the only guest plane), closed, or at 75% (made safe) */
-function outState(s: IslandState, a: Alert | undefined): { word: string; share: number } | null {
+/** the only guest plane's airworthiness alert: when it grounds the plane and what a week of the mainland sub-charter costs then ("from wk 9: … about $540 a week") */
+function subOf(s: IslandState, id: string): { sub?: string } {
+  const a = s.alerts?.find((x) => x.id === id);
+  if (!a || !alertFlags(s, a).aw) return {};
+  const from = groundsFrom(s, a);
+  const n = subCharterNeed(s, a.assetId, 'clear', from);
+  return n ? { sub: `${from <= s.week ? 'at this resolve' : `from wk ${from}`}: the guests go on a mainland sub-charter, ${n.flights > 0 ? `about ${usd(n.usd)} a week` : `${usd(n.fee)} a flight`}` } : {};
+}
+
+/** what the asset does while the fix waits: AOG (the only guest plane: its guests on the sub-charter), closed, or at 75% (made safe) */
+function outState(s: IslandState, a: Alert | undefined): { word: string; share: number; sub?: boolean } | null {
   if (!a) return null;
   const asset = s.assets.find((x) => x.id === a.assetId);
   const f = alertFlags(s, a);
-  if (asset?.kind === 'plane' && f.aw) return soleGuest(s, asset.id) ? { word: 'flies restricted', share: 0.5 } : { word: 'AOG', share: 1 };
+  if (asset?.kind === 'plane' && f.aw) return soleGuest(s, asset.id) ? { word: 'AOG', share: 1, sub: true } : { word: 'AOG', share: 1 };
   if (asset?.kind === 'house' && f.hazard) return a.safe ? { word: 'rents at 75%', share: 0.25 } : { word: 'closed', share: 1 };
   return null;
 }
@@ -285,7 +297,8 @@ function freightVM(s: IslandState, card: Card, a: Alert | undefined, eta: number
   const st = outState(s, a);
   const asset = s.assets.find((x) => x.id === a?.assetId);
   const week = card.downtime?.usd ?? 0;
-  const out = st && outWeeks > 0 ? `${asset?.name ?? 'It'} ${st.word} ${outWords(outWeeks)}${week > 0 ? ` (~${usd(week * st.share * outWeeks)} of guests)` : ''}` : '';
+  const cost = st ? week * st.share * outWeeks : 0;
+  const out = st && outWeeks > 0 ? `${asset?.name ?? 'It'} ${st.word} ${outWords(outWeeks)}${week > 0 ? (st.sub ? ` (~${usd(cost)}: the sub-charter flies its guests, no tours)` : ` (~${usd(cost)} of guests)`) : ''}` : '';
   if (aogCost !== undefined) return { eta, text: `AOG boat +${usd(aogCost)}: ${etaWords(s, eta)}`, out, cost: aogCost };
   const f = card.freight.sched;
   const ship = shipWords(f);
@@ -332,13 +345,14 @@ export function cardVM(s: IslandState, o: Order, buy?: BuyChoice): CardVM {
   const buyTotal = Math.round(toBuy.reduce((n, l) => n + l.qty * l.unit, 0) + tools.reduce((n, t) => n + t.value, 0));
   const chips: ChipVM[] = [];
   if (card.aog) chips.push({ text: 'AOG', tone: 'rust' });
-  if (card.restricted) chips.push({ text: 'Restricted', tone: 'rust' });
+  // the only guest plane: grounded past due, a mainland sub-charter flies the guests (before it happens too, so the analyst sees it coming)
+  if (card.sub) chips.push({ text: card.aog ? `Sub-charter ~${usd(card.sub.usd)}/wk` : `From wk ${a ? groundsFrom(s, a) : W}: sub-charter ~${usd(card.sub.usd)}/wk`, tone: card.aog ? 'rust' : 'amber' });
   if (card.shut) chips.push({ text: 'House closed', tone: 'rust' });
   if (a) chips.push(a.due <= W ? { text: 'Due now', tone: 'rust' } : { text: `Due wk ${a.due}`, tone: '' });
   if (card.mel) chips.push(card.mel.until >= W ? { text: `MEL to wk ${card.mel.until}${card.mel.ext ? ' (extended)' : ''}`, tone: 'ink' } : { text: `MEL ran out wk ${card.mel.until}`, tone: 'rust' });
   const st = outState(s, a);
   const exp = expectedDeferralCost(s, o).cost;
-  const bite = card.aog || card.restricted || card.shut ? Math.round((card.downtime?.usd ?? 0) * (st?.share ?? 1)) : 0;
+  const bite = card.aog || card.shut ? Math.round((card.downtime?.usd ?? 0) * (st?.share ?? 1)) : 0;
   const waitCost = exp + bite;
   if (waitCost > 0) chips.push({ text: `Waiting a week ≈ ${usd(waitCost)}`, tone: waitCost > card.total ? 'amber' : '' });
   const trade = role === 'mech' ? 'Mech' : 'Elec';
@@ -885,7 +899,7 @@ export function melWords(W: number, until: number, canExtend: boolean): string {
 // ---------------------------------------------------------------------------
 // Needs (14.2): open alerts nobody has planned (no P/N), the jobs waiting on parts, MEL placards
 
-export type NeedVM = { alert: string; trade: OpsRole; who: string; text: string; due: number; dueText: string; aw: boolean; nudged: boolean; soon: boolean; scheduled: boolean };
+export type NeedVM = { alert: string; trade: OpsRole; who: string; text: string; due: number; dueText: string; aw: boolean; nudged: boolean; soon: boolean; scheduled: boolean; /** the only guest plane's: what a week of the sub-charter costs once it's grounded */ sub?: string };
 export type WaitVM = { order: string; title: string; asset: string; who: string; lines: { pn: string; nomen: string; qty: string; state: string; tone: Tone }[] };
 export type PlacardVM = { alert: string; text: string; until: number; ext: boolean; asked: boolean; askedBy?: string; canExtend: boolean; runsOut: boolean; when: string };
 
@@ -902,6 +916,7 @@ export function needsVM(s: IslandState): { unplanned: NeedVM[]; waiting: WaitVM[
     nudged: n.nudged === W,
     soon: n.due <= W + 1,
     scheduled: !!n.scheduled,
+    ...subOf(s, n.alert),
   }));
   const waiting: WaitVM[] = [];
   for (const o of s.orders) {
@@ -1189,7 +1204,7 @@ export type SpendGroup = 'jobs' | 'capex' | 'other' | 'fixed';
 export const GROUPS: { k: SpendGroup; label: string; of: OutCat[] }[] = [
   { k: 'jobs', label: 'Jobs and stock', of: ['parts', 'labor', 'freight', 'carry'] },
   { k: 'capex', label: 'Capex (tools, building)', of: ['tools', 'building'] },
-  { k: 'other', label: 'Insurance, incidents, other', of: ['insurance', 'incidents', 'other'] },
+  { k: 'other', label: 'Insurance, incidents, sub-charter, other', of: ['insurance', 'incidents', 'subcharter', 'other'] },
   { k: 'fixed', label: 'Overhead and payroll', of: ['overhead', 'payroll'] },
 ];
 export const OUT_LABEL: Record<OutCat, string> = {
@@ -1203,6 +1218,7 @@ export const OUT_LABEL: Record<OutCat, string> = {
   building: 'Building (capex)',
   insurance: 'Insurance',
   incidents: 'Incidents',
+  subcharter: 'Mainland sub-charter (guests, only guest plane down)',
   other: 'Other',
 };
 

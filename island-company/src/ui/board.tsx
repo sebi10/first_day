@@ -347,7 +347,8 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
  * The week's costs, as the review lists them: the fixed cost split into overhead and
  * payroll where the week recorded them, then what the job flow paid (labour on
  * approved cards, the POs paid at the payment run and their freight, the carrying
- * charge on stock), then insurance, leakage, incidents, refunds and the rest. A cost
+ * charge on stock), then insurance, leakage, incidents, refunds and the rest (the mainland
+ * sub-charter that flew the guests while the only guest plane was grounded, last). A cost
  * that was nothing that week isn't listed; the fixed cost always is.
  */
 export function costLines(r: WeekReport): [string, number][] {
@@ -365,6 +366,7 @@ export function costLines(r: WeekReport): [string, number][] {
     ['Loan', c.loan],
     ['Open reports', c.reports],
     ['GPU charging', c.power],
+    ['Mainland sub-charter', c.subCharter],
   ];
   return [...fixed, ...rest.filter((x): x is [string, number] => !!x[1])];
 }

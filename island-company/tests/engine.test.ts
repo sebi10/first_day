@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { raiseAlert } from '../src/sim/alerts';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { ECON, STOCK } from '../src/sim/data';
-import { credit, expectedDeferralCost, deferralRisk, planeCapacity } from '../src/sim/econ';
+import { credit, expectedDeferralCost, deferralRisk, planeCapacity, SUB_FEE } from '../src/sim/econ';
 import { apply, canResolve, createIsland } from '../src/sim/engine';
 import { planTask, stdPick } from '../src/sim/flow';
 import { committed, spendable } from '../src/sim/ledger';
@@ -380,7 +380,10 @@ describe('crew decisions', () => {
     for (const r of ['mech', 'elec', 'fin'] as Role[]) s = apply(s, { t: 'endTurn', role: r }, NOW).s;
     const rep = s.history[0];
     expect(rep.flightsFlown).toBe(0);
-    expect(rep.housesBooked).toBe(0); // no guest flights, and cottage 1 red-tagged
+    // the only guest plane grounded: a mainland sub-charter flies its guests in (one flight: cottage 1 is red-tagged)
+    expect(rep.housesBooked).toBe(1);
+    expect(rep.costs.subCharter).toBe(SUB_FEE);
+    expect(rep.lines.some((l) => l.text === `Twin N-12 stayed on the ground: a mainland sub-charter flew the guests in (1 flight at $${SUB_FEE}, $${SUB_FEE}).`)).toBe(true);
     expect(s.tags).toEqual({}); // calls last one week
   });
 

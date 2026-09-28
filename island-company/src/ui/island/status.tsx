@@ -84,7 +84,7 @@ function Glyph({ icon, ink, sub }: { icon: Icon; ink: string; sub: string }) {
         </g>
       );
     case 'placard':
-      // flying restricted on an INOP item: a placard on its post
+      // flying on an MEL C placard (an INOP item deferred): a placard on its post
       return (
         <g>
           <rect x={-10} y={-11} width={20} height={13} rx={1.8} fill={ink} />

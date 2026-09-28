@@ -4,7 +4,8 @@
 import { useState } from 'preact/hooks';
 import { ECON, MODELS } from '../sim/data';
 import { isChainStep } from '../sim/chain';
-import { gseForStart, hangarJobs, hazardOn, houseBlocker, isAog, isTagged, orderCost, orderTier, planeCapacity, powered, restrictedBy, startCart } from '../sim/econ';
+import { soleGuest } from '../sim/alerts';
+import { gseForStart, hangarJobs, hazardOn, houseBlocker, isAog, isTagged, orderCost, orderTier, planeCapacity, powered, startCart, SUB_FEE, subCharterOn } from '../sim/econ';
 import { squawkable } from '../sim/engine';
 import { installCheck } from '../sim/flow';
 import type { Asset, IslandState, Order, Role } from '../sim/types';
@@ -67,6 +68,9 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
               const aog = isAog(s, p.id);
               const cap = aog ? 0 : planeCapacity(p, s.tier, s.weather);
               const grounded = !!s.tags?.[p.id];
+              // the only guest plane down: the mainland sub-charter flies its guests (grounding it by the safety call too)
+              const sub = subCharterOn(s);
+              const subbed = sub?.plane.id === p.id;
               return (
                 <div class="asset" key={p.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name="plane" size={22} />
@@ -75,10 +79,10 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                   </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     <b class={`num ${cap === 0 && !grounded ? 'fault' : ''}`}>{grounded ? 'GND' : cap === 0 ? 'AOG' : `${cap} fl`}</b>
-                    {aog && <span class="label fault">for a part</span>}
+                    {(aog || (grounded && subbed)) && <span class="label fault">{subbed ? 'guests on the sub-charter' : 'for a part'}</span>}
                     <span class="label num">{p.sinceInspection ?? 0}/{ECON.planeInspectionFlights} insp</span>
                   </span>
-                  <SafetyCall ctl={ctl} role={role} id={p.id} on={grounded} word="Ground" />
+                  <SafetyCall ctl={ctl} role={role} id={p.id} on={grounded} word="Ground" sub={soleGuest(s, p.id)} />
                 </div>
               );
             })}
@@ -218,13 +222,14 @@ function AssetChips({ s, role }: { s: IslandState; role: 'mech' | 'elec' }) {
     const planes = s.assets.filter((a) => a.kind === 'plane');
     const aog = planes.filter((p) => isAog(s, p.id)).length;
     const gnd = planes.filter((p) => isTagged(s, p.id)).length;
-    const restricted = planes.some((p) => !!restrictedBy(s, p.id));
+    // the only guest plane on the ground: a mainland sub-charter flies the guests this week
+    const sub = subCharterOn(s);
     const mel = (s.alerts ?? []).filter((a) => a.status !== 'closed' && a.mel && a.mel.until >= s.week).length;
     const low = planes.filter((p) => p.health < 40).length;
     chips.push({ text: `${planes.length} plane${planes.length === 1 ? '' : 's'}` });
     if (aog) chips.push({ text: `AOG ${aog}`, tone: 'rust' });
     if (gnd) chips.push({ text: `GND ${gnd}`, tone: 'rust' });
-    if (restricted) chips.push({ text: 'restricted', tone: 'rust' });
+    if (sub) chips.push({ text: sub.flights ? `sub-charter ${sub.flights} × $${sub.fee}` : 'sub-charter', tone: 'rust' });
     if (mel) chips.push({ text: `MEL ${mel}`, tone: 'sea' });
     if (low) chips.push({ text: `under 40: ${low}`, tone: 'rust' });
   } else {
@@ -314,8 +319,11 @@ function WriteUp({ ctl, role, asset, can, onDone }: { ctl: Ctl; role: Role; asse
   );
 }
 
-/** Safety call: ground a plane / red-tag a house for this week. Out of service = no flights or guests, but nothing can fail in service. */
-function SafetyCall({ ctl, role, id, on, word }: { ctl: Ctl; role: Role; id: string; on: boolean; word: string }) {
+/**
+ * Safety call: ground a plane / red-tag a house for this week. Out of service = no flights or guests, but nothing can
+ * fail in service. `sub`: the only guest plane, whose guests a mainland sub-charter flies while it's grounded (at a price)
+ */
+function SafetyCall({ ctl, role, id, on, word, sub }: { ctl: Ctl; role: Role; id: string; on: boolean; word: string; sub?: boolean }) {
   const ended = !!ctl.s.turns[role]?.ended;
   return (
     <button
@@ -323,7 +331,7 @@ function SafetyCall({ ctl, role, id, on, word }: { ctl: Ctl; role: Role; id: str
       style={{ border: 0, minHeight: 34, minWidth: 64, justifyContent: 'center' }}
       disabled={ended || ctl.s.week < 1}
       aria-pressed={on}
-      title={on ? 'Return to service' : `${word} for this week: no flights/guests, but no in-service failures`}
+      title={on ? 'Return to service' : sub ? `${word} for this week: a mainland sub-charter flies the guests at $${SUB_FEE} a flight, and no in-service failures` : `${word} for this week: no flights/guests, but no in-service failures`}
       onClick={() => void ctl.dispatch({ t: 'tag', role, assetId: id, on: !on })}
     >
       {on ? '↺ Undo' : word}

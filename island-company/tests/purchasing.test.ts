@@ -479,10 +479,14 @@ describe('receiving and the Money tab (14.3, 9.4, 9.7)', () => {
     // the boat and the guest carrier aren't held by the cargo plane
     expect(carrierDown(s, { carrier: 'any', freight: 'sched', eta: 5 })).toBeNull();
     expect(carrierDown(s, { carrier: 'bulk', freight: 'aog', eta: 5 })).toBeNull();
-    // a card whose lines are due tonight with no plane flying: the scheduled choice says it slips, and the boat is offered
+    // a card whose lines are due tonight with no plane flying: the scheduled choice says it slips, and the boat is offered.
+    // Both planes grounded: the mainland sub-charter flies the twin's guests, and its flights carry the box
     const r = cardFor(island(), 'M_TIRE_WORN', 0, 'p1');
     const t = r.s;
     t.tags = { p1: 'mech', p2: 'mech' };
+    expect(cardVM(t, r.o).freight.sched.text).toBe('Scheduled +$35: here tonight');
+    // …unless it has no guests to fly (the grid down, no house can rent): then nothing flies at all
+    t.assets.find((a) => a.kind === 'grid')!.health = 20;
     const c = cardVM(t, r.o);
     expect(c.freight.sched.text).toBe('Scheduled +$35: no plane is flying, so it slips a week');
     expect(c.freight.aog).toBeDefined();

@@ -7,7 +7,7 @@ import { figSb, ipcFor, planeModel, plantedFor, plantRows, rowFor, type Aircraft
 import { alertFlags, alertTier, causeOf, fixesOf, lowerFirst, needsOf, protectionNeeded, siteOf, symptomOf } from './alerts';
 import { islandAircraft, judgePart, type PartCheck } from './chain';
 import { CATALOG_BY_KIND, DEFECT, defectRule, FREIGHT, kitValue, LABOR, SUPPLIERS, type DefectRule } from './data';
-import { alertAog, downtimeOf, hazardOn, houseWeekRevenue, orderCost, orderTier, restrictedBy, round10 } from './econ';
+import { alertAog, downtimeOf, groundsFrom, hazardOn, houseWeekRevenue, orderCost, orderTier, round10, subCharterNeed } from './econ';
 import { buyUnits, itemById, lineValue, planeItemIds, priceAt } from './items';
 import { aogOk, cardBuyLines, etaOf, owned, reservedFor, schedFreight, uncovered, unitCost, vendorFor } from './stock';
 import { benchFor, fixedFor, laborMin, slotQty, slotsAt, taskById, type MainSlot, type Task } from './tasks';
@@ -680,7 +680,11 @@ export type Card = {
   freight: { sched: Arrival & { cost: number; rides?: string; shipments?: number }; aog?: Arrival & { cost: number }; pick: Freight };
   total: number;
   aog: boolean;
-  restricted: boolean;
+  /**
+   * the only guest plane's job: grounded by its alert past due (`aog`), the mainland sub-charter flies its guests in,
+   * `usd` a week (`flights` at `fee`; the card's downtime counts it)
+   */
+  sub?: { flights: number; fee: number; usd: number };
   shut: boolean;
   downtime?: { flights: number; usd: number };
   due: number;
@@ -688,7 +692,7 @@ export type Card = {
   budget: { trade: OpsRole; spent: number; of: number };
 };
 
-/** resolves the asset spends out (AOG, restricted, closed) waiting on lines that land at `eta`'s resolve (the job is done the week after) */
+/** resolves the asset spends out (AOG, closed) waiting on lines that land at `eta`'s resolve (the job is done the week after) */
 function outWeeks(s: IslandState, a: Alert | undefined, eta: number): number {
   if (!a) return 0;
   const f = alertFlags(s, a);
@@ -753,7 +757,8 @@ export function cardOf(s: IslandState, o: Order, buy?: BuyChoice): Card {
   const labour = pending ? o.cost : 0;
   const buyTotal = toBuy.reduce((n, l) => n + l.qty * l.unit, 0) + tools.reduce((n, t) => n + t.price, 0);
   const aogNow = asset?.kind === 'plane' ? alertAog(s, asset.id)?.id === a?.id && !!a : false;
-  const restricted = asset?.kind === 'plane' ? restrictedBy(s, asset.id)?.id === a?.id && !!a : false;
+  // the only guest plane's airworthiness job: past due it's grounded and the sub-charter flies its guests (a week of it, on a clear sky)
+  const sub = asset?.kind === 'plane' && a && alertFlags(s, a).aw ? subCharterNeed(s, asset.id, 'clear', groundsFrom(s, a)) : null;
   const hz = asset?.kind === 'house' ? hazardOn(s, asset.id) : undefined;
   return {
     labour,
@@ -763,7 +768,7 @@ export function cardOf(s: IslandState, o: Order, buy?: BuyChoice): Card {
     freight: { sched, ...(aog ? { aog } : {}), pick },
     total: Math.round(labour + buyTotal + (pick === 'aog' && aog ? aog.cost : sched.cost)),
     aog: aogNow,
-    restricted,
+    ...(sub ? { sub: { flights: sub.flights, fee: sub.fee, usd: sub.usd } } : {}),
     shut: !!hz && hz.id === a?.id && !hz.safe,
     ...(down ? { downtime: { flights: down.flights, usd: Math.round(down.usd) } } : {}),
     due: a?.due ?? W,

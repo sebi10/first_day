@@ -9,7 +9,7 @@ import { planeModel, rowFor, ipcFor, type AnyAta } from './aircraft';
 import { alertFlags, alertShort, liveAlerts, prefilledTask, symptomOf } from './alerts';
 import { islandAircraft } from './chain';
 import { DEFAULT_SUPPLIER, ECON, FREIGHT, MODELS, STARTER, STOCK, SUPPLIERS, TIERS, type StarterLine } from './data';
-import { alertAog, flightsPerPlane, hazardOn, restrictedBy, tierDef } from './econ';
+import { alertAog, flightsPerPlane, hazardOn, tierDef } from './econ';
 import { allItems, buyUnits, famOf, itemById, priceAt, sells } from './items';
 import { book, bookCredit, bookLoss, bookRcv, bookUse, committed, invValue, payable, poOwed, spendable } from './ledger';
 import type { Rng } from './rng';
@@ -396,14 +396,14 @@ export function placePo(s: IslandState, lines: BuyLine[], buy: BuyChoice, by: Pu
   return out;
 }
 
-/** a PO line for a job whose alert grounds a plane, restricts the only guest plane or closes a house now */
+/** a PO line for a job whose alert grounds a plane (the only guest plane too) or closes a house now */
 export function urgentJob(s: IslandState, o: Order | undefined, week = s.week): boolean {
   if (!o?.flow) return false;
   const a = s.alerts?.find((x) => x.id === o.flow!.alert);
   if (!a) return false;
   const asset = s.assets.find((x) => x.id === a.assetId);
   if (!asset) return false;
-  if (asset.kind === 'plane') return alertAog(s, asset.id, week)?.id === a.id || restrictedBy(s, asset.id, week)?.id === a.id;
+  if (asset.kind === 'plane') return alertAog(s, asset.id, week)?.id === a.id;
   if (asset.kind === 'house') {
     const h = hazardOn(s, asset.id);
     return h?.id === a.id && !h.safe;
@@ -412,8 +412,8 @@ export function urgentJob(s: IslandState, o: Order | undefined, week = s.week): 
 }
 
 /**
- * A job whose fix has to be on its way now (the fin bot's and autopilot's card rule): its alert grounds a plane,
- * restricts the only guest plane or closes a house this week or next, or its MEL placard runs out within a week
+ * A job whose fix has to be on its way now (the fin bot's and autopilot's card rule): its alert grounds a plane or
+ * closes a house this week or next, or its MEL placard runs out within a week
  * (a part approved later lands too late for the job before the placard does).
  */
 export function dueJob(s: IslandState, o: Order | undefined): boolean {
@@ -424,9 +424,9 @@ export function dueJob(s: IslandState, o: Order | undefined): boolean {
 }
 
 /**
- * A late card the standing approval takes whatever the limit (8.5): its alert grounds a plane, restricts the only
- * guest plane or closes a house at this week's resolve or next week's. (The cash floor for it is $0.) Otherwise a
- * crew that played in the "wrong" order (the analyst first) flies a plane restricted for a week over a card total.
+ * A late card the standing approval takes whatever the limit (8.5): its alert grounds a plane or closes a house at
+ * this week's resolve or next week's. (The cash floor for it is $0.) Otherwise a crew that played in the "wrong"
+ * order (the analyst first) keeps a plane on the ground for a week over a card total.
  */
 export const lateSafe = (s: IslandState, o: Order | undefined) => !!o && (urgentJob(s, o) || urgentJob(s, o, s.week + 1));
 

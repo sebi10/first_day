@@ -295,8 +295,9 @@ describe('in the IPC: lookup → buy → delivery → install', () => {
     // the cash at the end of the week: its own flows, plus the credit (the next week's petty-cash approvals come after)
     const h = s.history.at(-1)!;
     const c = h.costs;
-    // (the job flow's own outgoings too: the carrying charge on the stock, and any payment run)
-    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0) - (c.carry ?? 0) - (c.parts ?? 0) - (c.freight ?? 0)));
+    // (the job flow's own outgoings too: the carrying charge on the stock, any payment run, and the mainland sub-charter
+    // while the twin sits grounded on this island's unplanned week-1 alerts)
+    expect(h.cashEnd).toBe(Math.round(cash + (buy.cost - fee) + h.revenue - c.fixed - c.insurance - c.leak - (c.reports ?? 0) - c.incidents - (c.loan ?? 0) - (c.power ?? 0) - (c.carry ?? 0) - (c.parts ?? 0) - (c.freight ?? 0) - (c.subCharter ?? 0)));
     // the banner says why it's back at the IPC, until the new lookup is handed in
     expect(s.chain!.back).toMatch(new RegExp(`^Sent back at receiving: P/N ${wrong} is not effective for`));
     s = complete(s, step(s), { chain: { outcome: 'pn', pn: rightPn(ac, '32-40', 'lining') } });

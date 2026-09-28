@@ -1,6 +1,6 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
 import { soleGuest, symptomOf } from './alerts';
-import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, TIERS } from './data';
+import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, MODELS, REPORT, REPORT_BY_KEY, ROLE_LABEL, SUBCHARTER, TIERS } from './data';
 import { charterMult, housekeepingCap, payroll, pilotCap, reviewMult } from './staff';
 import type { Alert, Asset, CableBand, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
 
@@ -38,19 +38,13 @@ export const isTagged = (s: IslandState, id: string) => !!s.tags?.[id];
 /** a plane waiting on a part (the open part chain): not airworthy until it's installed. A chain the job flow's research opened doesn't ground by itself (its alert does, if it is an airworthiness one) */
 export const chainAog = (s: Pick<IslandState, 'chain'>, id: string) => !!s.chain && s.chain.step !== 'done' && s.chain.assetId === id && !s.chain.flow;
 
-/** an open or planned (not signed off) airworthiness alert on the plane, due by `week`, not placarded through it */
-function groundingAlert(s: Pick<IslandState, 'alerts'>, planeId: string, week: number): Alert | undefined {
+/**
+ * The alert that grounds a plane (10): an open or planned (not signed off) airworthiness alert on it, due by `week`,
+ * not placarded through it. Every plane, the only guest plane too: flying past the item's due week (or its MEL
+ * interval) isn't legal. The only guest plane's guests fly in on the mainland sub-charter meanwhile (`subCharterOn`)
+ */
+export function alertAog(s: Pick<IslandState, 'alerts'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
   return (s.alerts ?? []).find((a) => a.assetId === planeId && a.status !== 'closed' && a.kind !== 'repair' && !!symptomOf(a)?.aw && a.due <= week && !(a.mel && a.mel.until >= week));
-}
-/** the alert that grounds a plane (10): never on the only guest plane, which flies restricted instead */
-export function alertAog(s: Pick<IslandState, 'alerts' | 'assets'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
-  if (soleGuest(s, planeId)) return undefined;
-  return groundingAlert(s, planeId, week);
-}
-/** the only guest plane past due on an airworthiness alert: it flies half its flights, a near-miss each */
-export function restrictedBy(s: Pick<IslandState, 'alerts' | 'assets'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
-  if (!soleGuest(s, planeId)) return undefined;
-  return groundingAlert(s, planeId, week);
 }
 /** an open or planned alert on the plane placarded INOP under the MEL (category C) through `week`: it flies on the placard */
 export function melOn(s: Pick<IslandState, 'alerts'>, planeId: string, week = (s as IslandState).week): Alert | undefined {
@@ -69,8 +63,54 @@ export const isAog = (s: IslandState, id: string) => chainAog(s, id) || !!alertA
 export const outOfService = (s: IslandState, id: string) => isTagged(s, id) || isAog(s, id);
 export function capOf(s: IslandState, p: Asset, weather: Weather = s.weather) {
   if (outOfService(s, p.id)) return 0;
-  // restricted: half its flights, as at 40-59 health
-  return planeCapacity(restrictedBy(s, p.id) ? { ...p, health: Math.min(p.health, 59) } : p, s.tier, weather);
+  return planeCapacity(p, s.tier, weather);
+}
+
+// ---------------------------------------------------------------------------
+// The mainland sub-charter: the only guest plane on the ground, an outside operator flies its guests
+
+/** what the island pays the operator a flight (data.ts SUBCHARTER: the island's own cost of a guest flight x the operator's premium) */
+export const SUB_FEE = round10(SUBCHARTER.ownPerFlight * SUBCHARTER.mult);
+
+/**
+ * The flights a mainland sub-charter flies for the only guest plane's guests in a week it's down: the guests who
+ * need a seat (the houses that can rent and the housekeepers can turn over, less the ferry's parties), up to the
+ * plane's own schedule in that weather. null: not the only guest plane (another guest plane carries its guests).
+ * The operator's own crew flies it, so the island's pilots don't cap it; it sells no day tours.
+ */
+export function subCharterNeed(s: IslandState, planeId: string, weather: Weather = s.weather, week = s.week): { flights: number; cap: number; fee: number; usd: number } | null {
+  const p = s.assets.find((a) => a.id === planeId);
+  if (!p || !soleGuest(s, planeId)) return null;
+  const rentable = houses(s).filter((h) => houseRentable(s, h, week)).length;
+  const guests = Math.max(0, Math.min(rentable, housekeepingCap(s)) - tierDef(s.tier).ferry);
+  // `cap`: what the operator could fly in on the plane's schedule in that weather (the review's empty-house lines read it)
+  const cap = planeCapacity({ ...p, health: 100 }, s.tier, weather);
+  const flights = Math.min(guests, cap);
+  return { flights, cap, fee: SUB_FEE, usd: flights * SUB_FEE };
+}
+
+/**
+ * The week's sub-charter: the only guest plane is out of service (AOG on an airworthiness alert past due, a part
+ * chain's AOG, or the mechanic's safety call this week), so the operator flies the guests in. `alert`: the one that
+ * grounds it, if that's why. A future week (the cards' "past week N") counts the alerts, not this week's safety call.
+ */
+export function subCharterOn(s: IslandState, week = s.week, weather: Weather = s.weather): { plane: Asset; alert?: Alert; flights: number; cap: number; fee: number; usd: number } | null {
+  for (const p of planes(s)) {
+    if (!soleGuest(s, p.id)) continue;
+    const al = alertAog(s, p.id, week);
+    if (!al && !chainAog(s, p.id) && !(week === s.week && isTagged(s, p.id))) return null;
+    const need = subCharterNeed(s, p.id, weather, week)!;
+    return { plane: p, ...(al ? { alert: al } : {}), ...need };
+  }
+  return null;
+}
+
+/** the first week an airworthiness alert grounds its plane: its due week, or the week after its MEL placard runs out (never before this week) */
+export const groundsFrom = (s: Pick<IslandState, 'week'>, a: Pick<Alert, 'due' | 'mel'>) => Math.max(s.week, a.due, a.mel ? a.mel.until + 1 : 0);
+
+/** "about $540 a week (2 flights at $270)": what a week of the sub-charter costs, for the cards and the MEL words */
+export function subCharterWords(n: { flights: number; fee: number; usd: number }): string {
+  return n.flights > 0 ? `about $${n.usd.toLocaleString('en-US')} a week (${n.flights} flight${n.flights > 1 ? 's' : ''} at $${n.fee})` : `$${n.fee} a flight (no guests booked this week)`;
 }
 
 /** the fixed cost a week: the tier's overhead plus the staff's payroll (the stubs: today's fixed cost) */
@@ -261,7 +301,7 @@ export function urgency(s: IslandState, o: Order) {
     (o.redo ? 15 : 0) +
     // a plane is down until the part chain is through
     (o.chain ? 120 : 0) +
-    // the job flow: an airworthiness or hazard alert, due now (it grounds, restricts or closes at this resolve)
+    // the job flow: an airworthiness or hazard alert, due now (it grounds a plane or closes a house at this resolve)
     flowUrgency(s, o)
   );
 }
@@ -311,13 +351,16 @@ export function projectWeek(s: IslandState, rates = s.rates) {
   );
   const pax = fleet.filter((c) => !MODELS[c.plane.model].cargo);
   const paxFlights = pax.reduce((n, c) => n + c.n, 0);
+  // the only guest plane down: the mainland sub-charter flies its guests in (a cost, not revenue)
+  const sub = subCharterOn(s);
+  const subFlights = sub?.flights ?? 0;
   const rentable = houses(s)
     .filter((h) => houseRentable(s, h))
     .sort((a, b) => b.health - a.health);
-  const booked = rentable.slice(0, Math.min(paxFlights + td.ferry, housekeepingCap(s)));
+  const booked = rentable.slice(0, Math.min(paxFlights + subFlights + td.ferry, housekeepingCap(s)));
   const occ = clamp(occupancy(s, rates.nightly) * reviewMult(s, booked.length), 0, 1);
   const rental = booked.reduce((n, h) => n + 7 * rates.nightly * (MODELS[h.model].mult ?? 1) * occ * rentFactor(s, h), 0);
-  let guestNeed = Math.max(0, booked.length - td.ferry);
+  let guestNeed = Math.max(0, booked.length - td.ferry - subFlights);
   const load = charterLoad(s, rates.charter) * charterMult(s);
   let charter = 0;
   for (const c of [...pax].sort((a, b) => (MODELS[a.plane.model].mult ?? 1) - (MODELS[b.plane.model].mult ?? 1))) {
@@ -331,7 +374,10 @@ export function projectWeek(s: IslandState, rates = s.rates) {
     charter: Math.round(charter),
     booked: booked.length,
     rentable: rentable.length,
-    spareFlights: Math.max(0, paxFlights - Math.max(0, booked.length - td.ferry)),
+    spareFlights: Math.max(0, paxFlights - Math.max(0, booked.length - td.ferry - subFlights)),
+    /** the mainland sub-charter this week: its flights and what the island pays for them */
+    subFlights,
+    subCharter: sub?.usd ?? 0,
     occ,
     load,
     budget: td.budget,
@@ -342,7 +388,9 @@ export function projectWeek(s: IslandState, rates = s.rates) {
 /**
  * What a week with this plane down costs, as an analyst would put it on the
  * card: the guests and charters it would have flown (the week's revenue with
- * it flying, less without), or, for the cargo plane, the boat the kits wait for
+ * it flying, less without; the only guest plane: the day tours it would have
+ * flown and the mainland sub-charter that flies its guests), or, for the cargo
+ * plane, the boat the kits wait for
  * while it's down. `flights`: what it flies in a week when it's up.
  */
 export function downtimeOf(s: IslandState, assetId: string): { flights: number; usd: number; cargo: boolean } {
@@ -366,8 +414,8 @@ export function downtimeOf(s: IslandState, assetId: string): { flights: number; 
     alerts: (s.alerts ?? []).filter((a) => a.assetId !== assetId),
     tags: { ...(s.tags ?? {}), [assetId]: undefined as never },
   }).revenue;
-  const down = projectWeek({ ...s, tags: { ...(s.tags ?? {}), [assetId]: 'mech' }, chain: s.chain }).revenue;
-  return { flights, usd: Math.max(0, up - down), cargo: false };
+  const down = projectWeek({ ...s, tags: { ...(s.tags ?? {}), [assetId]: 'mech' }, chain: s.chain });
+  return { flights, usd: Math.max(0, up - down.revenue + down.subCharter), cargo: false };
 }
 
 // ---------------------------------------------------------------------------

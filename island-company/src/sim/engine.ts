@@ -104,7 +104,9 @@ import {
   isAog,
   melOn,
   rentFactor,
-  restrictedBy,
+  subCharterNeed,
+  subCharterOn,
+  subCharterWords,
   isTagged,
   outOfService,
   isBlind,
@@ -767,7 +769,7 @@ export function squawkable(role: Role, asset: Asset) {
 export function isEmergency(s: IslandState, o: Order) {
   // a part chain grounds its plane: the part and the engineering fee are safety work
   if (o.kind === 'inspect100' || o.kind === 'codeprep' || o.kind === 'repair' || o.chain) return true;
-  // a job whose alert grounds a plane, restricts the only guest plane or closes a house (this week or next)
+  // a job whose alert grounds a plane (the only guest plane too: its guests go on the sub-charter) or closes a house (this week or next)
   if (o.flow && (urgentJob(s, o) || urgentJob(s, o, s.week + 1))) return true;
   const a = s.assets.find((x) => x.id === o.assetId);
   return !!a && a.health < 60;
@@ -3189,7 +3191,7 @@ function autoRun(s: IslandState, role: Role) {
     let n = 0;
     for (const o of pend) {
       if (o.flow) {
-        // a job whose alert grounds a plane, restricts the only guest plane or closes a house (or whose placard runs out): whenever spendable covers it, default freight
+        // a job whose alert grounds a plane or closes a house (or whose placard runs out): whenever spendable covers it, default freight
         const card = cardOf(s, o);
         const urgent = dueJob(s, o);
         if (urgent && spendable(s) - card.total >= 0) {
@@ -3251,7 +3253,7 @@ function autoRun(s: IslandState, role: Role) {
     return;
   }
   const ops = role as OpsRole;
-  // the job flow (18.3): hazards made safe, MEL items placarded, the alerts that ground, restrict or close planned by the book
+  // the job flow (18.3): hazards made safe, MEL items placarded, the alerts that ground or close planned by the book
   for (const al of liveAlerts(s).filter((x) => x.role === ops && x.status !== 'closed')) {
     const asset = s.assets.find((x) => x.id === al.assetId);
     if (!asset) continue;
@@ -3454,7 +3456,7 @@ function leftoverChainCard(s: IslandState, line: (role: ReportLine['role'], tone
  * requisitions came in after it. Each goes through, most urgent first, with the
  * card's default freight, up to the standing limit and while spendable cash
  * stays above the freeze (safety work: above zero). A card whose alert grounds
- * a plane, restricts the only guest plane or closes a house this week or next
+ * a plane or closes a house this week or next
  * goes through whatever the limit (`lateSafe`, cash floor $0). The rest waits,
  * and the review says why.
  */
@@ -3634,7 +3636,10 @@ export function resolveWeek(s: IslandState, now: number) {
   const perPlane = flightsPerPlane(s.tier);
   const guestSlots: { plane: Asset; n: number }[] = [];
   const fleet: { plane: Asset; n: number }[] = [];
-  const restrictedOn = new Map<string, Alert>();
+  // the only guest plane on the ground (past due on an airworthiness item, or the mechanic's safety call): a mainland
+  // sub-charter flies the island's guests in on its own plane and crew, the flights the guests need, paid at step 11
+  const sub = subCharterOn(s, W, s.weather);
+  const subFlights = sub?.flights ?? 0;
   for (const p of planes(s)) {
     const grounded = isTagged(s, p.id);
     // waiting on a part (the part chain), or an airworthiness alert past due: not airworthy, no flights. Its flights
@@ -3642,11 +3647,11 @@ export function resolveWeek(s: IslandState, now: number) {
     const chainDown = !grounded && chainAog(s, p.id);
     const alertDown = !grounded && !chainDown ? alertAog(s, p.id) : undefined;
     const aog = chainDown || !!alertDown;
-    const restricted = !grounded && !aog ? restrictedBy(s, p.id) : undefined;
-    if (restricted) restrictedOn.set(p.id, restricted);
-    // on-time is judged against what the weather allows, not against a clear sky
-    if (!aog) scheduled += planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
-    const healthCap = grounded || aog ? 0 : planeCapacity(restricted ? { ...p, health: Math.min(p.health, 59) } : p, s.tier, 'clear');
+    // on-time is judged against what the weather allows, not against a clear sky. A plane AOG is off the schedule, but
+    // not the only guest plane when the sub-charter flies its guests: its schedule is the island's guest service, and
+    // the island's own flights on it are what the on-time grade reads (0 of 4, the sub-charter's aren't the island's)
+    if (!aog || sub?.plane.id === p.id) scheduled += planeCapacity({ ...p, health: 100 }, s.tier, s.weather);
+    const healthCap = grounded || aog ? 0 : planeCapacity(p, s.tier, 'clear');
     let cap = capOf(s, p);
     // a flight day on a weak battery: the first start is on the cart hooked up to it, or the first flight is lost
     if (cap > 0 && s.weakBattery?.week === W && s.weakBattery.assetId === p.id) cap -= flightDayStart(s, p, line);
@@ -3662,12 +3667,14 @@ export function resolveWeek(s: IslandState, now: number) {
           : `${p.name} AOG: ${shortText(s, alertDown)} (due week ${alertDown.due}, not fixed): ${perPlane} flight${perPlane > 1 ? 's' : ''} cancelled.`,
       );
       bookAog(s, aogCause(s, alertDown, W));
-    } else if (!restricted && healthCap < perPlane)
+    } else if (healthCap < perPlane)
       line('mech', 'bad', `${perPlane - healthCap} flight${perPlane - healthCap > 1 ? 's' : ''} lost on ${p.name}: airworthiness ${Math.round(p.health)}`);
     if (cap < healthCap) line('all', 'info', `${healthCap - cap} flight${healthCap - cap > 1 ? 's' : ''} lost on ${p.name}: ${s.weather}`);
     if (cap === 0 && healthCap === 0 && !grounded && !aog) line('mech', 'bad', `${p.name} is AOG (aircraft on ground).`);
     fleet.push({ plane: p, n: cap });
   }
+  if (sub && subFlights > 0)
+    line('all', 'bad', `${sub.plane.name} stayed on the ground: a mainland sub-charter flew the guests in (${subFlights} flight${subFlights > 1 ? 's' : ''} at ${usd(sub.fee)}, ${usd(sub.usd)}).`);
   // the pilots fly what their duty allows (D: pilotCap), cargo runs cut first so guests keep flying
   const capped = capFleet(s, fleet);
   const lostToPilots = fleet.reduce((n, c) => n + c.n, 0) - capped.reduce((n, c) => n + c.n, 0);
@@ -3679,16 +3686,17 @@ export function resolveWeek(s: IslandState, now: number) {
         line('mech', 'bad', `Near-miss on ${p.name}: rough engine on climb-out.`);
       }
     }
-    // the only guest plane past due on an airworthiness alert: half its flights, a near-miss on each (10)
-    const rs = restrictedOn.get(p.id);
-    if (rs && cap > 0) {
-      nearMisses += cap;
-      line('mech', 'bad', `${p.name} flew ${cap} of ${perPlane} with ${shortText(s, rs)} (due week ${rs.due}): a near-miss on each flight. Fix it, or ground it (tag).`);
+    // flying on an MEL C placard: the board says so (the placard's last week, and what comes after it). Past it the plane
+    // is grounded; the only guest plane's guests then fly in on the mainland sub-charter
+    const ml = cap > 0 ? melOn(s, p.id, W) : undefined;
+    if (ml) {
+      const after = soleGuestPlane(s, p) ? subCharterNeed(s, p.id, 'clear', ml.mel!.until + 1) : null;
+      line(
+        'mech',
+        'info',
+        `${p.name} flew with ${shortText(s, ml)} placarded INOP (MEL C, to week ${ml.mel!.until}${ml.mel!.ext ? ', extended' : ''}). Fix it by then, or it is grounded${after ? `: a mainland sub-charter flies the guests at ${subCharterWords(after)}` : ''}.`,
+      );
     }
-    // flying on an MEL C placard: the board says so (the placard's last week, and what comes after it)
-    const ml = !rs && cap > 0 ? melOn(s, p.id, W) : undefined;
-    if (ml)
-      line('mech', 'info', `${p.name} flew with ${shortText(s, ml)} placarded INOP (MEL C, to week ${ml.mel!.until}${ml.mel!.ext ? ', extended' : ''}). Fix it by then, or it ${soleGuestPlane(s, p) ? 'flies restricted' : 'is grounded'}.`);
     flown += cap;
     if (MODELS[p.model].cargo) cargoFlights += cap;
     else {
@@ -3708,12 +3716,14 @@ export function resolveWeek(s: IslandState, now: number) {
   // 3. receiving (9.4): the POs due this week whose carrier ran, the AOG boat's, and held ones released; then the allocation.
   // The part chain's own part keeps its rules: on the AOG boat (paid on the PO), in a guest flight's hold from the week it
   // ships (freight 'flight'), or on a cargo flight (it rides first). Nothing carried it: a boat, at a price
-  const carry = hasCargo(s) ? cargoFlights * ECON.partsPerCargoFlight : passenger;
+  // the sub-charter's flights come from the mainland too: a box rides in the hold as it would on a guest flight
+  const guestFlights = passenger + subFlights;
+  const carry = hasCargo(s) ? cargoFlights * ECON.partsPerCargoFlight : guestFlights;
   const ch = openChain(s);
   const due = !!ch && ch.step === 'transit' && ch.hold === undefined && (ch.freight !== 'flight' || (ch.ship ?? 0) <= W);
   const aogBoat = due && ch!.freight === 'boat';
   let chainPart = aogBoat;
-  if (due && !aogBoat && (ch!.freight === 'flight' ? passenger > 0 : carry > 0)) chainPart = true;
+  if (due && !aogBoat && (ch!.freight === 'flight' ? guestFlights > 0 : carry > 0)) chainPart = true;
   const onPlane = ch ? (s.assets.find((a) => a.id === ch.assetId)?.name ?? 'the plane') : '';
   if (aogBoat) line('mech', 'info', `The AOG boat brought the ${ch!.item} for ${onPlane}.`);
   else if (due && !chainPart) {
@@ -3726,7 +3736,7 @@ export function resolveWeek(s: IslandState, now: number) {
     line('mech', 'bad', `No ${carrier} flights carried the part: a mainland boat brought the ${ch!.item} (${usd(ECON.boatKit)}).`);
   }
   const receivedBefore = (s.pos ?? []).filter((p) => p.got === W).length;
-  const readied = receive(s, W, { guest: passenger, cargo: cargoFlights }, line, (o, ata, tag, pn) => {
+  const readied = receive(s, W, { guest: guestFlights, cargo: cargoFlights }, line, (o, ata, tag, pn) => {
     const asset = s.assets.find((a) => a.id === o.assetId)!;
     return judgeSlot(s, asset, ata, tag, pn);
   });
@@ -3763,23 +3773,27 @@ export function resolveWeek(s: IslandState, now: number) {
     else if (why && pw.on) line('elec', 'bad', `${h.name} unrentable: ${why}.`);
   }
   const ferry = td.ferry;
-  const arrivals = passenger + ferry;
+  const arrivals = passenger + subFlights + ferry;
+  // the seats that could have come in: the sub-charter flies only the guests the housekeepers can take, so its
+  // schedule (not its flights) is what the empty-house lines weigh
+  const seats = passenger + (sub?.cap ?? 0) + ferry;
   // the housekeepers turn over what they can (D: housekeepingCap)
   const turnovers = housekeepingCap(s);
   const booked = rentable.slice(0, Math.min(arrivals, turnovers));
-  if (Math.min(rentable.length, arrivals) > turnovers) {
-    const empty = Math.min(rentable.length, arrivals) - turnovers;
+  if (Math.min(rentable.length, seats) > turnovers) {
+    const empty = Math.min(rentable.length, seats) - turnovers;
     line('fin', 'bad', `${empty} house${empty > 1 ? 's' : ''} empty: housekeeping turns over ${turnovers} a week. ${hireComing(s, 'housekeeper', W) ?? 'Hire a housekeeper?'}`);
   }
-  if (rentable.length > arrivals) {
-    const clearSky = planes(s)
-      .filter((p) => !MODELS[p.model].cargo)
-      .reduce((n, p) => n + capOf(s, p, 'clear'), 0);
+  if (rentable.length > seats) {
+    const clearSky =
+      planes(s)
+        .filter((p) => !MODELS[p.model].cargo)
+        .reduce((n, p) => n + capOf(s, p, 'clear'), 0) + (sub ? subCharterNeed(s, sub.plane.id, 'clear', W)!.cap : 0);
     const weatherOnly = rentable.length <= clearSky + ferry;
     line(
       weatherOnly ? 'all' : 'mech',
       weatherOnly ? 'info' : 'bad',
-      `${rentable.length - arrivals} house${rentable.length - arrivals > 1 ? 's' : ''} empty: only ${passenger} guest flights${ferry ? ` + ${ferry} ferry` : ''}${weatherOnly ? ` (${s.weather})` : ''}.`,
+      `${rentable.length - seats} house${rentable.length - seats > 1 ? 's' : ''} empty: only ${passenger} guest flights${sub ? ` + ${subFlights} sub-charter` : ''}${ferry ? ` + ${ferry} ferry` : ''}${weatherOnly ? ` (${s.weather})` : ''}.`,
     );
   }
   // the wedding wanted every house
@@ -3819,7 +3833,7 @@ export function resolveWeek(s: IslandState, now: number) {
   }
 
   // 6. charter: spare passenger flights sell day tours (twin first to guests)
-  let guestNeed = Math.max(0, booked.length - ferry);
+  let guestNeed = Math.max(0, booked.length - ferry - subFlights);
   let charter = 0;
   const load = charterLoad(s, s.rates.charter, W) * charterMult(s);
   for (const slot of guestSlots.sort((a, b) => (MODELS[a.plane.model].mult ?? 1) - (MODELS[b.plane.model].mult ?? 1))) {
@@ -3860,7 +3874,7 @@ export function resolveWeek(s: IslandState, now: number) {
   }
 
   // 7. (the job flow) an alert nobody planned, past its due week, rolls the deferral risk a carried order would (5.5):
-  // 3 x the labour of its true kind, on its trade. An airworthiness alert on a plane doesn't roll: it grounds (or restricts) instead
+  // 3 x the labour of its true kind, on its trade. An airworthiness alert on a plane doesn't roll: it grounds the plane instead
   for (const al of liveAlerts(s)) {
     if (W < 3) break;
     if (al.status !== 'open' || al.due >= W || al.cause < 0 || al.kind === 'nff') continue;
@@ -4083,6 +4097,9 @@ export function resolveWeek(s: IslandState, now: number) {
   book(s, 'overhead', overhead, { trade: 'fin' });
   book(s, 'payroll', pay, { trade: 'fin' });
   if (carried) book(s, 'carry', carried, { trade: 'fin' });
+  // the mainland sub-charter's flights this week (the flight ops side of the business: the mechanic's trade)
+  const subCost = sub ? sub.usd : 0;
+  if (subCost) book(s, 'subcharter', subCost, { trade: 'mech' });
   const premium = Math.round(INSURANCE[s.insurance].premium * (1 + 0.25 * (s.tier - 1)));
   const grossIncidents = incidents.reduce((n, i) => n + i.cost, 0) + weatherCost;
   const netIncidents = Math.round(grossIncidents * (1 - INSURANCE[s.insurance].cover));
@@ -4090,7 +4107,7 @@ export function resolveWeek(s: IslandState, now: number) {
   if (grossIncidents) line('fin', 'info', `Claims ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
   const cashStart = s.openCash;
   const loanPay = s.loan ? Math.min(s.loan.left, s.loan.weekly) : 0;
-  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - reportLeak - netIncidents - loanPay - powerCost - carried);
+  s.cash = Math.round(s.cash + revenue - fixed - premium - leakCost - reportLeak - netIncidents - loanPay - powerCost - carried - subCost);
   if (s.loan) {
     s.loan.left -= loanPay;
     if (s.loan.left <= 0) {
@@ -4198,7 +4215,7 @@ export function resolveWeek(s: IslandState, now: number) {
   const bm = best('mech');
   const be = best('elec');
   const mvp: Record<Role, string> = {
-    mech: `${flown}/${scheduled} flights${bm ? ` · best: ${bm.title} ${Math.round(bm.result!.score * 100)}%` : ''}${signedOff('mech')}`,
+    mech: `${flown}/${scheduled} flights${subFlights ? ` (+${subFlights} sub-charter)` : ''}${bm ? ` · best: ${bm.title} ${Math.round(bm.result!.score * 100)}%` : ''}${signedOff('mech')}`,
     elec: `${booked.length}/${hs.length} houses booked${be ? ` · best: ${be.title} ${Math.round(be.result!.score * 100)}%` : ''}${signedOff('elec')}`,
     fin: `Cash ${s.cash - cashStart >= 0 ? '+' : '−'}${usd(Math.abs(s.cash - cashStart))}${found ? ` · recovered ${usd(found)}` : ''}`,
   };
@@ -4232,6 +4249,7 @@ export function resolveWeek(s: IslandState, now: number) {
       freight: paid.freight || undefined,
       labor: Math.round(s.ledger?.find((x) => x.w === W)?.sp.labor ?? 0) || undefined,
       parts: paid.parts || undefined,
+      subCharter: subCost || undefined,
     },
     housesBooked: booked.length,
     housesRentable: rentable.length,

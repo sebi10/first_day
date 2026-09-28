@@ -112,7 +112,7 @@ export function closeLedger(s: IslandState, W: number, revenue: number): void {
 // ---------------------------------------------------------------------------
 // Series (14.2): pure reads of the ledger and the week reports
 
-export type OutCat = 'parts' | 'labor' | 'freight' | 'carry' | 'payroll' | 'overhead' | 'tools' | 'building' | 'insurance' | 'incidents' | 'other';
+export type OutCat = 'parts' | 'labor' | 'freight' | 'carry' | 'payroll' | 'overhead' | 'tools' | 'building' | 'insurance' | 'incidents' | 'subcharter' | 'other';
 const OUT: Record<SpendCat, OutCat> = {
   parts: 'parts',
   consumables: 'parts',
@@ -126,8 +126,9 @@ const OUT: Record<SpendCat, OutCat> = {
   payroll: 'payroll',
   overhead: 'overhead',
   eng: 'other',
+  subcharter: 'subcharter',
 };
-const zeroOut = (): Record<OutCat, number> => ({ parts: 0, labor: 0, freight: 0, carry: 0, payroll: 0, overhead: 0, tools: 0, building: 0, insurance: 0, incidents: 0, other: 0 });
+const zeroOut = (): Record<OutCat, number> => ({ parts: 0, labor: 0, freight: 0, carry: 0, payroll: 0, overhead: 0, tools: 0, building: 0, insurance: 0, incidents: 0, subcharter: 0, other: 0 });
 
 /** revenue and cash out by category, the last `weeks` weeks (ledger rows merged with the week reports) */
 export function spendSeries(s: IslandState, weeks = 12): { w: number; rev: number; out: Record<OutCat, number>; cash: number }[] {
@@ -137,7 +138,7 @@ export function spendSeries(s: IslandState, weeks = 12): { w: number; rev: numbe
     const row = s.ledger?.find((x) => x.w === w);
     const h = s.history.find((x) => x.week === w);
     const o = zeroOut();
-    if (row) for (const [k, v] of Object.entries(row.sp)) o[OUT[k as SpendCat]] += v ?? 0;
+    if (row) for (const [k, v] of Object.entries(row.sp)) o[OUT[k as SpendCat] ?? 'other'] += v ?? 0;
     if (h) {
       o.insurance += h.costs.insurance;
       o.incidents += h.costs.incidents;

@@ -402,6 +402,8 @@ export interface WeekReport {
     labor?: number;
     /** purchase orders paid at the payment run (parts, consumables, materials, tools, building), freight excluded */
     parts?: number;
+    /** the mainland sub-charter that flew the guests while the only guest plane was on the ground */
+    subCharter?: number;
   };
   housesBooked: number;
   housesRentable: number;
@@ -957,7 +959,7 @@ export interface JobFlow {
   short?: boolean;
 }
 
-export type SpendCat = 'parts' | 'consumables' | 'rotables' | 'materials' | 'tools' | 'building' | 'freight' | 'labor' | 'carry' | 'payroll' | 'overhead' | 'eng';
+export type SpendCat = 'parts' | 'consumables' | 'rotables' | 'materials' | 'tools' | 'building' | 'freight' | 'labor' | 'carry' | 'payroll' | 'overhead' | 'eng' | 'subcharter';
 
 export interface WeekLedger {
   w: number;

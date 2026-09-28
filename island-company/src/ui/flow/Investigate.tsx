@@ -6,6 +6,7 @@
 import { useState } from 'preact/hooks';
 import { alertFlags, breakerOf, findingOf, siteOf, symptomOf } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
+import { groundsFrom, subCharterNeed, subCharterWords } from '../../sim/econ';
 import type { Action, Alert, IslandState } from '../../sim/types';
 import { Btn, Icon } from '../kit';
 import { DataPlate } from '../manual';
@@ -28,6 +29,12 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
   const elec = nameOf(s, 'elec');
   const fin = nameOf(s, 'fin');
   const can = !demo && !ended;
+  // what past due does to the plane (an airworthiness item): grounded until the fix, any plane. The only guest plane's
+  // guests then fly in on a mainland sub-charter, at the island's cost (a week of it, as the island books today)
+  const aw = f.aw && asset.kind === 'plane';
+  const sub = aw ? subCharterNeed(s, asset.id, 'clear', groundsFrom(s, a)) : null;
+  const subText = sub ? `, and a mainland sub-charter flies the guests at ${subCharterWords(sub)}` : '';
+  const signed = !!a.order && s.orders.some((o) => o.id === a.order && o.status === 'done');
   return (
     <div class="col jf-step" style={{ gap: 10 }}>
       <div class="card jf-finding">
@@ -49,7 +56,14 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
       {a.mel && (
         <div class="jf-note">
           <b>MEL C:</b> placarded INOP by {a.mel.by}, covers week {a.mel.until}
-          {a.mel.ext ? ' (extended once)' : a.mel.ask ? ` · ${a.mel.ask.by} asked ${fin} for the one extension` : ''}. Past it, the plane is grounded until the fix.
+          {a.mel.ext ? ' (extended once)' : a.mel.ask ? ` · ${a.mel.ask.by} asked ${fin} for the one extension` : ''}. {a.mel.until < s.week ? `It ran out: ${asset.name} is grounded until the fix` : `Past it, ${asset.name} is grounded until the fix`}
+          {subText}.
+        </div>
+      )}
+      {aw && !a.mel && a.status !== 'closed' && !signed && (
+        <div class="jf-note">
+          <b>Airworthiness item</b>, due week {a.due}: {a.due < s.week ? `past due, ${asset.name} is grounded until it's signed off` : `${a.due === s.week ? "from this week's resolve" : `from week ${a.due}`}, ${asset.name} is grounded until it's signed off`}
+          {subText}.
         </div>
       )}
       {a.role === 'mech' && a.mel && !a.mel.ext && !a.mel.ask && a.mel.until <= s.week && a.mel.until >= s.week - 1 && a.status !== 'closed' && (
@@ -89,7 +103,7 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
           {ask === 'mel' && (
             <div class="card col jf-ask" style={{ gap: 8 }}>
               <span class="label">
-                Company MEL, category C: the plane flies with it placarded INOP through {Math.max(s.week, a.due) > s.week ? `week ${Math.max(s.week, a.due)} (its due week)` : "this week's resolve"}. You can ask {fin} to extend it once by a week. Past that, it's grounded until the fix.
+                Company MEL, category C: the plane flies with it placarded INOP through {Math.max(s.week, a.due) > s.week ? `week ${Math.max(s.week, a.due)} (its due week)` : "this week's resolve"}. You can ask {fin} to extend it once by a week. Past that, it's grounded until the fix{subText}.
               </span>
               <Btn block onClick={() => void run({ t: 'mel', role: 'mech', alert: a.id }, 'Placarded INOP (MEL C).').then(() => setAsk(null))}>
                 Placard it

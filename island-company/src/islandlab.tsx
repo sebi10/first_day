@@ -188,7 +188,7 @@ const SCN: Scn[] = [
   },
   {
     id: 'staff-alerts',
-    note: 'Tier 3: the twin flies restricted (placard), Cottage 2 closed by a hazard (no entry), Cottage 3 made safe (tag), two builders on Cottage 5 in the grove',
+    note: 'Tier 3: the twin grounded past due (on jacks at its AOG spot, its guests on the mainland sub-charter), Cottage 2 closed by a hazard (no entry), Cottage 3 made safe (tag), two builders on Cottage 5 in the grove',
     tier: 3,
     phase: 'day',
     tweak: (s) => {

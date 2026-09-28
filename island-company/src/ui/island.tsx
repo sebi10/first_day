@@ -7,7 +7,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
-import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, restrictedBy } from '../sim/econ';
+import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, subCharterOn } from '../sim/econ';
 import { openBuild, pilotSeats, working } from '../sim/staff';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
@@ -303,8 +303,6 @@ export function Island({
       if (p.id === 'p1' && !onWater) bub(p.id, x + 3, y - 24, 'wrench', 'alert', { fixed: true });
       else bub(p.id, x, y - (onWater ? 20 : 26), 'wrench', 'alert');
     } else if (g) bub(p.id, x, y - 22, 'noflight', 'alert');
-    // the only guest plane past due on an airworthiness alert flies restricted: a placard
-    else if (restrictedBy(s, p.id)) bub(p.id, x, y - 22, 'placard', 'warn');
     else if (p.health < 60) bub(p.id, x, y - 22, 'warn', 'warn');
     // flying on an MEL C placard (an INOP item deferred through this week): a small placard, as a made-safe house gets a small tag
     else if (melOn(s, p.id)) bub(p.id, x, y - 22, 'placard', 'warn', { small: true });
@@ -879,7 +877,9 @@ function describe(s: IslandState, pw: ReturnType<typeof powered>, open: number, 
   const tierName = TIERS[s.tier - 1]?.name ?? '';
   const planes = s.assets.filter((a) => a.kind === 'plane');
   const houses = s.assets.filter((a) => a.kind === 'house');
-  const pl = planes.map((p) => `${p.name} ${p.health < 40 ? 'AOG' : isAog(s, p.id) ? 'AOG for a part' : s.tags?.[p.id] ? 'grounded' : p.health < 60 ? 'needs attention' : 'flying'}`);
+  const sub = subCharterOn(s);
+  const onSub = (p: Asset) => (sub?.plane.id === p.id ? ', its guests on a mainland sub-charter' : '');
+  const pl = planes.map((p) => `${p.name} ${p.health < 40 ? 'AOG' : isAog(s, p.id) ? `AOG${onSub(p) || ' for a part'}` : s.tags?.[p.id] ? `grounded${onSub(p)}` : p.health < 60 ? 'needs attention' : 'flying'}`);
   const closed = houses.filter((h) => !houseRentable(s, h)).map((h) => `${h.name} closed (${houseBlocker(s, h)})`);
   const c = dev.construction;
   const building = c && c.stage < 3 ? `construction under way for tier ${c.tier} ${TIERS[c.tier - 1]?.name ?? ''}: ${c.stage} of 3 parts done` : '';

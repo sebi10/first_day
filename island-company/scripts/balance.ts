@@ -30,7 +30,7 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 type Flow = {
   latency: number[];
   aog: Record<'stock' | 'approval' | 'plan' | 'carrier', number>;
-  restricted: number;
+  subWeeks: number;
   fill: [number, number];
   wait: number;
   weeks: number;
@@ -42,7 +42,7 @@ type Flow = {
   wiring: number;
 };
 function flowTrace(): { f: Flow; trace: (s: IslandState) => void } {
-  const f: Flow = { latency: [], aog: { stock: 0, approval: 0, plan: 0, carrier: 0 }, restricted: 0, fill: [0, 0], wait: 0, weeks: 0, returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0 };
+  const f: Flow = { latency: [], aog: { stock: 0, approval: 0, plan: 0, carrier: 0 }, subWeeks: 0, fill: [0, 0], wait: 0, weeks: 0, returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0 };
   const closed = new Set<string>();
   const stopped = new Set<string>();
   const asked = new Set<string>();
@@ -64,7 +64,7 @@ function flowTrace(): { f: Flow; trace: (s: IslandState) => void } {
       f.wait += row.wait ?? 0;
     }
     const h = s.history.find((x) => x.week === W);
-    if (h) f.restricted += h.lines.some((l) => / flew \d+ of \d+ with /.test(l.text)) ? 1 : 0;
+    if (h) f.subWeeks += h.lines.some((l) => /a mainland sub-charter flew the guests in/.test(l.text)) ? 1 : 0;
     for (const l of h?.lines ?? []) {
       const m = /Returned: .+ \(\$([\d,]+) restocking\)/.exec(l.text);
       if (!m) continue;
@@ -198,7 +198,7 @@ if (arg === 'detail') {
       : Object.entries(TEAMS);
   console.log(`\nPaper sim: ${WEEKS} weeks x ${SEEDS} seeds per team (medians unless noted)\n`);
   console.log(
-    'team            tier@26  wk→T2 wk→T3 wk→T4 wk→T5  %B+  min cash  weeks<0  incid/wk  defect/wk  rev/wk  latency  AOG wk (stk/apr/pln/car)  restr  fill%  wait/wk  inv@26  bins@26  payroll@26  late bld  ret/stp/req  restock  wiring',
+    'team            tier@26  wk→T2 wk→T3 wk→T4 wk→T5  %B+  min cash  weeks<0  incid/wk  defect/wk  rev/wk  latency  AOG wk (stk/apr/pln/car)    sub  fill%  wait/wk  inv@26  bins@26  payroll@26  late bld  ret/stp/req  restock  wiring',
   );
   const t0 = Date.now();
   let sims = 0;
@@ -214,7 +214,7 @@ if (arg === 'detail') {
     const mins: number[] = [];
     const lat: number[] = [];
     const aog = { stock: 0, approval: 0, plan: 0, carrier: 0 };
-    let restricted = 0;
+    let subWeeks = 0;
     const fill: [number, number] = [0, 0];
     let wait = 0;
     let weeksAll = 0;
@@ -240,7 +240,7 @@ if (arg === 'detail') {
       mins.push(minCash);
       lat.push(...f.latency);
       for (const k of Object.keys(aog) as (keyof typeof aog)[]) aog[k] += f.aog[k];
-      restricted += f.restricted;
+      subWeeks += f.subWeeks;
       fill[0] += f.fill[0];
       fill[1] += f.fill[1];
       wait += f.wait;
@@ -258,13 +258,13 @@ if (arg === 'detail') {
     };
     const g = (n: number) => (n / SEEDS).toFixed(1);
     console.log(
-      `${name.padEnd(15)} ${String(med(tiers)).padStart(7)}   ${wk(2)}   ${wk(3)}   ${wk(4)}   ${wk(5)} ${String(Math.round((100 * bplus) / total)).padStart(4)} ${usd(Math.min(...mins)).padStart(9)} ${String(neg).padStart(8)} ${(inc / total).toFixed(2).padStart(9)} ${(def / total).toFixed(3).padStart(10)} ${usd(rev / total).padStart(7)} ${mean(lat).toFixed(2).padStart(8)}  ${`${g(aog.stock)}/${g(aog.approval)}/${g(aog.plan)}/${g(aog.carrier)}`.padStart(23)} ${g(restricted).padStart(6)} ${String(fill[1] ? Math.round((100 * fill[0]) / fill[1]) : 0).padStart(6)} ${(wait / Math.max(1, weeksAll)).toFixed(2).padStart(8)} ${usd(med(inv)).padStart(7)} ${`${Math.round(100 * med(bins))}%`.padStart(8)} ${`${Math.round(100 * med(pay))}%`.padStart(11)} ${`${Math.round((100 * late) / SEEDS)}%`.padStart(9)}  ${`${g(slip.returns)}/${g(slip.stops)}/${g(slip.reqs)}`.padStart(11)} ${usd(slip.restock / SEEDS).padStart(8)} ${g(slip.wiring).padStart(7)}`,
+      `${name.padEnd(15)} ${String(med(tiers)).padStart(7)}   ${wk(2)}   ${wk(3)}   ${wk(4)}   ${wk(5)} ${String(Math.round((100 * bplus) / total)).padStart(4)} ${usd(Math.min(...mins)).padStart(9)} ${String(neg).padStart(8)} ${(inc / total).toFixed(2).padStart(9)} ${(def / total).toFixed(3).padStart(10)} ${usd(rev / total).padStart(7)} ${mean(lat).toFixed(2).padStart(8)}  ${`${g(aog.stock)}/${g(aog.approval)}/${g(aog.plan)}/${g(aog.carrier)}`.padStart(23)} ${g(subWeeks).padStart(6)} ${String(fill[1] ? Math.round((100 * fill[0]) / fill[1]) : 0).padStart(6)} ${(wait / Math.max(1, weeksAll)).toFixed(2).padStart(8)} ${usd(med(inv)).padStart(7)} ${`${Math.round(100 * med(bins))}%`.padStart(8)} ${`${Math.round(100 * med(pay))}%`.padStart(11)} ${`${Math.round((100 * late) / SEEDS)}%`.padStart(9)}  ${`${g(slip.returns)}/${g(slip.stops)}/${g(slip.reqs)}`.padStart(11)} ${usd(slip.restock / SEEDS).padStart(8)} ${g(slip.wiring).padStart(7)}`,
     );
   }
   const ms = (Date.now() - t0) / Math.max(1, sims);
   console.log(`\nTiming: ${Math.round(ms)} ms per ${WEEKS}-week sim (${sims} sims; the budget is 500 ms).`);
-  console.log('AOG wk: plane-weeks grounded (or flying restricted) on an alert, per game, by why: not stocked / waiting on approval / not planned / the carrier.');
-  console.log('latency: weeks from an alert to its sign-off. restr: weeks the only guest plane flew restricted, per game. fill%: main-slot value from stock at plan time, weeks 8-26.');
+  console.log('AOG wk: plane-weeks grounded on an alert (the only guest plane too), per game, by why: not stocked / waiting on approval / not planned / the carrier.');
+  console.log('latency: weeks from an alert to its sign-off. sub: weeks a mainland sub-charter flew the guests (the only guest plane on the ground), per game. fill%: main-slot value from stock at plan time, weeks 8-26.');
   console.log('payroll@26: the crew\'s payroll against the standard crew\'s. late bld: games where a new tier\'s buildings started before the builders finished them.');
   console.log('ret/stp/req: receiving returns, install stops and stock requests per game; restock: restocking fees per game; wiring: wiring faults met per game (5.4).');
   console.log('\nExit test (spec phase 0): "no role can win alone" + "no week ends with cash < 0 under sensible play".');

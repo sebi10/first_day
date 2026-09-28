@@ -5,7 +5,7 @@ import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../
 import { externalPower } from '../sim/aircraft';
 import { CABLE_REPORT, ECON, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
-import { alertAog, cartOn, flightsAvailable, flightsPerPlane, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, restrictedBy } from '../sim/econ';
+import { alertAog, cartOn, flightsAvailable, flightsPerPlane, groundsFrom, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, subCharterNeed, subCharterOn } from '../sim/econ';
 import { cardOf, flowStage } from '../sim/flow';
 import { itemById, priceAt } from '../sim/items';
 import { toolsFor } from '../sim/progression';
@@ -109,14 +109,13 @@ function chainAlert(s: IslandState, c: PartChain): Alert | undefined {
 }
 
 /**
- * What the chain's plane does meanwhile, from the state (13): "Cargo C-7 is AOG" only when it's grounded; the
- * only guest plane "flies restricted"; a placard "flies on its MEL placard to wk 6"; otherwise it "flies meanwhile"
+ * What the chain's plane does meanwhile, from the state (13): "Cargo C-7 is AOG" only when it's grounded (the only
+ * guest plane too); a placard "flies on its MEL placard to wk 6"; otherwise it "flies meanwhile"
  */
 export function chainTag(s: IslandState, c: PartChain): string {
   const name = s.assets.find((a) => a.id === c.assetId)?.name ?? 'the plane';
   if (chainGrounds(s, c)) return `${name} is AOG`;
   const al = chainAlert(s, c);
-  if (al && restrictedBy(s, c.assetId)?.id === al.id) return `${name} flies restricted`;
   if (al?.mel && al.mel.until >= s.week) return `${name} flies on its MEL placard to wk ${al.mel.until}`;
   return `${name} flies meanwhile`;
 }
@@ -139,7 +138,7 @@ export function crossMoves(s: IslandState): CrossMove[] {
   const ch = openChain(s);
   if (ch) {
     const asset = s.assets.find((a) => a.id === ch.assetId);
-    // "look up the brake linings in the IPC (Cargo C-7 is AOG)", "research the com radio in … (Twin N-12 flies restricted)"
+    // "look up the brake linings in the IPC (Cargo C-7 is AOG)", "research the com radio in … (Twin N-12 flies meanwhile)"
     const tag = chainTag(s, ch);
     const grounds = chainGrounds(s, ch);
     const add = (m: ReturnType<typeof chainMove>, key: string) => {
@@ -217,13 +216,22 @@ export function flowMove(s: IslandState, a: Alert): { who: Role | null; chip: st
   }
 }
 
-/** what an alert does to its asset now, in words (the grounded plane, the restricted one, the closed house) */
+/** what an alert does to its asset now, in words (the grounded plane, its guests on the sub-charter if it's the only guest plane; the closed house) */
 function bites(s: IslandState, o: Order): string | null {
   if (!urgentJob(s, o)) return null;
   const asset = s.assets.find((x) => x.id === o.assetId);
   if (!asset) return null;
-  if (asset.kind === 'plane') return soleGuest(s, asset.id) ? `${asset.name} flies restricted` : `${asset.name} is AOG`;
+  if (asset.kind === 'plane') return `${asset.name} is AOG${soleGuest(s, asset.id) ? ' (its guests on the sub-charter)' : ''}`;
   return `${asset.name} is closed`;
+}
+
+/**
+ * What an airworthiness alert does to its plane past due, in words: "is AOG", and for the only guest plane "is
+ * grounded and a mainland sub-charter flies the guests (about $540 a week)" (a week of it on a clear sky)
+ */
+export function groundWords(s: IslandState, a: Alert): string {
+  const sub = subCharterNeed(s, a.assetId, 'clear', groundsFrom(s, a));
+  return sub ? `is grounded and a mainland sub-charter flies the guests (${sub.flights > 0 ? `about ${usdWords(sub.usd)} a week` : `${usdWords(sub.fee)} a flight`})` : 'is AOG';
 }
 
 /** the job flow's cross-trade moves (inside crossMoves), when both seats are held */
@@ -371,7 +379,7 @@ export function endTurnChecks(s: IslandState, role: Role): { text: string; urgen
     if (a.due <= s.week && !signed && (f.aw || f.hazard)) {
       if (f.hazard && !a.safe) out.push({ text: `Make it safe or fix it, or ${name} stays closed: ${alertShort(s, a)}.`, urgent: true });
       else if (f.aw && asset?.kind === 'plane' && !(a.mel && a.mel.until >= s.week)) {
-        const bite = soleGuest(s, asset.id) ? 'flies restricted' : 'is AOG';
+        const bite = groundWords(s, a);
         const fin = nameOf(s, 'fin');
         // what the MEL still allows: a placard (category C), the one extension, or nothing (fix it or tag it)
         const text = !a.mel
@@ -420,12 +428,12 @@ export function standingWords(s: IslandState, total: number, safety = false, lat
 
 /**
  * The standing approval takes this alert's late card whatever the limit (8.5, the engine's lateSafe): it grounds its
- * plane, restricts the only guest plane or closes its house at this week's resolve or next week's
+ * plane (the only guest plane too) or closes its house at this week's resolve or next week's
  */
 export function lateSafeAlert(s: IslandState, a: Alert): boolean {
   const asset = s.assets.find((x) => x.id === a.assetId);
   if (!asset) return false;
-  if (asset.kind === 'plane') return [s.week, s.week + 1].some((w) => alertAog(s, asset.id, w)?.id === a.id || restrictedBy(s, asset.id, w)?.id === a.id);
+  if (asset.kind === 'plane') return [s.week, s.week + 1].some((w) => alertAog(s, asset.id, w)?.id === a.id);
   if (asset.kind === 'house') {
     const h = hazardOn(s, asset.id);
     return h?.id === a.id && !h.safe;
@@ -529,7 +537,7 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
     const m = chainMove(after, ca);
     const plane = after.assets.find((x) => x.id === ca.assetId)?.name ?? 'A plane';
     const who = m.who ? name(m.who) : null;
-    // grounded only when it is (a flow-opened chain's plane may fly on its placard, restricted, or meanwhile)
+    // grounded only when it is (a flow-opened chain's plane may fly on its placard, or meanwhile)
     const grounds = chainGrounds(after, ca);
     const state = grounds ? `${plane} is grounded for ${ca.item}` : `${upperFirstWord(chainTag(after, ca))}; the job waits for ${ca.item}`;
     push(`${after.name}: ${plane}${grounds ? ' AOG' : ''}`, who ? `${state}. ${who}, your move: ${m.text}.` : `${state}: ${m.text}.`);
@@ -583,6 +591,8 @@ export function teamNumbers(s: IslandState) {
   return {
     flights: flightsAvailable(s),
     flightsMax: planes(s).length * flightsPerPlane(s.tier),
+    /** the mainland sub-charter's flights this week (the only guest plane down) */
+    subFlights: subCharterOn(s)?.flights ?? 0,
     houses: housesRentable(s),
     housesMax: houses(s).length,
     budget: approved,
