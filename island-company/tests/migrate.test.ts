@@ -21,7 +21,7 @@ import { cardOf, flowStage } from '../src/sim/flow';
 import { committed } from '../src/sim/ledger';
 import { migrate } from '../src/sim/migrate';
 import { hashSeed, rng } from '../src/sim/rng';
-import { jobLines, reservedFor, stockFlags } from '../src/sim/stock';
+import { families, flowWeeks, jobLines, moveClass, reservedFor, stockFlags, velocity } from '../src/sim/stock';
 import { ROLES, type IslandState, type Order } from '../src/sim/types';
 import { blocks, crossMoves, dockNext, endTurnChecks, flowMoves, launchFor, openOrders, teamNumbers, yourMoves } from '../src/ui/select';
 
@@ -113,6 +113,39 @@ describe('the v2 docs the base engine wrote', () => {
       expect(JSON.stringify(a).length).toBeLessThan(150_000);
     });
   }
+});
+
+describe('the item analytics on a migrated island (14.5)', () => {
+  it('count the job flow’s weeks only: no class for 8 weeks, no dead stock and no stop for 25, and the stop text counts flow weeks', () => {
+    const doc = load('v2-6c0c426-late');
+    let s = migrate(clone(doc));
+    const since = s.flowSince!;
+    expect(since).toBe(doc.week);
+    // the backfilled rows stay for the cash and revenue charts; the item analytics skip them
+    expect(s.ledger!.some((r) => r.w < since)).toBe(true);
+    expect(flowWeeks(s)).toBe(0);
+    for (const f of families(s)) {
+      expect(moveClass(s, f.fam), f.fam).toBeNull();
+      expect(velocity(s, f.fam).series.length).toBeLessThanOrEqual(1);
+    }
+    expect(stockFlags(s).filter((f) => f.kind === 'stop')).toEqual([]);
+    let classed = false;
+    for (let w = 0; w < 27; w++) {
+      s = week(s, 'analytics', false);
+      const n = flowWeeks(s);
+      expect(n).toBe(Math.min(STOCK.ledgerWeeks - 1, s.week - since));
+      const classes = families(s).map((f) => moveClass(s, f.fam));
+      if (n < 8) expect(classes.every((c) => c === null)).toBe(true);
+      else classed ||= classes.some((c) => c !== null);
+      if (n < STOCK.ledgerWeeks - 1) expect(classes.includes('dead')).toBe(false);
+      for (const f of stockFlags(s).filter((x) => x.kind === 'stop')) {
+        const m = /no use in (\d+) weeks?/.exec(f.text);
+        if (m) expect(Number(m[1]), f.text).toBeLessThanOrEqual(n + 1);
+        if (n < STOCK.ledgerWeeks - 1) expect(f.text).not.toMatch(/no use in/);
+      }
+    }
+    expect(classed).toBe(true);
+  });
 });
 
 describe('what the migration does to the orders', () => {

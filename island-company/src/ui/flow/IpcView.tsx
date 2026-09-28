@@ -146,7 +146,8 @@ function IpcLine({ s, a, doc, row, tier, hint, onPick, showFig }: { s: IslandSta
         </span>
         {(badges.length > 0 || procurable) && (
           <span class="row wrap" style={{ gap: 4 }}>
-            {tier <= 2 && badges.map((b) => <span key={b} class={`jf-badge ${/this airplane|legal|approved/.test(b) ? 'ok' : /not effective|Altered|ICA part|NP/.test(b) ? 'none' : 'info'}`}>{b}</span>)}
+            {/* the negative words first: "not effective for this airplane's SB status" names the airplane too */}
+            {tier <= 2 && badges.map((b) => <span key={b} class={`jf-badge ${/not effective|Altered|ICA part|NP/.test(b) ? 'none' : /this airplane|legal|approved/.test(b) ? 'ok' : 'info'}`}>{b}</span>)}
             {procurable && <ShelfBadge s={s} item={doc.ref.item!} />}
           </span>
         )}

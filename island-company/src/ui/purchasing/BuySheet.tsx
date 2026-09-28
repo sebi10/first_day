@@ -48,6 +48,8 @@ export function BuySheet({ ctl, item, onDone, onBack }: { ctl: Ctl; item: ItemId
   const [busy, setBusy] = useState(false);
   if (!x) return null;
   const q = buyQuote(s, item, qty, { vendor, freight });
+  // the scheduled choice's freight (per shipment: its own, or riding one already on its way)
+  const qs = freight === 'sched' ? q : buyQuote(s, item, qty, { vendor, freight: 'sched' });
   const step = x.cut ? 10 : Math.max(1, x.pack);
   const packWord = x.cut ? `${x.unit} (cut to length)` : x.pack > 1 ? `${x.packName ?? 'pack'} of ${qtyWords(x, x.pack)}` : 'each';
   const buy = async () => {
@@ -82,7 +84,7 @@ export function BuySheet({ ctl, item, onDone, onBack }: { ctl: Ctl; item: ItemId
           <Seg<Freight>
             value={freight}
             options={[
-              { v: 'sched', label: 'Scheduled · free' },
+              { v: 'sched', label: qs.freight > 0 ? `Scheduled · +${usd(qs.freight)}` : 'Scheduled · no extra' },
               { v: 'aog', label: `AOG boat · +${usd(FREIGHT.aog)}` },
             ]}
             onChange={setFreight}
@@ -97,10 +99,11 @@ export function BuySheet({ ctl, item, onDone, onBack }: { ctl: Ctl; item: ItemId
           </span>
           <span class="v">{usd(q.value)}</span>
         </div>
-        {q.freight > 0 && (
+        {(q.freight > 0 || q.ship) && (
           <div class="pd-line">
-            <span>AOG boat</span>
+            <span>{freight === 'aog' && q.aogOk ? 'AOG boat' : 'Freight'}</span>
             <span class="v">{usd(q.freight)}</span>
+            {q.ship && <span class="sub">{q.ship}</span>}
           </div>
         )}
         <div class="pd-line total">

@@ -24,7 +24,7 @@ import { ReqQueue } from './purchasing/ReqQueue';
 import { StockPlanner, type PlannerFocus } from './purchasing/StockPlanner';
 import { WhatsNew } from './purchasing/WhatsNew';
 import './purchasing/purchasing.css';
-import { capNow, openOrders, type DockTarget } from './select';
+import { capNow, chainGrounds, openOrders, takeDeskAsked, type DockTarget } from './select';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
 
@@ -49,7 +49,8 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
   const leaks = openReports(s).filter((o) => o.report!.effect === 'leak');
   const leakTotal = leaks.reduce((n, o) => n + o.report!.amount, 0);
   // it opens on Approvals when something waits, else on Stock (the tab chosen this session sticks)
-  const [tab, setTabState] = useState<DeskTab>(() => savedTab(ctl.ref.id) ?? openingTab(s));
+  // (a tab the Dock asked for while the desk's chunk was loading comes first)
+  const [tab, setTabState] = useState<DeskTab>(() => takeDeskAsked() ?? savedTab(ctl.ref.id) ?? openingTab(s));
   // where the tab bar sits in the page: a tab picked while the bar is stuck opens at its top, not mid-page
   const tabTop = useRef<HTMLDivElement>(null);
   const setTab = (t: DeskTab) => {
@@ -66,13 +67,22 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
       const y = a.getBoundingClientRect().top - parseFloat(getComputedStyle(bar).paddingTop);
       if (y < stuck) window.scrollBy({ top: y - stuck });
     }
+    // after the new tab renders: scrolled past the tab bar (a desktop's side column, a long tab before), the new tab
+    // opens at its top, not mid-page
+    requestAnimationFrame(() => {
+      const top = tabTop.current?.getBoundingClientRect().top;
+      if (top !== undefined && top < 0) window.scrollBy({ top: top - 8 });
+    });
   };
   const [focus, setFocus] = useState<PlannerFocus | null>(null);
   // the Dock's Next (and anything else) opens the desk's Approvals or Stock (select.ts openTarget)
   useEffect(() => {
     const on = (e: Event) => {
       const d = (e as CustomEvent<DockTarget>).detail;
-      if (d && 'desk' in d) setTab(d.desk === 'stock' ? 'stock' : 'approvals');
+      if (d && 'desk' in d) {
+        takeDeskAsked();
+        setTab(d.desk === 'stock' ? 'stock' : 'approvals');
+      }
     };
     window.addEventListener('ic:open', on);
     return () => window.removeEventListener('ic:open', on);
@@ -399,7 +409,8 @@ function Approvals({ ctl, disabled, keys }: { ctl: Ctl; disabled: boolean; keys:
               </span>
               {/* a known defect is still in service: the card has no room for the story, the owner's detail has it */}
               {top.repair && <span class="chip ink">Repair</span>}
-              {top.chain && <span class="chip rust">AOG</span>}
+              {/* AOG only when the chain's plane is grounded (a flow-opened chain flies on MEL, restricted, or meanwhile) */}
+              {top.chain && chain && chain.id === top.chain.id && chainGrounds(s, chain) && <span class="chip rust">AOG</span>}
             </span>
             <span style={{ flex: 'none' }}>
               <TierDots tier={top.tier} />

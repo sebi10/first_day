@@ -3,7 +3,7 @@
 // the bots and the tests share it. Indexes are derived (never stored): static
 // ones once per module, an airplane's IPC per airplane state in an LRU of 12.
 import { ataTitle, figuresFor, planeModel, plantRows, pmaParts, type AnyAta, type Ata, type IpcRow } from './aircraft';
-import { causeOf, findingOf, fixesOf, needsOf, siteOf, symptomOf, symptomText } from './alerts';
+import { causeOf, findingOf, fixesOf, needsOf, siteOf, symptomText } from './alerts';
 import { islandAircraft } from './chain';
 import { effectivePn, judgeSlot, stdPickFor } from './flow';
 import { allItems, itemById } from './items';
@@ -458,6 +458,9 @@ export function supplyIndex(trade: ItemTrade): Index {
  * from the cause's own fix and pick, so a hint never recommends what the
  * install or receiving would reject. Nothing at tier 3+.
  */
+/** words a search chip never needs: who reported it, the time words, the template's own nouns */
+const HINT_STOP = new Set(['the', 'and', 'for', 'its', 'are', 'was', 'guest', 'guests', 'with', 'from', 'that', 'this', 'when', 'whenever', 'into', 'over', 'out', 'off', 'week', 'weeks', 'there', 'their', 'after', 'about', 'every', 'house', 'room', 'written', 'again', 'pilot', 'says', 'said', 'felt', 'last', 'night', 'once', 'only', 'more', 'than']);
+
 export function hintsFor(s: IslandState, a: Alert, tier: number): { chips: string[]; tasks: TaskId[]; items: ItemId[] } {
   if (tier >= 3) return { chips: [], tasks: [], items: [] };
   const fixes = fixesOf(s, a);
@@ -470,8 +473,12 @@ export function hintsFor(s: IslandState, a: Alert, tier: number): { chips: strin
     for (const k of [...kw, ...task.keywords]) if (!chips.includes(k) && chips.length < 2) chips.push(k);
     chips.push(num);
   } else {
-    const sym = symptomOf(a);
-    for (const w of tokenize(typeof sym?.text === 'string' ? sym.text : '')) if (w.length > 3 && chips.length < 3) chips.push(w);
+    // no fix task (a no-fault-found, the wiring): the alert's own words as rendered, less the asset's name, the
+    // template's fill and the small words ("guest · house · room" said nothing)
+    const names = new Set(s.assets.flatMap((x) => tokenize(x.name)));
+    // (who said it is before the colon: "Guest at Cottage 1: …", "Written up by Noa T.: …")
+    const said = symptomText(s, a).replace(/^[^:]{0,40}:\s/, '');
+    for (const w of tokenize(said)) if (w.length >= 3 && !HINT_STOP.has(w) && !names.has(w) && !/\d/.test(w) && !chips.includes(w) && chips.length < 3) chips.push(w);
   }
   if (tier >= 2) return { chips, tasks: [], items: [] };
   const items = task && causeOf(a) ? stdPickFor(s, a, task).map((l) => l.item) : [];

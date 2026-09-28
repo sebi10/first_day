@@ -127,9 +127,9 @@ export const TIERS: TierDef[] = [
   {
     n: 3,
     name: 'Village',
-    overhead: 1770,
+    overhead: 1620,
     bins: 60,
-    fixed: 2850,
+    fixed: 2700,
     budget: 6900,
     adds: [{ id: 'gen', model: 'gen', name: 'Generator house' }],
     storms: true,
@@ -140,9 +140,9 @@ export const TIERS: TierDef[] = [
   {
     n: 4,
     name: 'Harbor',
-    overhead: 5590,
+    overhead: 5440,
     bins: 75,
-    fixed: 6850,
+    fixed: 6700,
     budget: 16000,
     adds: [
       { id: 'p3', model: 'float', name: 'Float F-3' },
@@ -157,9 +157,9 @@ export const TIERS: TierDef[] = [
   {
     n: 5,
     name: 'Resort',
-    overhead: 8030,
+    overhead: 7880,
     bins: 90,
-    fixed: 9350,
+    fixed: 9200,
     budget: 22000,
     adds: [{ id: 'h7', model: 'lodge', name: 'The Lodge' }],
     storms: true,
@@ -290,8 +290,13 @@ export const SUPPLIERS: Record<SupplierId, SupplierDef> = {
 /** each trade's default supplier */
 export const DEFAULT_SUPPLIER: Record<ItemTrade, SupplierId> = { mech: 'oem', elec: 'supply', build: 'yard' };
 
-/** freight: scheduled rides the week's carrier for free; the AOG boat brings a PO at this week's resolve whatever flew */
-export const FREIGHT = { aog: 350 };
+/**
+ * Freight. The AOG boat brings a PO at this week's resolve whatever flew. Scheduled freight is charged per
+ * shipment: a supplier's lines on one carrier landing the same week ride one shipment, whoever bought them and
+ * however many POs they are on (the week's buys and the replenishment run consolidate: $0 extra). The yard's
+ * price is delivered on the supply boat.
+ */
+export const FREIGHT = { aog: 350, sched: { mech: 35, elec: 25, build: 0 } as Record<ItemTrade, number> };
 
 /** stock and purchasing (9) */
 export const STOCK = {
@@ -314,6 +319,8 @@ export const STOCK = {
   z: 1.28,
   /** most lines on one PO or buy */
   maxLines: 12,
+  /** most stock and tool requests (no job) a trade keeps open on the desk (a repeat request folds into the open one) */
+  maxReqs: 12,
   /** the most units of one item on a plan line (wire by the foot) */
   maxQty: 500,
   /** a broker's auction lot holds shop stock: no line whose unit price is over this */
@@ -380,6 +387,8 @@ export const STARTER: Record<number, StarterLine[]> = {
     { item: 'T-TW-IN', qty: 1 },
     { item: 'T-TW-FT', qty: 1 },
     { item: 'T-DIFF', qty: 1 },
+    { item: 'T-RIVET', qty: 1 },
+    { item: 'T-UVA', qty: 1 },
     { item: 'T-CLAMP', qty: 1 },
     { item: 'T-TORQUE', qty: 1 },
   ],

@@ -2,7 +2,7 @@
 // words, the week stamps, the no-gridlock rules, the work budget, reservations,
 // the install check, sign-off and the card the analyst approves.
 import { describe, expect, it, vi } from 'vitest';
-import { raiseAlert, symptomText, SYMPTOMS } from '../src/sim/alerts';
+import { findingOf, raiseAlert, symptomText, SYMPTOMS } from '../src/sim/alerts';
 import { ALERTS, ECON, FREIGHT, STOCK } from '../src/sim/data';
 import { alertAog, hazardOn, houseBlocker, rentFactor, restrictedBy } from '../src/sim/econ';
 import { simulate, TEAMS } from '../src/sim/bots';
@@ -360,6 +360,110 @@ describe('no gridlock (0.2 rule 8)', () => {
   });
 });
 
+describe('the standing approval and safety work (8.5)', () => {
+  it('a late card for safety work due this week or next goes through tonight whatever the limit, and the board says why', () => {
+    let s = island();
+    s = ok(s, { t: 'setStanding', amount: 0 });
+    s = ok(s, { t: 'endTurn', role: 'fin', week: 5 });
+    // the cargo plane's wheel halves, due next week: it grounds the plane at week 6's resolve
+    const al = raise(s, 'M_WHEEL_CORROSION', 0, 'p2', 6);
+    const r = plan(s, al);
+    s = r.s;
+    expect(orderOf(s, r.o.id).status).toBe('pending');
+    const total = cardOf(s, orderOf(s, r.o.id)).total;
+    expect(total).toBeGreaterThan(0);
+    s = only(endWeek(s), al.id);
+    expect(orderOf(s, r.o.id).status).not.toBe('pending');
+    expect(reviewSays(s, 5, /went through on the standing approval \(\$[\d,]+.*\): safety work due this week or next goes through whatever the limit\.$/)).toBe(true);
+    // the same card with the fix due in three weeks waits (the other test: over the limit)
+    let t = island();
+    t = ok(t, { t: 'setStanding', amount: 0 });
+    t = ok(t, { t: 'endTurn', role: 'fin', week: 5 });
+    const later = raise(t, 'M_WHEEL_CORROSION', 0, 'p2', 8);
+    const rl = plan(t, later);
+    t = only(endWeek(rl.s), later.id);
+    expect(orderOf(t, rl.o.id).status).toBe('pending');
+  });
+
+  it('safety work still needs the cash: under $0 spendable it waits, and the board says so', () => {
+    let s = island();
+    s = ok(s, { t: 'endTurn', role: 'fin', week: 5 });
+    const al = raise(s, 'M_WHEEL_CORROSION', 0, 'p2', 6);
+    const r = plan(s, al);
+    s = r.s;
+    s.cash = committed(s) + 5;
+    s = only(endWeek(s), al.id);
+    expect(orderOf(s, r.o.id).status).toBe('pending');
+    expect(reviewSays(s, 5, /there isn’t the cash for it, so it waits for Cy\.$/)).toBe(true);
+  });
+});
+
+describe('dropping a job (8.9)', () => {
+  it('a job never started gives its labour back: dropping a wrong task to plan the right one doesn’t pay twice', () => {
+    let s = island();
+    const belt = raise(s, 'M_BELT_SQUEAL', 0, 'p1');
+    s.inv!['HA-B38'] = { on: 2 };
+    const cash0 = s.cash;
+    const spent0 = s.autoSpent.mech ?? 0;
+    const r = plan(s, belt);
+    s = r.s;
+    const o = orderOf(s, r.o.id);
+    expect(o).toMatchObject({ status: 'ready', autoApproved: true });
+    expect(s.cash).toBe(cash0 - o.cost);
+    s = ok(s, { t: 'dropJob', role: 'mech', order: o.id, week: 5 });
+    expect(s.cash).toBe(cash0);
+    expect(s.autoSpent.mech ?? 0).toBe(spent0);
+    expect(s.feed.some((f) => f.text.includes(`(the $${o.cost} of labour comes back: it was never started)`))).toBe(true);
+    const row = s.ledger!.find((l) => l.w === 5)!;
+    expect(row.sp.labor ?? 0).toBe(0);
+    // planned again: labour paid once in all
+    const again = plan(s, alertOf(s, belt.id));
+    s = again.s;
+    expect(s.cash).toBe(cash0 - orderOf(s, again.o.id).cost);
+    // a started job keeps it: its sign-off is in
+    s = signOff(s, orderOf(s, again.o.id));
+    expect(no(s, { t: 'dropJob', role: 'mech', order: again.o.id, week: 5 })).toBe('That job is not open.');
+  });
+});
+
+describe('requests (9.3)', () => {
+  it('a repeat request for the same line folds into the open one; a trade keeps at most 12 open', () => {
+    let s = island();
+    s = ok(s, { t: 'request', role: 'mech', item: 'AN900-10', qty: 10, week: 5 });
+    s = ok(s, { t: 'request', role: 'mech', item: 'AN900-10', qty: 5, why: 'the oil changes', week: 5 });
+    const open = s.reqs!.filter((r) => r.status === 'open' && r.item === 'AN900-10');
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ qty: 15, why: 'the oil changes' });
+    s = ok(s, { t: 'request', role: 'mech', item: 'T-N2', qty: 1, week: 5 });
+    expect(no(s, { t: 'request', role: 'mech', item: 'T-N2', qty: 1, week: 5 })).toBe('Already asked: Cy decides on it.');
+    const items = ITEMS.filter((x) => x.trade === 'mech' && x.kind === 'consumable' && x.id !== 'AN900-10').map((x) => x.id);
+    let i = 0;
+    while (s.reqs!.filter((r) => r.status === 'open' && !r.order && r.role === 'mech').length < STOCK.maxReqs) s = ok(s, { t: 'request', role: 'mech', item: items[i++], qty: 1, week: 5 });
+    expect(no(s, { t: 'request', role: 'mech', item: items[i], qty: 1, week: 5 })).toBe(`${STOCK.maxReqs} requests are already waiting on Cy: cancel one, or wait for the desk.`);
+    // the electrician's are their own
+    s = ok(s, { t: 'request', role: 'elec', item: 'KR20-TR', qty: 10, week: 5 });
+    expect(STOCK.maxReqs).toBe(12);
+  });
+
+  it('a standalone request takes a bin like any stock buy; a late one skipped by the standing approval says why', () => {
+    let s = island();
+    const fresh = ITEMS.filter((x) => x.trade === 'mech' && x.kind === 'consumable' && !s.inv![x.id]).map((x) => x.id);
+    s = ok(s, { t: 'request', role: 'mech', item: fresh[0], qty: 1, week: 5 });
+    const req = s.reqs!.find((r) => r.item === fresh[0])!;
+    let i = 1;
+    while (binsInUse(s) < binsTotal(s)) s.inv![fresh[i++]] = { on: 1 };
+    expect(no(s, { t: 'approveReq', reqs: [req.id], week: 5 })).toMatch(/^Stores full: /);
+    // after the analyst's turn: over the limit, it waits with a review line
+    let t = island();
+    t = ok(t, { t: 'setStanding', amount: 0 });
+    t = ok(t, { t: 'endTurn', role: 'fin', week: 5 });
+    t = ok(t, { t: 'request', role: 'mech', item: 'AN900-10', qty: 10, week: 5 });
+    t = endWeek(t);
+    expect(t.reqs!.find((r) => r.item === 'AN900-10')!.status).toBe('open');
+    expect(reviewSays(t, 5, /request for 10 × AN900-10 came in \(\$[\d,]+\): over the standing limit \(\$0 left\), so it waits for Cy\.$/)).toBe(true);
+  });
+});
+
 describe('the work budget (8.4)', () => {
   it('in stock and inside the budget: approved at once at every tier; over it: a labour-only card; safety work runs past it', () => {
     for (let tier = 1; tier <= 5; tier++) {
@@ -548,7 +652,9 @@ describe('the card (8.6)', () => {
     expect(c.labour).toBe(o.cost);
     expect(c.toBuy).toEqual([{ item: 'HA-B38', qty: 1, unit: beltItem.price, supplier: 'oem', eta: 5 }]);
     expect(c.freight.pick).toBe('sched');
-    expect(c.total).toBe(Math.round(o.cost + beltItem.price));
+    // scheduled freight is per shipment (3.6): the week's first mech PO from the OEM pays its own
+    expect(c.freight.sched).toMatchObject({ cost: FREIGHT.sched.mech });
+    expect(c.total).toBe(Math.round(o.cost + beltItem.price + FREIGHT.sched.mech));
     expect(c.aog).toBe(false);
     // a tool is capex on the card
     const acc = raise(s, 'M_ACCUM', 0, 'p1');
@@ -556,7 +662,7 @@ describe('the card (8.6)', () => {
     s = r.s;
     c = cardOf(s, orderOf(s, r.o.id));
     expect(c.tools).toEqual([{ item: 'T-N2', price: itemById('T-N2')!.price }]);
-    expect(c.total).toBe(Math.round(c.labour + c.toBuy.reduce((n, l) => n + l.qty * l.unit, 0) + itemById('T-N2')!.price));
+    expect(c.total).toBe(Math.round(c.labour + c.toBuy.reduce((n, l) => n + l.qty * l.unit, 0) + itemById('T-N2')!.price + c.freight.sched.cost));
   });
 
   it('the default freight: scheduled, unless the AOG boat saves more downtime than it costs', () => {
@@ -572,13 +678,15 @@ describe('the card (8.6)', () => {
     const c = cardOf(s, o);
     expect(c.restricted).toBe(true);
     expect(c.aog).toBe(false);
-    expect(c.freight.sched).toEqual({ eta: 6, outWeeks: 2 });
+    // the wheel rides any flight, the bulk consumables the cargo flight: two shipments, as placePo splits them
+    expect(c.freight.sched).toEqual({ eta: 6, outWeeks: 2, cost: 2 * FREIGHT.sched.mech, shipments: 2 });
     expect(c.freight.aog).toEqual({ eta: 5, outWeeks: 1, cost: FREIGHT.aog });
     expect(c.downtime!.usd).toBeGreaterThan(FREIGHT.aog);
     expect(c.freight.pick).toBe('aog');
     const buy = c.toBuy.reduce((n, l) => n + l.qty * l.unit, 0);
+    // the boat replaces the scheduled shipment's charge
     expect(c.total).toBe(Math.round(o.cost + buy + FREIGHT.aog));
-    expect(cardOf(s, o, { freight: 'sched' }).total).toBe(Math.round(o.cost + buy));
+    expect(cardOf(s, o, { freight: 'sched' }).total).toBe(Math.round(o.cost + buy + 2 * FREIGHT.sched.mech));
     // approved on the boat: every line lands at this week's resolve
     s = ok(s, { t: 'approve', orderId: o.id, week: 5 });
     const pos = s.pos!.filter((p) => p.lines.some((l) => l.order === o.id));
@@ -607,9 +715,16 @@ describe('MEL, make safe and the only guest plane (10)', () => {
     // it flew on the placard: the board says so, and nothing grounded it
     expect(reviewSays(s, 5, /AOG|grounded until|cancelled/)).toBe(false);
     expect(reviewSays(s, 5, /^Cargo C-7 flew with .+ placarded INOP \(MEL C, to week 5\)\. Fix it by then, or it is grounded\.$/)).toBe(true);
-    s = ok(s, { t: 'melExtend', alert: com.id, week: 6 });
+    // the extension is the maintenance side's call: the mechanic asks, the analyst approves the cost and downtime
+    expect(no(s, { t: 'melExtend', role: 'fin', alert: com.id, week: 6 })).toBe("Ana asks for the extension first (the maintenance side's call).");
+    expect(no(s, { t: 'melExtend', role: 'elec', alert: com.id, week: 6 })).toBe('Not your call.');
+    s = ok(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 6 });
+    expect(alertOf(s, com.id).mel).toMatchObject({ until: 5, ask: { week: 6, by: 'Ana' } });
+    expect(no(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 6 })).toBe('Already asked: Cy approves it.');
+    s = ok(s, { t: 'melExtend', role: 'fin', alert: com.id, week: 6 });
     expect(alertOf(s, com.id).mel).toMatchObject({ until: 6, ext: true });
-    expect(no(s, { t: 'melExtend', alert: com.id, week: 6 })).toBe('The MEL allows one extension.');
+    expect(s.feed.some((f) => /^Cy approved Ana's MEL C extension on Cargo C-7 for .+: it flies on the placard to week 6\.$/.test(f.text))).toBe(true);
+    expect(no(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 6 })).toBe('The MEL allows one extension.');
     s = only(endWeek(s), com.id);
     expect(reviewSays(s, 6, /Cargo C-7 AOG|ran out/)).toBe(false);
     expect(reviewSays(s, 6, /\(MEL C, to week 6, extended\)/)).toBe(true);
@@ -625,7 +740,22 @@ describe('MEL, make safe and the only guest plane (10)', () => {
     s = only(endWeek(s), com.id);
     s = only(endWeek(s), com.id);
     expect(s.week).toBe(7);
-    expect(no(s, { t: 'melExtend', alert: com.id, week: 7 })).toBe('That placard has run out.');
+    expect(no(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 7 })).toBe('That placard has run out.');
+  });
+
+  it('a placard put on early covers the item through its due week: it is not spent before it is needed', () => {
+    let s = island();
+    // com 1 dead on the cargo plane, due next week (written up early)
+    const com = raise(s, 'M_COM_DEAD', 0, 'p2', 6);
+    s = ok(s, { t: 'mel', role: 'mech', alert: com.id, week: 5 });
+    expect(alertOf(s, com.id).mel).toMatchObject({ until: 6 });
+    s = only(endWeek(s), com.id);
+    s = only(endWeek(s), com.id);
+    // week 6's resolve: still on the placard, nothing grounded
+    expect(reviewSays(s, 6, /Cargo C-7 AOG|ran out/)).toBe(false);
+    // no MEL relief on the tires: the placard move says so
+    const tire = raise(s, 'M_TIRE_PRESSURE', 0, 'p1');
+    expect(no(s, { t: 'mel', role: 'mech', alert: tire.id, week: s.week })).toMatch(/^No MEL relief for that on /);
   });
 
   it('a hazard closes its house until it is made safe (then it rents at 75%) or fixed', () => {
@@ -680,10 +810,29 @@ describe('MEL, make safe and the only guest plane (10)', () => {
 });
 
 describe('comebacks (5.5)', () => {
-  it('an NFF close on a real fault comes back 1-2 weeks later, due now, same cause; a real NFF doesn’t', () => {
+  it('a finding that shows the fault can’t be closed as nothing: fix it, placard it or make it safe', () => {
     let s = island();
-    const al = raise(s, 'M_BRAKE_CHATTER', 0, 'p1');
+    const chatter = raise(s, 'M_BRAKE_CHATTER', 0, 'p1');
+    expect(findingOf(s, chatter, 3).nff).toBe(false);
+    expect(no(s, { t: 'nff', role: 'mech', alert: chatter.id, week: 5 })).toBe('The finding shows the fault: fix it, placard it or make it safe.');
+    const com = raise(s, 'M_COM_DEAD', 0, 'p2');
+    expect(no(s, { t: 'nff', role: 'mech', alert: com.id, week: 5 })).toBe('The finding shows the fault: fix it, placard it or make it safe.');
+    const tingle = raise(s, 'E_SHOWER_TINGLE', 0, 'h1');
+    expect(no(s, { t: 'nff', role: 'elec', alert: tingle.id, week: 5 })).toBe('The finding shows the fault: fix it, placard it or make it safe.');
+    // a finding that reads "could not duplicate" can be
     const nff = raise(s, 'M_BRAKE_CHATTER', -1, 'p2');
+    expect(findingOf(s, nff, 3).nff).toBe(true);
+    s = ok(s, { t: 'nff', role: 'mech', alert: nff.id, week: 5 });
+    expect(alertOf(s, nff.id).status).toBe('closed');
+  });
+
+  it('an NFF close on a real fault that hid (an intermittent) comes back 1-2 weeks later, due now, same cause; a real NFF doesn’t', () => {
+    let s = island();
+    // an intermittent that didn't show on the ground: the finding reads "could not duplicate" (the tier-3 roll)
+    const al = raise(s, 'M_COM_INTERMITTENT', 0, 'p1');
+    al.looksNff = true;
+    expect(findingOf(s, al, 3).nff).toBe(true);
+    const nff = raise(s, 'M_COM_INTERMITTENT', -1, 'p2');
     expect(nff.kind).toBe('nff');
     s = ok(s, { t: 'nff', role: 'mech', alert: al.id, week: 5 });
     s = ok(s, { t: 'nff', role: 'mech', alert: nff.id, week: 5 });
@@ -691,7 +840,7 @@ describe('comebacks (5.5)', () => {
     let back: Alert | undefined;
     for (let i = 0; i < 4 && !back; i++) {
       s = endWeek(s);
-      back = s.alerts!.find((a) => a.src === 'again' && a.sym === 'M_BRAKE_CHATTER');
+      back = s.alerts!.find((a) => a.src === 'again' && a.sym === 'M_COM_INTERMITTENT');
     }
     expect(back).toBeTruthy();
     expect(back!).toMatchObject({ assetId: 'p1', cause: 0, status: 'open' });

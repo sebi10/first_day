@@ -29,6 +29,19 @@ export type PuzzleId =
 
 export type PuzzleRole = 'mech' | 'elec' | 'fin';
 
+/** an alert's circuit for the electrician's puzzles: "Hall", 20 A, the device the complaint is about, what's wrong */
+export type PuzzleSite = {
+  /** the room as a label ("Hall", "Living room"); none for a panel, a generator or a pad */
+  room?: string;
+  amps: number;
+  /** an individual circuit: one receptacle for one appliance */
+  single?: boolean;
+  appliance?: string;
+  /** the device the complaint is about (a warm switch plate) */
+  device?: 'outlet' | 'switch';
+  fault: 'dead' | 'warm' | 'neutral';
+};
+
 export interface PuzzleContext {
   /** auction: market range for one parts kit, and the analyst's walk-away cap */
   market?: { low: number; high: number; fair: number; cap: number };
@@ -70,6 +83,12 @@ export interface PuzzleContext {
    * what is going in (the device, the stick size, the panelboard). Display only: scoring is unchanged
    */
   pick?: { pn: string; nomen: string; qty: number; slot?: string; spec?: ElecSpec }[];
+  /**
+   * the job flow's electrical site (docs/JOBFLOW.md 6): the alert's room, its breaker, one device on an individual
+   * circuit, and what the complaint is (a dead run, a warm termination, a loose neutral that shows under load), so
+   * the trace and the meter play that circuit, not a stock one
+   */
+  site?: PuzzleSite;
   /** the parts auction (17.3): the broker's lot a win buys, at list and the broker's fair price */
   lot?: { lines: { pn: string; nomen: string; qty: number; list: number }[]; fair: number; list: number };
   /** the three-way match (17.3): the POs received at the last resolve and not paid yet (their real lines) */

@@ -421,13 +421,32 @@ export function housekeepingCap(s: IslandState): number {
   );
 }
 
-/** occupancy, by the housekeepers' skill (reviews) */
-export function reviewMult(s: IslandState): number {
+/**
+ * occupancy, by the skill of the housekeepers who turn the bookings over (reviews): the best first, each taking up
+ * to their turnovers, the contractor's cleaners (a tier's first week) at skill 3. A spare who turns nothing over
+ * moves no review. `booked`: the week's bookings (none: every housekeeper at capacity)
+ */
+export function reviewMult(s: IslandState, booked?: number): number {
   if (STAFF_TEST.stubs) return 1;
-  const hk = working(s).filter((n) => n.role === 'housekeeper');
+  const hk = working(s)
+    .filter((n) => n.role === 'housekeeper')
+    .map((n) => ({ skill: n.skill as number, t: STAFF.turnovers[n.skill - 1] ?? 0 }));
+  const contractor = commissioning(s, 'housekeeper');
+  for (let i = 0; i < contractor; i++) hk.push({ skill: 3, t: STAFF.turnovers[2] });
   if (!hk.length) return 1;
-  const mean = hk.reduce((t, n) => t + n.skill, 0) / hk.length;
-  return clamp(1 + STAFF.review * (mean - 3), 0.95, 1.05);
+  hk.sort((a, b) => b.skill - a.skill);
+  let left = booked ?? Infinity;
+  let sum = 0;
+  let n = 0;
+  for (const h of hk) {
+    if (left <= 0) break;
+    const k = Math.min(left, h.t);
+    sum += h.skill * k;
+    n += k;
+    left -= k;
+  }
+  if (n <= 0) return 1;
+  return clamp(1 + STAFF.review * (sum / n - 3), 0.95, 1.05);
 }
 
 // ---------------------------------------------------------------------------
@@ -818,22 +837,30 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
 
 /**
  * An extra cottage: what it costs (the shell and its site work at list), what
- * it would rent at this week's rates, whether it needs another housekeeper to
- * turn it over, and the weeks it takes to pay back (net of that wage).
+ * it would rent in a normal week (every plane flying, no house closed) at this
+ * week's rates, averaged over the last 8 weeks' season (one week with two planes
+ * down says nothing about a building that stands for years), whether it needs
+ * another housekeeper to turn it over, and the weeks it takes to pay back (net
+ * of that wage).
  */
 export function cottagePlan(s: IslandState): { plot: { id: string; name: string } | null; cost: number; rent: number; housekeeper: boolean; payback: number | null } {
   const plot = freePlots(s)[0] ?? null;
   const cost = COTTAGE_SHELL + valueOf(COTTAGE.units.flatMap((u) => Object.entries(u).map(([item, qty]) => ({ item, qty: qty ?? 0 }))));
   if (!plot) return { plot, cost, rent: 0, housekeeper: false, payback: null };
   const extra: Asset = { id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: s.week, inspectionUntil: s.week + ECON.houseInspectionWeeks };
+  // a normal week: nothing grounded, restricted or closed for an alert, no safety tag, no plane chain-grounded
+  const normal = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
+  const weeks = Array.from({ length: 8 }, (_, i) => s.week - i).filter((w) => w >= 1);
+  if (!weeks.length) weeks.push(Math.max(1, s.week));
+  const avg = (x: IslandState) => weeks.reduce((n, w) => n + projectWeek(normal(x, w)).revenue, 0) / weeks.length;
   const withIt = { ...s, assets: [...s.assets, extra] };
-  const now = projectWeek(s).revenue;
-  let rent = projectWeek(withIt).revenue - now;
+  const now = avg(s);
+  let rent = Math.round(avg(withIt) - now);
   let housekeeper = false;
   if (rent <= 0) {
     // every turnover is taken: it rents once another housekeeper is on the payroll
     const hk: Npc = { id: 'plan-hk', name: '', role: 'housekeeper', skill: 3, wage: STAFF.wage.housekeeper, hired: s.week, start: s.week };
-    const more = projectWeek({ ...withIt, staff: [...crewOf(s), hk] }).revenue - now;
+    const more = Math.round(avg({ ...withIt, staff: [...crewOf(s), hk] }) - now);
     if (more > 0) {
       rent = more;
       housekeeper = true;

@@ -648,8 +648,11 @@ export type Action =
   | { t: 'nff'; role: OpsRole; alert: string; week?: number }
   /** placard the item INOP under the company MEL (category C): the plane flies on it at this week's resolve */
   | { t: 'mel'; role: 'mech'; alert: string; week?: number }
-  /** the analyst's one extension of an MEL placard */
-  | { t: 'melExtend'; alert: string; week?: number }
+  /**
+   * the one extension of an MEL placard: the mechanic asks for it (`role: 'mech'`, the maintenance side's call under
+   * the operator's extension authority), the analyst approves it (`role: 'fin'`, or none: older clients)
+   */
+  | { t: 'melExtend'; alert: string; role?: Role; week?: number }
   /** make a hazard safe: breaker off and tagged, or a blank-off */
   | { t: 'makeSafe'; role: 'elec'; alert: string; how: 'breaker' | 'blankoff'; week?: number }
   /** ask the electrician to meter a plane's electrical unit and its circuit */
@@ -830,7 +833,9 @@ export interface PurchaseOrder {
   got?: number;
   /** week paid */
   paid?: number;
-  /** USD the three-way match withheld (an overbilling it found) */
+  /** USD the vendor's invoice overbilled on it (the three-way match's week: it is paid unless the match catches it) */
+  over?: number;
+  /** USD the three-way match withheld (the overbilling it found) */
   caught?: number;
   /** credited back at the payment run: lines sent back at receiving, less restocking */
   refund?: number;
@@ -896,8 +901,8 @@ export interface Alert {
   status: 'open' | 'job' | 'closed';
   /** the job planned from it */
   order?: string;
-  /** placarded INOP under the company MEL (category C, 10) */
-  mel?: { until: number; by: string; ext?: boolean };
+  /** placarded INOP under the company MEL (category C, 10); `ask`: the mechanic asked for the one extension (the analyst approves it) */
+  mel?: { until: number; by: string; ext?: boolean; ask?: { week: number; by: string } };
   safe?: { how: 'breaker' | 'blankoff'; week: number; by: string };
   bench?: { order?: string; call?: 'unit' | 'wiring'; by?: string; week?: number; again?: boolean };
   /** kind 'repair': the defect and how it came to light (today's RepairInfo) */
@@ -1041,4 +1046,8 @@ export interface ElecSite {
   load?: number;
   /** the appliance on a `single` circuit: 'microwave' | 'window unit' */
   appliance?: string;
+  /** the load the circuit feeds, when it isn't the room's own (the water heater behind a bathroom's tingle) */
+  what?: string;
+  /** a 2-pole breaker (a 240 V load) */
+  poles?: 1 | 2;
 }

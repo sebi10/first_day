@@ -1,11 +1,11 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
-import type { PuzzleId } from '../puzzles/types';
-import { alertFlags, alertShort, liveAlerts, soleGuest } from '../sim/alerts';
+import type { PuzzleId, PuzzleSite } from '../puzzles/types';
+import { alertFlags, alertShort, causeOf, liveAlerts, siteOf, soleGuest } from '../sim/alerts';
 import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { externalPower } from '../sim/aircraft';
 import { CABLE_REPORT, ECON, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
-import { cartOn, flightsAvailable, flightsPerPlane, gseCarts, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap } from '../sim/econ';
+import { alertAog, cartOn, flightsAvailable, flightsPerPlane, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, restrictedBy } from '../sim/econ';
 import { cardOf, flowStage } from '../sim/flow';
 import { itemById, priceAt } from '../sim/items';
 import { toolsFor } from '../sim/progression';
@@ -13,7 +13,7 @@ import { hashSeed } from '../sim/rng';
 import { invoiceContext, reqValue, stockFlags, urgentJob } from '../sim/stock';
 import { spendable } from '../sim/ledger';
 import { taskById } from '../sim/tasks';
-import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Order, type Role } from '../sim/types';
+import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Order, type PartChain, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
 
 /** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
@@ -57,6 +57,13 @@ export function blocks(s: IslandState): Block[] {
 }
 
 const usdWords = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+const upperFirstWord = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** scheduled freight on a card in words: a shipment of its own, or riding one already on its way (3.6) */
+export function shipWords(f: { cost: number; rides?: string; shipments?: number }): string | undefined {
+  if (f.cost > 0) return (f.shipments ?? 1) > 1 ? `+${usdWords(f.cost)} freight: ${f.shipments} shipments of its own (one per supplier and carrier)` : `+${usdWords(f.cost)} freight: its own shipment`;
+  return f.rides ? `rides with ${f.rides}'s shipment: no extra freight` : undefined;
+}
 /** "2 cards and 1 requisition" */
 function waitWords(cards: number, reqs: number): string {
   const c = cards ? `${cards} card${cards > 1 ? 's' : ''}` : '';
@@ -88,18 +95,58 @@ export type CrossMove = {
   usd?: number;
 };
 
+/** does this chain ground its plane: every legacy chain does; a flow-opened one only when the job's alert grounds it */
+export function chainGrounds(s: IslandState, c: PartChain): boolean {
+  if (!c.flow) return true;
+  const al = chainAlert(s, c);
+  return !!al && alertAog(s, c.assetId)?.id === al.id;
+}
+
+/** the job flow's alert behind a chain it opened (the research branch) */
+function chainAlert(s: IslandState, c: PartChain): Alert | undefined {
+  const job = s.orders.find((o) => o.id === c.orderId);
+  return job?.flow ? s.alerts?.find((a) => a.id === job.flow!.alert) : undefined;
+}
+
+/**
+ * What the chain's plane does meanwhile, from the state (13): "Cargo C-7 is AOG" only when it's grounded; the
+ * only guest plane "flies restricted"; a placard "flies on its MEL placard to wk 6"; otherwise it "flies meanwhile"
+ */
+export function chainTag(s: IslandState, c: PartChain): string {
+  const name = s.assets.find((a) => a.id === c.assetId)?.name ?? 'the plane';
+  if (chainGrounds(s, c)) return `${name} is AOG`;
+  const al = chainAlert(s, c);
+  if (al && restrictedBy(s, c.assetId)?.id === al.id) return `${name} flies restricted`;
+  if (al?.mel && al.mel.until >= s.week) return `${name} flies on its MEL placard to wk ${al.mel.until}`;
+  return `${name} flies meanwhile`;
+}
+
+/** the chain's step a tech opens from the job, the banner, the Dock and Your move: the lookup, the logbooks, the circuit check */
+export function chainStepOrder(s: IslandState, c: PartChain | null = openChain(s)): { order: string; who: Role; label: string } | null {
+  if (!c?.stepId) return null;
+  const m = chainMove(s, c);
+  const o = s.orders.find((x) => x.id === c.stepId);
+  if (!m.who || !o || o.status === 'done' || o.status === 'cancelled' || o.role !== m.who) return null;
+  const label = c.step === 'lookup' ? 'Open the IPC ▸' : c.step === 'research' ? 'Open the logbooks ▸' : c.step === 'check' ? 'Meter the circuit ▸' : c.step === 'install' ? 'Open the job ▸' : null;
+  return label ? { order: o.id, who: m.who, label } : null;
+}
+
+/** a chain step in a word or two, for a chip ("Seb: logbooks") */
+const CHAIN_SHORT: Partial<Record<PartChain['step'], string>> = { lookup: 'IPC', research: 'logbooks', check: 'meter it', buy: 'approve the part', fee: 'approve the fee', install: 'install' };
+
 export function crossMoves(s: IslandState): CrossMove[] {
   const out: CrossMove[] = [];
   const ch = openChain(s);
   if (ch) {
     const asset = s.assets.find((a) => a.id === ch.assetId);
-    // "look up the brake linings in the IPC (Cargo C-7 is AOG)", "approve the part (066-22500, $310; Cargo C-7 is AOG)"
-    const aog = `${asset?.name ?? 'a plane'} is AOG`;
+    // "look up the brake linings in the IPC (Cargo C-7 is AOG)", "research the com radio in … (Twin N-12 flies restricted)"
+    const tag = chainTag(s, ch);
+    const grounds = chainGrounds(s, ch);
     const add = (m: ReturnType<typeof chainMove>, key: string) => {
       // the analyst waits on the mechanic's paperwork (nothing to buy yet); the mechanic on the analyst and on the electrician's check
       const waits: Role | null = m.who === 'fin' ? 'mech' : m.who === 'mech' ? 'fin' : m.who === 'elec' ? 'mech' : null;
-      const text = m.text.endsWith(')') ? `${m.text.slice(0, -1)}; ${aog})` : `${m.text} (${aog})`;
-      if (m.who && waits && s.players[m.who] && s.players[waits]) out.push({ key, kind: 'chain', who: m.who, waits, text, what: `${asset?.name ?? 'A plane'} AOG: ${ch.item}`, short: m.short });
+      const text = m.text.endsWith(')') ? `${m.text.slice(0, -1)}; ${tag})` : `${m.text} (${tag})`;
+      if (m.who && waits && s.players[m.who] && s.players[waits]) out.push({ key, kind: 'chain', who: m.who, waits, text, what: `${asset?.name ?? 'A plane'}${grounds ? ' AOG' : ''}: ${ch.item}`, short: m.short });
     };
     add(chainMove(s, ch), `chain:${ch.id}:${ch.step}:${ch.stepId ?? ''}`);
     // the electrician's check on an electrical unit runs beside the lookup and the research
@@ -157,7 +204,7 @@ export function flowMove(s: IslandState, a: Alert): { who: Role | null; chip: st
       const ch = openChain(s);
       if (ch && o?.chain && ch.id === o.chain.id) {
         const m = chainMove(s, ch);
-        return { who: m.who, chip: m.chip, text: m.text };
+        return { who: m.who, chip: m.who ? `${nameOf(s, m.who)}: ${CHAIN_SHORT[ch.step] ?? m.short}` : m.chip, text: m.text };
       }
       return { who: null, chip: 'Research queued', text: 'the research opens when the part chain in progress closes' };
     }
@@ -241,6 +288,23 @@ export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?
 
 export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' };
 
+/**
+ * This week's work that earns the week's money but isn't an alert (16): the charter load sheet (no sheet, half a
+ * plane's charters stay on the ramp) and a ground power start on a weak battery (no cart on it, its first flight is
+ * lost). Your move, the Dock and End turn show it with what skipping it costs.
+ */
+export function revenueMoves(s: IslandState, role: Role): { order: Order; label: string; cost: string }[] {
+  if (role !== 'mech') return [];
+  const out: { order: Order; label: string; cost: string }[] = [];
+  for (const o of s.orders) {
+    if (o.role !== role || o.status !== 'ready' || (o.kind !== 'wb' && o.kind !== 'gpustart')) continue;
+    const name = assetName(s, o.assetId) ?? 'the plane';
+    if (o.kind === 'wb') out.push({ order: o, label: `Load sheet · ${name}`, cost: `No load sheet: half of ${name}'s charters stay on the ramp.` });
+    else out.push({ order: o, label: `Ground power start · ${name}`, cost: `${name}'s battery is weak: without a charged cart on it, its first flight is lost.` });
+  }
+  return out.sort((a, b) => Number(a.order.kind === 'wb') - Number(b.order.kind === 'wb'));
+}
+
 /** the Dock's primary button (16): a tech's first Your move row (a ready job opens its start); the analyst's cards and requisitions */
 export function dockNext(s: IslandState, role: Role): { label: string; target: DockTarget } | null {
   if (s.turns[role]?.ended) return null;
@@ -254,27 +318,46 @@ export function dockNext(s: IslandState, role: Role): { label: string; target: D
     if (urgent > 0) return { label: `Stock: ${urgent} urgent ▸`, target: { desk: 'stock' } };
     return null;
   }
-  const row = yourMoves(s, role as OpsRole)[0];
+  // a job over this turn's limit (a trade's per-turn cap) isn't offered as Start: the next row that can go is
+  const rows = yourMoves(s, role as OpsRole).filter((x) => !(x.order?.status === 'ready' && capNow(s, role)?.full));
+  const row = rows[0];
+  // the week's revenue work comes before a row that isn't due yet: a load sheet or a ground power start this week
+  const rev = revenueMoves(s, role)[0];
+  if (rev && (!row || row.alert.due > s.week)) return { label: `${rev.label} ▸`, target: { order: rev.order.id } };
   if (!row) return null;
   const where = assetName(s, row.alert.assetId);
+  // the research branch: the chain's step is the move (the IPC, the logbooks), straight to it
+  if (flowStage(s, row.alert) === 'research') {
+    const step = chainStepOrder(s);
+    if (step && step.who === role) return { label: `${step.label.replace(' ▸', '')}${where ? ` · ${where}` : ''} ▸`, target: { order: step.order } };
+  }
   if (row.order?.status === 'ready') return { label: `Start: ${row.order.title}${where ? ` · ${where}` : ''} ▸`, target: { order: row.order.id } };
   return { label: `Next: ${alertShort(s, row.alert)}${where ? ` · ${where}` : ''} ▸`, target: { alert: row.alert.id } };
 }
 
 /** the End-turn confirm's flow lines (16); home adds today's ready jobs, owed moves and carts */
-export function endTurnChecks(s: IslandState, role: Role): { text: string; urgent: boolean }[] {
-  const out: { text: string; urgent: boolean }[] = [];
+export function endTurnChecks(s: IslandState, role: Role): { text: string; urgent: boolean; standing?: boolean }[] {
+  const out: { text: string; urgent: boolean; standing?: boolean }[] = [];
   if (role === 'fin') {
     const cards = s.orders.filter((o) => o.flow && o.status === 'pending' && o.lastDeferredWeek !== s.week);
     const reqs = (s.reqs ?? []).filter((r) => r.status === 'open' && r.deferredWeek !== s.week);
+    const limit = standingLimit(s);
     if (cards.length + reqs.length > 0) {
       const who = [...new Set([...cards.map((o) => o.role), ...reqs.map((r) => r.role)])].map((r) => nameOf(s, r)).join(', ');
-      const limit = s.standing ?? (s.autoBudget.mech ?? 0) + (s.autoBudget.elec ?? 0);
       out.push({
         text: `${waitWords(cards.length, reqs.length)} ${cards.length + reqs.length > 1 ? 'wait' : 'waits'} on you (${who}). After you end your turn, anything that comes in goes through tonight up to your standing limit (${usdWords(limit)}); the rest waits for next week.`,
         urgent: cards.some((o) => urgentJob(s, o)),
       });
     }
+    // the techs play after you: their cards come in late (8.5). Safety work due this week or next goes through
+    // anyway; the rest over the limit waits a week
+    const later = (['mech', 'elec'] as const).filter((r) => s.players[r] && !s.turns[r]?.ended).map((r) => nameOf(s, r));
+    if (later.length)
+      out.push({
+        text: `${later.join(' and ')} ${later.length > 1 ? "haven't" : "hasn't"} played yet: a card over ${usdWords(limit)} that isn't safety work due this week or next will wait a week. Raise the limit if you'd rather it went through.`,
+        urgent: false,
+        standing: true,
+      });
     return out;
   }
   const trade = role as OpsRole;
@@ -287,12 +370,30 @@ export function endTurnChecks(s: IslandState, role: Role): { text: string; urgen
     const signed = o?.status === 'done';
     if (a.due <= s.week && !signed && (f.aw || f.hazard)) {
       if (f.hazard && !a.safe) out.push({ text: `Make it safe or fix it, or ${name} stays closed: ${alertShort(s, a)}.`, urgent: true });
-      else if (f.aw && asset?.kind === 'plane' && !(a.mel && a.mel.until >= s.week))
-        out.push({ text: `Fix it or placard it this week, or ${name} ${soleGuest(s, asset.id) ? 'flies restricted' : 'is AOG'}: ${alertShort(s, a)}.`, urgent: true });
+      else if (f.aw && asset?.kind === 'plane' && !(a.mel && a.mel.until >= s.week)) {
+        const bite = soleGuest(s, asset.id) ? 'flies restricted' : 'is AOG';
+        const fin = nameOf(s, 'fin');
+        // what the MEL still allows: a placard (category C), the one extension, or nothing (fix it or tag it)
+        const text = !a.mel
+          ? f.mel === 'C'
+            ? `Fix it or placard it (MEL C) this week, or ${name} ${bite}: ${alertShort(s, a)}.`
+            : `Fix it or tag it this week (no MEL relief), or ${name} ${bite}: ${alertShort(s, a)}.`
+          : a.mel.ext || a.mel.until < s.week - 1
+            ? `The MEL placard has run out: fix it this week, or ${name} ${bite}: ${alertShort(s, a)}.`
+            : a.mel.ask
+              ? `${fin} hasn't approved the MEL extension yet: fix it, or ${name} ${bite} unless ${fin} does: ${alertShort(s, a)}.`
+              : `The MEL placard ran out: ask ${fin} to extend it (once), or fix it, or ${name} ${bite}: ${alertShort(s, a)}.`;
+        out.push({ text, urgent: true });
+      }
+      // a placard running out at this resolve with the fix not ready: the one extension is the mechanic's to ask for
+      if (a.mel && a.mel.until === s.week && !a.mel.ext && !a.mel.ask && o?.status !== 'ready')
+        out.push({ text: `${name}'s MEL placard runs out at this resolve: fix it, or ask ${nameOf(s, 'fin')} to extend it (once).`, urgent: false });
       continue;
     }
     if (a.status === 'open') out.push({ text: `Plan it now so the parts come in time: ${alertShort(s, a)} on ${name} (due wk ${a.due}).`, urgent: a.due <= s.week + 1 });
   }
+  // the week's revenue work, by what skipping it costs (a weak battery's start: home's cart line says it)
+  for (const m of revenueMoves(s, role).filter((x) => x.order.kind === 'wb')) out.push({ text: m.cost, urgent: true });
   return out.sort((x, y) => Number(y.urgent) - Number(x.urgent));
 }
 
@@ -303,19 +404,48 @@ export const standingLimit = (s: IslandState) => s.standing ?? (s.autoBudget.mec
  * A card that comes in after the analyst ended the turn (8.5), in the tech's words: the standing approval takes it
  * tonight when it fits the limit (and the cash), or it waits for the analyst. null while the analyst's turn is open.
  */
-export function standingWords(s: IslandState, total: number, safety = false): string | null {
+export function standingWords(s: IslandState, total: number, safety = false, lateSafe = false): string | null {
   if (!s.turns.fin?.ended) return null;
   const fin = nameOf(s, 'fin');
   const limit = standingLimit(s);
+  // safety work due this week or next goes through whatever the limit, cash permitting (the floor is $0)
+  if (lateSafe)
+    return spendable(s) - total < 0
+      ? `${fin} has ended the turn, and there isn't the cash for it: it waits for ${fin}'s approval.`
+      : `${fin} has ended the turn: it goes through tonight on the standing approval whatever the limit (safety work due this week or next).`;
   if (total > limit) return `${fin} has ended the turn, and it's over the standing limit (${usdWords(limit)}): it waits for ${fin}'s approval.`;
   if (spendable(s) - total < (safety ? 0 : ECON.freezeBelow)) return `${fin} has ended the turn, and spendable cash is under the freeze: it waits for ${fin}'s approval.`;
   return `${fin} has ended the turn: it goes through tonight on the standing approval (up to ${usdWords(limit)}) unless deferred.`;
 }
 
+/**
+ * The standing approval takes this alert's late card whatever the limit (8.5, the engine's lateSafe): it grounds its
+ * plane, restricts the only guest plane or closes its house at this week's resolve or next week's
+ */
+export function lateSafeAlert(s: IslandState, a: Alert): boolean {
+  const asset = s.assets.find((x) => x.id === a.assetId);
+  if (!asset) return false;
+  if (asset.kind === 'plane') return [s.week, s.week + 1].some((w) => alertAog(s, asset.id, w)?.id === a.id || restrictedBy(s, asset.id, w)?.id === a.id);
+  if (asset.kind === 'house') {
+    const h = hazardOn(s, asset.id);
+    return h?.id === a.id && !h.safe;
+  }
+  return false;
+}
+
 /** open a job-flow target: B's ops panel and C's desk listen for it */
 export function openTarget(t: DockTarget): void {
   if (typeof window === 'undefined') return;
+  // the desk is a chunk of its own (lazy.tsx): a desk tab asked for before it has loaded opens once it has
+  deskAsked = 'desk' in t ? t.desk : null;
   window.dispatchEvent(new CustomEvent('ic:open', { detail: t }));
+}
+let deskAsked: Extract<DockTarget, { desk: unknown }>['desk'] | null = null;
+/** the desk tab asked for (by the Dock's Next) before the desk was on screen, once */
+export function takeDeskAsked() {
+  const d = deskAsked;
+  deskAsked = null;
+  return d;
 }
 
 /** The cross-trade moves that are this seat's to make: a crewmate is waiting on each (the end-turn check names them). */
@@ -339,7 +469,7 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
   if (after.week > before.week && after.history.length) {
     const h = after.history[after.history.length - 1];
     const c = openChain(after);
-    const aog = c ? ` ${after.assets.find((x) => x.id === c.assetId)?.name ?? 'A plane'} AOG: ${chainMove(after, c).chip}.` : '';
+    const aog = c ? ` ${chainGrounds(after, c) ? `${after.assets.find((x) => x.id === c.assetId)?.name ?? 'A plane'} AOG` : upperFirstWord(chainTag(after, c))}: ${chainMove(after, c).chip}.` : '';
     const reps = fresh.map((m) => ` ${name(m.waits)} reports ${m.what}: ${name(m.who)}'s move.`).join('');
     // the job flow: parts that came in, and what bites this week
     const inLines = h.lines.map((l) => /^Parts for (.+?) are in: (.+?), your move\.$/.exec(l.text)).filter((m): m is RegExpExecArray => !!m);
@@ -399,13 +529,17 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
     const m = chainMove(after, ca);
     const plane = after.assets.find((x) => x.id === ca.assetId)?.name ?? 'A plane';
     const who = m.who ? name(m.who) : null;
-    push(`${after.name}: ${plane} AOG`, who ? `${plane} is grounded for ${ca.item}. ${who}, your move: ${m.text}.` : `${plane} is grounded for ${ca.item}: ${m.text}.`);
+    // grounded only when it is (a flow-opened chain's plane may fly on its placard, restricted, or meanwhile)
+    const grounds = chainGrounds(after, ca);
+    const state = grounds ? `${plane} is grounded for ${ca.item}` : `${upperFirstWord(chainTag(after, ca))}; the job waits for ${ca.item}`;
+    push(`${after.name}: ${plane}${grounds ? ' AOG' : ''}`, who ? `${state}. ${who}, your move: ${m.text}.` : `${state}: ${m.text}.`);
   } else if (cb && !ca && after.chain?.step === 'done' && after.chain.story) push(`${after.name}: back in service`, after.chain.story);
   // the electrician's check came up beside it (a new chain on an electrical unit, or the new unit made no difference)
   const ba = ca ? benchMove(after, ca) : null;
   if (ca && ba && (!cb || cb.id !== ca.id || !benchMove(before, cb))) {
     const plane = after.assets.find((x) => x.id === ca.assetId)?.name ?? 'A plane';
-    push(`${after.name}: ${plane} AOG`, `${plane} is grounded for ${ca.item}. ${name('elec')}, your move: ${ba.text}`);
+    const grounds = chainGrounds(after, ca);
+    push(`${after.name}: ${plane}${grounds ? ' AOG' : ''}`, `${grounds ? `${plane} is grounded for ${ca.item}` : upperFirstWord(chainTag(after, ca))}. ${name('elec')}, your move: ${ba.text}`);
   }
   if (a.t === 'endTurn') {
     const waiting = ROLES.filter((r) => !after.turns[r]?.ended).map(name);
@@ -473,6 +607,31 @@ export { islandAircraft };
 /** puzzles that work to the task card's numbers (both effectivities printed; the mechanic matches S/N and SB status) */
 const CARD_DRIVEN: ReadonlySet<PuzzleId> = new Set<PuzzleId>(['torque', 'hydraulics']);
 
+/** a house room as the puzzles label it (a panel, a pad or the generator house has no room of its own) */
+const PUZZLE_ROOM: Partial<Record<string, string>> = { bath: 'Bathroom', kitchen: 'Kitchen', bedroom: 'Bedroom', living: 'Living room', laundry: 'Laundry', outdoor: 'Porch', hall: 'Hall' };
+
+/**
+ * The alert's circuit for an electrician's flow job (the trace and the meter build their scenario from it): the
+ * room and the breaker; one receptacle on an individual circuit; a warm plate (a live high-resistance joint, not
+ * a dead run); a loose neutral (a flicker: it shows under load)
+ */
+export function puzzleSite(s: IslandState, o: Order): PuzzleSite | undefined {
+  if (!o.flow || o.role !== 'elec') return undefined;
+  const al = s.alerts?.find((x) => x.id === o.flow!.alert);
+  const site = al ? siteOf(s, al) : null;
+  if (!al || !site) return undefined;
+  const room = PUZZLE_ROOM[site.deviceRoom ?? site.room];
+  const warm = al.sym === 'E_WARM_OUTLET' || al.sym === 'E_SWITCH_WARM' || al.sym === 'E_APPLIANCE';
+  const neutral = !!causeOf(al)?.neutral || al.sym === 'E_FLICKER';
+  return {
+    ...(room ? { room } : {}),
+    amps: site.amps,
+    ...(site.single ? { single: true, ...(site.appliance ? { appliance: site.appliance } : {}) } : {}),
+    ...(al.sym === 'E_SWITCH_WARM' ? { device: 'switch' as const } : {}),
+    fault: warm ? 'warm' : neutral ? 'neutral' : 'dead',
+  };
+}
+
 export function launchFor(s: IslandState, o: Order, role: Role, assist = false): PuzzleLaunch {
   const p = s.players[role];
   const grace = !assist && p && s.week <= p.graceUntil;
@@ -520,6 +679,9 @@ export function launchFor(s: IslandState, o: Order, role: Role, assist = false):
     const al = s.alerts?.find((x) => x.id === o.bench);
     if (al) context.bench = { fault: al.bench?.again || al.kind === 'wiring' ? 'wiring' : 'unit' };
   }
+  // the electrician's puzzles play the alert's own circuit: its room, its breaker, its complaint
+  const site = puzzleSite(s, o);
+  if (site) context.site = site;
   // the job flow: the lines the tech chose (display only), and the chosen task's card
   if (o.flow && !o.flow.wired) {
     context.pick = o.flow.pick.map((l) => {

@@ -16,13 +16,14 @@ export function StockStep({ s, a, d }: { s: IslandState; a: Alert; d: Draft }) {
   const checks = tier <= 1 && !a.repair ? pickCheck(s, a, t, d.pick.filter((l) => l.slot !== d.research), tier) : [];
   const labels = new Map(slotRows(s, a, d).map((r) => [r.slot.slot, r.slot.label]));
   const p = preview(s, a, d);
+  const book = t.book === 'REF' ? 'Reference' : t.book === 'AMM' && a.repair ? 'Repair' : t.book;
   const parts = rows.filter((r) => r.from !== 'tool');
   const tools = rows.filter((r) => r.from === 'tool');
   const empty = rows.filter((r) => r.from === 'pick' || r.from === 'fixed').length === 0;
   return (
     <div class="col jf-step" style={{ gap: 10 }}>
       <div class="jf-taskline static">
-        <span class="label">{t.book === 'REF' ? 'Reference' : t.book === 'AMM' && a.repair ? 'Repair' : t.book}</span> <b>{t.no}</b> {t.title}
+        <span class="label">{book}</span> {t.no !== book && <b>{t.no}</b>} {t.title}
       </div>
       {checks.length > 0 && (
         <div class="jf-note warn" role="status">
@@ -36,7 +37,7 @@ export function StockStep({ s, a, d }: { s: IslandState; a: Alert; d: Draft }) {
           Not in the IPC: the {labels.get(d.research)?.toLowerCase() ?? 'part'} goes to the research branch (the airplane's logbooks, then engineering), not on this pick.
         </div>
       )}
-      {empty && !d.research && !t.fixed && t.main.length > 0 && <div class="jf-note">Nothing picked: the job goes with the task's own stock only.</div>}
+      {empty && !d.research && !t.fixed && t.main.length > 0 && p.outcome !== 'incomplete' && <div class="jf-note">Nothing picked: the job goes with the task's own stock only.</div>}
       <div class="jf-lines" role="list">
         {parts.map((r, i) => {
           const x = itemById(r.item);

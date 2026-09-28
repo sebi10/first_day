@@ -73,7 +73,10 @@ export function flagsOf(s: IslandState, a: Alert): Flag[] {
 export function moveChip(s: IslandState, a: Alert, me: Role): { chip: string; who: Role | null; mine: boolean; stage: FlowStage; text: string } {
   const m = flowMove(s, a);
   const stage = flowStage(s, a);
-  return { chip: m.chip, who: m.who, mine: m.who === me, stage, text: m.text };
+  // the viewer's own move never reads as waiting on themselves ("Seb: logbooks" on Seb's row: "Your move: logbooks")
+  const own = `${nameOf(s, me)}: `;
+  const chip = m.who === me && m.chip.startsWith(own) ? `Your move: ${m.chip.slice(own.length)}` : m.chip;
+  return { chip, who: m.who, mine: m.who === me, stage, text: m.text };
 }
 
 /** "Twin N-12 · N412IC" for a plane, the house's or the grid's name otherwise */
@@ -85,6 +88,8 @@ export function assetTitle(s: IslandState, asset: Asset | undefined): string {
 }
 
 export const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
+/** a phrase as a sentence's start: "the water heater's …" → "The water heater's …" */
+export const upperFirst = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /** the alert in a few words, capitalised: "Brake pedal soft" */
 export const shortOf = (s: IslandState, a: Alert) => {

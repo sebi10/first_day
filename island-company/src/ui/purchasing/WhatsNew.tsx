@@ -22,7 +22,7 @@ const PANELS: { title: string; lines: string[] }[] = [
     title: 'Cards carry real parts now',
     lines: [
       'A tech finds the task in the manual and the parts in the IPC or the catalog. What’s on the shelf is pulled; what isn’t comes to you as a card: the labour, the lines from stock, the lines to buy.',
-      'Pick the supplier (OEM or the broker; the supply house or online) and the freight: scheduled rides the week’s carrier, the AOG boat is $350 for when a grounded plane or a closed house can’t wait.',
+      'Pick the supplier (OEM or the broker; the supply house or online) and the freight: scheduled rides the week’s carrier at one shipment’s charge ($35 a mechanic’s, $25 an electrician’s; a PO that rides one already on its way adds nothing), and the AOG boat is $350 for when a grounded plane or a closed house can’t wait.',
       'Requests for stock and tools come in a queue: tick them and approve together. Nothing locks when you end your turn: late cards go through tonight up to your standing limit.',
     ],
   },
@@ -40,6 +40,7 @@ const PANELS: { title: string; lines: string[] }[] = [
       'Money shows cash beside what’s spendable, committed and payable; revenue against budget; where the cash went (jobs and stock, capex, overhead and payroll); what the stock ties up.',
       'Each trade’s work budget lets in-stock jobs go ahead without a card. Bills are paid a week after delivery, after the three-way match.',
       'The Staff tab is the island’s payroll: pilots, housekeepers and builders. Hiring is your call.',
+      'The parts kits you had became store credit at the vendors, each at what a kit fetches on today’s kit market ($300 at tier 1 to $420 at tier 5), not the list price paid for it. The free starter shelf more than makes up the difference.',
     ],
   },
 ];

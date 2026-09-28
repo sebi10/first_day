@@ -3,7 +3,7 @@
 // quarantined at receiving for its paperwork, a card that came in after the
 // analyst ended the turn, and paperwork that no grid outage, botch or blind
 // sign-off should get wrong.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { islandAircraft, plantFor, rightPn } from '../src/sim/chain';
 import { raiseAlert } from '../src/sim/alerts';
 import { CHAIN, DEFECT, ECON, FREIGHT } from '../src/sim/data';
@@ -11,6 +11,9 @@ import { downtimeOf } from '../src/sim/econ';
 import { apply, chainCardCost, chainWouldOpen, createIsland } from '../src/sim/engine';
 import { hashSeed } from '../src/sim/rng';
 import { ROLES, type Asset, type IslandState, type Order, type PurchaseOrder } from '../src/sim/types';
+
+// 600 islands in one test: the CI runner is about 1.5x slower than a dev box
+vi.setConfig({ testTimeout: 30000 });
 
 const NOW = Date.UTC(2026, 8, 26, 10);
 const CARGO: Asset = { id: 'p2', kind: 'plane', model: 'cargo', name: 'Cargo C-7', health: 70, touchedWeek: 5, sinceInspection: 0 };

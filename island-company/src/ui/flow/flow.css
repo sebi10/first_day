@@ -739,6 +739,10 @@
 .jf-summary.card {
   background: rgba(143, 184, 222, 0.28);
 }
+.jf-summary.incomplete {
+  background: rgba(196, 92, 58, 0.12);
+  color: #8a3a1e;
+}
 
 /* ---------- a job ---------- */
 .jf-stage {
@@ -852,15 +856,19 @@
 .jf-move {
   flex: none;
   max-width: 38%;
-  border-radius: 999px;
+  border-radius: 14px;
   padding: 4px 10px;
   font-size: 12.5px;
   font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
   background: var(--sand-deep);
   color: var(--ink);
-  white-space: nowrap;
+  /* a long chip ("Your move: logbooks") takes a second line on a phone rather than losing its word */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .jf-move.mine {
   background: var(--ink);

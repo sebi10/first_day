@@ -4,12 +4,12 @@
 // the UI), the teaching warnings before commit, and the stops at the install.
 // Pure: nothing here changes the island.
 import { figSb, ipcFor, planeModel, plantedFor, plantRows, rowFor, type Aircraft, type AnyAta, type Ata } from './aircraft';
-import { alertFlags, alertTier, causeOf, fixesOf, needsOf, protectionNeeded, siteOf, symptomOf } from './alerts';
+import { alertFlags, alertTier, causeOf, fixesOf, lowerFirst, needsOf, protectionNeeded, siteOf, symptomOf } from './alerts';
 import { islandAircraft, judgePart, type PartCheck } from './chain';
 import { CATALOG_BY_KIND, DEFECT, defectRule, FREIGHT, kitValue, LABOR, SUPPLIERS, type DefectRule } from './data';
 import { alertAog, downtimeOf, hazardOn, houseWeekRevenue, orderCost, orderTier, restrictedBy, round10 } from './econ';
 import { buyUnits, itemById, lineValue, planeItemIds, priceAt } from './items';
-import { aogOk, cardBuyLines, etaOf, owned, reservedFor, uncovered, unitCost, vendorFor } from './stock';
+import { aogOk, cardBuyLines, etaOf, owned, reservedFor, schedFreight, uncovered, unitCost, vendorFor } from './stock';
 import { benchFor, fixedFor, laborMin, slotQty, slotsAt, taskById, type MainSlot, type Task } from './tasks';
 import type { Alert, Asset, BuyChoice, EaRecord, ElecSite, Freight, IslandState, Item, ItemId, OpsRole, Order, PickLine, SupplierId, TaskId } from './types';
 
@@ -184,6 +184,18 @@ const breakerLimit = (awg: number) => ({ 14: 15, 12: 20, 10: 30, 8: 50, 6: 65, 3
 const egcFor = (amps: number) => (amps <= 15 ? 14 : amps <= 20 ? 12 : amps <= 60 ? 10 : 8);
 /** the hots a spa's amps need (Table 310.16 at 75 °C) */
 const hotsFor = (amps: number) => (amps <= 50 ? 8 : 6);
+/** THHN/THWN-2 cross sections, in² (Chapter 9, Table 5) */
+const WIRE_AREA: Record<number, number> = { 14: 0.0097, 12: 0.0133, 10: 0.0211, 8: 0.0366, 6: 0.0507, 4: 0.0824, 3: 0.0973 };
+/** EMT at 40% fill for over two conductors, in² (Chapter 9, Table 4) */
+const EMT_SIZES: [string, number][] = [
+  ['1/2', 0.122],
+  ['3/4', 0.213],
+  ['1', 0.346],
+];
+const EMT_FILL: Record<string, number> = Object.fromEntries(EMT_SIZES);
+/** the standard breaker ratings (240.6(A)), for the next size up a conductor's ampacity allows (240.4(B)) */
+const STD_AMPS = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125];
+const nextStd = (a: number) => STD_AMPS.find((x) => x >= a) ?? a;
 
 /** the device a receptacle replacement takes at this site: the cheapest set that passes every rule */
 function receptacleFor(site: ElecSite, gfciSlot: boolean): { device: ItemId; protection?: ItemId } {
@@ -337,10 +349,21 @@ export function judgeElecPick(task: Task, site: ElecSite | null, lines: PickLine
       if (!sameCategory(m, x)) return { stop: `${x?.nomen ?? l.item} isn't a ${m.label.toLowerCase()}: it doesn't go there.` };
     }
   }
-  // EMT the conductors can't be pulled through, and fittings that don't fit the stick
+  // EMT the conductors can't be pulled through (40% fill, Chapter 9 Tables 4 and 5), and fittings that don't fit the stick
   const emt = at('emt')[0];
   const hots = at('wire')[0];
-  if (emt?.spec?.size === '1/2' && hots && (hots.spec?.awg ?? 12) <= 6) return { stop: 'Four #6 conductors won’t pull through 1/2 in EMT (Chapter 9): the wall section needs 3/4 in.' };
+  const egcWire = at('egc')[0];
+  if (emt?.spec?.size && hots) {
+    const wires = [...Array(3).fill(hots.spec?.awg ?? 12), ...(egcWire ? [egcWire.spec?.awg ?? 10] : [])] as number[];
+    const area = wires.reduce((n, g) => n + (WIRE_AREA[g] ?? 0.0133), 0);
+    const cap = EMT_FILL[emt.spec.size] ?? 0.213;
+    if (area > cap) {
+      const words = `Three #${hots.spec?.awg}${egcWire ? ` and a #${egcWire.spec?.awg} EGC` : ''}`;
+      // (in size order: an object's integer-like key '1' would come first)
+      const bigger = EMT_SIZES.find(([, c]) => c >= area)?.[0];
+      return { stop: `${words} (${area.toFixed(3)} in²) won’t fit ${emt.spec.size} in EMT at 40% fill (${cap.toFixed(3)} in², Chapter 9): the wall section needs ${bigger ?? '1'} in.` };
+    }
+  }
   const conn = at('connectors')[0];
   if (emt && conn && conn.spec?.size !== emt.spec?.size) return { stop: `${conn.nomen} don't fit ${emt.nomen}.` };
 
@@ -361,14 +384,21 @@ export function judgeElecPick(task: Task, site: ElecSite | null, lines: PickLine
   for (const b of [...prot.filter((x) => x.spec?.form === 'breaker'), ...at('breaker'), ...at('gfci').filter((x) => x.spec?.form === 'breaker')])
     if ((b.spec?.amps ?? 0) > limit) return fail('oversized', 'a breaker oversized for its wire');
   const feed = at('feed')[0];
-  if (feed && (feed.spec?.amps ?? 0) > breakerLimit(hotsFor(st.amps))) return fail('oversized', 'a feed breaker oversized for the spa conductors');
+  const spaPanel = at('spa')[0];
+  // the feed: no bigger than the hots it protects allow (their ampacity, or the next standard size up: 240.4(B)), and no
+  // bigger than the spa panel's listing takes as its supply (110.3(B))
+  const hotsAmp = hots ? (ampacity[hots.spec?.awg ?? 12] ?? 0) : ampacity[hotsFor(st.amps)];
+  // (hots too small for the tub itself: that's the mistake, and the undersized rule below names it)
+  const hotsShort = hotsAmp < st.amps;
+  if (feed && !hotsShort && (feed.spec?.amps ?? 0) > nextStd(hotsAmp)) return fail('oversized', `a ${feed.spec?.amps} A feed on #${hots?.spec?.awg ?? hotsFor(st.amps)} hots`);
+  if (feed && spaPanel && (feed.spec?.amps ?? 0) > (spaPanel.spec?.amps ?? 0)) return fail('oversized', `a ${feed.spec?.amps} A feed on a ${spaPanel.spec?.amps} A spa panel (its listing, 110.3(B))`);
   // conductors and equipment too small for the circuit
   const cable = at('cable')[0];
   if (cable && (cable.spec?.awg ?? 12) > st.awg) return fail('undersized', `${cable.nomen} on a ${st.amps} A circuit`);
   if (hots && (ampacity[hots.spec?.awg ?? 12] ?? 0) < st.amps) return fail('undersized', `#${hots.spec?.awg} hots on a ${st.amps} A spa`);
-  const egc = at('egc')[0];
+  const egc = egcWire;
   if (egc && (egc.spec?.awg ?? 14) > egcFor(st.amps)) return fail('undersized', `a #${egc.spec?.awg} EGC on a ${st.amps} A circuit (Table 250.122)`);
-  const spa = at('spa')[0];
+  const spa = spaPanel;
   if (spa && (spa.spec?.amps ?? 0) < st.amps) return fail('undersized', `a ${spa.spec?.amps} A spa panel on a ${st.amps} A tub`);
   if (feed && (feed.spec?.amps ?? 0) < st.amps) return fail('undersized', `a ${feed.spec?.amps} A feed on a ${st.amps} A tub`);
   for (const b of at('breaker')) if ((b.spec?.amps ?? 0) < st.amps) return fail('undersized', `a ${b.spec?.amps} A breaker on a ${st.amps} A circuit`);
@@ -560,7 +590,8 @@ export function flowStage(s: IslandState, a: Alert): FlowStage {
 // ---------------------------------------------------------------------------
 // The install check (8.7): what the tech finds when the box is opened
 
-const lc = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+/** a slot's label mid-sentence: "the lining", but "a GFCI device" (a label that starts with an acronym keeps it) */
+const lc = (t: string) => lowerFirst(t);
 
 /**
  * What stops a flow job at the install: a mechanic's line that isn't this
@@ -644,7 +675,9 @@ export type Card = {
   fromStock: { item: ItemId; qty: number; value: number }[];
   toBuy: { item: ItemId; qty: number; unit: number; supplier: SupplierId; eta: number }[];
   tools: { item: ItemId; price: number }[];
-  freight: { sched: Arrival; aog?: Arrival & { cost: number }; pick: Freight };
+  /** sched: `cost` the shipments it starts (0 when every line rides one already on its way this week: `rides` names its PO) */
+  /** sched: the scheduled shipments' charge (3.6: per supplier and carrier, none for a PO riding one already on its way); `shipments` when more than one */
+  freight: { sched: Arrival & { cost: number; rides?: string; shipments?: number }; aog?: Arrival & { cost: number }; pick: Freight };
   total: number;
   aog: boolean;
   restricted: boolean;
@@ -701,13 +734,21 @@ export function cardOf(s: IslandState, o: Order, buy?: BuyChoice): Card {
     else toBuy.push({ item: l.item, qty, unit, supplier: vendor, eta });
   }
   const anyToBuy = toBuy.length + tools.length > 0;
-  const sched: Arrival = { eta: anyToBuy ? schedEta : W, outWeeks: outWeeks(s, a, anyToBuy ? schedEta : W - 1) };
+  // scheduled freight: a shipment's charge for each supplier and carrier not already on its way this week (3.6)
+  const ship: { cost: number; shipments?: number; rides?: string } = anyToBuy ? schedFreight(s, [...toBuy.map((l) => ({ item: l.item, vendor: l.supplier })), ...tools.map((t) => ({ item: t.item, vendor: vendorFor(itemById(t.item)!, buy) }))]) : { cost: 0 };
+  const sched: Card['freight']['sched'] = {
+    eta: anyToBuy ? schedEta : W,
+    outWeeks: outWeeks(s, a, anyToBuy ? schedEta : W - 1),
+    cost: ship.cost,
+    ...(ship.rides ? { rides: ship.rides } : {}),
+    ...((ship.shipments ?? 0) > 1 ? { shipments: ship.shipments } : {}),
+  };
   const vendors = new Set([...toBuy.map((l) => l.supplier), ...tools.map((t) => vendorFor(itemById(t.item)!, buy))]);
   const aogCost = FREIGHT.aog * Math.max(1, vendors.size);
   const aog = anyToBuy && aogPossible ? { eta: W, outWeeks: outWeeks(s, a, W), cost: aogCost } : undefined;
   const down = asset?.kind === 'plane' ? downtimeOf(s, asset.id) : asset?.kind === 'house' ? { flights: 0, usd: Math.round(houseWeekRevenue(s, asset)) } : undefined;
   const saved = aog ? sched.outWeeks - aog.outWeeks : 0;
-  const auto: Freight = aog && saved > 0 && saved * (down?.usd ?? 0) > aog.cost ? 'aog' : 'sched';
+  const auto: Freight = aog && saved > 0 && saved * (down?.usd ?? 0) > aog.cost - sched.cost ? 'aog' : 'sched';
   const pick: Freight = buy?.freight && (buy.freight === 'sched' || aog) ? buy.freight : auto;
   const labour = pending ? o.cost : 0;
   const buyTotal = toBuy.reduce((n, l) => n + l.qty * l.unit, 0) + tools.reduce((n, t) => n + t.price, 0);
@@ -720,7 +761,7 @@ export function cardOf(s: IslandState, o: Order, buy?: BuyChoice): Card {
     toBuy,
     tools,
     freight: { sched, ...(aog ? { aog } : {}), pick },
-    total: Math.round(labour + buyTotal + (pick === 'aog' && aog ? aog.cost : 0)),
+    total: Math.round(labour + buyTotal + (pick === 'aog' && aog ? aog.cost : sched.cost)),
     aog: aogNow,
     restricted,
     shut: !!hz && hz.id === a?.id && !hz.safe,

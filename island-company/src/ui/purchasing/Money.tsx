@@ -122,13 +122,14 @@ function WhereItWent({ ctl }: { ctl: Ctl }) {
         />
       ) : null}
       <Legend items={[...STACK].reverse().map((k) => ({ color: GROUP_COLOR[k], name: GROUPS.find((g) => g.k === k)!.label, value: usd(m.where.groups.find((g) => g.k === k)!.usd) }))} />
+      {/* cash out, not a P&L: parts and stock are what the POs paid (shelf stock is working capital until it's used) */}
       <div class="money-line">
-        <span>Capex {usd(m.where.capex)}</span>
-        <span>Opex {usd(m.where.opex)}</span>
-        <span class="pd-muted">
-          over {m.where.weeks} week{m.where.weeks === 1 ? '' : 's'}
+        <span>
+          Cash out, {m.where.weeks} week{m.where.weeks === 1 ? '' : 's'}: capex {usd(m.where.capex)}
         </span>
+        <span>the rest {usd(m.where.opex)}</span>
       </div>
+      <span class="pd-note">Shop charges are the island's own techs' overtime, call-outs and outside help on a job, not their pay (that's payroll).</span>
       <BarRows rows={m.where.cats.map((c) => ({ key: c.k, label: c.label, value: c.usd, text: usd(c.usd) }))} />
       <div class="divider" />
       <span class="label">By trade</span>
@@ -195,9 +196,14 @@ function StockCard({ m, onFamily }: { m: MoneyVM; onFamily(fam: string): void })
           </div>
         </div>
         <div>
-          <div class="k">Cash tied up</div>
+          <div class="k">Cash in stock</div>
           <div class="val num">{usd(st.tiedUp)}</div>
-          <div class="s">stock + open POs · ~{usd(st.capital)}/wk of capital</div>
+          <div class="s">stock less what's still owed for it · ~{usd(st.capital)}/wk of capital</div>
+        </div>
+        <div>
+          <div class="k">Committed</div>
+          <div class="val num">{usd(st.committed)}</div>
+          <div class="s">open POs, not yet paid</div>
         </div>
         <div>
           <div class="k">Fill rate, 8 wk</div>

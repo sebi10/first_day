@@ -5,6 +5,8 @@
 //   npm run balance -- robust             # the two target teams over 90 seeds x 4 re-rolled crews (slow, a few minutes)
 //   npm run balance -- flow [team] [n]    # the first 40 alerts of one game: symptom, hidden cause, the bot's task and pick, the verdict, what came of it
 //   npm run balance -- cottages           # the three friends with an analyst who starts a cottage at tier 4 (the staff update's growth project)
+// The summary's `mistakes` crew is the three friends with a human's slips (a near-miss pick on one plan in ten, a
+// stock request a week): its money and latency next to the three friends' price the mistakes the bots don't make.
 import { causeOf, fixesOf, symptomOf } from '../src/sim/alerts';
 import { simulate, TEAMS, type Team } from '../src/sim/bots';
 import { stdPickFor, planTask } from '../src/sim/flow';
@@ -25,11 +27,31 @@ const med = (xs: number[]) => {
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 
 /** the job flow's numbers for one game, gathered week by week from the ledger rows and the week reports */
-type Flow = { latency: number[]; aog: Record<'stock' | 'approval' | 'plan' | 'carrier', number>; restricted: number; fill: [number, number]; wait: number; weeks: number };
+type Flow = {
+  latency: number[];
+  aog: Record<'stock' | 'approval' | 'plan' | 'carrier', number>;
+  restricted: number;
+  fill: [number, number];
+  wait: number;
+  weeks: number;
+  /** the human mistakes' price: receiving returns, install stops, stock requests, restocking fees ($), wiring faults met */
+  returns: number;
+  stops: number;
+  reqs: number;
+  restock: number;
+  wiring: number;
+};
 function flowTrace(): { f: Flow; trace: (s: IslandState) => void } {
-  const f: Flow = { latency: [], aog: { stock: 0, approval: 0, plan: 0, carrier: 0 }, restricted: 0, fill: [0, 0], wait: 0, weeks: 0 };
+  const f: Flow = { latency: [], aog: { stock: 0, approval: 0, plan: 0, carrier: 0 }, restricted: 0, fill: [0, 0], wait: 0, weeks: 0, returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0 };
   const closed = new Set<string>();
+  const stopped = new Set<string>();
+  const asked = new Set<string>();
+  const wired = new Set<string>();
   const trace = (s: IslandState) => {
+    const once = (seen: Set<string>, id: string) => !seen.has(id) && !!seen.add(id);
+    for (const o of s.orders) if (o.flow?.stop && once(stopped, o.id)) f.stops++;
+    for (const q of s.reqs ?? []) if (!q.order && once(asked, q.id)) f.reqs++;
+    for (const a of s.alerts ?? []) if (a.kind === 'wiring' && once(wired, a.id)) f.wiring++;
     const W = s.week - 1;
     f.weeks++;
     const row = s.ledger?.find((r) => r.w === W);
@@ -43,6 +65,12 @@ function flowTrace(): { f: Flow; trace: (s: IslandState) => void } {
     }
     const h = s.history.find((x) => x.week === W);
     if (h) f.restricted += h.lines.some((l) => / flew \d+ of \d+ with /.test(l.text)) ? 1 : 0;
+    for (const l of h?.lines ?? []) {
+      const m = /Returned: .+ \(\$([\d,]+) restocking\)/.exec(l.text);
+      if (!m) continue;
+      f.returns++;
+      f.restock += Number(m[1].replace(/,/g, ''));
+    }
     for (const a of s.alerts ?? []) {
       if (a.status !== 'closed' || closed.has(a.id) || !a.closed) continue;
       closed.add(a.id);
@@ -170,7 +198,7 @@ if (arg === 'detail') {
       : Object.entries(TEAMS);
   console.log(`\nPaper sim: ${WEEKS} weeks x ${SEEDS} seeds per team (medians unless noted)\n`);
   console.log(
-    'team            tier@26  wk→T2 wk→T3 wk→T4 wk→T5  %B+  min cash  weeks<0  incid/wk  defect/wk  rev/wk  latency  AOG wk (stk/apr/pln/car)  restr  fill%  wait/wk  inv@26  bins@26  payroll@26  late bld',
+    'team            tier@26  wk→T2 wk→T3 wk→T4 wk→T5  %B+  min cash  weeks<0  incid/wk  defect/wk  rev/wk  latency  AOG wk (stk/apr/pln/car)  restr  fill%  wait/wk  inv@26  bins@26  payroll@26  late bld  ret/stp/req  restock  wiring',
   );
   const t0 = Date.now();
   let sims = 0;
@@ -194,6 +222,7 @@ if (arg === 'detail') {
     const bins: number[] = [];
     const pay: number[] = [];
     let late = 0;
+    const slip = { returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0 };
     for (let seed = 1; seed <= SEEDS; seed++) {
       const { f, trace } = flowTrace();
       const { weeks, final, minCash } = simulate(team, WEEKS, seed, trace);
@@ -216,6 +245,7 @@ if (arg === 'detail') {
       fill[1] += f.fill[1];
       wait += f.wait;
       weeksAll += f.weeks;
+      for (const k of Object.keys(slip) as (keyof typeof slip)[]) slip[k] += f[k];
       inv.push(invValue(final));
       bins.push(binsInUse(final) / binsTotal(final));
       pay.push(payroll(final) / standardPayroll(final.tier));
@@ -228,7 +258,7 @@ if (arg === 'detail') {
     };
     const g = (n: number) => (n / SEEDS).toFixed(1);
     console.log(
-      `${name.padEnd(15)} ${String(med(tiers)).padStart(7)}   ${wk(2)}   ${wk(3)}   ${wk(4)}   ${wk(5)} ${String(Math.round((100 * bplus) / total)).padStart(4)} ${usd(Math.min(...mins)).padStart(9)} ${String(neg).padStart(8)} ${(inc / total).toFixed(2).padStart(9)} ${(def / total).toFixed(3).padStart(10)} ${usd(rev / total).padStart(7)} ${mean(lat).toFixed(2).padStart(8)}  ${`${g(aog.stock)}/${g(aog.approval)}/${g(aog.plan)}/${g(aog.carrier)}`.padStart(23)} ${g(restricted).padStart(6)} ${String(fill[1] ? Math.round((100 * fill[0]) / fill[1]) : 0).padStart(6)} ${(wait / Math.max(1, weeksAll)).toFixed(2).padStart(8)} ${usd(med(inv)).padStart(7)} ${`${Math.round(100 * med(bins))}%`.padStart(8)} ${`${Math.round(100 * med(pay))}%`.padStart(11)} ${`${Math.round((100 * late) / SEEDS)}%`.padStart(9)}`,
+      `${name.padEnd(15)} ${String(med(tiers)).padStart(7)}   ${wk(2)}   ${wk(3)}   ${wk(4)}   ${wk(5)} ${String(Math.round((100 * bplus) / total)).padStart(4)} ${usd(Math.min(...mins)).padStart(9)} ${String(neg).padStart(8)} ${(inc / total).toFixed(2).padStart(9)} ${(def / total).toFixed(3).padStart(10)} ${usd(rev / total).padStart(7)} ${mean(lat).toFixed(2).padStart(8)}  ${`${g(aog.stock)}/${g(aog.approval)}/${g(aog.plan)}/${g(aog.carrier)}`.padStart(23)} ${g(restricted).padStart(6)} ${String(fill[1] ? Math.round((100 * fill[0]) / fill[1]) : 0).padStart(6)} ${(wait / Math.max(1, weeksAll)).toFixed(2).padStart(8)} ${usd(med(inv)).padStart(7)} ${`${Math.round(100 * med(bins))}%`.padStart(8)} ${`${Math.round(100 * med(pay))}%`.padStart(11)} ${`${Math.round((100 * late) / SEEDS)}%`.padStart(9)}  ${`${g(slip.returns)}/${g(slip.stops)}/${g(slip.reqs)}`.padStart(11)} ${usd(slip.restock / SEEDS).padStart(8)} ${g(slip.wiring).padStart(7)}`,
     );
   }
   const ms = (Date.now() - t0) / Math.max(1, sims);
@@ -236,5 +266,6 @@ if (arg === 'detail') {
   console.log('AOG wk: plane-weeks grounded (or flying restricted) on an alert, per game, by why: not stocked / waiting on approval / not planned / the carrier.');
   console.log('latency: weeks from an alert to its sign-off. restr: weeks the only guest plane flew restricted, per game. fill%: main-slot value from stock at plan time, weeks 8-26.');
   console.log('payroll@26: the crew\'s payroll against the standard crew\'s. late bld: games where a new tier\'s buildings started before the builders finished them.');
+  console.log('ret/stp/req: receiving returns, install stops and stock requests per game; restock: restocking fees per game; wiring: wiring faults met per game (5.4).');
   console.log('\nExit test (spec phase 0): "no role can win alone" + "no week ends with cash < 0 under sensible play".');
 }

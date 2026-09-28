@@ -112,7 +112,7 @@ export function ReqQueue({ ctl }: { ctl: Ctl }) {
           <Seg<'sched' | 'aog'>
             value={choice.aog ? 'aog' : 'sched'}
             options={[
-              { v: 'sched', label: 'Scheduled · free' },
+              { v: 'sched', label: 'Scheduled' },
               { v: 'aog', label: `AOG boat · +${usd(FREIGHT.aog)} a PO` },
             ]}
             onChange={(v) => setChoice({ ...choice, aog: v === 'aog' })}
@@ -121,10 +121,10 @@ export function ReqQueue({ ctl }: { ctl: Ctl }) {
       </div>
       <Btn block disabled={!picked.length || busy} onClick={() => void approve()}>
         Approve {picked.length} · {usd(quote.total)}
-        {quote.freight ? ` (boat ${usd(quote.freight)})` : ''}
+        {quote.freight ? ` (freight ${usd(quote.freight)})` : ''}
       </Btn>
       <span class="label center">
-        {quote.pos} PO{quote.pos === 1 ? '' : 's'}: one per supplier and carrier. Committed now, paid a week after it lands.
+        {quote.pos} PO{quote.pos === 1 ? '' : 's'}: one per supplier and carrier (scheduled freight is per shipment: a PO riding one already on its way adds none). Committed now, paid a week after it lands.
       </span>
     </div>
   );

@@ -179,9 +179,9 @@ describe('money per job', () => {
     // the exempt list: an altered airplane's ICA part is dearer by design (CHAIN.icaMult)
     console.log(`band: ${n} combinations; ICA picks exempt:\n  ${[...exempt].sort().join('\n  ')}\ncheap fixes under a dear kind (labour capped):\n  ${[...cheap].sort().join('\n  ')}`);
     expect(out).toEqual([]);
-    // only the cheap causes under a dear kind are capped (the belt, the com's connector or a write-up with no unit, a tube under the tire's card at the
-    // top tiers): every other job keeps today's card
-    expect([...new Set([...cheap].map((x) => `${x.split('#')[0]} ${x.split(' ')[1].split(':').pop()}`))].sort()).toEqual(['M_BELT_SQUEAL 24-30-02', 'M_COM_INTERMITTENT 23-10-01', 'M_LOW_VOLTS 24-30-02', 'M_TIRE_PRESSURE 32-40-01', 'W_avionics 23-10-01']);
+    // only the cheap causes under a dear kind are capped (the belt, the com's connector, a tube under the tire's card at the top tiers): every
+    // other job keeps today's card (a com radio write-up now carries the radio it names)
+    expect([...new Set([...cheap].map((x) => `${x.split('#')[0]} ${x.split(' ')[1].split(':').pop()}`))].sort()).toEqual(['M_BELT_SQUEAL 24-30-02', 'M_COM_INTERMITTENT 23-10-01', 'M_LOW_VOLTS 24-30-02', 'M_TIRE_PRESSURE 32-40-01']);
     expect(n).toBeGreaterThan(1000);
   });
 });

@@ -240,8 +240,8 @@ const BOXES: Item[] = [
 /** job lots for the rare jobs: the supply house's quote for the take-off (4.4) */
 const LOTS: Item[] = [
   el('LOT-STORM', { nomen: 'Storm repair lot: 50 ft UF-B 12/2, two 20 A TR/WR receptacles, two weatherproof boxes, an in-use cover, connectors', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 260, nec: ['110.11', '334.12(B)(4)', '406.9(B)(1)'], tags: ['storm', 'lot', 'uf-b', 'weatherproof'] }),
-  el('LOT-DIST', { nomen: 'Distribution panel upgrade lot: 400 A distribution panelboard, feeder lugs, two ground rods, the GEC and clamps', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 1400, lead: 2, bulk: true, nec: ['408', '250.52(A)(5)', '250.53(A)'], tags: ['panel', 'panelboard', 'distribution', 'upgrade', 'lot', '400a'] }),
-  el('LOT-XFER', { nomen: 'Transfer switch upgrade lot: 100 A manual transfer switch (listed), conductors and breakers', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 900, lead: 2, bulk: true, nec: ['702.4(B)', '702.5'], tags: ['transfer', 'switch', 'ats', 'generator', 'standby', 'lot'] }),
+  el('LOT-DIST', { nomen: 'Distribution panel upgrade lot: 600 A distribution panelboard, feeder lugs, two ground rods, the GEC and clamps', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 1400, lead: 2, bulk: true, nec: ['408', '250.52(A)(5)', '250.53(A)'], tags: ['panel', 'panelboard', 'distribution', 'upgrade', 'lot', '600a'] }),
+  el('LOT-XFER', { nomen: 'Transfer switch upgrade lot: 200 A manual transfer switch (listed for the backed-up load), conductors and breakers', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 900, lead: 2, bulk: true, nec: ['702.4(B)', '702.5'], tags: ['transfer', 'switch', 'ats', 'generator', 'standby', 'lot', '200a'] }),
   el('LOT-DOCK', { nomen: 'Fuel dock run lot: RMC and a seal fitting with compound for the classified section, THWN-2 by the foot, a 2-pole 30 A GFPE breaker', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 420, nec: ['514.8', '514.9', '555.35'], tags: ['fuel', 'dock', 'rmc', 'seal', 'gfpe', 'classified', 'lot'] }),
 ];
 
@@ -256,6 +256,8 @@ const TOOLS: Item[] = [
   tool('T-TW-FT', 'mech', 'Torque wrench 20-150 ft-lb with crowfoot adapters', 240, ['AC 43.13-1B 7-40'], ['torque', 'wrench', 'ft-lb', 'crowfoot']),
   tool('T-DIFF', 'mech', 'Differential compression tester with master orifice', 210, ['AC 43.13-1B 8-14'], ['compression', 'tester', 'differential', 'leakdown']),
   tool('T-N2', 'mech', 'Nitrogen charging kit: regulator, hose and gauge', 480, ['AMM 29-10-01 accumulator precharge'], ['nitrogen', 'n2', 'charging', 'accumulator', 'precharge', 'gauge']),
+  tool('T-RIVET', 'mech', 'Brake lining rivet tool: press, rolling and flaring heads, anvils', 160, ['AMM 32-40-02 lining replacement'], ['rivet', 'lining', 'brake', 'press', 'reline', 'set']),
+  tool('T-UVA', 'mech', 'UV-A lamp, 365 nm, with a UV-A radiometer and white-light meter', 290, ['ASTM E1417 (Type I fluorescent: UV-A at the part, ambient light)'], ['uv', 'uva', 'black', 'light', 'lamp', 'penetrant', 'fluorescent', 'ndt']),
   tool('T-CLAMP', 'elec', 'Clamp meter, true-RMS, CAT III 600 V', 180, ['NFPA 70E 110.8', 'UL 61010-1'], ['meter', 'clamp', 'amps', 'multimeter', 'true-rms']),
   tool('T-TORQUE', 'elec', 'Torque screwdriver 5-50 in-lb and lug torque wrench', 260, ['110.14(D)'], ['torque', 'screwdriver', 'lug', 'termination']),
   tool('T-MEGGER', 'elec', 'Insulation resistance tester 500/1000 V', 620, ['110.7'], ['megger', 'insulation', 'tester', 'megohm', 'resistance']),

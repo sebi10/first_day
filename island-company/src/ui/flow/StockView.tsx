@@ -31,7 +31,8 @@ export function StockView({ ctl, role, onClose }: { ctl: Ctl; role: OpsRole; onC
   const ended = !!s.turns[role]?.ended;
   const lines = Object.entries(s.inv ?? {})
     .map(([id, l]) => ({ id, l, x: itemById(id) }))
-    .filter((r): r is { id: string; l: NonNullable<IslandState['inv']>[string]; x: Item } => !!r.x && r.x.trade === role && r.x.kind !== 'tool' && (r.l.on > 0 || r.l.rop !== undefined))
+    // what's on the shelf or on its way: the analyst's min/max isn't shown (on a near-miss shelf it would say which P/N is the one)
+    .filter((r): r is { id: string; l: NonNullable<IslandState['inv']>[string]; x: Item } => !!r.x && r.x.trade === role && r.x.kind !== 'tool' && (r.l.on > 0 || onOrderFree(s, r.id).qty > 0))
     .sort((a, b) => (a.x.cat < b.x.cat ? -1 : a.x.cat > b.x.cat ? 1 : a.x.pn < b.x.pn ? -1 : 1));
   const tools = ix.docs.map((d) => itemById(d.ref.item ?? '')).filter((x): x is Item => !!x && x.kind === 'tool');
   const hits = q ? search(ix, q, { limit: 20 }).map((h) => itemById(h.doc.ref.item ?? '')).filter((x): x is Item => !!x) : [];
@@ -49,7 +50,6 @@ export function StockView({ ctl, role, onClose }: { ctl: Ctl; role: OpsRole; onC
     const free = available(s, x.id);
     const res = reservedOf(s, x.id);
     const ord = onOrderFree(s, x.id);
-    const line = s.inv?.[x.id];
     return (
       <div key={x.id} class="jf-inv-row" role="listitem">
         <span class="col grow" style={{ gap: 2, minWidth: 0 }}>
@@ -57,7 +57,6 @@ export function StockView({ ctl, role, onClose }: { ctl: Ctl; role: OpsRole; onC
           <span class="label">
             {x.trade === 'elec' ? `${x.pn} · ` : ''}
             {CAT_LABEL[x.cat]}
-            {line?.rop !== undefined ? ` · min ${line.rop} / max ${line.max}` : ''}
           </span>
           <span class="row wrap" style={{ gap: 4 }}>
             <span class={`jf-badge ${free > 0 ? 'ok' : on > 0 ? 'short' : 'none'}`}>

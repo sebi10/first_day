@@ -5,7 +5,7 @@
 // analytics on hand-built ledgers.
 import { describe, expect, it } from 'vitest';
 import { raiseAlert, SYMPTOMS } from '../src/sim/alerts';
-import { STOCK, SUPPLIERS } from '../src/sim/data';
+import { FREIGHT, STOCK, SUPPLIERS } from '../src/sim/data';
 import { apply, createIsland } from '../src/sim/engine';
 import { fixTaskFor, stdPickFor } from '../src/sim/flow';
 import { allItems, famOf, itemById, priceAt } from '../src/sim/items';
@@ -33,6 +33,7 @@ import {
   receive,
   replenish,
   reservedFor,
+  schedFreight,
   scrapItem,
   stockFlags,
   suggestRop,
@@ -115,8 +116,10 @@ describe('receiving (9.4)', () => {
     expect(p).toMatchObject({ freight: 'sched', eta: 5 });
     const cost = p.cost;
     said.length = 0;
+    const sched = p.freightCost;
     receive(s, 5, { guest: 0, cargo: 0 }, line);
-    expect(p).toMatchObject({ status: 'received', freight: 'aog', freightCost: 350 });
+    // the boat is the island leg on top of the mainland shipment already charged
+    expect(p).toMatchObject({ status: 'received', freight: 'aog', freightCost: sched + 350 });
     expect(p.cost).toBe(cost + 350);
     expect(said.some((t) => /and a job it serves grounds its asset: the AOG boat brought it \(\$350\)\.$/.test(t))).toBe(true);
     expect(orderOf(s, r.o.id).status).toBe('ready');
@@ -179,7 +182,7 @@ describe('receiving (9.4)', () => {
     const h = held[0];
     expect(h.hold).toBe(7);
     expect(h.lines[0].hold).toBe(SUPPLIERS.broker.doc!.part);
-    expect(h.notes![0]).toMatch(/^held: no traceability/);
+    expect(h.notes!.some((n) => /^held: no traceability/.test(n))).toBe(true);
     expect(said.some((x) => /^Receiving: the broker's .+ has no traceability paperwork: quarantined until the vendor sends it \(next week\)\.$/.test(x))).toBe(true);
     const on = onHand(t, part);
     receive(t, 7, { guest: 0, cargo: 0 }, line);
@@ -208,6 +211,28 @@ describe('receiving (9.4)', () => {
     expect(onHand(s, 'B-19413-1')).toBe(0);
     expect(poOf(s, 'B-19413-1').notes).toContain('shipped as B-19413-3 (supersedes B-19413-1, INTCHG 2)');
     expect(onHand(s, '066-19500')).toBe(onOld + 4);
+  });
+
+  it('supersession with part of a pick already reserved: the old P/N on the shelf stays reserved, what came joins it as the new P/N', () => {
+    let s = island();
+    s.inv!['B-19413-1'] = { on: 2 };
+    s.inv!['B-19413-3'] = { on: 0 };
+    const al = raise(s, 'M_PROP_VIB', 0, 'p1');
+    const r = plan(s, al, [{ item: 'B-19413-1', qty: 6, slot: 'propBolt' } as { item: string; qty: number }]);
+    s = r.s;
+    expect(reservedFor(s, r.o.id, 'B-19413-1')).toBe(2);
+    if (orderOf(s, r.o.id).status === 'pending') s = ok(s, { t: 'approve', orderId: r.o.id, week: 5 });
+    const po = s.pos!.find((p) => p.lines.some((l) => l.order === r.o.id && l.item === 'B-19413-1'))!;
+    expect(po.lines.find((l) => l.item === 'B-19413-1')!.qty).toBe(4);
+    receive(s, 5, FLEW, line, () => ({ ok: true, text: '' }));
+    const o = orderOf(s, r.o.id);
+    // 2 old bolts held + 4 new ones that came: the job is whole, and consume takes 6
+    expect(o.flow!.pick.filter((l) => l.item === 'B-19413-1').reduce((n, l) => n + l.qty, 0)).toBe(2);
+    expect(o.flow!.pick.filter((l) => l.item === 'B-19413-3').reduce((n, l) => n + l.qty, 0)).toBe(4);
+    expect(reservedFor(s, o.id, 'B-19413-1')).toBe(2);
+    expect(reservedFor(s, o.id, 'B-19413-3')).toBe(4);
+    expect(o.status).toBe('ready');
+    expect(po.notes).toContain('shipped as B-19413-3 (supersedes B-19413-1, INTCHG 2)');
   });
 
   it('against the work order: a wrong or unlisted part goes back (credit less restocking) and stops the job; displaced opens research; not effective passes', () => {
@@ -400,8 +425,68 @@ describe('replenishment, bins, the carrying charge, commitments and payment (9.5
     expect(committed(s)).toBe(0);
     const row = s.ledger!.find((l) => l.w === s.week)!;
     expect(row.cr).toBe(5);
-    expect(row.sp.consumables).toBeCloseTo(p.cost, 2);
+    // the lines to their category, the shipment's freight to freight, what the match caught off the parts
+    expect(row.sp.consumables).toBeCloseTo(p.cost - p.freightCost, 2);
+    expect(row.sp.freight).toBe(p.freightCost);
     expect(row.sp.parts).toBe(-10);
+  });
+
+  it('scheduled freight is per shipment: the first PO of a supplier and carrier pays it, the next one landing the same week rides free', () => {
+    const s = island();
+    const [a] = placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0);
+    expect(a).toMatchObject({ freight: 'sched', eta: 5, freightCost: FREIGHT.sched.mech });
+    expect(a.cost).toBe(Math.round((a.lines[0].qty * a.lines[0].unit + FREIGHT.sched.mech) * 100) / 100);
+    const [b] = placePo(s, [{ item: 'MS24665-302', qty: 1 }], {}, 'fin', 0);
+    expect(b.freightCost).toBe(0);
+    expect(b.notes).toContain(`rides with ${a.id}'s shipment: no extra freight`);
+    // another carrier (bulk rides the cargo flight) is its own shipment, and so is the electrical supplier's
+    const [c] = placePo(s, [{ item: 'MIL-PRF-5606', qty: 12 }], {}, 'fin', 0);
+    expect(c).toMatchObject({ carrier: 'bulk', freightCost: FREIGHT.sched.mech });
+    const [d] = placePo(s, [{ item: 'KR20-TR', qty: 10 }], {}, 'fin', 0);
+    expect(d.freightCost).toBe(FREIGHT.sched.elec);
+    // the quote says the same before the buy
+    expect(schedFreight(s, [{ item: 'AN900-10' }])).toMatchObject({ cost: 0, rides: a.id });
+    expect(schedFreight(s, [{ item: 'AN900-10' }, { item: 'LOT-DIST' }]).cost).toBe(FREIGHT.sched.elec);
+    // a broker's lot (its price is delivered) and the migration's POs carry none; the AOG boat is its own charge
+    expect(placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0, { noFreight: true })[0].freightCost).toBe(0);
+    expect(placePo(s, [{ item: 'LOT-DIST', qty: 1 }], { freight: 'aog' }, 'fin', 0)[0].freightCost).toBe(FREIGHT.aog);
+    // a replenishment placed at the resolve lands next week: next week's buys ride with it
+    const t = island();
+    t.inv!['AN900-10'] = { ...t.inv!['AN900-10'], on: 0, rop: 5, max: 25 };
+    const rep = replenish(t, 5, line).find((p) => p.lines.some((l) => l.item === 'AN900-10'))!;
+    expect(rep).toMatchObject({ eta: 6, freightCost: FREIGHT.sched.mech });
+    t.week = 6;
+    expect(placePo(t, [{ item: 'MS24665-302', qty: 1 }], {}, 'fin', 0)[0].freightCost).toBe(0);
+  });
+
+  it('the three-way match: the overbilling rides on last week’s POs, and what the match finds comes off their payment', () => {
+    for (const score of [1, 0.5, 0]) {
+      let s = island();
+      // week 5: $620 of prop bolts lands at the resolve
+      const [p] = placePo(s, [{ item: 'B-19413-1', qty: 10 }], {}, 'fin', 0);
+      for (const role of ROLES) s = ok(s, { t: 'endTurn', role, week: 5 });
+      expect(s.week).toBe(6);
+      const po = s.pos!.find((x) => x.id === p.id)!;
+      expect(po).toMatchObject({ status: 'received', got: 5 });
+      // week 6: the match (about 3% of the spend, plus a bad invoice now and then) is on that PO
+      const task = s.orders.find((o) => o.kind === 'invoice' && o.createdWeek === 6)!;
+      expect(task).toBeTruthy();
+      expect(task.leak).toBeGreaterThanOrEqual(60);
+      expect(po.over).toBe(task.leak);
+      if (score > 0) s = ok(s, { t: 'complete', role: 'fin', orderId: task.id, score, perfect: score === 1, week: 6 });
+      const cash0 = s.cash;
+      for (const role of ROLES) s = ok(s, { t: 'endTurn', role, week: 6 });
+      const after = s.pos!.find((x) => x.id === p.id)!;
+      expect(after.status).toBe('paid');
+      expect(after.caught ?? 0).toBe(Math.round(task.leak! * score));
+      // what the vendor got: the PO less what the match caught (the rest of the overbilling is paid, booked to parts)
+      const row = s.ledger!.find((l) => l.w === 6)!;
+      expect(row.sp.parts ?? 0).toBeCloseTo(after.lines[0].qty * after.lines[0].unit + (after.over! - (after.caught ?? 0)), 2);
+      // the invoice's overbilling isn't a separate leak: only the week's other hunts (skipped here) are
+      const others = s.orders.filter((o) => o.role === 'fin' && o.createdWeek === 6 && o.kind !== 'invoice' && o.kind !== 'report' && o.leak).reduce((n, o) => n + (o.leak ?? 0), 0);
+      expect(s.history.at(-1)!.costs.leak).toBe(others);
+      expect(cash0).toBeGreaterThan(s.cash);
+    }
   });
 
   it('scrap: a part goes back for 75% of its cost as store credit; a consumable is written off', () => {
@@ -465,6 +550,10 @@ describe('the analyst’s analytics (14.2)', () => {
     expect(insuranceSpare(s, 'radio')).toBe(true);
     expect(insuranceSpare(s, famOf('KG20-TR'))).toBe(true);
     expect(insuranceSpare(s, famOf('AN900-10'))).toBe(false);
+    // a spa panel is install material with weeks of lead, bought for its take-off: not a spare, GFCI and all
+    expect(insuranceSpare(s, famOf('SPA-60GF'))).toBe(false);
+    // a relining's rivets go with the linings kept as a spare
+    expect(insuranceSpare(s, famOf('105-00500'))).toBe(true);
   });
 
   it('suggestRop: lead × use + z × spread × √lead, and a max a pack (or two weeks’ use) over it; one job’s worth for an insurance spare', () => {
@@ -505,6 +594,25 @@ describe('the analyst’s analytics (14.2)', () => {
     expect(stockFlags({ ...s }).some((x) => x.kind === 'bins' && x.text === `Stores ${binsTotal(s) - 1}/${binsTotal(s)} bins: 1 free.`)).toBe(true);
   });
 
+  it('no stop flag on a line something still wants: a forecast, an open job, a PO on its way; none on a never-used line before it is dead', () => {
+    const stops = (x: IslandState) => stockFlags(x).filter((f) => f.kind === 'stop').map((f) => f.fam);
+    const dead = famOf('SAE-J1899-50');
+    const s = withLedger({});
+    expect(stops(s)).toContain(dead);
+    // a PO for the family on its way: it's still wanted
+    const t = withLedger({});
+    placePo(t, [{ item: 'SAE-J1899-50', qty: 1 }], {}, 'fin', 0);
+    expect(stops(t)).not.toContain(dead);
+    // a forecast: the family moved lately
+    const u = withLedger({ 'SAE-J1899-50': [...Array(22).fill(0), 1, 1, 1, 0] });
+    expect(stops(u)).not.toContain(dead);
+    // never used, a min/max, 12 weeks of ledger: slow, not dead: too early to call
+    const v = withLedger({}, 12);
+    v.inv!['SAE-J1899-50'].rop = 1;
+    expect(moveClass(v, dead)).toBe('slow');
+    expect(stops(v)).not.toContain(dead);
+  });
+
   it('needs: what nobody has planned, in plain words, no P/N', () => {
     const s = island();
     raise(s, 'M_BRAKE_SOFT', 1, 'p2', 5);
@@ -525,6 +633,11 @@ describe('the analyst’s analytics (14.2)', () => {
       expect(['tool', 'lot', 'rotable']).not.toContain(x.kind);
       expect(x.trade).not.toBe('build');
       expect(priceAt(x)).toBeLessThanOrEqual(STOCK.lotMaxUnit);
+    }
+    // one trade's supplier: never a mix of the mechanic's and the electrician's stock
+    for (let seed = 1; seed < 40; seed++) {
+      const l = auctionLot(s, rng(seed));
+      if (l) expect(new Set(l.lines.map((x) => itemById(x.item)!.trade)).size).toBe(1);
     }
     expect(lot.fair).toBeLessThan(lot.list);
     // nothing used and no min/max below its max: no lot

@@ -122,7 +122,7 @@ const ITEMS: Record<string, ItemDef> = {
   // a new element is the whole fix for a clogged one; metal in it would mean a pump coming apart, and a flush
   filter: { name: () => 'hydraulic filter element', how: 'damaged', found: () => 'clogged: bypass indicator extended at the scheduled change; the element cut open shows fine sludge, no metal' },
   resCap: { name: () => 'hydraulic reservoir filler cap', how: 'missing', found: () => 'missing: the reservoir was left open under the panel' },
-  radio: { name: () => 'com radio', how: 'gone', found: () => 'is dead on transmit, and receive is weak' },
+  radio: { name: () => 'com radio', how: 'gone', found: () => 'is dead on transmit (it receives fine)' },
   generator: {
     name: (m) => (m === 'cargo' ? 'starter-generator' : 'alternator'),
     how: 'gone',

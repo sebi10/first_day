@@ -9,12 +9,13 @@
 // the island and the alert (the seed, the code, the stored state), and nothing
 // here reads an alert's hidden cause except what the teaching tiers already
 // show (A's hintsFor and pickCheck). The UI keeps the draft in sessionStorage.
-import { alertFlags, alertTier, causeOf, prefilledTask, protectionNeeded, siteOf } from '../../sim/alerts';
+import { alertFlags, alertTier, causeOf, lowerFirst, prefilledTask, protectionNeeded, siteOf } from '../../sim/alerts';
 import { ECON, ROLE_LABEL } from '../../sim/data';
 import { acOf, judgeSlot, laborCost, planTask, repairLabor, stdPickFor } from '../../sim/flow';
 import { buyUnits, itemById, priceAt, unitWords } from '../../sim/items';
 import { hintsFor, ipcIndex, manualIndex, search, supplyIndex, type Doc } from '../../sim/search';
-import { available, isSafetyJob, onOrderFree, owned, reservedFor, spendable, toolComing, vendorFor } from '../../sim/stock';
+import { available, isSafetyJob, onOrderFree, owned, reservedFor, schedFreight, spendable, toolComing, vendorFor } from '../../sim/stock';
+import { lateSafeAlert, standingWords } from '../select';
 import { benchFor, fixedFor, plannable, slotQty, slotsAt, taskById, tasksFor, type MainSlot, type Task } from '../../sim/tasks';
 import type { Action, Alert, Asset, ElecSite, IslandState, Item, ItemId, OpsRole, Order, PickLine, TaskId } from '../../sim/types';
 
@@ -100,15 +101,31 @@ export const nextAfterTask = (s: IslandState, a: Alert, t: Task): StepKey => (ha
 export type StepState = 'done' | 'now' | 'todo' | 'skip';
 
 /** the stepper's five dots: what's done, where the draft is, what's left, what doesn't apply */
-export function stepper(s: IslandState, a: Alert, d: Pick<Draft, 'step' | 'task'>): { key: StepKey; label: string; state: StepState }[] {
+export function stepper(s: IslandState, a: Alert, d: Pick<Draft, 'step' | 'task'> & Partial<Pick<Draft, 'pick' | 'research'>>): { key: StepKey; label: string; state: StepState }[] {
   const task = taskFor(s, a, d.task);
   const at = STEPS.indexOf(d.step);
+  // Materials isn't done while a required slot is empty (Stock and Send say which)
+  const short = d.pick ? missingSlot(s, a, { task: d.task, pick: d.pick, research: d.research }) : null;
   return STEPS.map((key, i) => ({
     key,
     label: stepLabel(key, a.role),
-    state: !applies(s, a, key, task) ? 'skip' : i < at ? 'done' : i === at ? 'now' : 'todo',
+    state: !applies(s, a, key, task) ? 'skip' : i < at ? (key === 'parts' && short ? 'todo' : 'done') : i === at ? 'now' : 'todo',
   }));
 }
+
+/**
+ * The first required slot the pick leaves empty (not "if needed"; an outdoor cover counts: it only shows outdoors),
+ * or null. It reads the task and the site, never the alert's hidden cause: an "if needed" slot the fault needs is
+ * the install check's to catch, as it is on a real job
+ */
+export function missingSlot(s: IslandState, a: Alert, d: Pick<Draft, 'task' | 'pick'> & Partial<Pick<Draft, 'research'>>): MainSlot | null {
+  const t = taskFor(s, a, d.task);
+  if (!t || t.fixed || a.repair) return null;
+  return slotsFor(s, a, t).find((m) => (!m.optional || m.outdoor) && !filled({ pick: d.pick, research: d.research }, m)) ?? null;
+}
+
+/** "Pick the GFCI device ▸": Send's label while a required slot is empty */
+export const pickFirstWords = (m: MainSlot) => `Pick the ${lowerFirst(m.label)}`;
 
 // ---------------------------------------------------------------------------
 // The draft
@@ -456,7 +473,7 @@ export function stockRows(s: IslandState, a: Alert, d: Draft): StockRow[] {
 // What Send will come to, and what it dispatches
 
 export type Preview = {
-  outcome: 'ready' | 'card' | 'research' | 'reqs' | 'repriced';
+  outcome: 'ready' | 'card' | 'research' | 'reqs' | 'repriced' | 'incomplete';
   /** lines fully on the shelf, lines with something to buy, tools to buy */
   pull: number;
   buy: number;
@@ -514,8 +531,16 @@ export function preview(s: IslandState, a: Alert, d: Draft): Preview {
   const onHand = buy === 0 && rows.every((r) => r.from !== 'tool' || r.badge === 'owned');
   const fin = nameOf(s, 'fin');
   const base = { pull, buy, tools, labour, safety, budget: { spent, of } };
-  const lateWords = s.turns.fin?.ended ? `${fin} has ended the turn: it goes through tonight on the standing approval (up to ${usd(standingLimit(s))} this week) unless ${fin} defers it.` : undefined;
   const o = d.order ? s.orders.find((x) => x.id === d.order) : undefined;
+  // a required slot left empty: nothing to send yet (the start would stop on it)
+  const gap = missingSlot(s, a, d);
+  if (gap) return { ...base, outcome: 'incomplete', text: `${pickFirstWords(gap)} first: this job needs ${/^[aeiou]/i.test(gap.label) ? 'an' : 'a'} ${lowerFirst(gap.label)}, and none is picked.` };
+  // the card's total as the analyst will see it (labour, the lines to buy, the tools, a shipment's freight), and the
+  // standing approval's own rule for it: over the limit it waits, unless it's safety work due this week or next
+  const bought = rows.reduce((n, r) => n + (r.buy > 0 ? r.value : 0), 0);
+  const freight = buy + tools > 0 ? schedFreight(s, rows.filter((r) => r.buy > 0).map((r) => ({ item: r.item }))).cost : 0;
+  const total = labour + bought + freight;
+  const lateWords = standingWords(s, total, safety, lateSafeAlert(s, a)) ?? undefined;
   if (d.research) {
     const others = pull + buy ? ` The rest: pull ${pull}${buy ? ` · buy ${buy}` : ''}.` : '';
     return { ...base, outcome: 'research', text: `Not in the IPC: the job waits on the research branch (next, the airplane's logbooks).${others}` };
@@ -537,10 +562,7 @@ export function preview(s: IslandState, a: Alert, d: Draft): Preview {
   let text: string;
   if (onHand && !cashOk) text = `All on hand, but spendable cash is under ${usd(ECON.freezeBelow)}: a labour-only card for ${fin} (${usd(labour)}).`;
   else if (onHand) text = `All on hand, but over your work budget (${usd(spent + labour)} of ${usd(of)}): a labour-only card for ${fin} (${usd(labour)}).`;
-  else {
-    const bought = rows.reduce((n, r) => n + (r.buy > 0 ? r.value : 0), 0);
-    text = `Pull ${pull} · buy ${buy}${tools ? ` · ${tools} tool${tools > 1 ? 's' : ''}` : ''} · labour ${usd(labour)}: a card for ${fin}, about ${usd(labour + bought)} in all.`;
-  }
+  else text = `Pull ${pull} · buy ${buy}${tools ? ` · ${tools} tool${tools > 1 ? 's' : ''}` : ''} · labour ${usd(labour)}${freight ? ` · freight ${usd(freight)}` : ''}: a card for ${fin}, about ${usd(total)} in all.`;
   return { ...base, outcome: 'card', text, ...(lateWords ? { late: lateWords } : {}) };
 }
 
@@ -549,6 +571,8 @@ export function sendAction(s: IslandState, a: Alert, d: Draft): Action | { error
   const t = taskFor(s, a, d.task);
   if (!t) return { error: a.role === 'elec' ? 'Find the procedure first.' : 'Find the task first.' };
   if (!plannable(t) && !a.repair) return { error: "That's reference only: pick the task that does the work." };
+  const gap = missingSlot(s, a, d);
+  if (gap) return { error: `${pickFirstWords(gap)} first: this job needs one.` };
   const pick = t.fixed ? [] : d.pick.filter((l) => !(d.research && l.slot === d.research)).map((l) => ({ item: l.item, qty: l.qty, ...(l.slot ? { slot: l.slot } : {}) }));
   const research = d.research ? { research: true } : {};
   if (d.order) return { t: 'repick', role: a.role, order: d.order, pick, ...research };
@@ -654,12 +678,20 @@ export function recentTasks(s: IslandState, assetId: string, n = 5): { task: Tas
 }
 
 /** the electrical site in a line: "Bathroom · 20 A breaker, 12 AWG NM-B · downstream of a GFCI" */
-export function siteWords(site: ElecSite | null): string {
+export function siteWords(site: ElecSite | null, takeoff = false): string {
   if (!site) return '';
+  // a take-off is a new circuit: no conductors to read yet (the conductors are the take-off's answer), so the
+  // equipment it feeds and the run's length; a repair reads the breaker and the wire that are there
+  if (takeoff) {
+    if (site.room === 'spa') return `Spa: 240 V, needs a ${site.amps} A GFCI disconnect · pad ${site.feet ?? 40} ft from the panel`;
+    if (site.room === 'dock') return `Fuel dock pump: 240 V, ${site.amps} A · ${site.feet ?? 80} ft underground from the panel`;
+    if (site.room === 'gen') return `Transfer switch: ${site.amps} A today · the houses back up ${site.load ?? site.amps} A`;
+  }
   const room = { bath: 'Bathroom', kitchen: 'Kitchen', bedroom: 'Bedroom', living: 'Living room', laundry: 'Laundry', outdoor: 'Porch (wet location)', hall: 'Hall', panel: 'Distribution panel', spa: 'Spa pad (outdoors)', dock: 'Fuel dock', gen: 'Generator house' }[site.deviceRoom ?? site.room];
   // a non-breaking hyphen: "NM-B" never splits at the end of a line
   const wire = site.run === 'buried' ? 'underground' : site.run === 'nm' ? 'NM\u2011B' : '';
-  const parts = [room, `${site.amps} A breaker, ${site.awg} AWG${wire ? ` ${wire}` : ''}`];
+  // the circuit's own equipment when it isn't the room's (the water heater's 2-pole, not the bathroom's)
+  const parts = [site.what ?? room, `${site.amps} A ${site.poles === 2 ? '2\u2011pole ' : ''}breaker, ${site.awg} AWG${wire ? ` ${wire}` : ''}`];
   if (site.single) parts.push(`an individual circuit${site.appliance ? ` (the ${site.appliance})` : ''}`);
   if (site.upstream === 'gfci') parts.push('downstream of a GFCI');
   if (site.upstream === 'afci') parts.push('on an AFCI breaker');

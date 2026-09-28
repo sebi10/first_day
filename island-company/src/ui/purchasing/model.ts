@@ -10,7 +10,7 @@ import { DEFAULT_SUPPLIER, FREIGHT, MODELS, ROLE_LABEL, STOCK, SUPPLIERS } from 
 import { expectedDeferralCost, fixedNow, outOfService, projectWeek, tierDef, urgency } from '../../sim/econ';
 import { cardOf, repairTask, type Card } from '../../sim/flow';
 import { allItems, buyUnits, famOf, itemById, priceAt } from '../../sim/items';
-import { assetSpend, capitalCost, committed, fillRate, payable, poOwed, runway, spendable, spendSeries, stockBuiltUsed, tradeSpend, waitWeeks, type OutCat } from '../../sim/ledger';
+import { assetSpend, capitalCost, cashInStock, committed, fillRate, payable, poOwed, runway, spendable, spendSeries, stockBuiltUsed, tradeSpend, waitWeeks, type OutCat } from '../../sim/ledger';
 import { search, supplyIndex } from '../../sim/search';
 import { payroll, STAFF, NPC_ROLES } from '../../sim/staff';
 import {
@@ -21,6 +21,8 @@ import {
   carrierOf,
   etaOf,
   families,
+  flowRows,
+  flowWeeks,
   insuranceSpare,
   invValue,
   jobLines,
@@ -33,6 +35,7 @@ import {
   reqValue,
   reservedFor,
   reservedOf,
+  schedFreight,
   stockFlags,
   suggestRop,
   unitCost,
@@ -43,6 +46,7 @@ import {
   type StockFlag,
 } from '../../sim/stock';
 import { taskById } from '../../sim/tasks';
+import { shipWords } from '../select';
 import type { Action, Alert, BuyChoice, Freight, IslandState, Item, ItemId, ItemTrade, NpcRole, OpsRole, Order, PurchaseOrder, Requisition, Role, SupplierId } from '../../sim/types';
 
 // ---------------------------------------------------------------------------
@@ -205,7 +209,10 @@ export type Tone = 'rust' | 'sea' | 'palm' | 'ink' | 'amber' | '';
 export type ChipVM = { text: string; tone: Tone };
 export type LineVM = { item: ItemId; pn: string; nomen: string; qty: number; qtyText: string; value: number };
 export type BuyLineVM = LineVM & { unit: number; supplier: SupplierId; eta: number; etaText: string; tool?: boolean };
-export type FreightVM = { eta: number; text: string; out: string; cost?: number };
+/** a freight choice in words; `ship`: the scheduled shipment's charge in words ("+$35 freight: its own shipment") */
+export { shipWords };
+
+export type FreightVM = { eta: number; text: string; out: string; cost?: number; ship?: string };
 export type CardVM = {
   id: string;
   title: string;
@@ -231,8 +238,8 @@ export type CardVM = {
   waitCost: number;
   /** came after the analyst ended the turn: what happens to it tonight */
   late?: string;
-  /** an MEL placard on its alert, and whether the analyst can extend it */
-  mel?: { alert: string; until: number; ext: boolean; canExtend: boolean };
+  /** an MEL placard on its alert: whether the mechanic has asked for the one extension, and whether the analyst can approve it */
+  mel?: { alert: string; until: number; ext: boolean; asked: boolean; askedBy?: string; canExtend: boolean; /** the week the extension runs to */ to: number };
 };
 
 /** the flow cards waiting on the analyst this week: pending, not deferred this week, most urgent first */
@@ -273,12 +280,16 @@ function outState(s: IslandState, a: Alert | undefined): { word: string; share: 
 /** resolves out, in words: 1 is this week's */
 const outWords = (n: number) => (n <= 1 ? 'this week' : n === 2 ? 'this week and next' : `${n} weeks`);
 
-function freightVM(s: IslandState, card: Card, a: Alert | undefined, eta: number, outWeeks: number, cost?: number): FreightVM {
+
+function freightVM(s: IslandState, card: Card, a: Alert | undefined, eta: number, outWeeks: number, aogCost?: number): FreightVM {
   const st = outState(s, a);
   const asset = s.assets.find((x) => x.id === a?.assetId);
   const week = card.downtime?.usd ?? 0;
   const out = st && outWeeks > 0 ? `${asset?.name ?? 'It'} ${st.word} ${outWords(outWeeks)}${week > 0 ? ` (~${usd(week * st.share * outWeeks)} of guests)` : ''}` : '';
-  return { eta, text: cost !== undefined ? `AOG boat +${usd(cost)}: ${etaWords(s, eta)}` : `Scheduled: ${etaWords(s, eta)}`, out, ...(cost !== undefined ? { cost } : {}) };
+  if (aogCost !== undefined) return { eta, text: `AOG boat +${usd(aogCost)}: ${etaWords(s, eta)}`, out, cost: aogCost };
+  const f = card.freight.sched;
+  const ship = shipWords(f);
+  return { eta, text: `Scheduled${f.cost > 0 ? ` +${usd(f.cost)}` : ''}: ${etaWords(s, eta)}`, out, cost: f.cost, ...(ship ? { ship } : {}) };
 }
 
 /** the task a card names: "32-40-01 Main wheel, tire and tube" (a repair: its fix) */
@@ -351,7 +362,9 @@ export function cardVM(s: IslandState, o: Order, buy?: BuyChoice): CardVM {
     total: card.total,
     freight: {
       pick: card.freight.pick,
-      sched: down ? { ...freightVM(s, card, a, card.freight.sched.eta, card.freight.sched.outWeeks), text: `Scheduled: ${down}, so it slips a week` } : freightVM(s, card, a, card.freight.sched.eta, card.freight.sched.outWeeks),
+      sched: down
+        ? { ...freightVM(s, card, a, card.freight.sched.eta, card.freight.sched.outWeeks), text: `Scheduled${card.freight.sched.cost > 0 ? ` +${usd(card.freight.sched.cost)}` : ''}: ${down}, so it slips a week` }
+        : freightVM(s, card, a, card.freight.sched.eta, card.freight.sched.outWeeks),
       // the boat only when it's faster: a lead-1 line already rides tonight's flight (unless its plane is down)
       ...(card.freight.aog && (card.freight.aog.eta < card.freight.sched.eta || card.freight.pick === 'aog' || down) ? { aog: freightVM(s, card, a, card.freight.aog.eta, card.freight.aog.outWeeks, card.freight.aog.cost) } : {}),
     },
@@ -361,7 +374,9 @@ export function cardVM(s: IslandState, o: Order, buy?: BuyChoice): CardVM {
     budget: `${trade} work budget this week: ${usd(card.budget.spent)} of ${usd(card.budget.of)}`,
     waitCost,
     ...(lateWords(s, o.at, card.total) ? { late: lateWords(s, o.at, card.total) } : {}),
-    ...(a?.mel ? { mel: { alert: a.id, until: a.mel.until, ext: !!a.mel.ext, canExtend: !a.mel.ext && a.mel.until >= W - 1 } } : {}),
+    ...(a?.mel
+      ? { mel: { alert: a.id, until: a.mel.until, ext: !!a.mel.ext, asked: !!a.mel.ask, ...(a.mel.ask ? { askedBy: a.mel.ask.by } : {}), canExtend: melExtendable(a.mel, W), to: Math.max(a.mel.until, W - 1) + 1 } }
+      : {}),
   };
 }
 
@@ -440,6 +455,7 @@ export type ReqChoice = { cheaper: boolean; aog: boolean };
 /** a batch at the chosen suppliers and freight: what it comes to, in how many POs, and whether the boat can take it */
 export function reqQuote(s: IslandState, ids: string[], c: ReqChoice): { total: number; parts: number; freight: number; pos: number; aogOk: boolean; lines: number } {
   const groups = new Set<string>();
+  const sched: { item: ItemId; vendor: SupplierId }[] = [];
   let parts = 0;
   let faster = false;
   let lines = 0;
@@ -453,10 +469,13 @@ export function reqQuote(s: IslandState, ids: string[], c: ReqChoice): { total: 
     if (boat) faster = true;
     const f: Freight = c.aog && boat ? 'aog' : 'sched';
     groups.add(`${v}|${carrierOf(x)}|${f}`);
+    if (f === 'sched') sched.push({ item: x.id, vendor: v });
     parts += priceAt(x, v) * buyUnits(x, r.qty);
   }
   const aogGroups = [...groups].filter((g) => g.endsWith('|aog')).length;
-  const freight = aogGroups * FREIGHT.aog;
+  // scheduled lines: one shipment's charge per supplier and carrier not already on its way this week (3.6)
+  const schedLines = sched.length ? schedFreight(s, sched).cost : 0;
+  const freight = aogGroups * FREIGHT.aog + schedLines;
   return { total: Math.round(parts + freight), parts: Math.round(parts), freight, pos: groups.size, aogOk: faster, lines };
 }
 
@@ -625,13 +644,13 @@ export function abcClasses(s: IslandState): Map<string, Abc> {
   return out;
 }
 
-/** units of one P/N used over the ledger's weeks */
-export const itemUsed = (s: IslandState, id: ItemId) => (s.ledger ?? []).reduce((n, r) => n + (r.use?.[id] ?? 0), 0);
+/** units of one P/N used over the job flow's weeks on the ledger (a migrated island's backfilled rows carry none) */
+export const itemUsed = (s: IslandState, id: ItemId) => flowRows(s).reduce((n, r) => n + (r.use?.[id] ?? 0), 0);
 
-/** "last used 3 wk ago", "used this week", "no use yet" */
+/** "last used 3 wk ago", "used this week", "no use yet" (counted in the job flow's weeks: 14.5) */
 export function sinceWords(s: IslandState, last: number | null): string {
   if (last === null) {
-    const n = (s.ledger ?? []).filter((r) => r.w < s.week).length;
+    const n = flowWeeks(s);
     return n ? `no use in ${n} wk` : 'no use yet';
   }
   const ago = s.week - last;
@@ -852,20 +871,23 @@ export function flagsVM(s: IslandState): FlagVM[] {
   });
 }
 
+/** the analyst can approve the one MEL extension: the mechanic asked for it (the maintenance side's call), and the placard is still live or ran out last week */
+export const melExtendable = (m: NonNullable<Alert['mel']>, W: number) => !m.ext && !!m.ask && m.until >= W - 1;
+
 /** where an MEL placard stands: it covers the resolve of its last week; the one extension can come a week late */
 export function melWords(W: number, until: number, canExtend: boolean): string {
   if (until > W) return `placarded to wk ${until}`;
   if (until === W) return 'runs out at this week’s resolve';
-  if (until === W - 1 && canExtend) return 'ran out last week: the plane is grounded at this resolve unless you extend it';
+  if (until === W - 1 && canExtend) return 'ran out last week: the plane is grounded at this resolve unless the extension goes through';
   return `ran out wk ${until}`;
 }
 
 // ---------------------------------------------------------------------------
 // Needs (14.2): open alerts nobody has planned (no P/N), the jobs waiting on parts, MEL placards
 
-export type NeedVM = { alert: string; trade: OpsRole; who: string; text: string; due: number; dueText: string; aw: boolean; nudged: boolean; soon: boolean };
+export type NeedVM = { alert: string; trade: OpsRole; who: string; text: string; due: number; dueText: string; aw: boolean; nudged: boolean; soon: boolean; scheduled: boolean };
 export type WaitVM = { order: string; title: string; asset: string; who: string; lines: { pn: string; nomen: string; qty: string; state: string; tone: Tone }[] };
-export type PlacardVM = { alert: string; text: string; until: number; ext: boolean; canExtend: boolean; runsOut: boolean; when: string };
+export type PlacardVM = { alert: string; text: string; until: number; ext: boolean; asked: boolean; askedBy?: string; canExtend: boolean; runsOut: boolean; when: string };
 
 export function needsVM(s: IslandState): { unplanned: NeedVM[]; waiting: WaitVM[]; placards: PlacardVM[] } {
   const W = s.week;
@@ -879,6 +901,7 @@ export function needsVM(s: IslandState): { unplanned: NeedVM[]; waiting: WaitVM[
     aw: n.aw,
     nudged: n.nudged === W,
     soon: n.due <= W + 1,
+    scheduled: !!n.scheduled,
   }));
   const waiting: WaitVM[] = [];
   for (const o of s.orders) {
@@ -918,9 +941,11 @@ export function needsVM(s: IslandState): { unplanned: NeedVM[]; waiting: WaitVM[
       text: `${assetName(s, a.assetId)}: ${symptomText(s, a).replace(/^Written up (again|by [^:]+): /i, '')}`,
       until: a.mel!.until,
       ext: !!a.mel!.ext,
-      canExtend: !a.mel!.ext && a.mel!.until >= W - 1,
+      asked: !!a.mel!.ask,
+      ...(a.mel!.ask ? { askedBy: a.mel!.ask.by } : {}),
+      canExtend: melExtendable(a.mel!, W),
       runsOut: a.mel!.until <= W,
-      when: melWords(W, a.mel!.until, !a.mel!.ext),
+      when: melWords(W, a.mel!.until, !a.mel!.ext && !!a.mel!.ask),
     }))
     .sort((a, b) => a.until - b.until);
   return { unplanned, waiting, placards };
@@ -989,7 +1014,7 @@ export function itemVM(s: IslandState, id: ItemId): ItemVM | null {
     abc: abcClasses(s).get(fam) ?? null,
     spare: insuranceSpare(s, fam),
     series: v.series,
-    weeks: [...(s.ledger ?? [])].sort((a, b) => a.w - b.w).slice(-STOCK.ledgerWeeks).map((r) => r.w),
+    weeks: flowRows(s).map((r) => r.w),
     position: position(s, id),
     lead: L,
     leadText: `${plural(L, 'week')} by scheduled freight (${SUPPLIERS[DEFAULT_SUPPLIER[x.trade]].short})`,
@@ -1026,6 +1051,8 @@ export type BuyQuote = {
   eta: number;
   etaText: string;
   aogOk: boolean;
+  /** the scheduled freight in words: its own shipment, or riding one on its way */
+  ship?: string;
   /** what stops it: the freeze, cash, a full stores room */
   block?: string;
 };
@@ -1041,7 +1068,9 @@ export function buyQuote(s: IslandState, id: ItemId, qty: number, buy: BuyChoice
   const sched = etaOf(s.week, x, vendor);
   const ok = aogOk(x, vendor) && sched > s.week;
   const aog = buy.freight === 'aog' && ok;
-  const freight = aog ? FREIGHT.aog : 0;
+  // scheduled freight is per shipment: its own, or none when it rides one already on its way this week (3.6)
+  const ship = aog ? undefined : schedFreight(s, [{ item: id, vendor }]);
+  const freight = aog ? FREIGHT.aog : (ship?.cost ?? 0);
   const eta = aog ? s.week : sched;
   const total = Math.round(value + freight);
   const sp = spendable(s);
@@ -1055,7 +1084,8 @@ export function buyQuote(s: IslandState, id: ItemId, qty: number, buy: BuyChoice
           : units > STOCK.maxQty
             ? `Buy 1 to ${STOCK.maxQty} of an item.`
             : undefined;
-  return { units, packs, value, freight, total, vendor, eta, etaText: etaWords(s, eta), aogOk: ok, ...(block ? { block } : {}) };
+  const shipText = ship ? shipWords(ship) : undefined;
+  return { units, packs, value, freight, total, vendor, eta, etaText: etaWords(s, eta), aogOk: ok, ...(shipText ? { ship: shipText } : {}), ...(block ? { block } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1164,7 +1194,7 @@ export const GROUPS: { k: SpendGroup; label: string; of: OutCat[] }[] = [
 ];
 export const OUT_LABEL: Record<OutCat, string> = {
   parts: 'Parts and stock',
-  labor: 'Labour',
+  labor: 'Shop charges (overtime, call-outs, outside help)',
   freight: 'Freight',
   carry: 'Carrying',
   payroll: 'Payroll',
@@ -1255,7 +1285,10 @@ export type MoneyVM = {
   stock: {
     inv: number;
     builtUsed: { w: number; built: number; used: number }[];
+    /** the island's own cash in the shelf: stock at cost less what the vendors are still owed for it (their credit) */
     tiedUp: number;
+    /** open POs: committed, not yet paid (and not yet on the shelf) */
+    committed: number;
     capital: number;
     fill: number | null;
     waits: number;
@@ -1306,7 +1339,8 @@ export function moneyVM(s: IslandState, whereWeeks = 4): MoneyVM {
     stock: {
       inv,
       builtUsed: stockBuiltUsed(s, 12),
-      tiedUp: inv + committed(s),
+      tiedUp: cashInStock(s),
+      committed: committed(s),
       capital: capitalCost(s),
       fill: fillRate(s, 8),
       waits: waitWeeks(s, 8),

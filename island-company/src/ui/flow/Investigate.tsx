@@ -4,13 +4,13 @@
 // placard it under the MEL, ask the electrician to meter it, or close it with
 // no fault found. The main button goes on to the book.
 import { useState } from 'preact/hooks';
-import { alertFlags, findingOf, siteOf, symptomOf } from '../../sim/alerts';
+import { alertFlags, breakerOf, findingOf, siteOf, symptomOf } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
 import type { Action, Alert, IslandState } from '../../sim/types';
 import { Btn, Icon } from '../kit';
 import { DataPlate } from '../manual';
 import { assetOf, neutralWarning, siteWords, tierOf } from './steps';
-import { nameOf } from './words';
+import { nameOf, upperFirst } from './words';
 
 export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Alert; run(x: Action, done?: string): Promise<boolean>; demo?: boolean; ended?: boolean }) {
   const asset = assetOf(s, a);
@@ -26,13 +26,14 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
   const known = !!a.repair || ['due', 'ad', 'code', 'takeoff'].includes(a.src) || !!sym?.writeUp;
   const open = a.status === 'open';
   const elec = nameOf(s, 'elec');
+  const fin = nameOf(s, 'fin');
   const can = !demo && !ended;
   return (
     <div class="col jf-step" style={{ gap: 10 }}>
       <div class="card jf-finding">
         <span class="label">Finding{tier <= 2 ? '' : ' (as found)'}</span>
         <p style={{ margin: 0 }}>{finding.text}</p>
-        {site && <span class="label">Site: {siteWords(site)}</span>}
+        {site && <span class="label">Site: {siteWords(site, a.src === 'takeoff')}</span>}
       </div>
       {asset.kind === 'plane' && <DataPlate ac={islandAircraft(s.seed, asset)} />}
       {a.bench?.call && (
@@ -48,8 +49,13 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
       {a.mel && (
         <div class="jf-note">
           <b>MEL C:</b> placarded INOP by {a.mel.by}, covers week {a.mel.until}
-          {a.mel.ext ? ' (extended once)' : ''}. Past it, the plane is grounded until the fix.
+          {a.mel.ext ? ' (extended once)' : a.mel.ask ? ` · ${a.mel.ask.by} asked ${fin} for the one extension` : ''}. Past it, the plane is grounded until the fix.
         </div>
+      )}
+      {a.role === 'mech' && a.mel && !a.mel.ext && !a.mel.ask && a.mel.until <= s.week && a.mel.until >= s.week - 1 && a.status !== 'closed' && (
+        <Btn block kind="soft" disabled={!can} onClick={() => void run({ t: 'melExtend', role: 'mech', alert: a.id }, `Asked ${fin} to approve the one MEL extension.`)}>
+          <Icon name="placard" size={18} /> Ask {fin} to extend the MEL (once)
+        </Btn>
       )}
       {a.safe && (
         <div class="jf-note">
@@ -65,8 +71,8 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
             <div class="card col jf-ask" style={{ gap: 8 }}>
               <span class="label">The house closes while it's a hazard. Made safe, it rents at 75% until the fix.</span>
               {neutralWarning(s, a) && <span class="fault">A branch breaker won't isolate a loose service neutral: leave the house closed until it's fixed.</span>}
-              <Btn block kind="soft" onClick={() => void run({ t: 'makeSafe', role: 'elec', alert: a.id, how: 'breaker' }, 'Made safe: the circuit is off and tagged.').then(() => setAsk(null))}>
-                Breaker off and tag it
+              <Btn block kind="soft" onClick={() => void run({ t: 'makeSafe', role: 'elec', alert: a.id, how: 'breaker' }, `Made safe: ${breakerOf(site)} is off and tagged.`).then(() => setAsk(null))}>
+                {upperFirst(breakerOf(site))}: off and tag it
               </Btn>
               <Btn block kind="soft" onClick={() => void run({ t: 'makeSafe', role: 'elec', alert: a.id, how: 'blankoff' }, 'Made safe: blanked off.').then(() => setAsk(null))}>
                 Blank it off (a blank plate)
@@ -83,7 +89,7 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
           {ask === 'mel' && (
             <div class="card col jf-ask" style={{ gap: 8 }}>
               <span class="label">
-                Company MEL, category C: the plane flies with it placarded INOP through this week's resolve. The analyst can extend it once by a week. Past that, it's grounded until the fix.
+                Company MEL, category C: the plane flies with it placarded INOP through {Math.max(s.week, a.due) > s.week ? `week ${Math.max(s.week, a.due)} (its due week)` : "this week's resolve"}. You can ask {fin} to extend it once by a week. Past that, it's grounded until the fix.
               </span>
               <Btn block onClick={() => void run({ t: 'mel', role: 'mech', alert: a.id }, 'Placarded INOP (MEL C).').then(() => setAsk(null))}>
                 Placard it
@@ -97,7 +103,7 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
           <Icon name="meter" size={18} /> Ask {elec} to meter it
         </Btn>
       )}
-      {open && !known && (
+      {open && !known && finding.nff && (
         <>
           <Btn block kind="ghost" disabled={!can} onClick={() => setAsk(ask === 'nff' ? null : 'nff')}>
             No fault found · close
@@ -112,7 +118,7 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
           )}
         </>
       )}
-      {demo && <span class="label">In a real week you could also close it with no fault found, or make it safe or placard it first.</span>}
+      {demo && <span class="label">In a real week you could also make it safe or placard it first, or close it with no fault found when the finding can't duplicate it.</span>}
     </div>
   );
 }

@@ -3,13 +3,18 @@
 // The techs' second step walks one scripted alert through the job flow
 // (docs/JOBFLOW.md 17.5): the worn tire on the twin, the bathroom GFCI that
 // trips. It is raised on a copy of the island and nothing is written: Send
-// says what would happen in a real week.
+// says what would happen in a real week. The analyst's second step is the desk's
+// intro: the mechanic's plan for that tire, as the real approval card (the
+// labour, the line pulled from stock, the tire to buy, the freight), approved or
+// deferred on the copy, then what the desk holds from week 1.
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { raiseAlert } from '../sim/alerts';
 import { ROLE_LABEL, ROLE_LONG } from '../sim/data';
+import { apply } from '../sim/engine';
+import { fixTaskFor, stdPickFor } from '../sim/flow';
 import { hashSeed } from '../sim/rng';
 import type { PuzzleId } from '../puzzles/types';
-import type { Alert, IslandState, OpsRole, Role } from '../sim/types';
+import type { Alert, BuyChoice, IslandState, OpsRole, Order, Role } from '../sim/types';
 import { fx } from './feedback';
 import { AlertRow } from './flow/AlertRow';
 import { JobFlow } from './flow/JobFlow';
@@ -19,6 +24,8 @@ import { local, session } from './flow/words';
 import { Island } from './island';
 import { settings } from './settings';
 import { Btn, Icon, usd } from './kit';
+import { ApprovalCard } from './purchasing/ApprovalCard';
+import { cardVM } from './purchasing/model';
 import { PuzzleHost } from './puzzlehost';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
@@ -31,6 +38,29 @@ export function demoAlert(s: IslandState, role: OpsRole): { s: IslandState; aler
     if (!asset) return null;
     const alert = raiseAlert(copy, { role, asset, sym: role === 'mech' ? 'M_TIRE_WORN' : 'E_GFCI_TRIPS', cause: 0, due: copy.week + 3 }, 0);
     return { s: copy, alert };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * week 0's card for the analyst: the mechanic's plan for the worn tire, on a copy of the island at week 1 (the
+ * real one is never written). The tube comes off the shelf; the tire isn't stocked, so it's a card.
+ */
+export function demoCard(s: IslandState): { s: IslandState; order: Order } | null {
+  try {
+    const d = demoAlert(s, 'mech');
+    if (!d) return null;
+    const copy = d.s;
+    copy.week = Math.max(1, copy.week);
+    const task = fixTaskFor(copy, d.alert);
+    if (!task) return null;
+    const pick = stdPickFor(copy, d.alert, task);
+    const main = pick.find((l) => l.slot === 'tire') ?? pick[0];
+    if (main && copy.inv?.[main.item]) copy.inv[main.item] = { ...copy.inv[main.item], on: 0 };
+    const r = apply(copy, { t: 'plan', role: 'mech', alert: d.alert.id, task: task.id, pick, week: copy.week }, 1);
+    const order = r.error ? undefined : r.s.orders.find((o) => o.flow?.alert === d.alert.id && o.status === 'pending');
+    return order ? { s: r.s, order } : null;
   } catch {
     return null;
   }
@@ -66,6 +96,10 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
   const name = s.players[role]?.name ?? ROLE_LABEL[role];
   // the techs' walk-through: one alert, on a copy of the island
   const demo = useMemo(() => (role === 'fin' ? null : demoAlert(s, role)), [role]);
+  // the analyst's walk-through: the same tire, as the card it becomes
+  const card = useMemo(() => (role === 'fin' ? demoCard(s) : null), [role]);
+  const [buy, setBuy] = useState<BuyChoice>({});
+  const [cardOpen, setCardOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
   const [sent, setSent] = useState<Preview | null>(null);
   const analyst = s.players.fin && s.players.fin.name !== ROLE_LABEL.fin ? s.players.fin.name : 'the analyst';
@@ -179,15 +213,14 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
               </Btn>
             </div>
           )}
-          {step === 2 && role === 'fin' && (
+          {step === 2 && role === 'fin' && card && (
             <div class="card col" style={{ gap: 12 }}>
               <h2>Nobody wins alone</h2>
               <p class="muted" style={{ margin: 0 }}>
-                {mechanic} needs money for a repair. Approve now, or defer and risk it.
+                {mechanic} found a tire worn to the cord and planned the fix. The tube is on the shelf; the tire isn’t, so it comes to you as a card: the labour, what’s pulled from stock, what you buy and how it ships.
               </p>
-              <div class="card" style={{ background: 'var(--sand)', borderTop: `6px solid ${C.mech}` }}>
-                <b>Tire and brake · Twin N-12</b>
-                <div class="label num">$320 · expected cost of deferring $190</div>
+              <div class="pc" style={{ ['--tint' as string]: ROLE_TINT.mech }} role="group" aria-label="Week 0 approval card">
+                <ApprovalCard vm={cardVM(card.s, card.order, buy)} open={cardOpen} setOpen={setCardOpen} buy={buy} setBuy={setBuy} onExtend={() => {}} />
               </div>
               {!approved ? (
                 <div class="row" style={{ gap: 8 }}>
@@ -214,13 +247,41 @@ export function Week0({ ctl, role }: { ctl: Ctl; role: Role }) {
                 </div>
               ) : (
                 <>
-                  <span style={{ color: C.palm, fontWeight: 800 }}>
-                    {deferred ? '✓ Saved $320 this week; a 10% incident risk rides on it. Both calls can be right.' : `✓ ${mechanic} can do it now. On your desk, swipe right.`}
+                  <div class="jf-note ok" role="status">
+                    {deferred
+                      ? `Deferred a week: the tire waits, and the chips say what waiting costs. Both calls can be right.`
+                      : `Approved: the tire rides the week’s carrier and ${mechanic === 'The mechanic' ? 'the mechanic' : mechanic} fits it. Week 0 is a walk-through: nothing was written.`}
+                  </div>
+                  <span class="label">
+                    From week 1 your desk has four tabs. <b>Approvals</b>: cards like this one (swipe right to approve, left to defer) and the techs’ stock requests. <b>Stock</b>: what moves, and a min/max that refills a line at the resolve. <b>Money</b>: cash, budgets and where it went. <b>Staff</b>: pilots, housekeepers and builders.
                   </span>
                   <Btn block onClick={() => setPlaying(SECOND[role])}>
                     Next: buy a part
                   </Btn>
                 </>
+              )}
+            </div>
+          )}
+          {step === 2 && role === 'fin' && !card && (
+            <div class="card col" style={{ gap: 12 }}>
+              <h2>Nobody wins alone</h2>
+              <p class="muted" style={{ margin: 0 }}>
+                A repair that buys parts comes to you as a card: approve it (swipe right) or defer it a week (swipe left).
+              </p>
+              {!approved ? (
+                <Btn
+                  block
+                  onClick={() => {
+                    fx.snap();
+                    setApproved(true);
+                  }}
+                >
+                  Approve
+                </Btn>
+              ) : (
+                <Btn block onClick={() => setPlaying(SECOND[role])}>
+                  Next: buy a part
+                </Btn>
               )}
             </div>
           )}

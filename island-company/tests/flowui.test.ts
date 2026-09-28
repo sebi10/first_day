@@ -14,6 +14,7 @@ import { fixTaskFor, stdPickFor } from '../src/sim/flow';
 import { itemById } from '../src/sim/items';
 import { addStarter } from '../src/sim/stock';
 import { ROLES, type Alert, type IslandState, type PickLine } from '../src/sim/types';
+import { launchFor } from '../src/ui/select';
 import {
   checkDraft,
   isOneTap,
@@ -29,6 +30,7 @@ import {
   slotTaps,
   startStep,
   stepLabel,
+  siteWords,
   stepper,
   stockRows,
   taskFor,
@@ -390,6 +392,35 @@ describe('nothing before Send reads the hidden cause', () => {
   });
 });
 
+describe("the electrician's site (6)", () => {
+  it('a take-off reads the equipment, not the conductors; a repair reads the breaker and the wire; the heater its own circuit', () => {
+    expect(siteWords({ room: 'spa', amps: 60, awg: 6, wet: true, run: 'buried', feet: 43 }, true)).toBe('Spa: 240 V, needs a 60 A GFCI disconnect · pad 43 ft from the panel');
+    expect(siteWords({ room: 'spa', amps: 60, awg: 6, wet: true, run: 'buried', feet: 43 }, true)).not.toMatch(/AWG/);
+    expect(siteWords({ room: 'dock', amps: 30, awg: 10, wet: true, run: 'buried', feet: 85 }, true)).toBe('Fuel dock pump: 240 V, 30 A · 85 ft underground from the panel');
+    expect(siteWords({ room: 'gen', amps: 60, awg: 6, load: 110 }, true)).toBe('Transfer switch: 60 A today · the houses back up 110 A');
+    expect(siteWords({ room: 'bath', amps: 20, awg: 12, run: 'nm' })).toBe('Bathroom · 20 A breaker, 12 AWG NM\u2011B');
+    expect(siteWords({ room: 'bath', amps: 30, awg: 10, what: 'Water heater', poles: 2 })).toBe('Water heater · 30 A 2\u2011pole breaker, 10 AWG');
+  });
+
+  it("the trace and the meter play the alert's own circuit: its room, its breaker, its complaint", () => {
+    const s = island(12, 4);
+    const site = (sym: string, cause: number, assetId = 'h1') => {
+      const al = raise(s, sym, cause, assetId);
+      const task = fixTaskFor(s, al)!;
+      const next = apply(s, { t: 'plan', role: 'elec', alert: al.id, task: task.id, pick: stdPickFor(s, al, task), week: s.week }, NOW + 1);
+      expect(next.error).toBeUndefined();
+      const o = next.s.orders.find((x) => x.flow?.alert === al.id)!;
+      return launchFor(next.s, o, 'elec').context?.site;
+    };
+    const hall = site('E_SWITCH_WARM', 1)!;
+    expect(hall).toMatchObject({ room: 'Hall', device: 'switch', fault: 'warm' });
+    expect([15, 20]).toContain(hall.amps);
+    expect(site('E_FLICKER', 0)).toMatchObject({ room: 'Living room', fault: 'neutral' });
+    expect(site('E_APPLIANCE', 0)).toMatchObject({ single: true, amps: 20, fault: 'warm' });
+    expect(site('E_DEAD_OUTLET', 0)).toMatchObject({ fault: 'dead' });
+  });
+});
+
 describe('the puzzles label what the tech picked (display only)', () => {
   const pickOf = (lines: { item: string; qty: number; slot?: string }[]): NonNullable<PuzzleContext['pick']> =>
     lines.map((l) => {
@@ -409,8 +440,8 @@ describe('the puzzles label what the tech picked (display only)', () => {
   });
 
   it('panel: the panelboard (or the transfer switch) a lot brings', () => {
-    expect(pickedPanel(pickOf([{ item: 'LOT-DIST', qty: 1 }]))).toBe('400 A distribution panelboard · LOT-DIST');
-    expect(pickedPanel(pickOf([{ item: 'LOT-XFER', qty: 1 }]))).toBe('100 A manual transfer switch (listed) · LOT-XFER');
+    expect(pickedPanel(pickOf([{ item: 'LOT-DIST', qty: 1 }]))).toBe('600 A distribution panelboard · LOT-DIST');
+    expect(pickedPanel(pickOf([{ item: 'LOT-XFER', qty: 1 }]))).toBe('200 A manual transfer switch (listed for the backed-up load) · LOT-XFER');
     expect(pickedPanel(pickOf([{ item: 'KP120', qty: 1 }]))).toBeNull();
     const bare = generatePanel(5, 3, [], 'panelUp');
     const labelled = generatePanel(5, 3, [], 'panelUp', pickOf([{ item: 'LOT-DIST', qty: 1 }]));

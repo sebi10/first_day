@@ -39,8 +39,8 @@ export function migrate(s: IslandState): IslandState {
   migrateStaff(s);
   // 6. ledger, from the week reports
   if (!s.ledger) s.ledger = backfill(s);
-  // 7. the teaching weeks start now
-  s.flowSince ??= W;
+  // 7. the teaching weeks start now (a week-0 island starts with the flow in week 1, like a new one)
+  s.flowSince ??= Math.max(1, W);
   return s;
 }
 
@@ -109,7 +109,8 @@ function convertOrders(s: IslandState, W: number) {
         .filter((l) => l.qty > 0);
       const tools = toolsToBuy(s, o).map((t) => ({ item: t, qty: 1, order: o.id }));
       if (short.length || tools.length) {
-        const pos = placePo(s, [...short, ...tools], {}, 'auto', 0);
+        // (the kits were paid for: no freight on what replaces them)
+        const pos = placePo(s, [...short, ...tools], {}, 'auto', 0, { noFreight: true });
         for (const p of pos) p.eta = W;
       }
       if (allOnHand(s, o)) o.status = 'ready';

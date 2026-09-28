@@ -37,9 +37,9 @@ export function PartsStep({ s, a, d, act, readOnly }: { s: IslandState; a: Alert
   return (
     <div class="col jf-step" style={{ gap: 10 }}>
       <button class="jf-taskline" onClick={() => act({ t: 'go', step: 'manual' })} disabled={readOnly}>
-        <span class="label">{t.book === 'REF' ? 'Reference' : t.book}</span> <b>{t.no}</b> {t.title}
+        <span class="label">{t.book === 'REF' ? 'Reference' : t.book}</span> {t.no !== t.book && <b>{t.no}</b>} {t.title}
       </button>
-      {site && a.role === 'elec' && <span class="label">Site: {siteWords(site)}</span>}
+      {site && a.role === 'elec' && <span class="label">Site: {siteWords(site, a.src === 'takeoff')}</span>}
       {prot.unmet && (
         <div class="jf-note warn">
           This room needs <b>{prot.words}</b> protection on a replacement: {prot.words.includes('+') ? 'a DF device, or the device and a DF breaker' : 'from the device, or a breaker in the protection slot'}.

@@ -315,7 +315,7 @@ export function projectWeek(s: IslandState, rates = s.rates) {
     .filter((h) => houseRentable(s, h))
     .sort((a, b) => b.health - a.health);
   const booked = rentable.slice(0, Math.min(paxFlights + td.ferry, housekeepingCap(s)));
-  const occ = clamp(occupancy(s, rates.nightly) * reviewMult(s), 0, 1);
+  const occ = clamp(occupancy(s, rates.nightly) * reviewMult(s, booked.length), 0, 1);
   const rental = booked.reduce((n, h) => n + 7 * rates.nightly * (MODELS[h.model].mult ?? 1) * occ * rentFactor(s, h), 0);
   let guestNeed = Math.max(0, booked.length - td.ferry);
   const load = charterLoad(s, rates.charter) * charterMult(s);

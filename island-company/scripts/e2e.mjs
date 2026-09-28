@@ -135,7 +135,8 @@ const driveAlert = async () => {
 /** a tech's first Your move row that isn't a Start: open it, make a hazard safe, plan it */
 const planFirst = async (tag) => {
   await page.evaluate(() => window.scrollTo({ top: 0 }));
-  const row = page.locator('.jf-your .jf-arow:not(:has(.jf-start)) .jf-arow-main').first();
+  // an alert's row (the week's revenue work, a load sheet or a ground power start, is a row of its own: not an alert)
+  const row = page.locator('.jf-your .jf-arow:not(.rev):not(:has(.jf-start)) .jf-arow-main').first();
   if (!(await row.count())) return null;
   await row.click();
   await page.waitForTimeout(500);
@@ -144,7 +145,7 @@ const planFirst = async (tag) => {
   const safe = sheet().getByRole('button', { name: 'Make it safe' });
   if (await safe.count()) {
     await safe.click();
-    await sheet().getByRole('button', { name: 'Breaker off and tag it' }).click();
+    await sheet().getByRole('button', { name: /: off and tag it$/ }).first().click(); // the alert's own breaker ("The kitchen's 20 A breaker: off and tag it")
     await page.waitForTimeout(500);
     await shot(`${tag}-made-safe`);
   }
@@ -160,6 +161,22 @@ const startReady = async (tag) => {
   if (!(await start.count())) return false;
   await start.click();
   await page.waitForTimeout(600);
+  // radio work (and a ground power start) needs a charged cart hooked up to the plane: the carts' sheet opens
+  // instead of the job. Hook one up, close the sheet and start again
+  const gse = page.locator('.sheet', { hasText: 'Ground power' });
+  if (await gse.count()) {
+    await shot(`${tag}-needs-cart`);
+    const hook = gse.getByRole('button', { name: /^Hook up to / });
+    if (!(await hook.count())) return false;
+    await hook.first().click();
+    await page.waitForTimeout(400);
+    const close = page.locator('.sheet').getByRole('button', { name: 'Close', exact: true });
+    if (await close.count()) await close.first().click();
+    await page.waitForTimeout(400);
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
+    await page.locator('.jf-your .jf-start').first().click();
+    await page.waitForTimeout(600);
+  }
   if (await page.locator('.sheet', { hasText: 'Work stopped' }).count()) {
     await shot(`${tag}-stopped`);
     await page.keyboard.press('Escape');
@@ -242,7 +259,8 @@ await shot('week1-fin-first-look');
 await passTo('Mechanic');
 await shot('week1-mech');
 const dockMech = (await page.locator('.dock .primary').first().innerText()).replace(/\n/g, ' | ');
-if (!/^Next: |^Start: /.test(dockMech)) fail(`the mechanic's Dock should lead to an alert, got "${dockMech}"`);
+// an alert, or this week's revenue work first when no alert is due this week (the load sheet, a ground power start)
+if (!/^Next: |^Start: |^Load sheet · |^Ground power start · /.test(dockMech)) fail(`the mechanic's Dock should lead to an alert or this week's revenue work, got "${dockMech}"`);
 const mechSent = await planFirst('mech');
 console.log('mechanic sent:', JSON.stringify(mechSent));
 if (!mechSent) fail('the mechanic could not take an alert to Send');
@@ -320,6 +338,7 @@ await startReady('elec');
 await endTurn();
 await page.waitForTimeout(900);
 await shot('review');
+const reviewText = await page.locator('.overlay').first().innerText().catch(() => '');
 if (await page.getByRole('button', { name: 'Onward' }).count()) await click('Onward');
 if (await page.locator('.overlay button[aria-label="Close"]').count()) await page.locator('.overlay button[aria-label="Close"]').first().click();
 await page.waitForTimeout(300);
@@ -330,7 +349,29 @@ await passTo('Mechanic');
 const after = await storesRow(before.pn);
 await shot('week2-mech-stores');
 console.log(`week 2: ${before.pn} ${before.on} → ${after.on} on hand`);
-if (after.on <= before.on) fail(`the request for ${before.pn} didn't land: ${before.on} → ${after.on} on hand (${after.text})`);
+if (after.on <= before.on) {
+  // about one OEM part line in 50 comes without its paperwork and receiving quarantines it a week (stock.ts
+  // receivePo): the review said why, Stores says it lands tonight, and it's on hand once week 2 resolves
+  const why = /quarantined|waits a week/.test(reviewText);
+  console.log(`${before.pn} is held a week (the review said why: ${why}): ending week 2 to see it land`);
+  if (!why || !/on order, lands tonight/.test(after.text)) fail(`the request for ${before.pn} didn't land: ${before.on} → ${after.on} on hand (${after.text})`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await endTurn();
+  await passTo('Electrician');
+  await endTurn();
+  await passTo('Analyst');
+  await endTurn();
+  await page.waitForTimeout(900);
+  if (await page.getByRole('button', { name: 'Onward' }).count()) await click('Onward');
+  if (await page.locator('.overlay button[aria-label="Close"]').count()) await page.locator('.overlay button[aria-label="Close"]').first().click();
+  await page.waitForTimeout(300);
+  await passTo('Mechanic');
+  const landed = await storesRow(before.pn);
+  await shot('week3-mech-stores');
+  console.log(`week 3: ${before.pn} ${before.on} → ${landed.on} on hand`);
+  if (landed.on <= before.on) fail(`the request for ${before.pn} didn't land after its week in quarantine (${landed.text})`);
+}
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 await click('Board');

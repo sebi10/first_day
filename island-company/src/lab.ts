@@ -70,7 +70,18 @@ if (q.has('card')) context.card = manualCard(ac, job ?? (id === 'hydraulics' ? '
 // a ground power start on the island's plane (&asset=Float%20F-3 or Cargo%20C-7): its own airframe and placard
 if (id === 'gpu' && q.has('asset')) context.plane = { name: context.assetName!, reg: ac.registration, designation: ac.designation, ...externalPower(ac) };
 // the part chain's circuit check (&job=altField|sgField|comPower): &fault=wiring|unit
-if (id === 'meter' && q.has('fault')) context.bench = { fault: q.get('fault') === 'wiring' ? 'wiring' : 'unit' };
+if (id === 'meter' && q.has('fault') && !q.has('room')) context.bench = { fault: q.get('fault') === 'wiring' ? 'wiring' : 'unit' };
+// the job flow's alert site for the trace and the meter: &room=Hall&amps=20&fault=warm|dead|neutral[&single=1&appliance=window%20unit][&device=switch]
+if ((id === 'trace' || id === 'meter') && q.has('room')) {
+  const fault = q.get('fault');
+  context.site = {
+    room: q.get('room')!,
+    amps: Number(q.get('amps') ?? 20),
+    fault: fault === 'warm' || fault === 'neutral' ? fault : 'dead',
+    ...(q.has('single') ? { single: true, appliance: q.get('appliance') ?? 'window unit' } : {}),
+    ...(q.get('device') === 'switch' ? { device: 'switch' as const } : {}),
+  };
+}
 const chainStep = q.get('chain');
 if (chainStep === 'lookup' || chainStep === 'research') {
   const ata = (plant ?? ({ tires: '32-40', prop: '61-10', hydraulics: '29-10', avionics: '23-10', alternator: '24-30' } as Record<string, Ata>)[job ?? 'tires'] ?? '32-40') as Ata;

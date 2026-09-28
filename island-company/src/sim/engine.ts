@@ -34,7 +34,10 @@ import {
 import {
   alertFlags,
   alertShort,
+  alertTier,
+  breakerOf,
   causeOf,
+  findingOf,
   fixesOf,
   generateAlerts,
   liveAlerts,
@@ -67,6 +70,7 @@ import {
   isSafetyJob,
   jobLines,
   jobReady,
+  lateSafe,
   needsNewBin,
   newReq,
   payRun,
@@ -77,10 +81,12 @@ import {
   replenish,
   reserve,
   restockFeeOf,
+  schedFreight,
   scrapItem,
   takeSoft,
   uncovered,
   urgentJob,
+  vendorFor,
 } from './stock';
 import { builtShare, buildWeek, charterMult, housekeepingCap, newIslandStaff, payroll, pilotCap, reviewMult, staffAction, staffAfterFlights, staffOpenWeek, autoStaff } from './staff';
 import { benchFor, defaultTask, fixedFor, laborMin, plannable, taskById, taskOn, tasksFor, type Task } from './tasks';
@@ -941,7 +947,9 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     const won = Math.max(0, Math.floor(Number(a.data?.kits ?? 0))) > 0 && !!o.lot;
     const spent = Math.max(0, Math.round(Number(a.data?.spent ?? 0)));
     if (won && o.lot) {
-      const pos = placePo(s, o.lot.lines, { vendor: 'broker' }, 'fin', now);
+      // (the lot ships as one consignment from the broker, or the online house for the electrician's: its price is delivered)
+      const vendor = itemById(o.lot.lines[0]?.item ?? '')?.trade === 'elec' ? 'online' : 'broker';
+      const pos = placePo(s, o.lot.lines, { vendor }, 'fin', now, { noFreight: true });
       // each line at its share of what was bid (the POs come to exactly the bid)
       const total = pos.reduce((n, p) => n + p.lines.reduce((m, l) => m + l.unit * l.qty, 0), 0) || 1;
       for (const p of pos) {
@@ -1001,7 +1009,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
     return { s };
   }
   if (s.week < 1) return fail('The week has not started yet.');
-  if ('role' in a && TECH_MOVES.has(a.t) && s.turns[a.role]?.ended) return fail('Your turn is over for this week.');
+  if ('role' in a && a.role && TECH_MOVES.has(a.t) && s.turns[a.role]?.ended) return fail('Your turn is over for this week.');
   const W = s.week;
   switch (a.t) {
     case 'plan': {
@@ -1016,6 +1024,9 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       if (!al || al.status !== 'open') return fail('That alert is not open.');
       if (al.role !== a.role) return fail('Not your trade.');
       if (al.repair || al.src === 'due' || al.src === 'ad' || al.src === 'code' || al.src === 'takeoff' || symptomOf(al)?.writeUp) return fail("There's a known task for this one.");
+      // a finding that shows the fault can't be closed as nothing: only what reads "could not duplicate" can (an
+      // intermittent that hides at tier 3+ reads that way too, and comes back: 5.5)
+      if (!findingOf(s, al, alertTier(s, al, al.role)).nff) return fail('The finding shows the fault: fix it, placard it or make it safe.');
       closeAlert(s, al, 'nff');
       const asset = s.assets.find((x) => x.id === al.assetId);
       // a real fault closed as nothing: it comes back (hidden)
@@ -1032,21 +1043,40 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       if (o?.status === 'done') return fail('That job is done.');
       if (alertFlags(s, al).mel !== 'C') return fail(`No MEL relief for that on ${asset.name}.`);
       if (al.mel) return fail('It is already placarded.');
-      al.mel = { until: W, by: nameOf(s, 'mech') };
-      feed(s, 'mech', 'info', `${nameOf(s, 'mech')} placarded ${shortText(s, al)} INOP on ${asset.name} (MEL category C): it flies on it this week.`, now);
+      // the placard covers the item through its due week's resolve (a placard put on early isn't spent before it's needed)
+      al.mel = { until: Math.max(W, al.due), by: nameOf(s, 'mech') };
+      feed(
+        s,
+        'mech',
+        'info',
+        `${nameOf(s, 'mech')} placarded ${shortText(s, al)} INOP on ${asset.name} (MEL category C): it flies on it ${al.mel.until > W ? `through week ${al.mel.until}` : 'this week'}.`,
+        now,
+      );
       return { s };
     }
     case 'melExtend': {
       const al = alertById(s, a.alert);
-      if (!al?.mel) return fail('That item is not placarded.');
+      if (!al?.mel || al.status === 'closed') return fail('That item is not placarded.');
       if (al.mel.ext) return fail('The MEL allows one extension.');
       // the placard covers the resolve of the week it went on; the one extension can still be given the week after
       // (before that week's flights), not later
       if (al.mel.until < W - 1) return fail('That placard has run out.');
+      const asset = s.assets.find((x) => x.id === al.assetId);
+      const plane = asset?.name ?? 'the plane';
+      if (a.role === 'mech') {
+        // the extension is the maintenance side's call (the Director of Maintenance under the operator's MEL
+        // extension authority): the mechanic asks for it, and the analyst approves what the downtime and the fix cost
+        if (s.turns.mech?.ended) return fail('Your turn is over for this week.');
+        if (al.mel.ask) return fail(`Already asked: ${nameOf(s, 'fin')} approves it.`);
+        al.mel.ask = { week: W, by: nameOf(s, 'mech') };
+        feed(s, 'fin', 'info', `${nameOf(s, 'mech')} asks for the one MEL C extension on ${plane} (${shortText(s, al)}): ${nameOf(s, 'fin')}'s approval.`, now);
+        return { s };
+      }
+      if (a.role !== undefined && a.role !== 'fin') return fail('Not your call.');
+      if (!al.mel.ask) return fail(`${nameOf(s, 'mech')} asks for the extension first (the maintenance side's call).`);
       al.mel.until = Math.max(al.mel.until, W - 1) + 1;
       al.mel.ext = true;
-      const asset = s.assets.find((x) => x.id === al.assetId);
-      feed(s, 'fin', 'info', `${nameOf(s, 'fin')} extended ${asset?.name ?? 'the plane'}'s MEL C for ${shortText(s, al)} to week ${al.mel.until}.`, now);
+      feed(s, 'fin', 'info', `${nameOf(s, 'fin')} approved ${al.mel.ask.by}'s MEL C extension on ${plane} for ${shortText(s, al)}: it flies on the placard to week ${al.mel.until}.`, now);
       return { s };
     }
     case 'makeSafe': {
@@ -1066,7 +1096,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       }
       // a branch breaker doesn't isolate a service-neutral fault: it is still there (hidden)
       if (a.how === 'breaker' && causeOf(al)?.neutral) plantIsolation(s, al, nameOf(s, 'elec'));
-      feed(s, 'elec', 'info', `${nameOf(s, 'elec')} made ${asset.name} safe (${a.how === 'breaker' ? 'the circuit off and tagged' : 'a blank-off'}): it rents at 75% until the fix.`, now);
+      feed(s, 'elec', 'info', `${nameOf(s, 'elec')} made ${asset.name} safe (${a.how === 'breaker' ? `${breakerOf(siteOf(s, al))} off and tagged` : 'a blank-off'}): it rents at 75% until the fix.`, now);
       return { s };
     }
     case 'askBench': {
@@ -1122,6 +1152,14 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       release(s, o.id);
       cancelReqsOf(s, o.id);
       untiePos(s, o.id);
+      // a job never started gives its labour back: dropping a wrong task to plan the right one doesn't pay twice
+      // (a part already bought for it lands as free stock)
+      const refund = o.approvedWeek !== undefined && !o.result ? o.cost : 0;
+      if (refund > 0) {
+        s.cash += refund;
+        book(s, 'labor', -refund, { trade: o.role as OpsRole, asset: o.assetId });
+        if (o.autoApproved && o.approvedWeek === W) s.autoSpent[o.role as OpsRole] = Math.max(0, (s.autoSpent[o.role as OpsRole] ?? 0) - refund);
+      }
       o.status = 'cancelled';
       const al = alertOf(s, o);
       if (al && al.status === 'job') {
@@ -1129,7 +1167,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
         delete al.order;
       }
       for (const x of allocate(s)) partsIn(s, x, now);
-      feed(s, a.role, 'info', `${nameOf(s, a.role)} dropped ${o.title}: the alert is open again.`, now);
+      feed(s, a.role, 'info', `${nameOf(s, a.role)} dropped ${o.title}: the alert is open again${refund ? ` (the ${usd(refund)} of labour comes back: it was never started)` : ''}.`, now);
       return { s };
     }
     case 'request': {
@@ -1137,7 +1175,20 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       if (!x) return fail(`Unknown item ${a.item}.`);
       if (x.trade !== a.role) return fail('Not your trade.');
       const max = x.kind === 'tool' ? 1 : 50;
-      if (!(a.qty >= 1 && a.qty <= (x.cut ? STOCK.maxQty : max))) return fail(x.kind === 'tool' ? 'One of a tool.' : `Ask for 1 to ${max}.`);
+      const cap = x.cut ? STOCK.maxQty : max;
+      if (!(a.qty >= 1 && a.qty <= cap)) return fail(x.kind === 'tool' ? 'One of a tool.' : `Ask for 1 to ${max}.`);
+      // a repeat request for the same line folds into the open one; a trade keeps at most STOCK.maxReqs open (the doc stays bounded)
+      const same = (s.reqs ?? []).find((r) => r.status === 'open' && !r.order && r.role === a.role && r.item === a.item);
+      if (same) {
+        if (x.kind === 'tool') return fail(`Already asked: ${nameOf(s, 'fin')} decides on it.`);
+        same.qty = Math.min(cap, same.qty + Math.round(a.qty));
+        same.at = now;
+        if (a.why) same.why = a.why.slice(0, 120);
+        feed(s, a.role, 'info', `${nameOf(s, a.role)} asked for ${a.qty} more × ${x.pn}: ${same.qty} in all, the analyst's call.`, now);
+        return { s };
+      }
+      if ((s.reqs ?? []).filter((r) => r.status === 'open' && !r.order && r.role === a.role).length >= STOCK.maxReqs)
+        return fail(`${STOCK.maxReqs} requests are already waiting on ${nameOf(s, 'fin')}: cancel one, or wait for the desk.`);
       newReq(s, { at: now, role: a.role, item: a.item, qty: Math.round(a.qty), ...(a.why ? { why: a.why.slice(0, 120) } : {}) });
       feed(s, a.role, 'info', `${nameOf(s, a.role)} asked for ${a.qty} × ${x.pn} ${x.nomen.split(',')[0].toLowerCase()}: the analyst's call.`, now);
       return { s };
@@ -1154,7 +1205,11 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
     case 'approveReq': {
       const reqs = a.reqs.map((id) => s.reqs?.find((x) => x.id === id));
       if (!reqs.length || reqs.some((r) => !r || r.status !== 'open')) return fail('That request is no longer waiting.');
-      const cost = reqs.reduce((n, r) => n + reqCost(r!, a.buy), 0);
+      const lineFreight = a.buy?.freight === 'aog' ? FREIGHT.aog : schedFreight(s, reqs.map((r) => ({ item: r!.item, vendor: itemById(r!.item) ? vendorFor(itemById(r!.item)!, a.buy) : undefined }))).cost;
+      const cost = reqs.reduce((n, r) => n + reqCost(r!, a.buy), 0) + lineFreight;
+      // a stock request (no job) takes a bin like any stock buy
+      const fresh = [...new Set(reqs.filter((r) => !r!.order).map((r) => r!.item))].filter((id) => needsNewBin(s, id));
+      if (fresh.length && binsInUse(s) + fresh.length > binsTotal(s)) return fail(`Stores full: ${binsInUse(s)} of ${binsTotal(s)} bins. Use up, scrap or return a line first.`);
       const urgent = reqs.some((r) => r!.order && urgentJob(s, s.orders.find((o) => o.id === r!.order)));
       const tool = reqs.every((r) => itemById(r!.item)?.kind === 'tool' && r!.order);
       if (spendable(s) < ECON.freezeBelow && !urgent && !tool) return fail(`Spendable cash under ${usd(ECON.freezeBelow)}: only safety-critical work can be approved.`);
@@ -1191,7 +1246,9 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
         if (!(l.qty >= 1 && l.qty <= STOCK.maxQty)) return fail(`Buy 1 to ${STOCK.maxQty} of an item.`);
       }
       if (spendable(s) < ECON.freezeBelow) return fail(`Spendable cash under ${usd(ECON.freezeBelow)}: stock orders are frozen.`);
-      const cost = a.lines.reduce((n, l) => n + reqCost({ item: l.item, qty: l.qty }, a.buy), 0) + (a.buy?.freight === 'aog' ? FREIGHT.aog : 0);
+      const cost =
+        a.lines.reduce((n, l) => n + reqCost({ item: l.item, qty: l.qty }, a.buy), 0) +
+        (a.buy?.freight === 'aog' ? FREIGHT.aog : schedFreight(s, a.lines.map((l) => ({ item: l.item, vendor: vendorFor(itemById(l.item)!, a.buy) }))).cost);
       if (spendable(s) - cost < 0) return fail('Not enough cash.');
       const fresh = [...new Set(a.lines.map((l) => l.item))].filter((id) => needsNewBin(s, id));
       if (fresh.length && binsInUse(s) + fresh.length > binsTotal(s))
@@ -1550,10 +1607,14 @@ export const benchFault = (al: Pick<Alert, 'sym' | 'cause'>): 'unit' | 'wiring' 
 
 /**
  * The electrician's check is in (a flow alert). "The unit": the mechanic plans
- * the part as usual. "The wiring", fixed at the airplane: no part; the
- * mechanic still signs the airplane back into service (14 CFR 43.3, 43.7): the
- * alert's job (or a new one) becomes the return-to-service step, ready at the
- * task's labour floor. A wrong call leaves today's sure defects.
+ * the part as usual; on a wiring fault that call's consequence is the missed
+ * wiring at the install (the new unit makes no difference, the check runs
+ * again), as the part chain's check has it: nothing hidden is planted. "The
+ * wiring", fixed at the airplane: no part; the mechanic still signs the
+ * airplane back into service (14 CFR 43.3, 43.7): the alert's job (or a new
+ * one) becomes the return-to-service step, ready at the task's labour floor.
+ * Called on a unit that is really dead, the dead unit goes back into service
+ * (a sure defect).
  */
 function flowBenchDone(s: IslandState, al: Alert, data: { call?: string; fixed?: boolean; where?: string }, name: string, now: number) {
   const b = (al.bench ??= {});
@@ -1568,7 +1629,6 @@ function flowBenchDone(s: IslandState, al: Alert, data: { call?: string; fixed?:
   const mech = nameOf(s, 'mech');
   if (call === 'unit') {
     feed(s, 'all', 'info', `${name} metered the ${item} circuit on ${asset.name}: the wiring checks good, it's the ${item}.`, now);
-    if (fault === 'wiring') benchMiss(s, al, asset, name, 'unit', radio);
     return;
   }
   const right = fault === 'wiring' && (!!b.again || !!data.fixed);
@@ -3060,11 +3120,27 @@ function generateFinTasks(s: IslandState, r: Rng) {
   // the weekly close alternates: variance hunt on odd weeks, bank rec on even weeks
   const leak = round10(r.range(300, 700) * (1 + 0.3 * (s.tier - 1)));
   fin(W % 2 === 0 ? 'reconcile' : 'close', leak);
-  // the three-way match: the POs received at the last resolve (their real lines), else last week's approvals
+  // the three-way match: the POs received at the last resolve (their real lines), else last week's approvals. The
+  // vendors' invoices overbill about 3% of it (AP error rates run 1-3%), and now and then one invoice is plain wrong
+  // (a seeded bad invoice, about every 2-3 weeks). On real POs the overbilling sits on them: it is paid at this
+  // week's payment run unless the match catches it
   const inv = invoiceContext(s);
   const poSpend = inv ? inv.pos.reduce((n, p) => n + p.lines.reduce((m, l) => m + l.qty * l.unit, 0) + p.freight, 0) : 0;
   const lastWeekSpend = poSpend || (s.history.length ? spendIn(s, W - 1) : 0);
-  if (lastWeekSpend >= 500) fin('invoice', round10(0.08 * lastWeekSpend + r.range(80, 220)));
+  if (lastWeekSpend >= 500) {
+    const bad = rng(hashSeed(s.seed, 'bad-invoice', W));
+    const leak = round10(Math.max(60, 0.03 * lastWeekSpend) + (bad.chance(0.4) ? bad.range(100, 240) : 0));
+    fin('invoice', leak);
+    if (poSpend > 0) {
+      const pos = (s.pos ?? []).filter((p) => inv!.pos.some((x) => x.id === p.id));
+      let left = leak;
+      pos.forEach((p, i) => {
+        const share = i === pos.length - 1 ? left : Math.round((leak * (p.cost - p.freightCost)) / Math.max(1, poSpend - inv!.pos.reduce((n, x) => n + x.freight, 0)));
+        p.over = Math.max(0, Math.min(left, share));
+        left -= p.over;
+      });
+    }
+  }
   // the parts auction: a broker's lot of what the island uses, at most every 2 weeks
   const lastAuction = Math.max(-9, ...s.orders.filter((o) => o.kind === 'auction').map((o) => o.createdWeek));
   if (W - lastAuction >= 2) {
@@ -3138,6 +3214,11 @@ function autoRun(s: IslandState, role: Role) {
         n++;
       }
     }
+    // the one MEL extension the mechanic asked for: approved (the plane keeps flying on the placard a week)
+    for (const al of liveAlerts(s).filter((x) => x.mel?.ask && !x.mel.ext && x.mel.until >= s.week - 1)) {
+      al.mel!.until = Math.max(al.mel!.until, s.week - 1) + 1;
+      al.mel!.ext = true;
+    }
     // requisitions: a grounding job's whenever the cash is there; the rest within the autopilot's weekly cap
     let cap = STOCK.autopilotCap;
     const reqs = (s.reqs ?? [])
@@ -3181,7 +3262,13 @@ function autoRun(s: IslandState, role: Role) {
       // autopilot keeps to the manual: a service-neutral fault stays closed (a branch breaker doesn't isolate it)
       if (!causeOf(al)?.neutral) al.safe = { how: 'breaker', week: s.week, by: auto };
     }
-    if (ops === 'mech' && f.mel === 'C' && !al.mel && needsBuy) al.mel = { until: s.week, by: auto };
+    // placarded when it can't be fixed this week: a part to buy, or the electrician's check still to come
+    if (ops === 'mech' && f.mel === 'C' && !al.mel && (needsBuy || (f.bench && !al.bench?.call))) al.mel = { until: Math.max(s.week, al.due), by: auto };
+    // a placard running out with the fix not ready: the one extension, asked of the analyst
+    if (ops === 'mech' && al.mel && !al.mel.ext && !al.mel.ask && al.mel.until <= s.week && al.mel.until >= s.week - 1) {
+      const job = al.order ? s.orders.find((x) => x.id === al.order) : undefined;
+      if (!job || job.status !== 'ready') al.mel.ask = { week: s.week, by: auto };
+    }
     if (ops === 'mech' && f.bench && !al.bench?.call && !(al.bench?.order && open(s.orders.find((x) => x.id === al.bench!.order)!))) {
       const b = flowBenchOrder(s, al, false);
       al.bench = { ...(al.bench ?? {}), order: b.id };
@@ -3366,7 +3453,10 @@ function leftoverChainCard(s: IslandState, line: (role: ReportLine['role'], tone
  * Resolve step 1b (8.5): the analyst ended the turn, and flow cards and
  * requisitions came in after it. Each goes through, most urgent first, with the
  * card's default freight, up to the standing limit and while spendable cash
- * stays above the freeze (safety work: above zero). The rest waits.
+ * stays above the freeze (safety work: above zero). A card whose alert grounds
+ * a plane, restricts the only guest plane or closes a house this week or next
+ * goes through whatever the limit (`lateSafe`, cash floor $0). The rest waits,
+ * and the review says why.
  */
 function standingApprovals(s: IslandState, line: Liner, now: number) {
   const t = s.turns.fin;
@@ -3376,35 +3466,53 @@ function standingApprovals(s: IslandState, line: Liner, now: number) {
   const fin = nameOfRole(s, 'fin');
   const cards = s.orders
     .filter((o) => o.flow && o.status === 'pending' && (o.at ?? 0) > endedAt && o.lastDeferredWeek !== s.week)
-    .sort((a, b) => Number(isSafetyJob(s, b)) - Number(isSafetyJob(s, a)) || (alertOf(s, a)?.due ?? 99) - (alertOf(s, b)?.due ?? 99));
+    .sort((a, b) => Number(lateSafe(s, b)) - Number(lateSafe(s, a)) || Number(isSafetyJob(s, b)) - Number(isSafetyJob(s, a)) || (alertOf(s, a)?.due ?? 99) - (alertOf(s, b)?.due ?? 99));
   for (const o of cards) {
     const card = cardOf(s, o);
     const cost = card.total;
     const safety = isSafetyJob(s, o);
+    const soon = lateSafe(s, o);
     // what waits says why on the board: both seats see it (the tech was told it might go through tonight)
-    const over = cost > limit;
+    const over = !soon && cost > limit;
     if (over || spendable(s) - cost < (safety ? 0 : ECON.freezeBelow)) {
       const asset = assetOf(s, o);
-      line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, o.role)}'s card for ${o.title}${asset ? ` on ${asset.name}` : ''} came in (${usd(cost)}): ${over ? `over the standing limit (${usd(limit)} left)` : 'spendable cash is under the freeze'}, so it waits for ${fin}.`);
+      line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, o.role)}'s card for ${o.title}${asset ? ` on ${asset.name}` : ''} came in (${usd(cost)}): ${over ? `over the standing limit (${usd(limit)} left)` : safety ? 'there isn’t the cash for it' : 'spendable cash is under the freeze'}, so it waits for ${fin}.`);
       continue;
     }
     approveFlow(s, o, false, { freight: card.freight.pick }, 'auto', now);
-    limit -= cost;
+    if (!soon) limit -= cost;
     const asset = assetOf(s, o);
     const eta = card.freight.pick === 'aog' ? 'on the AOG boat, here tonight' : card.freight.sched.eta <= s.week ? 'next flight, here tonight' : `here week ${card.freight.sched.eta}`;
-    line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, o.role)}'s card for ${o.title}${asset ? ` on ${asset.name}` : ''} came in: it went through on the standing approval (${usd(cost)}${card.toBuy.length + card.tools.length ? `, ${eta}` : ''}).`);
+    line(
+      'fin',
+      'info',
+      `${fin} had ended the turn when ${nameOfRole(s, o.role)}'s card for ${o.title}${asset ? ` on ${asset.name}` : ''} came in: it went through on the standing approval (${usd(cost)}${card.toBuy.length + card.tools.length ? `, ${eta}` : ''})${soon ? `: safety work due this week or next goes through whatever the limit` : ''}.`,
+    );
   }
   const reqs = (s.reqs ?? []).filter((r) => r.status === 'open' && r.at > endedAt && r.deferredWeek !== s.week);
   for (const r of reqs) {
-    const cost = reqCost(r);
-    const urgent = !!r.order && urgentJob(s, s.orders.find((o) => o.id === r.order));
-    if (cost > limit) continue;
-    if (spendable(s) - cost < (urgent ? 0 : ECON.freezeBelow)) continue;
+    // the line and its shipment's freight (none when it rides a PO already on its way)
+    const cost = reqCost(r) + schedFreight(s, [{ item: r.item }]).cost;
+    const job = r.order ? s.orders.find((o) => o.id === r.order) : undefined;
+    const urgent = lateSafe(s, job);
+    const x = itemById(r.item);
+    const why =
+      !urgent && cost > limit
+        ? `over the standing limit (${usd(limit)} left)`
+        : spendable(s) - cost < (urgent ? 0 : ECON.freezeBelow)
+          ? 'spendable cash is under the freeze'
+          : !r.order && needsNewBin(s, r.item) && !binFree(s)
+            ? `the stores are full (${binsInUse(s)} of ${binsTotal(s)} bins)`
+            : null;
+    if (why) {
+      line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, r.role)}'s request for ${r.qty} × ${x?.pn ?? r.item} came in (${usd(cost)}): ${why}, so it waits for ${fin}.`);
+      continue;
+    }
     const [po] = placePo(s, [{ item: r.item, qty: r.qty, req: r.id, ...(r.order ? { order: r.order } : {}) }], {}, 'auto', now);
     r.status = 'ordered';
     r.po = po?.id;
-    limit -= cost;
-    line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, r.role)}'s request for ${r.qty} × ${r.item} came in: it went through on the standing approval (${usd(cost)}).`);
+    if (!urgent) limit -= cost;
+    line('fin', 'info', `${fin} had ended the turn when ${nameOfRole(s, r.role)}'s request for ${r.qty} × ${x?.pn ?? r.item} came in: it went through on the standing approval (${usd(cost)}).`);
   }
 }
 
@@ -3682,7 +3790,7 @@ export function resolveWeek(s: IslandState, now: number) {
       line('elec', 'bad', `Wedding party: ${short} house${short > 1 ? 's' : ''} not ready, −$${(1000 * short).toLocaleString('en-US')}.`);
     }
   }
-  const occ = clamp(occupancy(s, s.rates.nightly, W) * reviewMult(s), 0, 1);
+  const occ = clamp(occupancy(s, s.rates.nightly, W) * reviewMult(s, booked.length), 0, 1);
   let rental = 0;
   let refunds = 0;
   const bookedRevenue = new Map<string, number>();
@@ -3914,17 +4022,31 @@ export function resolveWeek(s: IslandState, now: number) {
   else if (s.weather === 'storm' && r.chance(0.6)) weatherCost = Math.round((1500 + 1000 * Math.max(0, s.tier - 2)) * shield);
   else if (s.weather === 'wind' && s.tier >= 2 && r.chance(0.15)) weatherCost = 600 + 200 * s.tier;
 
-  // 10. analyst money hunts: close / bank rec / invoice match recover a hidden leak
+  // 10. analyst money hunts: close / bank rec / invoice match recover a hidden leak. The three-way match on real POs
+  // withholds what it found from those POs' payment (their `over` is paid at step 11's payment run, less `caught`)
   let leak = 0;
   let found = 0;
+  let foundCash = 0;
   for (const t of s.orders.filter((o) => o.role === 'fin' && o.kind !== 'report' && o.leak && o.createdWeek === W)) {
     const got = t.result ? (t.leak ?? 0) * t.result.score : 0;
-    leak += t.leak ?? 0;
+    const onPos = t.kind === 'invoice' ? (s.pos ?? []).filter((p) => p.status === 'received' && (p.over ?? 0) > 0 && p.got === W - 1) : [];
+    if (onPos.length) {
+      const over = onPos.reduce((n, p) => n + (p.over ?? 0), 0);
+      let left = Math.round(got);
+      onPos.forEach((p, i) => {
+        const c = i === onPos.length - 1 ? left : Math.round((got * (p.over ?? 0)) / Math.max(1, over));
+        p.caught = Math.max(0, Math.min(p.over ?? 0, c, left));
+        left -= p.caught;
+      });
+    } else {
+      leak += t.leak ?? 0;
+      foundCash += got;
+    }
     found += got;
     const what = t.kind === 'invoice' ? 'vendor overbilling' : t.kind === 'reconcile' ? 'unreconciled cash' : 'budget leakage';
     line('fin', got >= (t.leak ?? 0) * 0.95 ? 'good' : 'bad', got > 0 ? `${t.title}: recovered ${usd(got)} of ${usd(t.leak ?? 0)} ${what}.` : `${t.title} skipped: ${usd(t.leak ?? 0)} ${what} lost.`);
   }
-  const leakCost = Math.round(leak - found);
+  const leakCost = Math.round(leak - foundCash);
 
   // 10b. open cross-trade reports: a leak costs cash every week; a cap slowed the reporter down
   let reportLeak = 0;

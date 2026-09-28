@@ -7,6 +7,7 @@
 // electrical site and the fix all derive from the symptom, the cause and the
 // alert's seed.
 import { planeModel, type PlaneModel } from './aircraft';
+import { islandAircraft, manualCard } from './chain';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, MODELS } from './data';
 import { hashSeed, rng, type Rng } from './rng';
 import { pilotOf, squawkNff, wearMult } from './staff';
@@ -24,6 +25,12 @@ export type Cause = {
   fix?: string;
   /** the raw finding Investigate shows */
   finding?: string;
+  /**
+   * the only guest plane's early sign (5.6): the same cause caught before it is a no-go item, a condition still
+   * within limits (a pilot flying it wouldn't be flying an unairworthy plane). Investigate shows it when the alert
+   * was raised with the sole wording
+   */
+  soleFinding?: string;
   /** the main slots it requires (the task's other slots are optional) */
   needs?: string[];
   /** elec: only in these rooms */
@@ -80,8 +87,22 @@ const MECH: Symptom[] = [
     aw: true,
     lead: [0, 0],
     causes: [
-      { kind: 'hydraulics', w: 3, fix: '32-42-01', models: PISTONS, finding: 'Pedal sinks, then firms up after two or three pumps; reservoir at ADD; no leaks at the caliper.' },
-      { kind: 'tires', w: 2, fix: '32-40-02', finding: '{side} linings 0.06 in (limit 0.10); pedal firm; no leaks.', needs: ['lining'] },
+      {
+        kind: 'hydraulics',
+        w: 3,
+        fix: '32-42-01',
+        models: PISTONS,
+        finding: 'Pedal sinks, then firms up after two or three pumps; reservoir at ADD; no leaks at the caliper.',
+        soleFinding: 'Pedal firm after one pump, a little more travel than the other side; reservoir just under FULL; no leaks at the caliper.',
+      },
+      {
+        kind: 'tires',
+        w: 2,
+        fix: '32-40-02',
+        finding: '{side} linings 0.06 in (limit 0.10); pedal firm; no leaks.',
+        soleFinding: '{side} linings 0.12 in (limit 0.10): at this wear, at the limit in about two weeks. Pedal firm; no leaks.',
+        needs: ['lining'],
+      },
     ],
     sole: { text: '{side} brake pedal travel increasing; firm at the stop.', lead: [1, 2] },
   },
@@ -116,7 +137,7 @@ const MECH: Symptom[] = [
     lead: [1, 1],
     causes: [
       { kind: 'tires', w: 3, fix: '32-40-01', finding: 'Soap test: a pinhole in the tube at the valve stem base; the wheel halves are dry.', needs: ['tube'] },
-      { kind: 'corrosion', w: 1, fix: '32-40-03', finding: "Tire off: the tube chafed through over a corrosion pit at the outer half's bead seat; penetrant shows no crack.", needs: ['tube'] },
+      { kind: 'corrosion', w: 1, fix: '32-40-03', finding: "Tire off: the tube chafed through over a corrosion pit at the outer half's bead seat.", needs: ['tube'] },
     ],
     nff: [{ w: 1, finding: 'Held pressure 24 h after a top-up: a cold night. Could not duplicate.' }],
   },
@@ -128,7 +149,7 @@ const MECH: Symptom[] = [
     models: ALL,
     aw: true,
     lead: [1, 2],
-    causes: [{ kind: 'corrosion', w: 1, fix: '32-40-03', finding: 'Blistered at the bead seat; penetrant: no crack. Treat, coat and refit.' }],
+    causes: [{ kind: 'corrosion', w: 1, fix: '32-40-03', finding: 'Blistered at the bead seat, pitting under the paint. Strip, treat, penetrant-inspect, coat and refit.' }],
   },
   {
     key: 'M_HARD_LANDING',
@@ -155,8 +176,20 @@ const MECH: Symptom[] = [
     aw: true,
     lead: [0, 0],
     causes: [
-      { kind: 'prop', w: 3, fix: '61-10-01', finding: 'Two prop bolts below torque; fretting at the flange.' },
-      { kind: 'prop', w: 1, fix: '61-10-01', finding: 'Blade track 3/16 in out (limit 1/16): the prop sits cocked on its flange.' },
+      {
+        kind: 'prop',
+        w: 3,
+        fix: '61-10-01',
+        finding: 'Torque stripes moved on two prop bolts; no fretting at the flange: re-torque them.',
+        soleFinding: 'Two prop bolts at the bottom of the torque band, stripes intact, no fretting at the flange.',
+      },
+      {
+        kind: 'prop',
+        w: 1,
+        fix: '61-10-01',
+        finding: 'Blade track 3/16 in out (limit 1/16): the prop sits cocked on its flange.',
+        soleFinding: 'Blade track 1/16 in out, at the limit; the prop sits true on its flange.',
+      },
     ],
     nff: [{ w: 1, finding: 'Run-up smooth; blades and spinner undamaged. Could not duplicate.' }],
     sole: { text: 'A light vibration at cruise, smooth at other rpm.', lead: [1, 2] },
@@ -180,22 +213,30 @@ const MECH: Symptom[] = [
     models: ALL,
     aw: true,
     lead: [0, 0],
-    causes: [{ kind: 'wire', w: 1, fix: '61-10-02', finding: 'The wire parted at the twist; both bolts still at their torque stripes.' }],
+    causes: [
+      {
+        kind: 'wire',
+        w: 1,
+        fix: '61-10-02',
+        finding: 'The wire parted at the twist; both bolts still at their torque stripes.',
+        soleFinding: 'The wire is nicked at the twist, not parted: still tight; both bolts at their torque stripes.',
+      },
+    ],
     sole: { text: 'Safety wire on a prop bolt pair nicked at the preflight; still tight.', lead: [1, 1] },
   },
   {
     key: 'M_COM_DEAD',
     role: 'mech',
     src: 'squawk',
-    text: 'Com 1 dead on transmit; receive weak.',
+    text: 'Com 1 dead on transmit.',
     models: ALL,
     aw: true,
     mel: ['twin', 'cargo'],
     lead: [0, 0],
     bench: true,
     causes: [
-      { kind: 'avionics', w: 7, fix: '23-10-01', finding: 'No sidetone, no carrier on the test set; 27.8 V at the tray.', needs: ['radio'] },
-      { kind: 'wiring', w: 3, finding: '0 V at tray pin 1 with the breaker in; the radio powers up on the bench supply.' },
+      { kind: 'avionics', w: 7, fix: '23-10-01', finding: 'No sidetone, no carrier on the test set; 27.8 V at the tray, keyed or not.', needs: ['radio'] },
+      { kind: 'wiring', w: 3, finding: '27.8 V at the tray unkeyed, 20 V keyed: a loose power pin sags under the transmit load; the radio transmits on the bench.' },
     ],
   },
   {
@@ -260,7 +301,7 @@ const MECH: Symptom[] = [
     aw: true,
     intermittent: true,
     lead: [2, 3],
-    causes: [{ kind: 'cylinder', w: 2, fix: '72-30-01', finding: '#3 compression 58/80; air at the intake; intake gasket seeping.' }],
+    causes: [{ kind: 'cylinder', w: 2, fix: '72-30-01', finding: "#3 38/80 against a master orifice of 46; air at the exhaust stack; borescope: the exhaust valve eroded at 3 o'clock." }],
     nff: [{ w: 1, finding: 'A folded baffle seal at #3, straightened on the spot; CHTs even now. Nothing to order.' }],
   },
   {
@@ -271,7 +312,7 @@ const MECH: Symptom[] = [
     models: PISTONS,
     aw: true,
     lead: [2, 4],
-    causes: [{ kind: 'cylinder', w: 3, fix: '72-30-01', finding: '#2 compression 60/80; fine iron in the filter media.' }],
+    causes: [{ kind: 'cylinder', w: 3, fix: '72-30-01', finding: '#2: the borescope shows the barrel scored in the ring travel; 52/80, air at the breather; fine iron in the filter media.' }],
     nff: [{ w: 1, finding: 'Resample: iron 14 ppm. The last sample was contaminated.' }],
   },
   {
@@ -293,8 +334,15 @@ const MECH: Symptom[] = [
     aw: true,
     lead: [0, 1],
     causes: [
-      { kind: 'oil', w: 2, fix: '79-00-01', finding: 'Drain plug safety wire broken, the plug backing off; filter gasket dry.', needs: ['oilFilter'] },
-      { kind: 'cylinder', w: 1, fix: '72-30-01', finding: 'Oil weeping at the #4 cylinder base.' },
+      {
+        kind: 'oil',
+        w: 2,
+        fix: '79-00-01',
+        finding: 'Drain plug safety wire broken, the plug backing off; filter gasket dry.',
+        soleFinding: 'Drain-plug safety wire loose; the plug is tight; filter gasket dry.',
+        needs: ['oilFilter'],
+      },
+      { kind: 'cylinder', w: 1, fix: '72-30-01', finding: 'Oil weeping at the #4 cylinder base.', soleFinding: 'The #4 cylinder base is damp with oil: no drip, the base nuts at torque.' },
     ],
     nff: [{ w: 1, finding: 'Overfilled by a quart; the breather blew it out. Serviced to the mark.' }],
     sole: { text: 'A little oil on the belly after each flight; the level holds.', lead: [1, 1] },
@@ -318,7 +366,15 @@ const MECH: Symptom[] = [
     models: PISTONS,
     aw: true,
     lead: [0, 0],
-    causes: [{ kind: 'hydraulics', w: 1, fix: '29-10-01', finding: "Precharge 450 psi against the card's value." }],
+    causes: [
+      {
+        kind: 'hydraulics',
+        w: 1,
+        fix: '29-10-01',
+        finding: 'Precharge 450 psi (card: {pc} psi ±25 at 70 °F).',
+        soleFinding: 'Precharge {pcLow} psi (card: {pc} psi ±25 at 70 °F): at the low end, bleeding down slowly; it still holds five brake applications.',
+      },
+    ],
     sole: { text: "Accumulator precharge near the card's minimum at the preflight check.", lead: [1, 1] },
   },
   {
@@ -350,7 +406,15 @@ const MECH: Symptom[] = [
     models: ALL,
     aw: true,
     lead: [0, 0],
-    causes: [{ kind: 'spar', w: 1, fix: '57-10-01', finding: 'Black streaks behind four root rivets; the fairing moves under hand pressure.' }],
+    causes: [
+      {
+        kind: 'spar',
+        w: 1,
+        fix: '57-10-01',
+        finding: 'Black streaks behind four root rivets; the fairing moves under hand pressure.',
+        soleFinding: 'Paint cracked at two root rivets; no black streaks yet, the fairing firm under hand pressure.',
+      },
+    ],
     sole: { text: 'Paint cracked around two wing-root rivets.', lead: [2, 2] },
   },
   {
@@ -440,7 +504,15 @@ const ELEC: Symptom[] = [
     hazard: true,
     lead: [0, 0],
     causes: [
-      { kind: 'flicker', w: 2, fix: 'ref:wh', finding: "Water heater element 40 kΩ to its sheath; the heater's EGC open at its junction box; 4 V valve to drain.", needs: ['element'] },
+      {
+        kind: 'flicker',
+        w: 2,
+        fix: 'ref:wh',
+        finding: "Water heater element 40 kΩ to its sheath; the heater's EGC open at its junction box; 4 V valve to drain.",
+        needs: ['element'],
+        // the heater's own circuit, not the bathroom's: the make-safe tags this breaker
+        site: { what: 'Water heater', amps: 30, awg: 10, poles: 2 },
+      },
       { kind: 'flicker', w: 1, fix: 'ref:ground', finding: 'No bonding jumper on the water piping (250.104(A)); 4 V valve to drain with the heater off.', needs: ['jumper', 'clamp'] },
       {
         kind: 'flicker',
@@ -604,7 +676,7 @@ const ELEC: Symptom[] = [
     key: 'E_TAKEOFF_XFER',
     role: 'elec',
     src: 'takeoff',
-    text: 'The transfer switch is too small for the houses now: install a larger one.',
+    text: 'The houses now back up {load} A on the {amps} A transfer switch: install a larger one (702.4(B)).',
     targets: ['gen'],
     rooms: ['gen'],
     lead: [2, 3],
@@ -620,7 +692,7 @@ const ELEC: Symptom[] = [
     rooms: ['gen'],
     lead: [0, 1],
     causes: [
-      { kind: 'transfer', w: 2, fix: 'ref:xfer', finding: "The transfer switch's contacts pitted and burnt on {leg}'s leg." },
+      { kind: 'transfer', w: 2, fix: 'ref:xfer', finding: "The transfer switch's contacts pitted and burnt on the leg to {leg}." },
       { kind: 'genTest', w: 2, fix: 'ref:gentest', finding: "{Leg}' transfer-panel relay coil reads open.", needs: ['relay'] },
     ],
   },
@@ -636,13 +708,15 @@ const ELEC: Symptom[] = [
   },
 ];
 
-/** a trade's write-up names a job (the squawk action): one line per catalog kind (7) */
-const WRITE_UP: Record<string, { what: string; rooms?: Room[] }> = {
+/** a trade's write-up names a job (the squawk action): one line per catalog kind (7).
+ *  `needs` overrides the task's required slots when every slot is optional but
+ *  the write-up names the unit (a com radio swap needs the radio) */
+const WRITE_UP: Record<string, { what: string; rooms?: Room[]; needs?: string[] }> = {
   inspect100: { what: 'the 100-hour inspection' },
   tires: { what: 'brake linings worn' },
   prop: { what: 'prop bolts due a torque check' },
   corrosion: { what: 'corrosion at a wheel-half bead seat' },
-  avionics: { what: 'the com radio weak on transmit' },
+  avionics: { what: 'the com radio weak on transmit', needs: ['radio'] },
   alternator: { what: 'alternator output low' },
   cylinder: { what: 'a cylinder low on compression' },
   spar: { what: 'the wing spar due an inspection' },
@@ -673,7 +747,7 @@ function writeUps(): Symptom[] {
     const plane = MODELS[c.targets[0]]?.kind === 'plane';
     const any = c.targets[0];
     const task = defaultTask(c.kind, { kind: MODELS[any].kind, model: any });
-    const needs = task ? task.main.filter((x) => !x.optional).map((x) => x.slot) : [];
+    const needs = w.needs ?? (task ? task.main.filter((x) => !x.optional).map((x) => x.slot) : []);
     out.push({
       key: `W_${c.kind}`,
       role: c.role,
@@ -798,6 +872,7 @@ function vars(s: IslandState, a: Alert): Record<string, string> {
     appliance: site?.appliance ?? 'appliance',
     amps: String(site?.amps ?? 60),
     feet: String(site?.feet ?? 40),
+    load: String(site?.load ?? 90),
     leg,
     Leg: leg.charAt(0).toUpperCase() + leg.slice(1),
     problem: a.repair?.problem ?? 'a known defect',
@@ -810,8 +885,15 @@ function fill(text: string, v: Record<string, string>): string {
   let out = text.replace(/\{(\w+)\}/g, (_, k: string) => v[k] ?? `{${k}}`);
   // "{Eng}the engine monitor …" on a single: the sentence starts with the rest
   out = out.charAt(0).toUpperCase() + out.slice(1);
-  // "due in {lead} weeks" a week out
-  return out.replace(/\b1 weeks\b/g, '1 week');
+  // "due in {lead} weeks" a week out, "(1 flights)" a flight out
+  return out.replace(/\b1 weeks\b/g, '1 week').replace(/\b1 flights\b/g, '1 flight');
+}
+
+/** the accumulator precharge this airplane's card prints (its S/N block), for a finding's {pc}: the twin 800 or 900 psi */
+function cardPrecharge(s: IslandState, a: Pick<Alert, 'assetId'>): number | undefined {
+  const asset = assetOf(s, a);
+  if (!asset || asset.kind !== 'plane') return undefined;
+  return manualCard(islandAircraft(s.seed, asset), 'powerpack', 'hydraulics', false)?.precharge?.lines.find((l) => l.applies)?.psi;
 }
 
 /** a sentence's first letter in lower case, mid-sentence: never an acronym or a side ("GFCI …", "R/H main tire", "N-12") */
@@ -898,7 +980,8 @@ function siteFor(room: Room, r: Rng): ElecSite {
     case 'dock':
       return { room, amps: 30, awg: 10, wet: true, run: 'buried', feet: r.int(60, 120) };
     case 'gen':
-      return { room, amps: 100, awg: 3, load: r.int(40, 80) };
+      // the transfer switch as it is (60 A on #6), and the houses' backed-up load (a larger switch carries it, 702.4(B))
+      return { room, amps: 60, awg: 6, load: r.int(72, 140) };
   }
 }
 
@@ -909,6 +992,13 @@ export function protectionNeeded(site: ElecSite): { gfci: boolean; afci: boolean
     gfci: ['bath', 'kitchen', 'laundry', 'outdoor', 'spa'].includes(room),
     afci: ['bedroom', 'living', 'kitchen', 'laundry', 'hall'].includes(room),
   };
+}
+
+/** the breaker a make-safe tags at a site, in words: "the water heater's 30 A 2-pole breaker", "the bathroom's 20 A breaker" */
+export function breakerOf(site: ElecSite | null | undefined): string {
+  if (!site) return 'the circuit breaker';
+  const who = site.what ? site.what.toLowerCase() : roomWord(site.deviceRoom ?? site.room);
+  return `the ${who}'s ${site.amps} A ${site.poles === 2 ? '2-pole ' : ''}breaker`;
 }
 
 /** the task that fixes the cause on this asset */
@@ -963,7 +1053,14 @@ export function findingOf(s: IslandState, a: Alert, tier: number): { text: strin
     const n = pool[0] ?? sym.nff?.[0];
     return { text: n ? fill(n.finding, v) : 'Nothing found on the ground: could not duplicate.', nff: true };
   }
-  let text = c.finding ? fill(c.finding, v) : fill(typeof sym.text === 'string' ? sym.text : Object.values(sym.text)[0]!, v);
+  // the only guest plane's early sign reads as what it is: a condition still within limits (5.6)
+  const raw = a.sole && c.soleFinding ? c.soleFinding : c.finding;
+  if (raw?.includes('{pc')) {
+    const pc = cardPrecharge(s, a) ?? 800;
+    v.pc = String(pc);
+    v.pcLow = String(pc - 20);
+  }
+  let text = raw ? fill(raw, v) : fill(typeof sym.text === 'string' ? sym.text : Object.values(sym.text)[0]!, v);
   if (tier <= 2) {
     const elec = s.players.elec?.name ?? 'the electrician';
     const t = fixTask(s, a, c);
@@ -1009,19 +1106,30 @@ function fits(sym: Symptom, asset: Asset): boolean {
   return !!sym.targets?.includes(asset.model);
 }
 
-/** the (symptom, cause) pairs a kind can be raised as on an asset, weighted by the cause */
+/**
+ * The (symptom, cause) pairs a kind can be raised as on an asset, weighted by the cause. A symptom that has a
+ * cause of this kind brings its wiring causes along (5.4: the electrician's fix at the airplane), with their own
+ * weights: the com radio's dead transmit is the wiring 3 in 10, the alternator's no output 1 in 5, the
+ * starter-generator's 1 in 4. The alert still fills the kind's slot (`slotKind`).
+ */
 function pairsFor(kind: string, asset: Asset, sole: boolean): { sym: Symptom; cause: number; w: number }[] {
   const out: { sym: Symptom; cause: number; w: number }[] = [];
+  const onModel = (c: Cause) => !(c.models && asset.kind === 'plane' && !c.models.includes(planeModel(asset.model)));
   for (const sym of Object.values(SYMPTOMS)) {
     if (sym.auto || !fits(sym, asset)) continue;
     if (sole && sym.sole === 'none') continue;
+    if (!sym.causes.some((c) => c.kind === kind && onModel(c))) continue;
     sym.causes.forEach((c, i) => {
-      if (c.kind !== kind) return;
-      if (c.models && asset.kind === 'plane' && !c.models.includes(planeModel(asset.model))) return;
-      out.push({ sym, cause: i, w: c.w });
+      if ((c.kind === kind || c.kind === 'wiring') && onModel(c)) out.push({ sym, cause: i, w: c.w });
     });
   }
   return out;
+}
+
+/** the catalog kind an alert fills a slot of: its cause's kind, a wiring cause its symptom's unit's (M_COM_DEAD's wiring is an 'avionics' alert) */
+export function slotKind(a: Pick<Alert, 'sym' | 'kind'>): string {
+  if (a.kind !== 'wiring') return a.kind;
+  return SYMPTOMS[a.sym]?.causes.find((c) => c.kind !== 'wiring')?.kind ?? a.kind;
 }
 
 /** a new alert (also used by repairs, NFF comebacks, write-ups and hard landings) */
@@ -1138,7 +1246,7 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
       for (const c of CATALOG) {
         if (c.role !== role || !c.targets.includes(asset.model)) continue;
         if (openOrders.some((o) => o.kind === c.kind && o.assetId === asset.id)) continue;
-        if (live.some((a) => a.assetId === asset.id && a.kind === c.kind)) continue;
+        if (live.some((a) => a.assetId === asset.id && slotKind(a) === c.kind)) continue;
         let w = c.weight(asset, W);
         // better pilots wear the brakes and tires less (D: wearMult)
         if (w > 0 && c.kind === 'tires' && asset.kind === 'plane') w *= wearMult(s, asset.id);

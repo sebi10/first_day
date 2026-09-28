@@ -220,7 +220,8 @@ await sebLaptop.shot('linked');
 
 // 4. Seb takes an alert through the job flow on the laptop, and asks Stores for a line; his phone sees the job
 await sebLaptop.page.evaluate(() => window.scrollTo({ top: 0 }));
-const row = sebLaptop.page.locator('.jf-your .jf-arow:not(:has(.jf-start)) .jf-arow-main').first();
+// an alert's row, not the week's revenue work (a load sheet, a ground power start)
+const row = sebLaptop.page.locator('.jf-your .jf-arow:not(.rev):not(:has(.jf-start)) .jf-arow-main').first();
 await row.waitFor({ state: 'visible', timeout: 15000 });
 const alertText = (await row.locator('.jf-arow-sym').innerText()).trim();
 await row.click();
@@ -228,7 +229,7 @@ await sebLaptop.page.waitForTimeout(600);
 const safe = sebLaptop.sheet().getByRole('button', { name: 'Make it safe' });
 if (await safe.count()) {
   await safe.click();
-  await sebLaptop.sheet().getByRole('button', { name: 'Breaker off and tag it' }).click();
+  await sebLaptop.sheet().getByRole('button', { name: /: off and tag it$/ }).first().click(); // the alert's own breaker
 }
 const sent = await sebLaptop.driveAlert();
 console.log(`laptop: "${alertText}" sent: ${JSON.stringify(sent)}`);

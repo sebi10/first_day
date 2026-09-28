@@ -2,9 +2,9 @@
 // guest plane, the teaching findings, and the right pick for every site the
 // tables make. The week-by-week parts (volume, NFF share, hazards, MEL,
 // comebacks) are in tests/flow.test.ts and tests/consequences.test.ts.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { plantFor } from '../src/sim/chain';
-import { alertTier, causeOf, findingOf, fixesOf, needsOf, prefilledTask, protectionNeeded, raiseAlert, siteOf, soleGuest, symptomOf, symptomText, SYMPTOMS } from '../src/sim/alerts';
+import { alertTier, causeOf, findingOf, fixesOf, needsOf, prefilledTask, protectionNeeded, raiseAlert, siteOf, slotKind, soleGuest, symptomOf, symptomText, SYMPTOMS } from '../src/sim/alerts';
 import { planeModel, type PlaneModel } from '../src/sim/aircraft';
 import { CATALOG, MODELS, TIERS } from '../src/sim/data';
 import { createIsland } from '../src/sim/engine';
@@ -24,6 +24,9 @@ function island(tier: number, seed = 7): IslandState {
   s.flowSince = 1;
   return s;
 }
+
+// thousands of raised alerts and 30 islands' picks: the CI runner is about 1.5x slower than a dev box
+vi.setConfig({ testTimeout: 30000 });
 
 const NO_ALERT = ['wb', 'gpustart'];
 const assetFor = (s: IslandState, model: string) => s.assets.find((a) => a.model === model)!;
@@ -62,7 +65,9 @@ describe('the symptom tables', () => {
         const asset = assetFor(s, t);
         for (let k = 0; k < 6; k++) {
           const a = raiseAlert(s, { role: c.role as OpsRole, asset, kind: c.kind }, 0);
-          expect(a.kind, `${c.kind} on ${t}`).toBe(c.kind);
+          // a bench symptom's wiring cause fills its unit's slot (5.4)
+          expect(slotKind(a), `${c.kind} on ${t}`).toBe(c.kind);
+          expect([c.kind, 'wiring'], `${c.kind} on ${t}`).toContain(a.kind);
           expect(a.sym.startsWith('W_'), `${c.kind} on ${t}: ${a.sym}`).toBe(false);
           expect(symptomOf(a)!.auto).toBeFalsy();
         }
@@ -73,7 +78,7 @@ describe('the symptom tables', () => {
     expect(soleGuest(s, 'p1')).toBe(true);
     for (const c of CATALOG.filter((x) => x.targets.includes('twin') && !NO_ALERT.includes(x.kind))) {
       const a = raiseAlert(s, { role: 'mech', asset: assetFor(s, 'twin'), kind: c.kind }, 0);
-      expect(a.kind).toBe(c.kind);
+      expect(slotKind(a)).toBe(c.kind);
       expect(a.sym.startsWith('W_'), `${c.kind}: ${a.sym}`).toBe(false);
     }
   });
@@ -145,6 +150,35 @@ describe('the only guest plane', () => {
   });
 });
 
+describe('the wiring share (5.4)', () => {
+  // generateAlerts raises trade work by catalog kind; a bench symptom's wiring
+  // cause rides along with its unit's kind, so the electrician's circuit check
+  // really does find the wiring about as often as the spec says
+  it('a bench symptom rolls the wiring about as often as the spec says: com 3 in 10, alternator 1 in 5, starter-generator 1 in 4', () => {
+    const want: { key: string; kind: string; model: string; share: number }[] = [
+      { key: 'M_COM_DEAD', kind: 'avionics', model: 'twin', share: 0.3 },
+      { key: 'M_COM_DEAD', kind: 'avionics', model: 'cargo', share: 0.3 },
+      { key: 'M_LOW_VOLTS', kind: 'alternator', model: 'twin', share: 0.2 },
+      { key: 'M_GEN_OFF', kind: 'alternator', model: 'cargo', share: 0.25 },
+    ];
+    for (const w of want) {
+      const s = island(5);
+      const asset = assetFor(s, w.model);
+      let n = 0;
+      let wiring = 0;
+      for (let k = 0; k < 900; k++) {
+        const a = raiseAlert(s, { role: 'mech', asset, kind: w.kind }, 0);
+        expect(slotKind(a)).toBe(w.kind);
+        if (a.sym !== w.key) continue;
+        n++;
+        if (a.kind === 'wiring') wiring++;
+      }
+      expect(n, `${w.key} on ${w.model}`).toBeGreaterThan(250);
+      expect(Math.abs(wiring / n - w.share), `${w.key} on ${w.model}: ${wiring}/${n}`).toBeLessThan(0.08);
+    }
+  });
+});
+
 describe('findings', () => {
   it('the bench fault always agrees with its finding: the wiring, or the unit', () => {
     const s = island(4);
@@ -159,7 +193,9 @@ describe('findings', () => {
           if (c.kind === 'wiring') {
             expect(f1, `${sym.key}#${ci}`).toContain("It's the wiring");
             expect(fixesOf(s, a)).toEqual([]);
-            expect(f3).toMatch(/0 V/);
+            // a reading on the airplane, and the unit good on the bench
+            expect(f3).toMatch(/\d V/);
+            expect(f3).toMatch(/on the bench|on the test stand/);
           } else {
             expect(f1, `${sym.key}#${ci}`).toContain("It's the unit");
             expect(f3).not.toMatch(/on the bench/);
@@ -233,6 +269,34 @@ describe('the right pick', () => {
       });
     }
     expect(n).toBeGreaterThan(1000);
+  });
+
+  it('the spa take-off judge: conduit fill from Chapter 9 for what was picked, the next standard size (240.4(B)) and the spa panel’s listing (110.3(B))', () => {
+    const task = taskOn('ref:spa', { kind: 'house', model: 'villa' } as never) ?? taskOn('ref:spa', assetFor(island(5), 'villa'))!;
+    const tub50 = { room: 'spa', amps: 50, awg: 8, wet: true, run: 'buried', feet: 41 } as never;
+    const tub60 = { room: 'spa', amps: 60, awg: 6, wet: true, run: 'buried', feet: 35 } as never;
+    const pick50 = [
+      { slot: 'spa', item: 'SPA-50GF', qty: 1 },
+      { slot: 'feed', item: 'KP250', qty: 1 },
+      { slot: 'wire', item: 'THWN-8', qty: 138 },
+      { slot: 'egc', item: 'THWN-10', qty: 46 },
+      { slot: 'emt', item: 'EMT-34', qty: 1 },
+      { slot: 'connectors', item: 'EMT-C34RT', qty: 2 },
+      { slot: 'pvc', item: 'PVC40-1', qty: 4 },
+    ];
+    const swap = (p: typeof pick50, slot: string, item: string) => p.map((l) => (l.slot === slot ? { ...l, item } : l));
+    expect(judgeElecPick(task, tub50, pick50)).toEqual({ ok: true });
+    // three #8 and a #10 EGC in 1/2 in EMT: 0.131 in² against 0.122 at 40%
+    const half = swap(swap(pick50, 'emt', 'EMT-12'), 'connectors', 'EMT-C12RT');
+    expect(judgeElecPick(task, tub50, half)).toEqual({ stop: 'Three #8 and a #10 EGC (0.131 in²) won’t fit 1/2 in EMT at 40% fill (0.122 in², Chapter 9): the wall section needs 3/4 in.' });
+    // a 60 A feed on #8 hots for a 50 A tub: oversized (their 50 A is a standard size)
+    expect(judgeElecPick(task, tub50, swap(pick50, 'feed', 'KP260'))).toMatchObject({ ok: false, variant: 'oversized', text: 'a 60 A feed on #8 hots' });
+    // #6 hots (65 A) may take the next standard size, 70 A (240.4(B)), but not over the 60 A spa panel's listing
+    const pick60 = swap(swap(swap(swap(pick50, 'spa', 'SPA-60GF'), 'feed', 'KP260'), 'wire', 'THWN-6'), 'egc', 'THWN-10');
+    expect(judgeElecPick(task, tub60, pick60)).toEqual({ ok: true });
+    expect(judgeElecPick(task, tub60, swap(pick60, 'feed', 'KP270'))).toMatchObject({ ok: false, variant: 'oversized', text: 'a 70 A feed on a 60 A spa panel (its listing, 110.3(B))' });
+    // #8 hots on a 60 A tub: undersized
+    expect(judgeElecPick(task, tub60, swap(pick60, 'wire', 'THWN-8'))).toMatchObject({ ok: false, variant: 'undersized' });
   });
 
   it('stdPick passes receiving’s judge for every mechanic’s cause on every airplane of 30 islands', () => {

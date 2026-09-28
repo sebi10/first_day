@@ -6,11 +6,11 @@ import { useState } from 'preact/hooks';
 import { SUPPLIERS } from '../../sim/data';
 import { cardOf, flowStage, installCheck } from '../../sim/flow';
 import { itemById } from '../../sim/items';
-import { isSafetyJob, jobLines, onOrderFor, owned, reservedFor, toolComing } from '../../sim/stock';
+import { isSafetyJob, jobLines, lateSafe, onOrderFor, owned, reservedFor, toolComing } from '../../sim/stock';
 import type { Action, Alert, IslandState, Order } from '../../sim/types';
 import { ChainOrigin } from '../chain';
 import { Btn, usd } from '../kit';
-import { flowMove, standingWords } from '../select';
+import { chainStepOrder, flowMove, shipWords, standingWords } from '../select';
 import { lineWords, taskFor } from './steps';
 import { landsWords, nameOf } from './words';
 
@@ -67,6 +67,7 @@ export function JobView({
   run,
   onStart,
   onRepick,
+  onOpenOrder,
   demo,
   ended,
 }: {
@@ -76,6 +77,8 @@ export function JobView({
   run(x: Action, done?: string): Promise<boolean>;
   onStart(o: Order): void;
   onRepick(research?: boolean): void;
+  /** open another order (the part chain's step this job waits on: the IPC, the logbooks) */
+  onOpenOrder?(id: string): void;
   demo?: boolean;
   ended?: boolean;
 }) {
@@ -93,6 +96,11 @@ export function JobView({
   // when the card's buys land: said once when they all come on the same resolve
   const etas = card ? [...new Set(card.toBuy.map((l) => l.eta))] : [];
   const oneEta = etas.length === 1 ? etas[0] : undefined;
+  // the research branch: the chain's step is this job's next move (the logbooks), a tap away
+  const step = stage === 'research' && o.chain ? chainStepOrder(s) : null;
+  const myStep = step && step.who === a.role ? step : null;
+  const label = a.repair ? 'Repair' : t?.book === 'REF' ? 'Reference' : t?.book;
+  const ship = card && card.freight.pick !== 'aog' ? shipWords(card.freight.sched) : undefined;
   return (
     <div class="col jf-step" style={{ gap: 10 }}>
       <div class={`jf-stage ${mine ? 'mine' : ''} ${stage}`}>
@@ -101,7 +109,7 @@ export function JobView({
       </div>
       {t && (
         <div class="jf-taskline static">
-          <span class="label">{a.repair ? 'Repair' : t.book === 'REF' ? 'Reference' : t.book}</span> <b>{t.no}</b> {o.title}
+          <span class="label">{label}</span> {t.no !== label && <b>{t.no}</b>} {o.title}
         </div>
       )}
       {o.flow?.wired && <div class="jf-note">{nameOf(s, 'elec')}'s check found the fault in the wiring and fixed it: no part. Inspect the splice, ops-check it and sign the airplane back into service.</div>}
@@ -120,6 +128,7 @@ export function JobView({
               {oneEta === undefined ? ` · ${landsWords(s.week, l.eta)}` : ''}
             </span>
           ))}
+          {ship && <span>Freight {usd(card.freight.sched.cost)} · {ship}</span>}
           {oneEta !== undefined && <span class="label">Once approved, it {landsWords(s.week, oneEta)}.</span>}
           {card.tools.map((l) => (
             <span key={l.item}>
@@ -128,7 +137,7 @@ export function JobView({
           ))}
           <span>Labour {usd(card.labour)}</span>
           <b>Total {usd(card.total)}</b>
-          {o.status === 'pending' && standingWords(s, card.total, isSafetyJob(s, o)) && <span class="label">{standingWords(s, card.total, isSafetyJob(s, o))}</span>}
+          {o.status === 'pending' && standingWords(s, card.total, isSafetyJob(s, o), lateSafe(s, o)) && <span class="label">{standingWords(s, card.total, isSafetyJob(s, o), lateSafe(s, o))}</span>}
         </div>
       )}
       {!card && lines.length > 0 && (
@@ -151,6 +160,11 @@ export function JobView({
       )}
       {open && !demo && (
         <div class="col" style={{ gap: 8 }}>
+          {myStep && onOpenOrder && (
+            <Btn block disabled={ended} onClick={() => onOpenOrder(myStep.order)}>
+              {myStep.label}
+            </Btn>
+          )}
           {o.status === 'ready' && !check && (
             <Btn block disabled={ended} onClick={() => onStart(o)}>
               Start ▸
@@ -185,7 +199,7 @@ export function JobView({
             <div class="card col jf-ask" style={{ gap: 8 }}>
               <span>
                 The alert goes back to open. Units reserved for it go back on the shelf; requests not ordered yet are cancelled.
-                {o.approvedWeek !== undefined ? ' The labour already paid stays paid.' : ''}
+                {o.approvedWeek !== undefined ? (o.result ? ' The labour already paid stays paid.' : ` Its ${usd(o.cost)} of labour comes back: it was never started.`) : ''}
               </span>
               <Btn block kind="ink" onClick={() => void run({ t: 'dropJob', role: a.role, order: o.id }, 'Job dropped: the alert is open again.').then(() => setDrop(false))}>
                 Drop it

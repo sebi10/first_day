@@ -6,20 +6,14 @@
 // says so, and says AOG only when the job's alert grounds the plane (13).
 import { benchMove, chainMove, chainSteps, isAre, needsFreight, openChain } from '../sim/chain';
 import { ECON, ROLE_LABEL } from '../sim/data';
-import { alertAog } from '../sim/econ';
 import type { IslandState, Order, PartChain, Role } from '../sim/types';
-import { Icon, usd } from './kit';
+import { Btn, Icon, usd } from './kit';
+import { chainGrounds, chainStepOrder, chainTag, openTarget } from './select';
 import { C, ROLE_TINT } from './theme';
 
 const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
 
-/** does this chain ground its plane: every legacy chain does; a flow-opened one only when the job's alert grounds it */
-export function chainGrounds(s: IslandState, c: PartChain): boolean {
-  if (!c.flow) return true;
-  const job = s.orders.find((o) => o.id === c.orderId);
-  const al = job?.flow ? s.alerts?.find((a) => a.id === job.flow!.alert) : undefined;
-  return !!al && alertAog(s, c.assetId)?.id === al.id;
-}
+export { chainGrounds } from './select';
 
 /** Found → IPC → (Logbooks → Engineering) → Buy → Delivery → Install */
 export function ChainStepper({ c }: { c: PartChain }) {
@@ -57,6 +51,8 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
   // the electrician's check runs beside the lookup or the research: a second move, another seat's
   const bm = benchMove(s, c);
   const grounds = chainGrounds(s, c);
+  // the step is a tap away: the lookup, the logbooks, the circuit check (the same order Other work opens)
+  const go = chainStepOrder(s, c);
   return (
     <div class="card col chain-banner" style={{ gap: 8, borderLeft: `6px solid ${mine ? C.rust : C.mech}` }}>
       <div class="row" style={{ gap: 8, alignItems: 'flex-start' }}>
@@ -68,7 +64,7 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
           <span class="label">
             {c.flow ? `From ${c.title} in week ${c.week}` : `Found on ${c.title} in week ${c.week}`}
             {!grounds
-              ? ': the job waits for the part; the plane keeps flying'
+              ? `: the job waits for the part · ${chainTag(s, c)}`
               : c.aogWeeks
                 ? ` · grounded ${c.aogWeeks} week${c.aogWeeks > 1 ? 's' : ''} so far`
                 : c.wired
@@ -92,6 +88,11 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
           <>{m.text.charAt(0).toUpperCase() + m.text.slice(1)}.</>
         )}
       </span>
+      {go && go.who === role && (
+        <Btn block onClick={() => openTarget({ order: go.order })}>
+          {go.label}
+        </Btn>
+      )}
       {bm && (
         <span style={{ fontSize: 15 }}>
           {bm.who === role ? (
@@ -102,6 +103,11 @@ export function ChainBanner({ s, role }: { s: IslandState; role: Role }) {
             </>
           )}
         </span>
+      )}
+      {bm && bm.who === role && c.bench?.id && (
+        <Btn block kind="soft" onClick={() => openTarget({ order: c.bench!.id })}>
+          Meter the circuit ▸
+        </Btn>
       )}
     </div>
   );

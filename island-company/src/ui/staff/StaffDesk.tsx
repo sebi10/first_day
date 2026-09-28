@@ -21,7 +21,12 @@ export function StaffDesk({ ctl }: { ctl: Ctl }) {
   const { s } = ctl;
   const [pick, setPick] = useState<Pick>(null);
   const crew = crewOf(s);
-  const board = s.hiring?.week === s.week ? s.hiring.cands : [];
+  const [more, setMore] = useState(false);
+  // the board by what each hire does for the week's money (best first); the ones that would cost more than they
+  // bring fold away behind "more", so the real choices are on top
+  const board = (s.hiring?.week === s.week ? s.hiring.cands : []).map((c) => ({ c, net: staffEffect(s, c, 'hire').net })).sort((a, b) => b.net - a.net);
+  const good = board.filter((x) => x.net >= 0);
+  const costly = board.filter((x) => x.net < 0);
   const close = () => setPick(null);
   return (
     <section class="staff col" aria-label="Staff and payroll">
@@ -59,9 +64,15 @@ export function StaffDesk({ ctl }: { ctl: Ctl }) {
       </div>
       {board.length === 0 && <div class="card muted">{s.week < 1 ? 'The board opens with week 1.' : 'Nobody new this week: the board fills again when the next week opens.'}</div>}
       {s.receivership > 0 && board.length > 0 && <div class="card fault">In receivership: no new hires until it ends.</div>}
-      {board.map((c) => (
+      {good.map(({ c }) => (
         <CandCard key={c.id} ctl={ctl} c={c} onHire={() => setPick({ kind: 'hire', c })} />
       ))}
+      {costly.length > 0 && (good.length === 0 || more) && costly.map(({ c }) => <CandCard key={c.id} ctl={ctl} c={c} onHire={() => setPick({ kind: 'hire', c })} />)}
+      {costly.length > 0 && good.length > 0 && (
+        <button class="pd-link" style={{ alignSelf: 'flex-start' }} onClick={() => setMore(!more)} aria-expanded={more}>
+          {more ? 'Hide the ones that cost more than they bring ▴' : `${costly.length} more who'd cost more than they bring ▾`}
+        </button>
+      )}
 
       <Builds ctl={ctl} onCottage={() => setPick({ kind: 'cottage' })} />
 
@@ -352,7 +363,7 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
               <span class="st-need">
                 {plan.plot.name} in the lagoon grove: {usd(COTTAGE_SHELL)} prefab shell + {usd(plan.cost - COTTAGE_SHELL)} of site work.{' '}
                 {plan.rent > 0
-                  ? `Rents about ${usd(plan.rent)} a week at this week's rates${plan.housekeeper ? `, with another housekeeper to turn it over (${usd(STAFF.wage.housekeeper)}/wk)` : ''}.`
+                  ? `Rents about ${usd(plan.rent)} a week (a normal week's flights and bookings, averaged over the last 8 weeks)${plan.housekeeper ? `, with another housekeeper to turn it over (${usd(STAFF.wage.housekeeper)}/wk)` : ''}.`
                   : `At this week’s bookings it would sit empty: ${projectWeek(s).booked} of ${projectWeek(s).rentable} houses are booked.`}
               </span>
               <span class="label">{plan.payback ? `Pays back in about ${plan.payback} weeks.` : 'More guests (more flights) would fill it.'} The builders start it after the tier’s own site work.</span>
@@ -385,7 +396,7 @@ function CottageSheet({ ctl, onDone }: { ctl: Ctl; onDone(): void }) {
         <span>Site work {usd(plan.cost - COTTAGE_SHELL)} of materials, bought as the builders go (5 units)</span>
         <span>
           {plan.rent > 0
-            ? `Rents about ${usd(plan.rent)} a week at this week's rates${plan.housekeeper ? `, once another housekeeper (${usd(STAFF.wage.housekeeper)}/wk) turns it over` : ''}`
+            ? `Rents about ${usd(plan.rent)} a week (a normal week's flights and bookings, averaged over the last 8 weeks)${plan.housekeeper ? `, once another housekeeper (${usd(STAFF.wage.housekeeper)}/wk) turns it over` : ''}`
             : `Rents nothing at this week’s bookings: ${projectWeek(s).booked} of ${projectWeek(s).rentable} houses are booked`}
         </span>
         <b class={plan.payback ? 'st-good' : 'st-bad'}>{plan.payback ? `Pays back in about ${plan.payback} weeks` : 'No payback at this week’s bookings'}</b>

@@ -7,8 +7,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { symptomText } from '../../sim/alerts';
 import { cardOf } from '../../sim/flow';
-import { isSafetyJob } from '../../sim/stock';
-import { standingWords } from '../select';
+import { isSafetyJob, lateSafe } from '../../sim/stock';
+import { openTarget, standingWords } from '../select';
 import type { Action, Alert, Order } from '../../sim/types';
 import { fx } from '../feedback';
 import { Btn, Icon, toast, usd } from '../kit';
@@ -19,7 +19,7 @@ import { JobView } from './JobView';
 import { ManualView } from './ManualView';
 import { PartsStep } from './PartsStep';
 import { StockStep } from './StockStep';
-import { applies, assetOf, checkDraft, newDraft, preview, reduceDraft, researchRepick, sendAction, stepper, STEPS, taskFor, tierOf, type Draft, type DraftAct, type Preview, type StepKey } from './steps';
+import { applies, assetOf, checkDraft, missingSlot, newDraft, pickFirstWords, preview, reduceDraft, researchRepick, sendAction, stepper, STEPS, taskFor, tierOf, type Draft, type DraftAct, type Preview, type StepKey } from './steps';
 import { assetTitle, draftKey, flagsOf, nameOf, session, SRC_ICON, SRC_WORDS } from './words';
 
 export type JobFlowProps = {
@@ -67,16 +67,16 @@ export function JobFlow({ ctl, alert: a, repick, onClose, onStart, demo }: JobFl
     if (job.status === 'ready') msg = 'Ready: start it now.';
     else if (job.status === 'pending') {
       const total = cardOf(s, job).total;
-      const late = standingWords(s, total, isSafetyJob(s, job));
+      const late = standingWords(s, total, isSafetyJob(s, job), lateSafe(s, job));
       msg = `Card sent to ${fin}: ${usd(total)}.${late ? ` ${late}` : ''}`;
     } else if (job.flow?.research || job.flow?.queued) msg = job.flow.queued ? 'Research queued: it opens when the part chain in progress closes.' : "Research: next, the airplane's logbooks (your move).";
     else {
       const reqs = (s.reqs ?? []).filter((r) => r.order === job.id && r.status === 'open').length;
       msg = reqs ? `Requested ${reqs} line${reqs > 1 ? 's' : ''}: ${fin}'s move.` : 'Waiting on parts.';
     }
-    // a toast says what happened (17.2), and the banner keeps it on the job while the sheet stays open
+    // the banner says what happened on the job while the sheet stays open (17.2); a toast would repeat it word for
+    // word over the sheet's title and stepper
     setBanner(msg);
-    toast(msg);
     setSentAt(null);
   }, [s, sentAt]);
 
@@ -212,7 +212,19 @@ export function JobFlow({ ctl, alert: a, repick, onClose, onStart, demo }: JobFl
             {banner}
           </div>
         )}
-        <JobView s={s} a={a} o={o} run={run} ended={ended} onStart={onStart} onRepick={startRepick} />
+        <JobView
+          s={s}
+          a={a}
+          o={o}
+          run={run}
+          ended={ended}
+          onStart={onStart}
+          onRepick={startRepick}
+          onOpenOrder={(id) => {
+            onClose();
+            openTarget({ order: id });
+          }}
+        />
       </>
     ) : (
       <ClosedView ctl={ctl} a={a} />
@@ -278,12 +290,27 @@ export function JobFlow({ ctl, alert: a, repick, onClose, onStart, demo }: JobFl
       );
     else if (d.step === 'stock') {
       const p = preview(s, a, d);
+      // a required slot left empty: the button goes back to it (Send would only stop at the start)
+      const gap = p.outcome === 'incomplete' ? missingSlot(s, a, d) : null;
       foot = (
         <div class="row" style={{ gap: 8 }}>
           {backBtn}
-          <Btn block disabled={busy || ended} onClick={send}>
-            {p.outcome === 'ready' ? 'Send ▸ ready now' : p.outcome === 'card' ? `Send ▸ card for ${fin}` : 'Send ▸'}
-          </Btn>
+          {gap ? (
+            <Btn
+              block
+              disabled={busy || ended}
+              onClick={() => {
+                act({ t: 'go', step: 'parts' });
+                act({ t: 'openSlot', slot: gap.slot });
+              }}
+            >
+              {pickFirstWords(gap)} ▸
+            </Btn>
+          ) : (
+            <Btn block disabled={busy || ended} onClick={send}>
+              {p.outcome === 'ready' ? 'Send ▸ ready now' : p.outcome === 'card' ? `Send ▸ card for ${fin}` : 'Send ▸'}
+            </Btn>
+          )}
         </div>
       );
     }

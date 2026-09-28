@@ -139,6 +139,13 @@ export function ApprovalCard({
             <span class="v">{usd(vm.freight.aog!.cost ?? 0)}</span>
           </div>
         )}
+        {!boat && buying && vm.freight.sched.ship && (
+          <div class="pd-line">
+            <span>Freight</span>
+            <span class="v">{usd(vm.freight.sched.cost ?? 0)}</span>
+            <span class="sub">{vm.freight.sched.ship}</span>
+          </div>
+        )}
       </div>
       <div class="pc-total">
         <span class="label">{vm.labour > 0 ? 'Approve' : 'Buy'}</span>
@@ -153,7 +160,7 @@ export function ApprovalCard({
       {vm.late && <div class="pd-late">{vm.late}</div>}
       {vm.mel?.canExtend && (
         <Btn small kind="soft" onClick={onExtend}>
-          Extend the MEL placard a week (to wk {Math.max(vm.mel.until, 0) + 1})
+          Approve {vm.mel.askedBy ?? vm.who}’s MEL extension (to wk {vm.mel.to})
         </Btn>
       )}
       {buying && (
@@ -176,7 +183,7 @@ export function ApprovalCard({
                 onChange={(v) => setBuy({ ...buy, freight: v })}
               />
               <span class="pd-note">
-                {vm.freight.pick === 'aog' ? vm.freight.aog.out || 'Here at this week’s resolve, whatever flew.' : vm.freight.sched.out || 'Rides the week’s carrier: no freight charge.'}
+                {vm.freight.pick === 'aog' ? vm.freight.aog.out || 'Here at this week’s resolve, whatever flew.' : vm.freight.sched.out || `Rides the week’s carrier${vm.freight.sched.ship ? `: ${vm.freight.sched.ship}` : ''}.`}
               </span>
             </>
           ) : (
@@ -263,7 +270,10 @@ export function FlowCards({ ctl, keys }: { ctl: Ctl; keys: boolean }) {
             setOpen={setOpen}
             buy={buy}
             setBuy={setBuy}
-            onExtend={() => vm.mel && void ctl.dispatch({ t: 'melExtend', alert: vm.mel.alert }).then((ok) => ok && toast(`MEL placard extended to week ${vm.mel!.until + 1}`))}
+            onExtend={() =>
+              vm.mel &&
+              void ctl.dispatch({ t: 'melExtend', role: 'fin', alert: vm.mel.alert }).then((ok) => ok && toast(`MEL extension approved: the placard runs to week ${vm.mel!.to}`))
+            }
           />
           {hint && (
             <div class="pc-hint" style={{ right: hint === 'APPROVE' ? 14 : undefined, left: hint === 'DEFER' ? 14 : undefined, color: hint === 'APPROVE' ? C.palm : C.inkSoft }}>

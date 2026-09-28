@@ -41,7 +41,9 @@ export function Needs({ ctl }: { ctl: Ctl }) {
                       {x.aw ? ' · grounds, restricts or closes it when due' : ''}
                     </span>
                   </span>
-                  {x.nudged ? (
+                  {x.scheduled ? (
+                    <span class="chip">Scheduled</span>
+                  ) : x.nudged ? (
                     <span class="chip">Nudged</span>
                   ) : (
                     <Btn
@@ -71,15 +73,15 @@ export function Needs({ ctl }: { ctl: Ctl }) {
                     <span class="pd-wrap">{p.text}</span>
                     <span class="d">
                       {p.runsOut ? <b>{p.when}</b> : p.when}
-                      {p.ext ? ' · extended once (the MEL allows one)' : ''}
+                      {p.ext ? ' · extended once (the MEL allows one)' : p.asked ? ` · ${p.askedBy ?? 'the mechanic'} asks for the one extension` : ''}
                     </span>
                   </span>
                   {p.canExtend ? (
-                    <Btn small kind="soft" onClick={() => void ctl.dispatch({ t: 'melExtend', alert: p.alert }).then((ok) => ok && toast(`Placard extended to week ${Math.max(p.until, s.week - 1) + 1}`))}>
-                      Extend a week
+                    <Btn small kind="soft" onClick={() => void ctl.dispatch({ t: 'melExtend', role: 'fin', alert: p.alert }).then((ok) => ok && toast(`MEL extension approved: the placard runs to week ${Math.max(p.until, s.week - 1) + 1}`))}>
+                      {p.askedBy ? `Approve ${p.askedBy}’s extension` : 'Approve the extension'}
                     </Btn>
                   ) : (
-                    <span class="chip">{p.ext ? 'Extended' : 'Ran out'}</span>
+                    <span class="chip">{p.ext ? 'Extended' : p.until < s.week - 1 ? 'Ran out' : 'Not asked yet'}</span>
                   )}
                 </div>
               ))}

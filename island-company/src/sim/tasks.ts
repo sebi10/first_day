@@ -176,7 +176,8 @@ function mechTasks(m: PlaneModel): Task[] {
         { item: 'MIL-PRF-81322', qty: 1 },
         { item: 'MS24665-302', qty: 1 },
       ],
-      tools: ['T-TW-FT'],
+      // wheel tie bolts torque in in-lb
+      tools: ['T-TW-IN'],
       keywords: ['wheel', 'tire', 'tyre', 'tube', 'flat', 'tread', 'removal', 'installation', 'bead'],
     }),
     amm('32-40-02', {
@@ -188,7 +189,7 @@ function mechTasks(m: PlaneModel): Task[] {
       card: 'brake',
       main: [{ slot: 'lining', label: 'Brake linings', ata: '32-40', tag: 'lining', qty: 'upa' }],
       bench: [{ item: '105-00500', qty: 16 }],
-      tools: ['T-TW-FT'],
+      tools: ['T-TW-FT', 'T-RIVET'],
       keywords: ['brake', 'lining', 'linings', 'pad', 'reline', 'rivet', 'worn'],
     }),
     amm('32-40-03', {
@@ -203,7 +204,8 @@ function mechTasks(m: PlaneModel): Task[] {
         { item: 'E1417-KIT', qty: 1 },
         { item: 'MIL-DTL-5541', qty: 1 },
       ],
-      tools: [],
+      // Type I fluorescent penetrant is read under UV-A
+      tools: ['T-UVA'],
       keywords: ['wheel', 'half', 'corrosion', 'penetrant', 'crack', 'bead', 'seat', 'conversion', 'coating', 'ndt'],
     }),
     amm('57-10-01', {
@@ -215,7 +217,7 @@ function mechTasks(m: PlaneModel): Task[] {
       card: 'spar',
       main: [],
       bench: [{ item: 'E1417-KIT', qty: 2 }],
-      tools: [],
+      tools: ['T-UVA'],
       keywords: ['wing', 'spar', 'cap', 'root', 'rivets', 'smoking', 'penetrant', 'crack', 'ad'],
     }),
     amm('61-10-01', {
@@ -480,7 +482,8 @@ const REF: Task[] = [
     tools: ['T-CLAMP'],
     nec: ['250.104(A)', '250.52', '250.53', '250.66', '250.70'],
     keywords: ['ground', 'grounding', 'bond', 'bonding', 'jumper', 'water', 'pipe', 'electrode', 'tingle', 'shock'],
-    summary: 'Metal water piping is bonded to the service with a jumper sized from Table 250.102(C)(1) (6 AWG copper for a small service) and a listed clamp (250.104(A)). Voltage between the valve and the drain means the bond is missing or open.',
+    summary:
+      'Metal water piping is bonded to the service with a jumper sized from Table 250.102(C)(1) (8 AWG copper up to a 2 AWG service; 6 AWG is common and always fine) and a listed clamp (250.104(A)). Voltage between the valve and the drain means the bond is missing or open.',
   }),
   ref('afci', {
     no: 'R-AFCI',

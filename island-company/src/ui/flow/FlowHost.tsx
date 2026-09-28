@@ -11,12 +11,15 @@ import type { Order, OpsRole } from '../../sim/types';
 import { fx } from '../feedback';
 import { Btn, Sheet, toast } from '../kit';
 import type { DockTarget } from '../select';
+import { lazy, whenIdle } from '../lazy';
 import type { Ctl } from '../useIsland';
-import { JobFlow } from './JobFlow';
 import { newDraft, oneTapShort, researchRepick, sendAction } from './steps';
 import { StockView } from './StockView';
 import { StopSheet } from './StopSheet';
 import { nameOf, shortOf } from './words';
+
+/** the job sheet is the techs' own chunk (lazy.tsx): fetched once this panel is on screen, before the first tap */
+const JobFlow = lazy(() => import('./JobFlow').then((m) => m.JobFlow));
 
 export type FlowHostProps = {
   ctl: Ctl;
@@ -38,6 +41,7 @@ export function FlowHost({ ctl, role, onPlay, onOrder, heldWhy }: FlowHostProps)
   const [pending, setPending] = useState<string | null>(null);
   const live = useRef({ s, ctl, onPlay, onOrder, heldWhy });
   live.current = { s, ctl, onPlay, onOrder, heldWhy };
+  useEffect(() => whenIdle(JobFlow.preload), []);
 
   /** Start a job: the turn, the per-turn limits, then the install check (a stop shows the stop sheet) */
   const start = (o: Order) => {

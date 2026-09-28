@@ -128,18 +128,20 @@ describe('approval cards (8.6, 17.3)', () => {
     const s = r.s;
     const c = cardVM(s, r.o);
     expect(c.toBuy.map((l) => l.pn)).toContain('LOT-DIST');
-    expect(c.freight.sched).toMatchObject({ eta: 6, text: 'Scheduled: here next week' });
+    // scheduled freight is per shipment: the week's first electrical PO pays its own
+    // (the lot rides a cargo flight, the breakers any flight: two shipments, one per carrier, as placePo splits them)
+    expect(c.freight.sched).toMatchObject({ eta: 6, text: 'Scheduled +$50: here next week', cost: 2 * FREIGHT.sched.elec, ship: '+$50 freight: 2 shipments of its own (one per supplier and carrier)' });
     expect(c.freight.aog).toMatchObject({ eta: 5, cost: FREIGHT.aog, text: 'AOG boat +$350: here tonight' });
     expect(c.freight.pick).toBe('sched');
     const boat = cardVM(s, r.o, { freight: 'aog' });
-    expect(boat.total).toBe(c.total + FREIGHT.aog);
+    expect(boat.total).toBe(c.total - 2 * FREIGHT.sched.elec + FREIGHT.aog);
     // approving it with the boat puts it on a PO that lands at this week's resolve
     const t = ok(s, { t: 'approve', orderId: r.o.id, buy: { freight: 'aog' }, week: 5 });
     const po = t.pos!.find((p) => p.lines.some((l) => l.order === r.o.id))!;
     expect(po).toMatchObject({ freight: 'aog', eta: 5, freightCost: FREIGHT.aog });
   });
 
-  it('chips: AOG and due now on a grounded cargo plane, what waiting a week costs, an MEL placard the analyst can extend once', () => {
+  it('chips: AOG and due now on a grounded cargo plane, what waiting a week costs, an MEL extension the mechanic asks for and the analyst approves', () => {
     let s = island();
     const r = cardFor(s, 'M_BRAKE_SOFT', 1, 'p2', 5);
     s = r.s;
@@ -158,8 +160,11 @@ describe('approval cards (8.6, 17.3)', () => {
     const o = s.orders.find((x) => x.flow?.alert === com.id)!;
     const m = cardVM(s, o);
     expect(m.chips.map((x) => x.text)).toContain('MEL to wk 5');
-    expect(m.mel).toMatchObject({ until: 5, ext: false, canExtend: true });
-    s = ok(s, { t: 'melExtend', alert: com.id, week: 5 });
+    // the extension is the maintenance side's call: nothing to approve until the mechanic asks
+    expect(m.mel).toMatchObject({ until: 5, ext: false, asked: false, canExtend: false });
+    s = ok(s, { t: 'melExtend', role: 'mech', alert: com.id, week: 5 });
+    expect(cardVM(s, o).mel).toMatchObject({ until: 5, ext: false, asked: true, canExtend: true });
+    s = ok(s, { t: 'melExtend', role: 'fin', alert: com.id, week: 5 });
     expect(cardVM(s, o).mel).toMatchObject({ until: 6, ext: true, canExtend: false });
     expect(cardVM(s, o).chips.map((x) => x.text)).toContain('MEL to wk 6 (extended)');
   });
@@ -192,7 +197,7 @@ describe('approval cards (8.6, 17.3)', () => {
 });
 
 describe('requisitions (17.3 ReqQueue)', () => {
-  it('grouped by supplier and carrier; a batch quote adds the AOG boat per PO; each trade dispatches its own approveReq', () => {
+  it('grouped by supplier and carrier; a batch quote adds each shipment’s freight and the AOG boat per PO; each trade dispatches its own approveReq', () => {
     let s = island();
     newReq(s, { at: clock, role: 'mech', item: 'T-N2', qty: 1, why: 'the accumulator job needs it' });
     newReq(s, { at: clock, role: 'mech', item: 'MIL-PRF-5606', qty: 12 });
@@ -204,21 +209,23 @@ describe('requisitions (17.3 ReqQueue)', () => {
     expect(g.map((x) => `${x.vendor}|${x.carrier}`).sort()).toEqual(['oem|any', 'oem|bulk', 'supply|any']);
     const ids = q.map((r) => r.id);
     const sched = reqQuote(s, ids, { cheaper: false, aog: false });
-    expect(sched).toMatchObject({ freight: 0, pos: 3, lines: 3 });
-    expect(sched.total).toBe(480 + 216 + 42);
+    // scheduled freight per shipment: two mech shipments (any flight, cargo) and an electrical one
+    const ships = 2 * FREIGHT.sched.mech + FREIGHT.sched.elec;
+    expect(sched).toMatchObject({ freight: ships, pos: 3, lines: 3 });
+    expect(sched.total).toBe(480 + 216 + 42 + ships);
     // every line here lands tonight on the week's carrier: the boat would buy nothing
-    expect(reqQuote(s, ids, { cheaper: false, aog: true })).toMatchObject({ freight: 0, pos: 3, aogOk: false });
+    expect(reqQuote(s, ids, { cheaper: false, aog: true })).toMatchObject({ freight: ships, pos: 3, aogOk: false });
     // a lead-2 lot is two weeks out: the boat takes it (and only it), $350 for its PO
     newReq(s, { at: clock, role: 'elec', item: 'LOT-DIST', qty: 1 });
     const all = reqQueue(s).map((r) => r.id);
     const boat = reqQuote(s, all, { cheaper: false, aog: true });
-    expect(boat).toMatchObject({ freight: FREIGHT.aog, pos: 4, aogOk: true });
+    expect(boat).toMatchObject({ freight: FREIGHT.aog + ships, pos: 4, aogOk: true });
     const split = reqActions(s, all, { cheaper: false, aog: true }) as Extract<Action, { t: 'approveReq' }>[];
     expect(split.map((a) => `${a.buy?.vendor}:${a.buy?.freight}:${a.reqs.length}`).sort()).toEqual(['oem:sched:2', 'supply:aog:1', 'supply:sched:1']);
     s = ok(s, { t: 'deferReq', req: all[3], week: 5 });
     // the cheaper suppliers: the broker for the mechanic's, the online store for the electrician's, never on the boat
     const cheap = reqQuote(s, ids, { cheaper: true, aog: true });
-    expect(cheap.freight).toBe(0);
+    expect(cheap.freight).toBe(ships);
     expect(cheap.aogOk).toBe(false);
     expect(cheap.total).toBeLessThan(sched.total);
     const acts = reqActions(s, ids, { cheaper: true, aog: false });
@@ -360,15 +367,19 @@ describe('the stock planner (17.3)', () => {
   it('a buy: whole packs, the boat priced per PO, blocked by the freeze and a full stores room', () => {
     const s = island();
     const q = buyQuote(s, 'AN900-10', 3, {});
-    expect(q).toMatchObject({ units: 25, packs: 1, vendor: 'oem', eta: 5, etaText: 'here tonight', freight: 0, aogOk: false });
+    // scheduled freight: the week's first OEM shipment is its own
+    expect(q).toMatchObject({ units: 25, packs: 1, vendor: 'oem', eta: 5, etaText: 'here tonight', freight: FREIGHT.sched.mech, ship: '+$35 freight: its own shipment', aogOk: false });
     expect(q.value).toBe(Math.round(priceAt(itemById('AN900-10')!) * 25 * 100) / 100);
     // the boat only where it's faster: LOT-DIST is two weeks out by the week's carrier
     expect(buyQuote(s, 'LOT-DIST', 1).aogOk).toBe(true);
     const boat = buyQuote(s, 'LOT-DIST', 1, { freight: 'aog' });
     expect(boat).toMatchObject({ eta: 5, freight: FREIGHT.aog, total: 1400 + FREIGHT.aog });
-    expect(buyQuote(s, 'AN900-10', 3, { freight: 'aog' })).toMatchObject({ freight: 0, eta: 5 });
+    expect(buyQuote(s, 'AN900-10', 3, { freight: 'aog' })).toMatchObject({ freight: FREIGHT.sched.mech, eta: 5 });
     const cheap = buyQuote(s, 'KR20-TR', 10, { vendor: 'online', freight: 'aog' });
-    expect(cheap).toMatchObject({ vendor: 'online', freight: 0, aogOk: false, eta: 6 });
+    expect(cheap).toMatchObject({ vendor: 'online', freight: FREIGHT.sched.elec, aogOk: false, eta: 6 });
+    // a second buy the same week rides the first one's shipment: no extra freight
+    const [first] = placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0);
+    expect(buyQuote(s, 'AN900-10', 3, {})).toMatchObject({ freight: 0, ship: `rides with ${first.id}'s shipment: no extra freight` });
     // every bin taken: a new line can't come in
     const fill = allItems().filter((x) => x.trade === 'elec' && x.kind !== 'tool' && !s.inv![x.id]);
     let i = 0;
@@ -391,7 +402,7 @@ describe('receiving and the Money tab (14.3, 9.4, 9.7)', () => {
     po.hold = 6;
     po.lines[0].hold = "an FAA 8130-3 matching the unit's data plate";
     po.notes = [`held: no an FAA 8130-3 matching the unit's data plate with ${po.lines[0].item}`];
-    placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0);
+    const [bolts] = placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0);
     receive(s, 5, { guest: 2, cargo: 1 }, () => {});
     const v = receivingVM(s);
     expect(v.held).toHaveLength(1);
@@ -399,7 +410,7 @@ describe('receiving and the Money tab (14.3, 9.4, 9.7)', () => {
     expect(v.held[0].cores[0]).toMatch(/: an exchange unit\. The old unit goes back in its box as the core/);
     expect(v.held[0].jobs[0]).toMatch(/ on Cargo C-7$/);
     expect(v.payable.map((p) => p.lines[0].pn)).toContain('AN900-10');
-    expect(v.payableTotal).toBe(Math.round(priceAt(itemById('AN900-10')!) * 25));
+    expect(v.payableTotal).toBe(Math.round(priceAt(itemById('AN900-10')!) * 25 + bolts.freightCost));
     expect(v.committed).toBe(committed(s));
   });
 
@@ -473,15 +484,15 @@ describe('receiving and the Money tab (14.3, 9.4, 9.7)', () => {
     const t = r.s;
     t.tags = { p1: 'mech', p2: 'mech' };
     const c = cardVM(t, r.o);
-    expect(c.freight.sched.text).toBe('Scheduled: no plane is flying, so it slips a week');
+    expect(c.freight.sched.text).toBe('Scheduled +$35: no plane is flying, so it slips a week');
     expect(c.freight.aog).toBeDefined();
     for (const l of c.toBuy) expect(l.etaText).toBe('slips a week: no plane is flying');
     const boat = cardVM(t, r.o, { freight: 'aog' });
     for (const l of boat.toBuy) expect(l.etaText).toBe('here tonight');
-    expect(boat.freight.sched.text).toBe('Scheduled: no plane is flying, so it slips a week');
+    expect(boat.freight.sched.text).toBe('Scheduled +$35: no plane is flying, so it slips a week');
     expect(melWords(12, 13, true)).toBe('placarded to wk 13');
     expect(melWords(12, 12, true)).toBe('runs out at this week’s resolve');
-    expect(melWords(12, 11, true)).toBe('ran out last week: the plane is grounded at this resolve unless you extend it');
+    expect(melWords(12, 11, true)).toBe('ran out last week: the plane is grounded at this resolve unless the extension goes through');
     expect(melWords(12, 11, false)).toBe('ran out wk 11');
   });
 
@@ -582,11 +593,13 @@ describe('the desk puzzles on real items (17.3)', () => {
 
   it('the desk task lines name the lot and the POs', () => {
     let s = island();
-    placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0);
+    const [p] = placePo(s, [{ item: 'AN900-10', qty: 25 }], {}, 'fin', 0);
+    // the invoice is the lines and the shipment's freight
+    expect(p.cost).toBe(15 + FREIGHT.sched.mech);
     receive(s, 5, { guest: 2, cargo: 1 }, () => {});
     s.week = 6;
     s = { ...s, orders: [...s.orders, { id: 'o1', role: 'fin', kind: 'invoice', assetId: null, title: 'Three-way match', puzzle: 'invoice', tier: 2, cost: 0, parts: 0, gain: 0, createdWeek: 6, deferrals: 0, lastDeferredWeek: null, status: 'ready', seed: 1 }] };
-    expect(deskTaskLine(s, s.orders[s.orders.length - 1])).toMatch(/^po\d+ came in last week \(\$15\): match before the payment run$/);
+    expect(deskTaskLine(s, s.orders[s.orders.length - 1])).toMatch(/^po\d+ came in last week \(\$50\): match before the payment run$/);
     const auc: Order = { ...s.orders[s.orders.length - 1], id: 'o2', kind: 'auction', puzzle: 'auction', lot: { lines: [{ item: 'AN900-10', qty: 25 }], fair: 11, list: 15 } };
     expect(deskTaskLine(s, auc)).toBe('Broker lot: 25 × AN900-10 · $15 at list');
     expect(STOCK.keepWeeks).toBeGreaterThan(0);

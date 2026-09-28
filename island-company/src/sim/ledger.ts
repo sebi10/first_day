@@ -199,10 +199,10 @@ export function waitWeeks(s: IslandState, weeks = 8): number {
 // ---------------------------------------------------------------------------
 // Commitments and payables (9.7): what every "can we afford it" check reads
 
-/** what a PO still owes the vendor: its cost less what was sent back and what the match caught (nothing once paid) */
+/** what a PO still owes the vendor: its cost and what the invoice overbilled, less what was sent back and what the match caught (nothing once paid) */
 export function poOwed(p: PurchaseOrder): number {
   if (p.status === 'paid') return 0;
-  return Math.max(0, p.cost - (p.refund ?? 0) - (p.caught ?? 0));
+  return Math.max(0, p.cost + (p.over ?? 0) - (p.refund ?? 0) - (p.caught ?? 0));
 }
 
 /** cash still owed on open, held and received-unpaid POs, after the store credit that will pay them */
@@ -227,9 +227,12 @@ export function runway(s: IslandState): { weekly: number; weeks: number } {
   return { weekly, weeks: weekly > 0 ? Math.max(0, Math.round((spendable(s) / weekly) * 10) / 10) : 0 };
 }
 
-/** the cost of cash tied up in stock and open POs, a week (shown, never charged) */
+/** cash tied up in stock: the stock's value less what the vendors are still owed for what came in (they finance it until the payment run) */
+export const cashInStock = (s: IslandState) => Math.max(0, Math.round(invValue(s) - payable(s)));
+
+/** the cost of the cash tied up in stock, a week (shown, never charged). Open POs aren't cash out yet: they're committed, not paid */
 export function capitalCost(s: IslandState): number {
-  return Math.round((invValue(s) + committed(s)) * STOCK.capital);
+  return Math.round(cashInStock(s) * STOCK.capital);
 }
 
 /** the ledger's last `weeks` rows before this week's */
