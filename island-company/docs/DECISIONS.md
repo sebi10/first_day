@@ -1570,3 +1570,24 @@ On purpose: the helper, the receiver, grid first at risk, a dark house decaying 
 - `tests/resort.test.ts` (21): grid first at real risk, the feed only, the lapsed prep first at 48+; (g) dropped; the streak rule; a 9-week Harbor streak with the Resort arriving mid-week on an autopilot week graded A, over 12 all-good seasons (A-graded arrivals seen, no credits); the credits only after 8 full-crew Resort weeks over 10 seasons (the pause seen and said); the guard as above.
 - `tests/golden.test.ts` (22): 8 digests and 13 knob flips. `staff.test.ts` and `robusttail.test.ts`: the helper outside the standard crew's payroll ratio; the chain doc can reach the Resort inside its seven weeks now.
 - 837 tests in 48 files (803 in 47 before).
+
+## 2026-09-29: Release QA of stage 1 (v4), `c57c51e`
+
+What was tested: the tip of `gaps`, `c57c51e` (the gap fixes, A0 and A0 review round 1, under the v4 gate), against the live build `bd1e1d2`. No game code, test or script was changed; this entry is the only change.
+
+### Results
+
+- **tsc** clean. **vitest** 837 tests in 48 files, all pass. **Build** passes (dist removed).
+- **Balance, standard** (26 weeks × 30 seeds): three friends 8 / 11 / 16 / 23, all average 7 / 12 / 16 / 23, both 0 weeks below $0; solo, absent and nobody teams at tier 1. Targets met.
+- **Robust** (90 seeds × 4 crews): three friends miss tier 5 in 70 of 360 (17 + 20 + 15 + 18), all average in 58 (16 + 12 + 15 + 15), weeks below $0 0 and 0. Long columns: games below $0 in weeks 24–52, 61 and 12 of 360; the credits by week 45, 0 and 0. All average is still over its ≤ 37 tail target (known; Seb's call, HANDOFF §1).
+- **Long** (52 weeks × 30 seeds), T1: three friends 3 of 30 games below $0 (median 0 weeks, median 0 dead weeks), all average 1 of 30 (0, 0); the credits by week 45 0% for both (the one T1 line not met, a gate question). The proposed hold line: three friends 6 of 7 houses rentable at week 52 (met), revenue 69% of budget in weeks 40–52 (1 point under 70%).
+- **Pass-and-play e2e** on phone (390×844) and desktop (1280×820): pass. The only console errors are the Manrope font 403 through the symlinked `node_modules` (cosmetic, worktree-only).
+- **Online e2e** on its own emulator (firebase-tools 14, Firestore 8585, Auth 9595, this branch's rules): 3 of 3 runs pass; run 1's electrician's first alert was a no-fault-found and the script planned the next one. **probe-gate** on the emulator: v:3 permission-denied, v:4 not-found, listing refused.
+- **Migration:** the eight `v3-bd1e1d2-*` fixtures regenerate byte for byte from the live engine (`scripts/fixtures-v3.ts` on a `git archive` of `bd1e1d2`). The skew, migrate and sub-charter tests over all eleven pass (68 tests). In the browser, the late doc (week 20, tier 4) loaded into pass-and-play at its own saved time: the week 19 review and the Harbor sheet show, the mechanic and the electrician each hand in a ready job, the analyst's tabs render, all three end the turn and week 20 resolves. Engine 4 afterwards, the review's opening cash equals the doc's `openCash`, and none of the 7 open orders is lost.
+- **Reverse skew** (`scripts/reverse-skew.ts` against `bd1e1d2`): 173 of 173 moves refused on 19 docs, all with "saved by a newer version", and the docs are untouched.
+- **islandlab** at phone width: all 34 scenes render. The beaten scene has 1,390 SVG nodes (the budget is 1,500).
+
+### Found, not fixed (commit messages only; the trees are fine)
+
+- `a46bd49` (the expansion-spec merge, not pushed): its message ends with git's leftover `# Conflicts:` block after the trailer. git's own trailer parser still finds the trailer. Fixing it means rewriting `a46bd49` and every commit after it, which changes the release SHAs, and other worktrees are built on `25afc96`. So it's left to whoever deploys: `git filter-branch --msg-filter` over `a46bd49^..gaps` to drop the `# Conflicts` lines (the trees stay identical, per HANDOFF §6.4 item 7), or leave it as it is.
+- `abda756` (already pushed to `claude/jolly-keller-gy5hs4`): it ends with a `Claude-Session:` line and the cloud session's own attribution trailer. It's pushed history, so it can't be rewritten.
