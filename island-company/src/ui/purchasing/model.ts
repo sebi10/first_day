@@ -6,8 +6,9 @@
 // and nothing names an effectivity (0.2 rule 7): a family's numbers are the
 // family's, a need has no P/N.
 import { alertFlags, liveAlerts, soleGuest, symptomText } from '../../sim/alerts';
-import { DEFAULT_SUPPLIER, FREIGHT, MODELS, ROLE_LABEL, STOCK, SUPPLIERS } from '../../sim/data';
+import { DEFAULT_SUPPLIER, ECON, FREIGHT, MODELS, ROLE_LABEL, STOCK, SUPPLIERS } from '../../sim/data';
 import { expectedDeferralCost, fixedNow, gridFirstJob, groundsFrom, outOfService, projectWeek, subCharterNeed, subCharterOn, tierDef, urgency } from '../../sim/econ';
+import { isEmergency, receiverFunds, receiverWords } from '../../sim/engine';
 import { cardOf, outWeeks, repairTask, type Card } from '../../sim/flow';
 import { allItems, buyUnits, famOf, itemById, priceAt } from '../../sim/items';
 import { assetSpend, capitalCost, cashInStock, committed, fillRate, payable, poOwed, runway, spendable, spendSeries, stockBuiltUsed, tradeSpend, waitWeeks, type OutCat } from '../../sim/ledger';
@@ -40,6 +41,7 @@ import {
   suggestRop,
   unitCost,
   urgentJob,
+  urgentReq,
   velocity,
   type Family,
   type MoveClass,
@@ -241,6 +243,8 @@ export type CardVM = {
   waitCost: number;
   /** came after the analyst ended the turn: what happens to it tonight */
   late?: string;
+  /** in receivership, what the receiver advances for it and adds to the bridge loan (the release gate: the fee said) */
+  recv?: string;
   /** an MEL placard on its alert: whether the mechanic has asked for the one extension, and whether the analyst can approve it */
   mel?: { alert: string; until: number; ext: boolean; asked: boolean; askedBy?: string; canExtend: boolean; /** the week the extension runs to */ to: number };
 };
@@ -396,10 +400,18 @@ export function cardVM(s: IslandState, o: Order, buy?: BuyChoice): CardVM {
     budget: `${trade} work budget this week: ${usd(card.budget.spent)} of ${usd(card.budget.of)}`,
     waitCost,
     ...(lateWords(s, o.at, card.total) ? { late: lateWords(s, o.at, card.total) } : {}),
+    ...(recvWords(s, o, card.total) ? { recv: recvWords(s, o, card.total) } : {}),
     ...(a?.mel
       ? { mel: { alert: a.id, until: a.mel.until, ext: !!a.mel.ext, asked: !!a.mel.ask, ...(a.mel.ask ? { askedBy: a.mel.ask.by } : {}), canExtend: melExtendable(a.mel, W), to: Math.max(a.mel.until, W - 1) + 1 } }
       : {}),
   };
+}
+
+/** the receiver's line on a card it would fund: "The receiver funds $190 → +$218 on the bridge loan (15% fee)" */
+function recvWords(s: IslandState, o: Order, total: number): string | undefined {
+  if (s.receivership <= 0) return undefined;
+  const adv = receiverFunds(s, total, isEmergency(s, o));
+  return adv ? `${receiverWords(adv)}.` : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -506,17 +518,23 @@ const reqVendor = (x: Item, c: ReqChoice): SupplierId => (c.cheaper ? SUPPLIER_P
 /** the AOG boat for a line: this supplier ships on it, and the week's carrier wouldn't land it tonight anyway */
 const boatHelps = (s: IslandState, x: Item, v: SupplierId) => aogOk(x, v) && etaOf(s.week, x, v) > s.week;
 
-/** the moves a batch approval dispatches: one approveReq per trade (each trade's supplier is its own) */
+/**
+ * The moves a batch approval dispatches: one approveReq per trade (each trade's supplier is its own). Under the
+ * $2,000 freeze or in receivership the safety-critical requests go on their own (the release gate): only they pass
+ * there, so a plain line in the same batch can't sink them or ride on them
+ */
 export function reqActions(s: IslandState, ids: string[], c: ReqChoice): Action[] {
-  const byTrade = new Map<ItemTrade, string[]>();
+  const byTrade = new Map<string, { trade: ItemTrade; ids: string[] }>();
+  const apart = s.receivership > 0 || spendable(s) < ECON.freezeBelow;
   for (const id of ids) {
     const r = s.reqs?.find((x) => x.id === id);
     const x = r ? itemById(r.item) : undefined;
     if (!r || !x) continue;
-    (byTrade.get(x.trade) ?? byTrade.set(x.trade, []).get(x.trade)!).push(id);
+    const key = `${x.trade}${apart && urgentReq(s, r) ? '|urgent' : ''}`;
+    (byTrade.get(key) ?? byTrade.set(key, { trade: x.trade, ids: [] }).get(key)!).ids.push(id);
   }
   // the boat takes only the lines it gets here sooner: the rest ride the week's carrier (no $350 for nothing)
-  return [...byTrade.entries()].flatMap(([trade, reqs]) => {
+  return [...byTrade.values()].flatMap(({ trade, ids: reqs }) => {
     const vendor = c.cheaper ? SUPPLIER_PAIR[trade][1] : SUPPLIER_PAIR[trade][0];
     const boat = c.aog ? reqs.filter((id) => boatHelps(s, itemById(s.reqs!.find((r) => r.id === id)!.item)!, vendor)) : [];
     const rest = reqs.filter((id) => !boat.includes(id));

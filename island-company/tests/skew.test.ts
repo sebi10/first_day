@@ -277,8 +277,12 @@ describe('island docs written by the live job-flow build (bd1e1d2, engine 3)', (
       const doc = load(name);
       expect(doc.engine).toBe(3);
       screens(doc);
-      // nothing to migrate: the live build wrote every job-flow field already
-      expect(JSON.stringify(migrate(structuredClone(doc)))).toBe(JSON.stringify(doc));
+      // nothing to migrate: the live build wrote every job-flow field already (only the one-time v4 stamp: the week v4
+      // takes over and a credits streak the old rule earned, carried; the release gate)
+      const want = structuredClone(doc);
+      want.stats.v4From = doc.week;
+      if ((doc.stats.aStreak ?? 0) > 0) want.stats.aCarry = doc.stats.aStreak;
+      expect(JSON.stringify(migrate(structuredClone(doc)))).toBe(JSON.stringify(want));
       // the first move on this build stamps its version and leaves the money and the work as they were
       const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
       expect(r.error).toBeUndefined();

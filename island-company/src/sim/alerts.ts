@@ -9,7 +9,7 @@
 import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
-import { FEED_KINDS, gridFirst } from './econ';
+import { FEED_KINDS, feedAlert, gridFirst, gridFirstJob } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
 import { helperJobs, pilotOf, squawkNff, wearMult } from './staff';
 import { defaultTask, taskOn, type Task } from './tasks';
@@ -1260,10 +1260,17 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     }
     // an asset in critical shape with nothing open on it always gets a job; so does the grid at real risk from tier 4
     // (A0 e: grid first, the island's single point of failure): a feed job, and it goes first among the must-dos
+    // (release gate: at real risk only a feed alert or job already open counts as "something open on it": a fuel-dock
+    // takeoff, a conduit run due in weeks or a dock card on the grid used to switch grid first off)
     const first = (a: Asset) => a.kind === 'grid' && gridFirst(s, a);
     for (const asset of s.assets) {
-      if ((asset.health >= 45 && !first(asset)) || workable.some((o) => o.assetId === asset.id) || openAlerts.some((a) => a.assetId === asset.id)) continue;
       const feedOnly = asset.health >= 45 && first(asset);
+      if (
+        (asset.health >= 45 && !first(asset)) ||
+        workable.some((o) => o.assetId === asset.id && (!feedOnly || gridFirstJob(s, o))) ||
+        openAlerts.some((a) => a.assetId === asset.id && (!feedOnly || feedAlert(s, a)))
+      )
+        continue;
       const fix = cands
         .filter((c) => c.asset.id === asset.id && c.w < 100 && (!feedOnly || FEED_KINDS.has(c.kind)))
         .sort((a, b) => (CATALOG_BY_KIND[a.kind]?.parts ?? 0) - (CATALOG_BY_KIND[b.kind]?.parts ?? 0) || b.w - a.w)[0];

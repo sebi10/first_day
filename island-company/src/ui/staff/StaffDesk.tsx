@@ -6,7 +6,7 @@
 import { useState } from 'preact/hooks';
 import { fixedNow, projectWeek, tierDef } from '../../sim/econ';
 import { runway, spendable } from '../../sim/ledger';
-import { buildSite, commissioning, cottagePlan, COTTAGE_SHELL, crewOf, NPC_ROLES, openBuild, payroll, severanceOf, STAFF, staffEffect, standardCount, working } from '../../sim/staff';
+import { buildSite, commissioning, cottagePlan, COTTAGE_SHELL, crewOf, helperOn, NPC_ROLES, openBuild, payroll, severanceOf, STAFF, staffEffect, standardCount, working } from '../../sim/staff';
 import type { Candidate, Npc } from '../../sim/types';
 import { fx } from '../feedback';
 import { Btn, Icon, Sheet, toast, usd } from '../kit';
@@ -116,7 +116,7 @@ function Payroll({ ctl }: { ctl: Ctl }) {
       {later.length > 0 && <span class="label">From week {Math.min(...later.map((n) => n.start))}: +{usd(later.reduce((t, n) => t + n.wage, 0))} ({later.map((n) => n.name).join(', ')}, giving notice).</span>}
       <span class="label">
         Weekly cost to the company. Pilots fly, housekeepers turn the houses over, builders do the site work
-        {s.tier >= STAFF.helper.fromTier ? `, an electrician's helper puts in ${s.players.elec?.name ?? 'the electrician'}'s planned routine jobs` : ''}. Nobody here diagnoses, plans or signs for a trade.
+        {helperOn(s) ? `, an electrician's helper puts in ${s.players.elec?.name ?? 'the electrician'}'s planned routine jobs` : ''}. Nobody here diagnoses, plans or signs for a trade.
       </span>
     </div>
   );

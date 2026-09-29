@@ -5,7 +5,7 @@ import { alertFlags, alertShort, soleGuest } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
 import { ROLE_LABEL } from '../../sim/data';
 import { alertAog, gridFirstAlert, hazardOn } from '../../sim/econ';
-import { helperQueue } from '../../sim/engine';
+import { helperQueues } from '../../sim/engine';
 import { flowStage, type FlowStage } from '../../sim/flow';
 import type { Alert, AlertSrc, Asset, IslandState, Role } from '../../sim/types';
 import { flowMove } from '../select';
@@ -42,7 +42,8 @@ export const SRC_WORDS: Record<AlertSrc, string> = {
   takeoff: 'Install take-off',
 };
 
-export type Flag = { text: string; tone?: 'rust' | 'sea' | 'palm' | 'ink' };
+/** a flag beside an alert's stage; `why` is said on the open job (the release gate: a chip that explains itself on tap) */
+export type Flag = { text: string; tone?: 'rust' | 'sea' | 'palm' | 'ink'; why?: string };
 
 /** the flags beside an alert's stage: due, MEL, made safe, AOG (the only guest plane's guests on the sub-charter), the house shut */
 export function flagsOf(s: IslandState, a: Alert): Flag[] {
@@ -70,8 +71,17 @@ export function flagsOf(s: IslandState, a: Alert): Flag[] {
   // A0 (e): from tier 4 the grid's feed at real risk goes before code prep (every house hangs off it): the chip says
   // why it's first (the feed only: a fuel-dock trip isn't the island feed)
   if (gridFirstAlert(s, a)) out.push({ text: 'grid first', tone: 'rust' });
-  // the electrician's helper takes this ready job at the resolve if you don't (review round 1)
-  if (o && helperQueue(s).some((x) => x.id === o.id)) out.push({ text: 'helper tonight', tone: 'sea' });
+  // the electrician's helper takes this ready job at the resolve if you don't (review round 1), and says who and how
+  const helper = o ? [...helperQueues(s)].find(([, q]) => q.some((x) => x.id === o.id))?.[0] : undefined;
+  if (helper) {
+    const n = (s.staff ?? []).find((x) => x.id === helper)?.name ?? 'The helper';
+    const elec = nameOf(s, 'elec');
+    out.push({
+      text: 'helper tonight',
+      tone: 'sea',
+      why: `${n} (electrician's helper) puts this in at tonight's resolve as ${elec} planned it, unless ${elec} does it first. It goes in under ${elec}'s licence: a wrong plan surfaces later, traced to ${elec} and naming ${n}.`,
+    });
+  }
   const f = alertFlags(s, a);
   if (f.hazard && !a.safe && !out.some((x) => x.text === 'SHUT')) out.push({ text: 'hazard', tone: 'rust' });
   return out;

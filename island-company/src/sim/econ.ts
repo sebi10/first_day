@@ -254,10 +254,18 @@ export function atResort(s: Pick<IslandState, 'tier' | 'stats'>, W: number): boo
 }
 
 /**
+ * A streak an older engine earned (stats.aCarry, stamped by migrate on a live doc's first v4 read, the release gate
+ * 2026-09-29) still running: it counts in full, Harbor weeks and all, until a week below A ends it
+ */
+export const carriedStreak = (s: Pick<IslandState, 'stats'>) => (s.stats.aCarry ?? 0) > 0 && (s.stats.aStreak ?? 0) > 0;
+
+/**
  * The credits' streak as it stands before week `W` resolves: the stored one, never more than the weeks played at the
- * Resort before `W` (a live doc's streak from an older build may hold Harbor weeks). Derived, never stored.
+ * Resort before `W`, unless it's a streak carried from an older engine (grandfathered: the crew earned it under the old
+ * rule). Derived, never stored.
  */
 export function creditsStreak(s: Pick<IslandState, 'tier' | 'stats'>, W: number): number {
+  if (carriedStreak(s)) return s.stats.aStreak ?? 0;
   if (s.tier < 5) return 0;
   const t5 = s.stats.tierReachedWeek[5];
   const max = t5 === undefined ? Infinity : Math.max(0, W - 1 - t5);
@@ -271,15 +279,23 @@ export function creditsStreak(s: Pick<IslandState, 'tier' | 'stats'>, W: number)
  * 7-week run). The credits come at 8, on a full-crew week.
  */
 export function aStreakAfter(s: Pick<IslandState, 'tier' | 'stats'>, W: number, grade: Grade, fullTeam: boolean): number {
-  if (!atResort(s, W) || grade !== 'A') return 0;
+  if (grade !== 'A') return 0;
+  // a streak carried from an older engine holds through an A week at the Harbor (new Harbor weeks don't add to it)
+  if (!atResort(s, W)) return carriedStreak(s) && (fullTeam || LATE.streakPause) ? (s.stats.aStreak ?? 0) : 0;
   const now = creditsStreak(s, W);
   if (fullTeam) return now + 1;
   return LATE.streakPause ? now : 0;
 }
 
-/** an autopilot A at the Resort: the week held the streak instead of counting (the review line, the Board's chips) */
+/** a week resolved on v4 (a live doc's weeks before stats.v4From played by the old rules) */
+export const onV4 = (s: Pick<IslandState, 'stats'>, week: number) => s.stats.v4From === undefined || week >= s.stats.v4From;
+
+/**
+ * an autopilot A at the Resort: the week held the streak instead of counting (the review line, the Board's chips). Only
+ * weeks v4 resolved (the release gate): on the old rule an autopilot A ended the streak
+ */
 export const pausedWeek = (s: Pick<IslandState, 'tier' | 'stats'>, r: Pick<WeekReport, 'week' | 'grade' | 'autoRun'>) =>
-  !!LATE.streakPause && r.grade === 'A' && !!r.autoRun?.length && atResort(s, r.week);
+  !!LATE.streakPause && r.grade === 'A' && !!r.autoRun?.length && atResort(s, r.week) && onV4(s, r.week);
 
 /** how far ahead the county's notice comes (E_CODE_DUE's lead): a prep inside this window is ready for the booked date */
 export const INSPECTION_NOTICE = 2;

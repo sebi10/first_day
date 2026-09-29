@@ -189,6 +189,13 @@ export function JobFlow({ ctl, alert: a, repick, onClose, onStart, demo }: JobFl
           <span class="jf-tier label">{tier <= 1 ? 'teaching: hints on' : tier === 2 ? 'hints: keywords' : 'no hints'}</span>
         </div>
       )}
+      {flags
+        .filter((f) => f.why)
+        .map((f) => (
+          <span key={`why-${f.text}`} class="label">
+            {f.why}
+          </span>
+        ))}
       <ol class="jf-dots" aria-label="Steps">
         {dots.map((x) => (
           <li key={x.key} class={x.state}>
@@ -333,11 +340,19 @@ function ClosedView({ ctl, a }: { ctl: Ctl; a: Alert }) {
     how === 'nff'
       ? `If there was a fault after all, it comes back as a new alert on ${name}, due at once.`
       : `How good the work was shows up later: in ${name}'s health, an inspection, or the same fault coming back.`;
+  // the electrician's helper put it in (the release gate: the closed job named nobody)
+  const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+  const npc = o?.result?.npc;
   return (
     <div class="col jf-step" style={{ gap: 10 }}>
       <div class="jf-stage closed">
         <b>{words}</b>
-        {a.closed && <span>Week {a.closed.week}.</span>}
+        {a.closed && !npc && <span>Week {a.closed.week}.</span>}
+        {npc && (
+          <span>
+            Put in by {npc} (helper) to {nameOf(s, 'elec')}'s plan, week {o!.result!.week}: {Math.round(o!.result!.score * 100)}%.
+          </span>
+        )}
       </div>
       <span class="label">{later}</span>
     </div>

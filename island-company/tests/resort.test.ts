@@ -22,6 +22,7 @@ import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed, rng } from '../src/sim/rng';
 import { flagsOf } from '../src/ui/flow/words';
 import { dockNext, yourMoves } from '../src/ui/select';
+import { STAFF } from '../src/sim/staff';
 import { ROLES, type Asset, type IslandState, type Order, type Role } from '../src/sim/types';
 
 // whole-season sims below (52 weeks): CI runners are about 1.5x slower, and the three longest get 120 s each
@@ -354,9 +355,23 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
     expect(aStreakAfter(st(5, 9), 20, 'A', true)).toBe(0);
     expect(atResort(st(5, 0), 21)).toBe(true);
     expect(aStreakAfter(st(5, 0), 21, 'A', true)).toBe(1);
-    // a live doc's streak from an older build (Harbor weeks in it) is read as the Resort weeks it can hold
+    // a stored streak longer than the Resort weeks (never written by v4) is read as the Resort weeks it can hold
     expect(creditsStreak(st(5, 9), 23)).toBe(2);
     expect(aStreakAfter(st(5, 9), 23, 'A', true)).toBe(3);
+    // the release gate: a live doc's streak from an older build (Harbor weeks in it) is carried (stats.aCarry, stamped by
+    // migrate): it counts in full, a full-crew A at the Resort adds one (9 → 10: the credits), and a week below A ends it
+    const carried = (tier: number, aStreak: number, t5 = 20) => {
+      const x = st(tier, aStreak, t5);
+      x.stats.aCarry = aStreak;
+      return x;
+    };
+    expect(creditsStreak(carried(5, 9), 23)).toBe(9);
+    expect(aStreakAfter(carried(5, 9), 23, 'A', true)).toBe(10);
+    expect(aStreakAfter(carried(5, 9), 23, 'A', false)).toBe(9);
+    expect(aStreakAfter(carried(5, 9), 23, 'B', true)).toBe(0);
+    // at the Harbor a carried streak holds on an A (new Harbor weeks don't add), and ends below A
+    expect(aStreakAfter(carried(4, 8), 18, 'A', true)).toBe(8);
+    expect(aStreakAfter(carried(4, 8), 18, 'C', true)).toBe(0);
   });
 
   it('(f, review round 1) a 9-week Harbor streak, and the Resort arriving mid-week on an autopilot week graded A: no credits (seeds 1-12)', () => {
@@ -451,54 +466,60 @@ describe('A0 in whole seasons', () => {
     expect(paused).toBeGreaterThan(0);
   }, 180_000);
 
-  it('the long-game guard (52 weeks, seeds 1-10, weeks 24-52): the Resort holds, and the mechanism shows at week 52 before the cash does', () => {
+  it('the long-game guard, release build (the helper held back; 52 weeks, seeds 1-10, weeks 24-52): A0 delays the slide, and the houses show it', () => {
+    // The stage 1 release gate (DECISIONS "2026-09-29: stage 1 release gate") holds the electrician's helper back
+    // (STAFF.helper.enabled false: an NPC doing the electrician's hands-on work is the owner's call), so the long game
+    // is A0's alone again. Measured on these seeds: three friends 6 of 10 games below $0, 25 weeks, 76 dead weeks, the
+    // median house at health 4 at week 52 and 0 of 7 rentable; all average 2, 3, 20, health 11, 0 of 7, cash $183k.
+    // The guard pins that with room for noise, so a regression shows; the next test is the helper's own guard.
+    expect(STAFF.helper.enabled).toBe(false);
+    const tf = longGuard('three friends');
+    expect(tf.games).toBeLessThanOrEqual(7);
+    expect(tf.neg).toBeLessThanOrEqual(35);
+    expect(tf.dead).toBeLessThanOrEqual(95);
+    const av = longGuard('all average');
+    expect(av.games).toBeLessThanOrEqual(3);
+    expect(av.neg).toBeLessThanOrEqual(8);
+    expect(av.dead).toBeLessThanOrEqual(28);
+    expect(av.cash52).toBeGreaterThan(120_000);
+  }, 120_000);
+
+  it("the long-game guard with the helper on (the owner's call; 52 weeks, seeds 1-10, weeks 24-52): the cash holds, and the houses show the helper's scope", () => {
     // docs/EXPANSION.md 11.1 T1 asks for a median of 0 weeks below $0, at most 3 of 30 games ever below $0, median dead
     // weeks ≤ 2 and the credits in half of the three friends' games by week 45. On these seeds, weeks 24-52:
     //   before A0 (258d0d2): three friends 10 of 10 games below $0, 127 weeks, 192 dead weeks; all average 10, 103, 180
     //   A0 (e4908db):        three friends 6 of 10, 24, 49; all average 2 of 10, 4, 21 (and the houses at 0-10 by week 52)
     //   review round 1:      three friends 0 of 10, 0, 4; all average 0, 0, 0; median houses rentable at week 52 7 of 7
     //                        and 7 of 7, median house health at week 52 about 48 and 70
+    //   release gate:        the helper narrowed to the routine device swaps (no diagnosis-led job: flicker, water
+    //                        heater, bonding, spa feed, storm rewire), no hazard, only what was ready when the electrician
+    //                        ended the turn, never in a week they're away: three friends 2 of 10, 8, 18, houses about 19
+    //                        at week 52 with 2 of 7 rentable; all average 0, 0, 0, about 49, 6 of 7. The narrower scope is
+    //                        what costs the houses (the old kinds with the other rules: 1, 1, 1, about 40, 5 of 7)
     // The guard keeps room for noise, and reads the houses at week 52 too (review round 1: a lever that regresses shows
     // in the houses weeks before it shows in the cash).
-    const run = (team: string) => {
-      let games = 0;
-      let neg = 0;
-      let dead = 0;
-      const cash: number[] = [];
-      const hp: number[] = [];
-      const rent: number[] = [];
-      for (let seed = 1; seed <= 10; seed++) {
-        const { weeks } = simulate(TEAMS[team], 52, seed, (s) => {
-          if (s.week - 1 !== 52) return;
-          const hs = s.assets.filter((a) => a.kind === 'house');
-          hp.push(hs.reduce((t, h) => t + h.health, 0) / hs.length);
-          rent.push(s.history[s.history.length - 1].housesRentable);
-        });
-        const late = weeks.filter((w) => w.week >= 24);
-        const n = late.filter((w) => w.cash < 0).length;
-        if (n) games++;
-        neg += n;
-        dead += late.filter((w) => w.revenue < 2000).length;
-        cash.push(weeks[51].cash);
-      }
-      const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[5];
-      return { games, neg, dead, cash52: median(cash), hp52: median(hp), rent52: median(rent) };
-    };
-    const tf = run('three friends');
+    STAFF.helper.enabled = true;
+    let tf: ReturnType<typeof longGuard>;
+    let av: ReturnType<typeof longGuard>;
+    try {
+      tf = longGuard('three friends');
+      av = longGuard('all average');
+    } finally {
+      STAFF.helper.enabled = false;
+    }
     expect(tf.games).toBeLessThanOrEqual(3);
     expect(tf.neg).toBeLessThanOrEqual(12);
     expect(tf.dead).toBeLessThanOrEqual(25);
-    // the hold line: the median game keeps at least 4 of its 7 houses rentable at week 52
-    expect(tf.rent52).toBeGreaterThanOrEqual(4);
-    expect(tf.hp52).toBeGreaterThanOrEqual(35);
-    const av = run('all average');
+    // the hold line: the median game keeps some of its 7 houses rentable at week 52
+    expect(tf.rent52).toBeGreaterThanOrEqual(1);
+    expect(tf.hp52).toBeGreaterThanOrEqual(12);
     expect(av.games).toBeLessThanOrEqual(2);
     expect(av.neg).toBeLessThanOrEqual(6);
     expect(av.dead).toBeLessThanOrEqual(12);
     expect(av.cash52).toBeGreaterThan(150_000);
-    expect(av.rent52).toBeGreaterThanOrEqual(6);
-    expect(av.hp52).toBeGreaterThanOrEqual(55);
-  }, 120_000);
+    expect(av.rent52).toBeGreaterThanOrEqual(5);
+    expect(av.hp52).toBeGreaterThanOrEqual(40);
+  }, 240_000);
 
   it('a live tier-4 doc (bd1e1d2, engine 3) plays on under A0: its 8-week notices stand, its next renewal books 13 weeks, and it resolves 12 more weeks', () => {
     const doc = load('v3-bd1e1d2-late');
@@ -524,3 +545,29 @@ describe('A0 in whole seasons', () => {
     expect(s.week).toBe(W + 12);
   });
 });
+
+/** the long-game guard's run (weeks 24-52 of 52, seeds 1-10): games and weeks below $0, dead weeks, and the medians at week 52 */
+function longGuard(team: string) {
+  let games = 0;
+  let neg = 0;
+  let dead = 0;
+  const cash: number[] = [];
+  const hp: number[] = [];
+  const rent: number[] = [];
+  for (let seed = 1; seed <= 10; seed++) {
+    const { weeks } = simulate(TEAMS[team], 52, seed, (s) => {
+      if (s.week - 1 !== 52) return;
+      const hs = s.assets.filter((a) => a.kind === 'house');
+      hp.push(hs.reduce((t, h) => t + h.health, 0) / hs.length);
+      rent.push(s.history[s.history.length - 1].housesRentable);
+    });
+    const late = weeks.filter((w) => w.week >= 24);
+    const n = late.filter((w) => w.cash < 0).length;
+    if (n) games++;
+    neg += n;
+    dead += late.filter((w) => w.revenue < 2000).length;
+    cash.push(weeks[51].cash);
+  }
+  const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[5];
+  return { games, neg, dead, cash52: median(cash), hp52: median(hp), rent52: median(rent) };
+}

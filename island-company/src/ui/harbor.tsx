@@ -4,6 +4,7 @@
 // (localStorage, guarded: a per-viewer convenience, like What's new).
 import { useState } from 'preact/hooks';
 import { LATE } from '../sim/data';
+import { carriedStreak, creditsStreak } from '../sim/econ';
 import { STAFF } from '../sim/staff';
 import type { IslandState, Role } from '../sim/types';
 import { local, nameOf } from './flow/words';
@@ -14,6 +15,8 @@ export const harborKey = (island: string, role: string) => `ic.a0.harbor.${islan
 export function harborLines(s: IslandState): { title: string; body: string }[] {
   const elec = nameOf(s, 'elec');
   const fin = nameOf(s, 'fin');
+  // a live island's streak from before the update is kept (the release gate): say so where the rule is said
+  const carried = carriedStreak(s) ? ` Your streak from before this update counts: ${Math.min(8, creditsStreak(s, s.week))}/8. Once it ends, only Resort weeks count.` : '';
   return [
     {
       title: 'The grid comes first',
@@ -27,13 +30,18 @@ export function harborLines(s: IslandState): { title: string; body: string }[] {
       title: 'Fewer notices, lighter wear',
       body: `The Harbor's rental licence puts the island on the county's quarterly schedule: a code inspection every ${LATE.inspectionWeeks} weeks, not 8. A booked week wears a house ${LATE.houseWear}, not 2.`,
     },
-    {
-      title: "An electrician's helper",
-      body: `${fin} can hire one on the Staff desk: they do ${elec}'s planned routine jobs at the resolve (outlets, GFCIs, switches, fixtures, the generator's circuit test; a hazard once it's made safe), ${usd(STAFF.wage.helper)} a week at skill 3. The diagnosis and the plan, making a hazard safe, code prep, the grid's feed and repairs stay ${elec}'s.`,
-    },
+    // (held back for stage 1: STAFF.helper.enabled, the owner's call; the sheet says it only when it plays)
+    ...(STAFF.helper.enabled
+      ? [
+          {
+            title: "An electrician's helper",
+            body: `${fin} can hire one on the Staff desk: at the resolve they put in ${elec}'s planned receptacle, GFCI and 3-way switch swaps and the generator's circuit test, if ${elec} ended the turn with them ready, ${usd(STAFF.wage.helper)} a week at skill 3. Never in a week ${elec} is away (nobody supervises them). The diagnosis and the plan, a hazard and its fix, code prep, the grid's feed and repairs stay ${elec}'s.`,
+          },
+        ]
+      : []),
     {
       title: 'The credits',
-      body: 'Eight full-crew A weeks at the Resort (tier 5), none below A, beat the game. A week graded A with a seat on autopilot holds the streak without counting; a week below A resets it. Weeks at the Harbor are no head start.',
+      body: `Eight full-crew A weeks at the Resort (tier 5), none below A, beat the game. A week graded A with a seat on autopilot holds the streak without counting; a week below A resets it. Weeks at the Harbor are no head start.${carried}`,
     },
   ];
 }

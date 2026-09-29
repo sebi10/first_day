@@ -5,7 +5,7 @@
 //
 // Each digest reads every week's island doc after the resolve (so the credits' streak, the stats and every asset's
 // health count, not only the week's summary row), the week-by-week table and the final doc. Four runs are 26 weeks;
-// four are 52, because tier 5 comes around weeks 21-23 and the network (stage 3) opens two tiers later: 26 weeks
+// five are 52, because tier 5 comes around weeks 21-23 and the network (stage 3) opens two tiers later: 26 weeks
 // would cover almost none of the time stage 3 changes (review round 1).
 //
 // A digest changes only when the game's rules or content change on purpose. When that is the change you meant
@@ -29,8 +29,11 @@ const RUNS: [team: string, seed: number, weeks: number][] = [
   ['all average', 1, 52],
   ['mistakes', 1, 52],
   // (seed 6: a receivership below $0, a grid-down week and a lapsed-house prep against grid first come up in its 52
-  // weeks; seed 1 has an autopilot A at the Resort mid-streak)
+  // weeks)
   ['mistakes', 6, 52],
+  // (autopilot A weeks at the Resort, weeks 28 and 29: the streak's pause. Added at the release gate: with the helper
+  // held back no other run has one, and the pause's knob went unseen)
+  ['all average', 4, 52],
 ];
 const key = (team: string, seed: number, weeks: number) => `${team}/${seed}${weeks === 26 ? '' : `/${weeks}`}`;
 
@@ -42,16 +45,23 @@ function digest(team: string, seed: number, weeks: number): string {
   return h.digest('hex').slice(0, 16);
 }
 
-/** recorded on branch `gaps` after A0's review round 1 (2026-09-29) */
+/**
+ * recorded on branch `gaps` at the stage 1 release gate (2026-09-29): the electrician's helper held back (the hiring
+ * board's draw from tier 4 no longer deals one, and the bots never hire one), the helper narrowed, grid first's
+ * must-do no longer masked by an open dock job, the receiver's loan and lines. With the helper turned on, three friends
+ * 2 and 3 and all average 1 (26 weeks) reproduce A0 review round 1's digests byte for byte: the draw is all that moved
+ * them. The other five hire a helper by week 26 or 52 (DECISIONS "2026-09-29: stage 1 release gate").
+ */
 const GOLDEN: Record<string, string> = {
-  'three friends/1': 'cc9a6aa8e8fba3c8',
-  'three friends/2': '0f0a613898ab2fb9',
-  'three friends/3': '8a69be2862b7bfda',
-  'all average/1': '484b906166d6eb52',
-  'three friends/1/52': 'd8b2b905df1e0b9a',
-  'all average/1/52': 'a4e2259887c7c2b4',
-  'mistakes/1/52': '68a2031f75e45211',
-  'mistakes/6/52': '58cc0b3bfd028e0c',
+  'three friends/1': '071e528f29483b3d',
+  'three friends/2': '43b9c878f6f837bc',
+  'three friends/3': 'b1a2df6821f18a90',
+  'all average/1': '937e3050847406e4',
+  'three friends/1/52': 'ac98dae6093ebb7b',
+  'all average/1/52': '48b2a3225eb43677',
+  'mistakes/1/52': '3160783043448a94',
+  'mistakes/6/52': 'a447ae4844dd9f3a',
+  'all average/4/52': '2f13f83531354526',
 };
 
 describe('golden digests: home plays byte-identical (the paper-sim crews, 26 and 52 weeks)', () => {
@@ -94,7 +104,8 @@ const KNOBS: Knob[] = [
   { name: 'LATE.healthyDecay 5', flip: set(LATE, 'healthyDecay', { at: 70, decay: 5 }) },
   { name: 'LATE.lowHealthTierBump off', flip: set(LATE, 'lowHealthTierBump', false) },
   { name: 'LATE.streakPause off', flip: set(LATE, 'streakPause', false) },
-  { name: "STAFF.helper never (the electrician's helper)", flip: set(STAFF.helper, 'fromTier', 99) },
+  // (held back for stage 1: the knob turns it on, and a digest must see it; the release gate)
+  { name: "STAFF.helper on (the electrician's helper, held back)", flip: set(STAFF.helper, 'enabled', true) },
   { name: 'RECEIVER.allowance 0', flip: set(RECEIVER, 'allowance', 0) },
   { name: 'RECEIVER.standstill off', flip: set(RECEIVER, 'standstill', false) },
 ];

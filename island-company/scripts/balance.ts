@@ -155,7 +155,8 @@ function longGame(team: Team, seed: number, salt = '', trace?: (s: IslandState) 
       neg: late.filter((w) => w.cash < 0).length,
       dead: late.filter((w) => w.revenue < DEAD_REV).length,
       cash: [at_(26), at_(39), at_(52)],
-      credits: final.creditsWeek ?? 99,
+      // (capped at week 52 like every other long column: `long 78` counted credits won in weeks 53-78)
+      credits: final.creditsWeek && final.creditsWeek <= LONG ? final.creditsWeek : 99,
       t5: final.stats.tierReachedWeek[5] ?? 99,
       aWeeks: t5w.filter((w) => w.grade === 'A').length,
       t5Weeks: t5w.length,

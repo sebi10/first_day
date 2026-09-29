@@ -1,17 +1,20 @@
 // Review round 1 of A0 (docs/DECISIONS.md "2026-09-29: A0 review round 1"): the late game's two new pieces.
 //   - the electrician's helper: an NPC the analyst hires from the Harbor (tier 4) who does the electrician's planned
-//     routine installs at the resolve (never the licensed work), and whose rounds let the electrician's list run longer
+//     routine installs at the resolve (never the licensed work), and whose rounds let the electrician's list run longer.
+//     Held back for the stage 1 release (STAFF.helper.enabled false, DECISIONS "2026-09-29: stage 1 release gate"):
+//     these tests turn it on, and tests/releasegate.test.ts checks it's off in the build
 //   - the receiver: an island in receivership that can't pay isn't locked out. The receiver funds safety-critical work
 //     up to $1,500 a week (added to the bridge loan) and takes its payment only out of cash above $0
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generateAlerts, liveAlerts, raiseAlert } from '../src/sim/alerts';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { RECEIVER } from '../src/sim/data';
-import { apply, createIsland, receiverFunds, receiverLeft } from '../src/sim/engine';
+import { apply, createIsland, receiverFunds, receiverLeft, tracedTo } from '../src/sim/engine';
 import { planTask, stdPickFor } from '../src/sim/flow';
 import { rng } from '../src/sim/rng';
 import { addStarter } from '../src/sim/stock';
 import { boardNeeds, cottagePlan, helperJobs, helperWanted, nextCashGate, STAFF, staffEffect, staffOpenWeek } from '../src/sim/staff';
+import { defaultTaskNo } from '../src/sim/tasks';
 import { ROLES, type IslandState, type Npc, type Order, type Role } from '../src/sim/types';
 
 // whole-season sims below: CI runners are about 1.5x slower
@@ -82,6 +85,14 @@ function endWeek(s: IslandState, seats: Role[] = [...ROLES]): IslandState {
 const asset = (s: IslandState, id: string) => s.assets.find((a) => a.id === id)!;
 
 describe("the electrician's helper (from tier 4)", () => {
+  // (off in the release: the helper's code and tests stay, run with it on)
+  beforeAll(() => {
+    STAFF.helper.enabled = true;
+  });
+  afterAll(() => {
+    STAFF.helper.enabled = false;
+  });
+
   it('the board offers one only from tier 4, when the electrician has 6 alerts open and no helper; the hire is refused before tier 4', () => {
     for (const tier of [3, 4]) {
       const s = at(tier);
@@ -113,7 +124,7 @@ describe("the electrician's helper (from tier 4)", () => {
     }
   });
 
-  it('at the resolve a skill-3 helper does 2 of the ready routine jobs, the most urgent first, at 60%, and never the licensed work', () => {
+  it('at the resolve a skill-3 helper does 2 of the ready routine device swaps, the most urgent first, at 60%, and never the licensed work or a diagnosis', () => {
     let s = at(4);
     s.weather = 'clear';
     const n = helper(s, 3);
@@ -122,7 +133,8 @@ describe("the electrician's helper (from tier 4)", () => {
     asset(s, 'h2').health = 70;
     const low = job(s, { kind: 'trip', assetId: 'h1', title: 'Trace dead outlets' });
     job(s, { kind: 'gfci', assetId: 'h2', title: 'GFCI in wet rooms', gain: 10 });
-    job(s, { kind: 'flicker', assetId: 'h2', title: 'Diagnose flickering lights', puzzle: 'meter' });
+    // a diagnosis is the electrician's (the release gate: by task, not by catalog kind)
+    const flick = job(s, { kind: 'flicker', assetId: 'h2', title: 'Diagnose flickering lights', puzzle: 'meter' });
     // the licensed work: code prep, the grid's feed, a repair
     const prep = job(s, { kind: 'codeprep', assetId: 'h1', title: 'Code inspection prep', puzzle: 'panel', gain: 6 });
     const feeder = job(s, { kind: 'feeder', assetId: g.id, title: 'Find and re-splice the cottage feeder', gain: 16 });
@@ -136,15 +148,17 @@ describe("the electrician's helper (from tier 4)", () => {
     expect(done.some((o) => o.id === low.id)).toBe(true);
     for (const o of done) {
       expect(o.result).toMatchObject({ score: 0.6, by: 'elec', auto: true, npc: 'Lina M.' });
-      expect(STAFF.helper.kinds).toContain(o.kind);
+      expect(STAFF.helper.tasks).toContain(o.flow ? o.flow.task : defaultTaskNo(o.kind));
     }
-    for (const o of [prep, feeder, repair]) expect(s.orders.find((x) => x.id === o.id)!.status, o.kind).toBe('ready');
+    for (const o of [prep, feeder, repair, flick]) expect(s.orders.find((x) => x.id === o.id)!.status, o.kind).toBe('ready');
     // the gain landed at the helper's score (then the week's decay)
     expect(asset(s, 'h1').health).toBeGreaterThan(before.h1);
-    expect(s.history[s.history.length - 1].lines.some((l) => /Lina M\. \(electrician's helper\) did Trace dead outlets on Cottage 1, as planned \(60%\)/.test(l.text))).toBe(true);
+    expect(s.history[s.history.length - 1].lines.some((l) => /Lina M\. \(electrician's helper\) did Trace dead outlets on Cottage 1, as Ben planned \(60%\)/.test(l.text))).toBe(true);
+    // and the island log says what the helper put in (the release gate: the review's nine lines could hide it)
+    expect(s.feed.some((f) => /The electrician's helper put in 2 of Ben's planned jobs/.test(f.text))).toBe(true);
   });
 
-  it("a hazard's planned fix is the helper's only once the electrician has made it safe", () => {
+  it("a hazard's fix is never the helper's, made safe or not: the electrician puts what they made safe back in service (the release gate)", () => {
     for (const safe of [false, true]) {
       let s = at(4);
       helper(s, 3);
@@ -156,7 +170,7 @@ describe("the electrician's helper (from tier 4)", () => {
       al.status = 'job';
       al.order = o.id;
       s = endWeek(s);
-      expect(s.orders.find((x) => x.id === o.id)!.result?.npc, `safe ${safe}`).toBe(safe ? 'Lina M.' : undefined);
+      expect(s.orders.find((x) => x.id === o.id)!.result?.npc, `safe ${safe}`).toBeUndefined();
     }
   });
 
@@ -178,7 +192,9 @@ describe("the electrician's helper (from tier 4)", () => {
     s = endWeek(s);
     expect(s.orders.find((x) => x.id === o.id)!.result?.npc).toBe('Lina M.');
     const d = (s.defects ?? []).find((x) => x.variant === 'task');
-    expect(d).toMatchObject({ by: 'elec', name: 'Ben' });
+    // traced to the electrician's plan, and naming who put it in (the release gate)
+    expect(d).toMatchObject({ by: 'elec', name: 'Ben', npc: 'Lina M.' });
+    expect(tracedTo(d!)).toMatch(/Ben planned and Lina M\. \(helper\) put in under Ben's licence in week 20$/);
   });
 
   it("the helper's rounds let the electrician's list run longer: the target and the week's slots grow by the helper's jobs", () => {
@@ -204,8 +220,10 @@ describe("the electrician's helper (from tier 4)", () => {
     const e = staffEffect(s, { id: 'c1', name: 'Lina M.', role: 'helper', skill: 3, ask: 280, start: s.week }, 'hire');
     expect(e.does).toBe("does 2 planned routine jobs of Ben's a week, at 60%");
     expect(e.need).toMatch(/Ben has 6 alerts open/);
-    expect(e.need).toMatch(/the diagnosis, making a hazard safe, code prep, the grid's feed and repairs stay Ben's/);
-    expect(e.money).toMatch(/^\$280 a week · pays for itself if it keeps one cottage open \(about \$[\d,]+ a week in rent\)$/);
+    expect(e.need).toMatch(/receptacles, GFCIs, 3-way switches and the generator's circuit test/);
+    expect(e.need).toMatch(/the diagnosis, a hazard's fix, code prep, the grid's feed and repairs stay Ben's/);
+    // the money as a break-even against a cottage's expected rent (the release gate: not a fully booked week's)
+    expect(e.money).toMatch(/^\$280 a week · (breaks even if it keeps a cottage open 1 week in \d+ \(a cottage rents about \$[\d,]+ a week\)|more than a cottage rents \(about \$[\d,]+ a week\))$/);
   });
 
   it('the bots hire one only once the Resort’s cash gate is covered (payroll before it only delays the tier), and solo or absent teams never do', () => {
@@ -294,7 +312,9 @@ describe('the receiver (in receivership, cash below $0)', () => {
     expect(h.cashEnd).toBeLessThan(0);
     expect(s.loan!.left).toBe(left);
     expect(h.lines.some((l) => l.role === 'fin' && /comes only out of cash above \$0/.test(l.text))).toBe(true);
-    expect(h.lines.some((l) => l.role === 'all' && /The way out is revenue/.test(l.text))).toBe(true);
+    // in plain numbers (the release gate): the week's revenue against overhead and payroll, the fee, what's owed
+    expect(h.lines.some((l) => l.role === 'all' && /^Receivership, cash −\$[\d,]+: revenue \$[\d,]+ this week against \$[\d,]+ of overhead and payroll\. .*15% fee; \$[\d,]+ owed/.test(l.text))).toBe(true);
+    expect(h.lines.some((l) => /The way out is revenue/.test(l.text))).toBe(false);
     // out of receivership the payment is taken in full, as before
     let t = at(4);
     t.loan = { left: 5_000, weekly: 500 };

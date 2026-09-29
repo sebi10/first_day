@@ -123,6 +123,8 @@ export interface Defect {
   by: Role;
   /** who signed it off */
   name: string;
+  /** the electrician's helper who put it in to that plan (the trace names both) */
+  npc?: string;
   /** week it was signed off */
   week: number;
   /** resolveWeek of this week surfaces it (a tagged asset waits a week) */
@@ -327,6 +329,8 @@ export interface TurnState {
   /** of those, the part chain's paperwork (it needs no hangar tools: the grid-down cap doesn't count it) */
   paper?: number;
   coveredBy?: Role;
+  /** the electrician's turn: the jobs the helper may take at the resolve, stamped when it ended (the release gate: a card approved after that waits for them) */
+  ready?: string[];
 }
 
 export interface Incident {
@@ -408,6 +412,8 @@ export interface WeekReport {
     parts?: number;
     /** the mainland sub-charter that flew the guests while the only guest plane was on the ground */
     subCharter?: number;
+    /** money in, not a cost: the receiver's advances and a bridge loan this week (the release gate: the week's walk shows them) */
+    financing?: number;
   };
   housesBooked: number;
   housesRentable: number;
@@ -502,6 +508,13 @@ export interface IslandState {
     tierReachedWeek: Record<number, number>;
     /** consecutive full-team A weeks (endgame: 8 at the Resort) */
     aStreak?: number;
+    /**
+     * the streak an older engine's rule had earned when this doc first met v4 (the release gate, 2026-09-29: that rule
+     * counted Harbor weeks). While it runs unbroken it counts in full; the first week below A ends it and this field
+     */
+    aCarry?: number;
+    /** the first week this doc resolved on v4 (a doc an older engine wrote): the weeks before it played by the old rules */
+    v4From?: number;
   };
   /** week the crew beat the game (8 full-crew A weeks played at tier 5, none below A) */
   creditsWeek?: number;

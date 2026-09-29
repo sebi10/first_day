@@ -1658,3 +1658,86 @@ What was tested: the tip of `gaps`, `1a50845` (the gap fixes, A0, A0 review roun
 ### Found, not fixed
 
 - **Commit messages over `bd1e1d2..HEAD`: 19 of 20 pass, `abda756` fails.** It ends with a `Claude-Session:` line after the cloud session's own attribution trailer, which names another model. It's pushed history (on `origin/claude/jolly-keller-gy5hs4`, which is `abda756` on the remote too), so it can't be reworded (CLAUDE.md). `scripts/check-commits.ts` over what the push publishes (`origin/claude/jolly-keller-gy5hs4..HEAD`): 19 commits, 0 failing (A0 review round 2 above).
+
+## 2026-09-29: stage 1 release gate
+
+Branch `gaps` at `db306aa` (stage 1, v4, not shipped), against the live build `bd1e1d2` with real islands mid-season. Three reviews before the release: correctness, live docs, pillars. Seb's brief: "make sure everything runs perfectly and we dont lose where we are now". The reviewers split on the electrician's helper and the pillars review said hold it back, so it's behind one flag, off for this release. Each issue was reproduced first. The numbers are 30 seeds and weeks 24–52 unless noted; the sims are the paper-sim bots.
+
+### Decided
+
+1. **The electrician's helper is held back: `STAFF.helper.enabled` false (`helperOn`).** An NPC putting in the electrician's jobs is trade work, and `docs/JOBFLOW.md` 15 and `docs/EXPANSION.md` 7 still say "NPCs never do trade work". While it's off:
+   - the hiring board never deals one; a hire is refused with "The electrician's helper isn't in this release."
+   - no work at the resolve, no alert-flow bonus (`helperJobs` 0), no *helper tonight* chip
+   - the bots never hire one
+   - the Harbor sheet, ONBOARDING (3, 7, 10a) and the Payroll label leave it out; the `staff.ts` header says it's held back
+   - the code, its tests (`tests/latefix.test.ts`, `tests/releasegate.test.ts`, the helper's long-game guard, all run with it on) and this log stay. No live doc has a helper (it was never live), so nothing is lost; turning it on later is one flag, and it's Seb's call (HANDOFF 1).
+2. **What the helper does, if Seb turns it on** (the pillars review's majors, built now):
+   - **By task, not by catalog kind** (`STAFF.helper.tasks`): the receptacle, GFCI and 3-way swaps and the generator's circuit test only. No flicker diagnosis, water heater, bonding, spa feed, storm rewire or panel AFCI. No review line says "helper did … diagnosis".
+   - **No hazard's fix**, made safe or not: the electrician puts what they made safe back in service.
+   - **Only what was ready when the electrician ended the turn** (`TurnState.ready`, stamped at End turn). A card the analyst approves later, or the standing approval at the resolve, waits for the electrician.
+   - **Never in a week the electrician is on autopilot.** Nobody supervises the helper, and the review says so.
+   - **Named everywhere:**
+     - the trace: "the wet-room GFCI install Ben planned and Lina M. (helper) put in under Ben's licence in week 20" (`Defect.npc`)
+     - the closed job: "Put in by Lina M. (helper) to Ben's plan, week 42: 60%."
+     - the review: a pinned *The electrician's helper* card, outside the nine lines
+     - the island log: "The electrician's helper put in 2 of Ben's planned jobs: …"
+     - the chip: *helper tonight* says who and how on the open job
+   - **Each helper's own queue** on the Staff desk (`helperQueues`), in the resolve's order.
+   - **The hiring card** gives the rule the board applies:
+     - the first helper by the list or the houses: "0 of 6 alerts open and the houses at 80 (the first helps at 6 open or under 65)"
+     - a second by the houses only: "the houses average 60: a second helps under 55"
+     - in receivership: none dealt ("no new hires")
+   - **The card's money** is a break-even against a cottage's *expected* rent (`cottageRent`: the extra cottage's 8-week, occupancy-weighted figure, not a fully booked week's $1,709). It sorts at 0, not at +$1,419.
+   - **The price:** the narrower scope costs the helper most of its hold. The helper-on guard (seeds 1–10) gives three friends 2 of 10 games below $0, 8 weeks and 18 dead weeks, with houses at about 19 at week 52 and 2 of 7 rentable; all average 0/0/0, about 49, 6 of 7. The old kinds under the other new rules give 1/1/1 and about 40 with 5 of 7. Dropping the ready stamp changes little (2/7/25, about 21, 2 of 7). Still open if Seb says yes: a *Give to helper* toggle on each ready job (bots always hand), and rewriting JOBFLOW 15 and EXPANSION 7 with his decision.
+3. **Live islands keep their credits streak** (`stats.aCarry`, `carriedStreak`). The one piece of lost progress the live-docs review found:
+   - What v4 did: capped a tier-5 doc's stored streak at its Resort weeks (7/8 read 3/8 on load), and zeroed a tier-4 doc's streak at its first resolve.
+   - The fix: `migrate()` stamps `aCarry = aStreak` once, on a doc an older engine wrote last (`engine < 4`, read before `apply` sets 4, week > 0). New islands never get it, so the digests and balance don't see it.
+   - While a carried streak is unbroken: it counts in full; an A at the Harbor holds it (new Harbor weeks don't add, as the new rule says); an autopilot A holds it; at the Resort a full-crew A adds one and the credits come at 8 on a full-crew week. A week below A ends it and clears `aCarry`; from then on only the new rule applies.
+   - The Endgame card, the Board's Next card (tier 4) and the Harbor sheet's credits line say "Your streak from before this update counts: 7/8. Once it ends, only Resort weeks count."
+   - On the live-built fixtures (now committed):
+     - `credits-next-t5` (7) gets the credits in week 25 in 4 of 4 continued runs, as on `bd1e1d2`
+     - `t5-harbor-streak` shows 6/8, not 0/8
+     - `t4-streak-high` keeps 8 and pays on its first full-crew A at the Resort
+   - `tests/resort.test.ts`'s old expectation (a stored 9 read as 2) now holds only for a streak nobody carried.
+   - **Seb, before deploying (read-only, prod is off limits to agents):** check whether any live island has tier ≥ 4 and `stats.aStreak` > 0, and tell that crew.
+4. **The Board rings a paused A only on weeks v4 resolved** (`stats.v4From`, stamped with `aCarry`; `onV4`). The live engine reset the streak on an autopilot A, so `t5-auto-a`'s week 23 is no longer ringed as "held the streak". A credits card from a week an older engine resolved keeps its v3 words ("Eight straight A weeks at the Resort").
+5. **Grid first isn't masked** (`generateAlerts`). At real risk, only an open feed alert or grid-first job counts as "something open on the grid". Before, a fuel-dock take-off (a conduit run due in weeks) or a dock card switched grid first off: no feed alert, no chip, not planned. The review counted 37 of 401 at-risk weeks in 19 of 30 three-friends games.
+6. **The receiver:**
+   - **Funds only a batch's safety-critical share.** The rest must fit the cash above $0 and its $800 block on its own. The $2,000 freeze goes by the share too: a plain stock request no longer rides through with one urgent part. The desk's batch approval sends the safety-critical requests on their own under the freeze or in receivership (`reqActions`).
+   - **Says its fee.** The approval card and the feed read "The receiver funds $190 → +$218 on the bridge loan (15% fee)", with the loan and its weekly payment after it. The desk's loan line says "about N weeks".
+   - **The loan stays a 10-week loan.** Each advance raises the weekly payment (`max(weekly, ceil(left/10))`) instead of stretching the term unsaid.
+   - **A second receivership gets its bridge loan too**, on top of what's still owed. Before, a balance left meant it started below $0 on the $1,500 allowance alone.
+   - **A card over the whole week's allowance says it can't be funded.**
+   - **The review books the receiver's money as *Financing in*** (`costs.financing`).
+   - **The weekly line is plain numbers**, pinned at the top of the review: "Receivership, cash −$37,912: revenue $0 this week against $9,260 of overhead and payroll. The receiver funds safety-critical work up to $1,500 a week onto the bridge loan (15% fee; $49,675 owed) … It ends when cash is back above $0." It replaces "The way out is revenue …", which promised a way out the sim never finds. The desk gives last week's revenue against overhead and payroll.
+7. **Minors:**
+   - a perfect blind sign-off's no-decay week survives a helper's or autopilot's job on the same asset at the same resolve (`touchedWeek` takes the max, as `complete()` does)
+   - `balance.ts long 78`'s credits column is capped at week 52 like the others
+8. **The golden digests were re-recorded** (`tests/golden.test.ts`), and a ninth run was added (all average seed 4, 52 weeks).
+   - Why they moved: with the helper held back, the hiring board's draw from tier 4 no longer includes it and the bots never hire one. With the helper turned on, three friends 2 and 3 and all average 1 (26 weeks) reproduce review round 1's digests byte for byte, so the draw is all that moved them. The other five hire a helper, whose rules changed. Two moved again for the receivership line's minus sign.
+   - Why the ninth run: with the helper held back, no other run has an autopilot A at the Resort, and the streak pause's knob went unseen. The helper's knob is now "on".
+
+### Not done (Seb's calls)
+
+- **The helper itself.** Off is what the pillars review asked for, and it has a price: the long game on the release build is A0's alone again (below). Yes means the scope above plus the hand-over toggle and the spec rewrite. The live A0 slide starts around week 33 on the live late fixture, so an island at week 20 leaves about 2 real weeks to decide.
+- **The credits' goal is out of reach** for the friends: 8 full-crew A weeks at the Resort, none below A, comes by week 45 in 0 of 30 games for three friends and all average, and the median game never gets there by week 52 (the A-grade share of Resort weeks is 7% and 13% on this build). Options: 8 in any 12, 6 in a row, or grading the Resort against a revenue budget they can reach. The gate stays as is: no softer gate was bought.
+- **Receivership deep below $0 has no way out.** The receiver funds $1,500 a week of repairs while $6,700–9,800 of overhead and payroll run on little revenue. On the three live receivership docs (continued 14 weeks with their crews' bots), cash minus loan ends at −$259,582, −$215,059 and −$182,644, the same as `db306aa`. On the re-entry repro (the late fixture at −$6,000), the island now gets a second and a third bridge loan, and it still goes to 0 of 6 houses by week 35. Real levers: freeze the overhead, furlough the grounded pilots, size the allowance to reopen one house, an asset sale or a restart at the Harbor. The same check as the streak: whether any live island is in receivership below $0.
+
+### Verified on the release build
+
+- tsc clean. vitest: 868 tests in 50 files, all pass (842 on `db306aa`). `npm run build` passes (dist removed).
+- **Balance, standard (T0):** unchanged. Three friends reach T2–T5 in weeks 8 / 11 / 16 / 23 and all average in 7 / 12 / 16 / 23, both with 0 weeks below $0. Solo, absent and nobody teams stay at tier 1.
+- **Robust:**
+  - Three friends miss tier 5 in 70 of 360 games (17 + 19 + 16 + 18), all average in 64 (18 + 14 + 16 + 16), with 0 and 0 weeks below $0. That's 70 and 58 with the helper: the all-average tail is 6 worse without it.
+  - Long columns: 251 and 115 of 360 games below $0 in weeks 24–52 (61 and 12 with the helper; 247 and 100 on A0 alone). The credits by week 45: 0 and 0.
+- **Long (T1 not met on the release build):**
+  - Three friends: 18 of 30 games below $0 (median 2 weeks), median 8 dead weeks. Houses at 23 at week 40 and 4 at week 52, 0 of 7 rentable at week 52, revenue at 9% of budget in weeks 40–52.
+  - All average: 8 of 30 games below $0 (0 weeks, 1 dead week). Houses at 41 and 9, 0 of 7 rentable at week 52.
+  - This is the review's prediction for the helper off (18 of 30). The release long-game guard pins it. It's still far better than live `bd1e1d2`: before A0, 30 of 30 games below $0 with a median of 14 weeks.
+- **Pass-and-play e2e** on phone (390×844) and desktop (1280×820): pass. The only console errors are the Manrope 403s.
+- **In the browser (phone), the live-built docs on this build:**
+  - the Endgame card reads 6/8 and 7/8 with the carried-streak line; the tier-4 Next card reads 8/8
+  - the Harbor sheet has no helper paragraph, and its credits line has the carried streak
+  - `t5-auto-a`'s week 23 isn't ringed
+  - the receivership desk says the fee, the loan's weeks and last week's revenue against overhead and payroll
+  - the review pins the receivership line and books *Financing in*

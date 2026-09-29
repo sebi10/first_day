@@ -1,6 +1,6 @@
 // What the staff screens say (docs/JOBFLOW.md 15.11): pure reads of the island
 // for the analyst's Staff desk and the builders' line on Home. No engine writes.
-import { helperQueue } from '../../sim/engine';
+import { helperQueues } from '../../sim/engine';
 import { itemById, priceAt } from '../../sim/items';
 import { nextTierProgress } from '../../sim/progression';
 import { buildDef, buildSite, crewOf, nextUnit, openBuild, pilotSeats, STAFF, unitLines, working } from '../../sim/staff';
@@ -43,10 +43,11 @@ export function doingNow(s: IslandState, n: Npc): string {
   }
   if (n.role === 'housekeeper') return `turns over ${plural(STAFF.turnovers[n.skill - 1] ?? 0, 'house')} a week`;
   if (n.role === 'helper') {
-    // the planned routine jobs they'd put in at the resolve if nobody else does them (review round 1)
+    // the planned routine jobs they'd put in at the resolve if nobody else does them (review round 1): theirs, in the
+    // resolve's order (the release gate: each helper's line listed the whole crew's queue)
     const elec = s.players.elec?.name ?? 'the electrician';
     const jobs = STAFF.helper.jobs[n.skill - 1] ?? 1;
-    const tonight = helperQueue(s);
+    const tonight = helperQueues(s).get(n.id) ?? [];
     return tonight.length
       ? `${plural(jobs, 'job')} a week of ${elec}'s plans · tonight: ${tonight.map((o) => `${o.title}${s.assets.find((a) => a.id === o.assetId) ? ` (${s.assets.find((a) => a.id === o.assetId)!.name})` : ''}`).join(', ')}`
       : `${plural(jobs, 'job')} a week of ${elec}'s plans · nothing planned for them tonight`;

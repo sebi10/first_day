@@ -1,12 +1,18 @@
 // NPC staff: pilots, housekeepers and builders on the island's payroll
-// (docs/JOBFLOW.md 15), and from the Harbor (tier 4) the electrician's helper.
-// NPCs never do the mechanic's or the analyst's work: they fly the planes, turn
-// the houses over between guests and do the site work for new buildings. The
-// helper (review round 1) does the electrician's planned routine installs at
-// the resolve (outlets, GFCIs, switches, fixtures, the generator's circuit
-// test); the licensed work stays the electrician's: diagnosis and the plan,
-// code prep, hazards, the grid's feed and repairs. The analyst decides who is on
-// the payroll (hire, let go, and how skilled: a better hire costs more and does more).
+// (docs/JOBFLOW.md 15). NPCs never do mechanic, electrician or analyst work
+// (JOBFLOW 15): they fly the planes, turn the houses over between guests and do
+// the site work for new buildings. The analyst decides who is on the payroll
+// (hire, let go, and how skilled: a better hire costs more and does more).
+//
+// The electrician's helper (A0 review round 1) is built but HELD BACK for the
+// stage 1 release (STAFF.helper.enabled false, the release gate 2026-09-29): an
+// NPC doing the electrician's hands-on work breaks the rule above, and whether
+// it should is the owner's call (HANDOFF.md 1). Enabled, from the Harbor (tier
+// 4) a helper puts in the electrician's planned receptacle, GFCI and 3-way
+// swaps and the generator's circuit test at the resolve, only what was ready
+// when the electrician ended the turn and never in a week they're away; the
+// diagnosis and the plan, hazards, code prep, the grid's feed and repairs stay
+// the electrician's.
 //
 // Stored: the staff, this week's hiring board and the builds. Everything that
 // follows from them (who flies which plane, the caps, the payroll, the effect
@@ -21,7 +27,7 @@
 import { raiseAlert, soleGuest } from './alerts';
 import type { Bot } from './bots';
 import { CATALOG_BY_KIND, ECON, MODELS, STOCK } from './data';
-import { bookInspection, capFleet, capOf, clamp, decayOf, flightsPerPlane, houseRentable, houseWeekRevenue, houseWearOf, inspectionWeeks, planes, projectWeek, round10, tierDef } from './econ';
+import { bookInspection, capFleet, capOf, clamp, decayOf, flightsPerPlane, houseRentable, houseWearOf, inspectionWeeks, planes, projectWeek, round10, tierDef } from './econ';
 import { apply, type ApplyResult } from './engine';
 import { itemById, priceAt } from './items';
 import { book, spendable } from './ledger';
@@ -76,13 +82,22 @@ export const STAFF = {
   /**
    * the electrician's helper (review round 1): on the board from tier 4; each week at the resolve they do this many of
    * the electrician's ready routine jobs (skill 1..5), signed at this score (by the book: no hidden defect, as
-   * autopilot's), the most urgent first. Only these kinds: the house's branch circuits and the generator's circuit test
+   * autopilot's), the most urgent first. Only these tasks (the release gate, 2026-09-29: by task, not by catalog kind):
+   * the routine device swaps and the generator's circuit test
    */
   helper: {
+    /**
+     * HELD BACK for the stage 1 release (2026-09-29): an NPC doing the electrician's hands-on work is Seb's call
+     * (docs/JOBFLOW.md 15: "NPCs never do mechanic, electrician or analyst work"). Off: not on the hiring board, the
+     * hire is refused, no work at the resolve, no alert-flow bonus, the bots never hire one. The code, its tests (run
+     * with it on) and its docs stay. HANDOFF.md 1 has the decision.
+     */
+    enabled: false,
     fromTier: 4,
     jobs: [1, 1, 2, 2, 2],
     score: [0.5, 0.55, 0.6, 0.65, 0.7],
-    kinds: ['trip', 'gfci', 'switch3', 'flicker', 'hottub', 'storm', 'genTest'] as string[],
+    /** the tasks a helper puts in (never the diagnosis-led ones: R-FLICK, R-WH, R-GRND, R-SPA, storm; never the panel's AFCI) */
+    tasks: ['ref:outlet', 'ref:gfci', 'ref:3way', 'ref:gentest'] as string[],
     /** the board offers one when the electrician has this many alerts open (and there's no helper) */
     need: 6,
     /** ... or when the houses average under the first (no helper yet), or the second (one on the payroll) */
@@ -100,8 +115,11 @@ export const STAFF_TEST = { stubs: false, hardLandings: true };
 export const NPC_ROLES: NpcRole[] = ['pilot', 'housekeeper', 'builder', 'helper'];
 export const ROLE_NAME: Record<NpcRole, string> = { pilot: 'Pilot', housekeeper: 'Housekeeper', builder: 'Builder', helper: "Electrician's helper" };
 
-/** the roles the hiring board can offer on this island (the helper from tier 4) */
-export const boardRoles = (s: Pick<IslandState, 'tier'>): NpcRole[] => NPC_ROLES.filter((r) => r !== 'helper' || s.tier >= STAFF.helper.fromTier);
+/** the electrician's helper plays on this island: the release flag (STAFF.helper.enabled, off for stage 1) and tier 4 */
+export const helperOn = (s: Pick<IslandState, 'tier'>) => STAFF.helper.enabled && s.tier >= STAFF.helper.fromTier;
+
+/** the roles the hiring board can offer on this island (the helper from tier 4, while it's enabled) */
+export const boardRoles = (s: Pick<IslandState, 'tier'>): NpcRole[] => NPC_ROLES.filter((r) => r !== 'helper' || helperOn(s));
 
 /** the standard crew's payroll a week: 760, 1,080, 1,080, 1,260, 1,320 */
 export function standardPayroll(tier: number): number {
@@ -597,7 +615,7 @@ export function boardNeeds(s: IslandState): NpcRole[] {
 
 /** the jobs a week the electrician's helpers on the payroll do (0 before tier 4 or without one) */
 export function helperJobs(s: Pick<IslandState, 'staff' | 'tier' | 'week'>): number {
-  if (s.tier < STAFF.helper.fromTier) return 0;
+  if (!helperOn(s)) return 0;
   return working(s)
     .filter((n) => n.role === 'helper')
     .reduce((t, n) => t + (STAFF.helper.jobs[n.skill - 1] ?? 1), 0);
@@ -606,13 +624,21 @@ export function helperJobs(s: Pick<IslandState, 'staff' | 'tier' | 'week'>): num
 /** the electrician's open alerts (not closed): the helper's need on the board and in the effect statement */
 export const elecOpen = (s: IslandState) => (s.alerts ?? []).filter((a) => a.role === 'elec' && a.status !== 'closed').length;
 
-/** from tier 4, no helper on the payroll and the electrician with STAFF.helper.need alerts or more open */
-export function helperWanted(s: IslandState): boolean {
-  if (s.tier < STAFF.helper.fromTier) return false;
-  const n = crewOf(s).filter((x) => x.role === 'helper').length;
+/** the houses' average health (100 with none): the helper's need on the board */
+export const housesAvg = (s: Pick<IslandState, 'assets'>) => {
   const hs = s.assets.filter((a) => a.kind === 'house');
-  const houses = hs.length ? hs.reduce((t, h) => t + h.health, 0) / hs.length : 100;
-  // the first when the electrician's list runs long or the houses slip under 65 on average; a second under 55
+  return hs.length ? hs.reduce((t, h) => t + h.health, 0) / hs.length : 100;
+};
+
+/**
+ * From tier 4 (while enabled), not in receivership (no new hires there: the board doesn't deal a card that can't be
+ * hired, the release gate), and the electrician's list running long or the houses slipping: the first helper at
+ * STAFF.helper.need alerts open or the houses under 65 on average, a second under 55
+ */
+export function helperWanted(s: IslandState): boolean {
+  if (!helperOn(s) || s.receivership > 0) return false;
+  const n = crewOf(s).filter((x) => x.role === 'helper').length;
+  const houses = housesAvg(s);
   if (n === 0) return elecOpen(s) >= STAFF.helper.need || houses < STAFF.helper.houses[0];
   return n < 2 && houses < STAFF.helper.houses[1];
 }
@@ -700,6 +726,7 @@ export function staffAction(s: IslandState, prev: IslandState, a: StaffAction, n
       if (!c) return fail('That candidate took another job.');
       if ((s.staff ?? []).length >= STAFF.maxStaff) return fail('No room on the island for more staff.');
       if (s.receivership > 0) return fail('In receivership: no new hires.');
+      if (c.role === 'helper' && !STAFF.helper.enabled) return fail("The electrician's helper isn't in this release.");
       if (c.role === 'helper' && s.tier < STAFF.helper.fromTier) return fail("An electrician's helper comes with the Harbor (tier 4).");
       hireNow(s, c, now);
       return { s };
@@ -849,11 +876,13 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
     const elec = s.players.elec?.name ?? 'the electrician';
     does = `does ${plural(jobs, 'planned routine job')} of ${elec}'s a week, at ${pct}%`;
     const open = elecOpen(s);
-    const others = crewOf(s).filter((n) => n.role === 'helper' && n.id !== me.id).length;
-    // the licensed work stays the electrician's: the helper only installs what they planned
+    const others = base.filter((n) => n.role === 'helper').length;
+    // the rule the board applies (the release gate: the first by the list or the houses, a second by the houses only)
+    const state = others ? `${plural(others, 'helper')} already, the houses average ${Math.round(housesAvg(s))}` : `${elec} has ${plural(open, 'alert')} open, the houses average ${Math.round(housesAvg(s))}`;
+    // the licensed work stays the electrician's: the helper only installs what they planned (the routine device swaps)
     need.push(
       hire
-        ? `${elec} has ${plural(open, 'alert')} open${others ? ` and ${plural(others, 'helper')} already` : ''}: the helper puts in the outlets, GFCIs, switches, fixtures and the generator's circuit test ${elec} has planned (a hazard once it's made safe); the diagnosis, making a hazard safe, code prep, the grid's feed and repairs stay ${elec}'s`
+        ? `${state}: the helper puts in the receptacles, GFCIs, 3-way switches and the generator's circuit test ${elec} has planned; the diagnosis, a hazard's fix, code prep, the grid's feed and repairs stay ${elec}'s`
         : `${elec} takes back ${plural(jobs, 'routine job')} a week (${plural(open, 'alert')} open)`,
     );
   } else {
@@ -880,16 +909,22 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
     }
   }
   const sev = hire ? 0 : severanceOf(s, who as Npc);
-  // the helper's money is the houses they keep open: one cottage's rent a week against the wage while the electrician's
-  // list runs long (the board's need); the week's projection can't see it
-  const houseRent = me.role === 'helper' ? Math.round(Math.max(0, ...s.assets.filter((a) => a.kind === 'house' && a.model === 'cottage').map((h) => houseWeekRevenue(s, h)))) : 0;
+  // the helper's money is the houses they keep open, which the week's projection can't see: a break-even against a
+  // cottage's expected rent (the release gate: the same 8-week, occupancy-weighted figure as the extra cottage's plan,
+  // not a fully booked week's), while the board says the electrician needs one. The card sorts at its break-even (0)
   const wanted = me.role === 'helper' && helperWanted({ ...s, staff: base });
-  const net = me.role === 'helper' ? (hire ? (wanted ? houseRent - wage : -wage) : wage - (wanted ? houseRent : 0)) : hire ? dRev - wage : wage - dRev;
+  const houseRent = me.role === 'helper' && wanted ? cottageRent(s) : 0;
+  const helperNet = !wanted ? -wage : houseRent >= wage ? 0 : houseRent - wage;
+  const net = me.role === 'helper' ? (hire ? helperNet : -helperNet) : hire ? dRev - wage : wage - dRev;
   let money: string;
   let payback: number | undefined;
   // (a hire that adds no revenue this week, a builder or a spare, says so rather than repeating its wage as the net)
   if (hire && me.role === 'helper')
-    money = wanted ? `${usd(wage)} a week · pays for itself if it keeps one cottage open (about ${usd(houseRent)} a week in rent)` : `${usd(wage)} a week · the electrician's list is short: not needed yet`;
+    money = wanted
+      ? houseRent >= wage
+        ? `${usd(wage)} a week · breaks even if it keeps a cottage open 1 week in ${Math.floor(houseRent / wage)} (a cottage rents about ${usd(houseRent)} a week)`
+        : `${usd(wage)} a week · more than a cottage rents (about ${usd(houseRent)} a week)`
+      : `${usd(wage)} a week · not needed yet: ${helperWhyNot(s, base)}`;
   else if (hire) money = dRev === 0 ? `${usd(wage)} a week · no new income` : `${usd(wage)} a week · net about ${net >= 0 ? '+' : '−'}${usd(Math.abs(net))} a week`;
   else {
     const save = wage - dRev;
@@ -900,6 +935,33 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
         : `costs ${usd(-save)} a week in lost revenue${sev ? `, plus ${usd(sev)} severance` : ''}`;
   }
   return { does, need: `${later && me.role !== 'builder' ? 'from next week: ' : ''}${need.join(' · ')}`, money, net, ...(payback !== undefined ? { payback } : {}) };
+}
+
+/** why the board doesn't want a(nother) helper on this island, by the rule it applies (helperWanted) */
+function helperWhyNot(s: IslandState, crew: Npc[]): string {
+  if (s.receivership > 0) return 'in receivership, no new hires';
+  const n = crew.filter((x) => x.role === 'helper').length;
+  const avg = Math.round(housesAvg(s));
+  if (n === 0) return `${elecOpen(s)} of ${STAFF.helper.need} alerts open and the houses at ${avg} (the first helps at ${STAFF.helper.need} open or under ${STAFF.helper.houses[0]})`;
+  if (n === 1) return `the houses average ${avg}: a second helps under ${STAFF.helper.houses[1]}`;
+  return `${n} on the payroll already`;
+}
+
+/** a normal week at `s` (nothing grounded or closed for an alert, no safety tag, no plane chain-grounded) in week `w` */
+const normalWeek = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
+
+/** the revenue of a normal week at this week's rates, averaged over the last 8 weeks' season */
+function normalRevenue(s: IslandState, x: IslandState): number {
+  const weeks = Array.from({ length: 8 }, (_, i) => s.week - i).filter((w) => w >= 1);
+  if (!weeks.length) weeks.push(Math.max(1, s.week));
+  return weeks.reduce((n, w) => n + projectWeek(normalWeek(x, w)).revenue, 0) / weeks.length;
+}
+
+/** what one cottage of the island's rents a week, expected: the normal weeks' revenue with it less without it (0: none) */
+export function cottageRent(s: IslandState): number {
+  const c = s.assets.find((a) => a.kind === 'house' && a.model === 'cottage');
+  if (!c) return 0;
+  return Math.max(0, Math.round(normalRevenue(s, s) - normalRevenue(s, { ...s, assets: s.assets.filter((a) => a.id !== c.id) })));
 }
 
 /** the electrician's routine house jobs' card price per health point they land (the cottage's upkeep estimate) */
@@ -922,10 +984,7 @@ export function cottagePlan(s: IslandState): { plot: { id: string; name: string 
   if (!plot) return { plot, cost, rent: 0, housekeeper: false, payback: null, upkeep: 0, open };
   const extra: Asset = { id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: s.week, inspectionUntil: s.week + inspectionWeeks(s.tier) };
   // a normal week: nothing grounded or closed for an alert, no safety tag, no plane chain-grounded
-  const normal = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
-  const weeks = Array.from({ length: 8 }, (_, i) => s.week - i).filter((w) => w >= 1);
-  if (!weeks.length) weeks.push(Math.max(1, s.week));
-  const avg = (x: IslandState) => weeks.reduce((n, w) => n + projectWeek(normal(x, w)).revenue, 0) / weeks.length;
+  const avg = (x: IslandState) => normalRevenue(s, x);
   const withIt = { ...s, assets: [...s.assets, extra] };
   const now = avg(s);
   let rent = Math.round(avg(withIt) - now);

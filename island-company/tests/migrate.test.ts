@@ -238,12 +238,19 @@ describe('what the migration does to the orders', () => {
 
 describe('the v3 docs the live job-flow build wrote (bd1e1d2): the v4 build reads them as they are', () => {
   const V3 = ['early', 'late', 'midweek', 'mel', 'chain', 'makesafe', 'build', 'feeder', 'restricted-t1', 'restricted-t2', 'restricted-mel'].map((n) => `v3-bd1e1d2-${n}`);
-  it("migrate() changes nothing on any of them, so the app's read path (useIsland: engine below this build's → migrate a copy) shows the doc as written", () => {
+  it("migrate() changes nothing on any of them but the one-time v4 stamp, so the app's read path (useIsland: engine below this build's → migrate a copy) shows the doc as written", () => {
     for (const name of V3) {
       const doc = load(name);
       expect(doc.engine, name).toBe(3);
       expect((doc.engine ?? 0) < ENGINE_VERSION).toBe(true);
-      expect(JSON.stringify(migrate(clone(doc))), name).toBe(JSON.stringify(doc));
+      // the release gate (DECISIONS "2026-09-29: stage 1 release gate"): the week v4 takes over, and the credits streak
+      // the old rule earned, carried; nothing else
+      const want = clone(doc);
+      want.stats.v4From = doc.week;
+      if ((doc.stats.aStreak ?? 0) > 0) want.stats.aCarry = doc.stats.aStreak;
+      expect(JSON.stringify(migrate(clone(doc))), name).toBe(JSON.stringify(want));
+      // and it's stamped once: a second read changes nothing
+      expect(JSON.stringify(migrate(migrate(clone(doc)))), name).toBe(JSON.stringify(want));
       selectors(doc);
     }
   });

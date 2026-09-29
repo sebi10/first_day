@@ -158,6 +158,7 @@ export function ApprovalCard({
         <span class="chip outline">{vm.budget}</span>
       </div>
       {vm.late && <div class="pd-late">{vm.late}</div>}
+      {vm.recv && <div class="pd-late">{vm.recv}</div>}
       {vm.mel?.canExtend && (
         <Btn small kind="soft" onClick={onExtend}>
           Approve {vm.mel.askedBy ?? vm.who}’s MEL extension (to wk {vm.mel.to})

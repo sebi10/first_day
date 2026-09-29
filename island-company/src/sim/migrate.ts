@@ -41,6 +41,14 @@ export function migrate(s: IslandState): IslandState {
   if (!s.ledger) s.ledger = backfill(s);
   // 7. the teaching weeks start now (a week-0 island starts with the flow in week 1, like a new one)
   s.flowSince ??= Math.max(1, W);
+  // 8. the v4 update (the stage 1 release gate, 2026-09-29), on a doc an older engine wrote last (read before apply()
+  // sets engine to 4, and in the UI's read path): the week v4 takes over (the weeks before it were resolved by the old
+  // rules: the Board rings no pause there), and the credits streak the old rule had earned, kept (it counted Harbor
+  // weeks; v4 counts only the Resort's). A new island (engine 4 from its first move, in week 0) never has either.
+  if ((s.engine ?? 0) < 4 && W > 0 && s.stats.v4From === undefined) {
+    s.stats.v4From = W;
+    if ((s.stats.aStreak ?? 0) > 0) s.stats.aCarry = s.stats.aStreak;
+  }
   return s;
 }
 

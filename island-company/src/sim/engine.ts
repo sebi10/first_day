@@ -90,10 +90,11 @@ import {
   takeSoft,
   uncovered,
   urgentJob,
+  urgentReq,
   vendorFor,
 } from './stock';
-import { builtShare, buildWeek, charterMult, housekeepingCap, newIslandStaff, payroll, pilotCap, reviewMult, STAFF, staffAction, staffAfterFlights, staffOpenWeek, autoStaff, working } from './staff';
-import { benchFor, defaultTask, fixedFor, laborMin, plannable, taskById, taskOn, tasksFor, type Task } from './tasks';
+import { builtShare, buildWeek, charterMult, helperOn, housekeepingCap, newIslandStaff, payroll, pilotCap, reviewMult, STAFF, staffAction, staffAfterFlights, staffOpenWeek, autoStaff, working } from './staff';
+import { benchFor, defaultTask, defaultTaskNo, fixedFor, laborMin, plannable, taskById, taskOn, tasksFor, type Task } from './tasks';
 import {
   aStreakAfter,
   atResort,
@@ -207,6 +208,7 @@ import {
   type PickLine,
   type Player,
   type ReportLine,
+  type Requisition,
   type Role,
   type TurnState,
   type WeekReport,
@@ -589,7 +591,7 @@ function applyMove(prev: IslandState, a: Action, now: number): ApplyResult {
       const cost = chainCardCost(s, o, a.ship);
       if (s.cash < ECON.freezeBelow && !urgent) return fail(`Cash under ${usd(ECON.freezeBelow)}: only safety-critical work can be approved.`);
       const adv = receiverFunds(s, cost, urgent, s.cash);
-      if (s.cash - cost < 0 && adv === null) return fail(noCash(s, cost, urgent));
+      if (s.cash - cost < 0 && adv === null) return fail(noCash(s, cost, urgent, s.cash));
       if (s.receivership > 0 && o.cost > 800 && !urgent) return fail('Receivership: the receiver blocks spend over $800 except safety-critical work.');
       if (adv) receiverAdvance(s, adv, o.title, now);
       markApproved(s, o, false);
@@ -670,6 +672,12 @@ function applyMove(prev: IslandState, a: Action, now: number): ApplyResult {
       if (s.week < 1) return fail('The week has not started yet.');
       const t = (s.turns[a.role] ??= { ended: false, endedAt: null, done: 0 });
       if (t.ended) return { s: prev };
+      // the electrician's helper takes only what was ready when the electrician ended the turn (the release gate):
+      // stamped before the turn counts as ended (helperMay reads the stamp once it has)
+      if (a.role === 'elec' && helperOn(s) && working(s).some((n) => n.role === 'helper')) {
+        const ready = s.orders.filter((o) => helperMay(s, o)).map((o) => o.id);
+        if (ready.length) t.ready = ready;
+      }
       t.ended = true;
       t.endedAt = now;
       const p = s.players[a.role];
@@ -843,21 +851,40 @@ export function receiverFunds(s: IslandState, cost: number, urgent: boolean, hav
   return short <= receiverLeft(s) ? short : null;
 }
 
-/** the receiver advances `usd` into cash: added to the bridge loan (at RECEIVER.rate) and to this week's allowance used */
+/** what an advance of `amount` adds to the bridge loan: the advance plus the receiver's fee (RECEIVER.rate) */
+export const receiverOwed = (amount: number) => Math.round(amount * (1 + RECEIVER.rate));
+
+/** the receiver's line on a card it would fund: "The receiver funds $190 → +$218 on the bridge loan (15% fee)" */
+export const receiverWords = (amount: number) => `The receiver funds ${usd(amount)} → +${usd(receiverOwed(amount))} on the bridge loan (${Math.round(RECEIVER.rate * 100)}% fee)`;
+
+/**
+ * The receiver advances `usd` into cash: added to the bridge loan (at RECEIVER.rate) and to this week's allowance
+ * used. The loan's term stays 10 weeks (the release gate): its weekly payment grows with it instead of the term
+ * stretching unsaid, and the feed says the fee and where the loan stands
+ */
 function receiverAdvance(s: IslandState, amount: number, what: string, now: number) {
   const W = s.week;
   const loan = (s.loan ??= { left: 0, weekly: 0 });
   loan.adv = { week: W, usd: (loan.adv?.week === W ? loan.adv.usd : 0) + amount };
-  loan.left += Math.round(amount * (1 + RECEIVER.rate));
-  if (!loan.weekly) loan.weekly = Math.round(loan.left / 10);
+  loan.left += receiverOwed(amount);
+  loan.weekly = Math.max(loan.weekly, Math.ceil(loan.left / 10));
   s.cash += amount;
-  feed(s, 'fin', 'info', `The receiver funded ${usd(amount)} of ${what} (safety-critical, added to the bridge loan: ${usd(receiverLeft(s))} of the week's ${usd(RECEIVER.allowance)} left).`, now);
+  feed(
+    s,
+    'fin',
+    'info',
+    `${receiverWords(amount)} for ${what} (safety-critical): the loan is ${usd(loan.left)} at ${usd(loan.weekly)}/week. ${usd(receiverLeft(s))} of the week's ${usd(RECEIVER.allowance)} allowance left.`,
+    now,
+  );
 }
 
 /** "Not enough cash", and in receivership what the receiver would fund instead */
-function noCash(s: IslandState, cost: number, urgent: boolean): string {
+function noCash(s: IslandState, cost: number, urgent: boolean, have = spendable(s)): string {
   if (s.receivership <= 0) return 'Not enough cash.';
   if (!urgent) return 'Not enough cash: the receiver funds only safety-critical work while cash is below $0.';
+  // a card whose shortfall is over the whole week's allowance can't be funded at all (the release gate: say so)
+  if (cost - Math.max(0, have) > RECEIVER.allowance)
+    return `Not enough cash, and the receiver funds at most ${usd(RECEIVER.allowance)} a week: a ${usd(cost)} card can't be funded in receivership.`;
   return `Not enough cash, and the receiver's repair allowance has ${usd(receiverLeft(s))} left this week (${usd(cost)} card).`;
 }
 
@@ -1315,12 +1342,21 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       // a stock request (no job) takes a bin like any stock buy
       const fresh = [...new Set(reqs.filter((r) => !r!.order).map((r) => r!.item))].filter((id) => needsNewBin(s, id));
       if (fresh.length && binsInUse(s) + fresh.length > binsTotal(s)) return fail(`Stores full: ${binsInUse(s)} of ${binsTotal(s)} bins. Use up, scrap or return a line first.`);
-      const urgent = reqs.some((r) => r!.order && urgentJob(s, s.orders.find((o) => o.id === r!.order)));
-      const tool = reqs.every((r) => itemById(r!.item)?.kind === 'tool' && r!.order);
-      if (spendable(s) < ECON.freezeBelow && !urgent && !tool) return fail(`Spendable cash under ${usd(ECON.freezeBelow)}: only safety-critical work can be approved.`);
+      const urgent = reqs.some((r) => urgentReq(s, r!));
+      // the cash rules go by the safety-critical requests' share of a batch, not the batch (the release gate: one urgent
+      // part in a batch waved plain stock requests past the $2,000 freeze, had the receiver fund them, or waved them past
+      // its $800 block). The rest has to pass on its own: a tool a job needs, the cash above $0, the block
+      const rest = reqs.filter((r) => !urgentReq(s, r!));
+      const tool = rest.every((r) => itemById(r!.item)?.kind === 'tool' && r!.order);
+      const urgentShare = urgent && rest.length ? reqsCost(s, reqs.filter((r) => urgentReq(s, r!)) as Requisition[], a.buy) : cost;
+      const plain = urgent ? Math.max(0, cost - urgentShare) : cost;
+      const alone = `The receiver funds only the safety-critical requests: approve those on their own; the rest (${usd(plain)}) waits for cash above $0.`;
+      if (spendable(s) < ECON.freezeBelow && rest.length && !tool)
+        return fail(urgent && s.receivership > 0 ? alone : `Spendable cash under ${usd(ECON.freezeBelow)}: only safety-critical work can be approved${urgent ? ': approve the safety-critical requests on their own' : ''}.`);
       const adv = receiverFunds(s, cost, urgent);
+      if (s.receivership > 0 && urgent && plain > 0 && spendable(s) - cost < 0 && plain > Math.max(0, spendable(s))) return fail(alone);
       if (spendable(s) - cost < 0 && adv === null) return fail(noCash(s, cost, urgent));
-      if (s.receivership > 0 && cost > 800 && !urgent) return fail('Receivership: the receiver blocks spend over $800 except safety-critical work.');
+      if (s.receivership > 0 && plain > 800) return fail('Receivership: the receiver blocks spend over $800 except safety-critical work.');
       if (adv) receiverAdvance(s, adv, `the parts for ${reqs.length > 1 ? `${reqs.length} requests` : 'a request'}`, now);
       const pos = placePo(
         s,
@@ -1573,6 +1609,12 @@ function approveFlowCard(s: IslandState, prev: IslandState, o: Order, buy: BuyCh
 }
 
 /** the value of a requisition line at a supplier (whole packs) */
+/** what a set of requisitions costs on one approval: the lines at the supplier plus their freight */
+function reqsCost(s: IslandState, reqs: Requisition[], buy?: BuyChoice): number {
+  const freight = buy?.freight === 'aog' ? FREIGHT.aog : schedFreight(s, reqs.map((r) => ({ item: r.item, vendor: itemById(r.item) ? vendorFor(itemById(r.item)!, buy) : undefined }))).cost;
+  return reqs.reduce((n, r) => n + reqCost(r, buy), 0) + freight;
+}
+
 function reqCost(r: { item: ItemId; qty: number }, buy?: BuyChoice): number {
   const x = itemById(r.item);
   if (!x) return 0;
@@ -2177,7 +2219,9 @@ function logOf(o: Order): string | undefined {
  * instruction, so it is quoted: "the repair “Re-torque the prop bolts” Ana
  * signed off in week 6". Anything else without a noun form is quoted too.
  */
-export function tracedTo(d: Pick<Defect, 'orderKind' | 'title' | 'name' | 'week' | 'log'>) {
+export function tracedTo(d: Pick<Defect, 'orderKind' | 'title' | 'name' | 'week' | 'log' | 'npc'>) {
+  // the electrician's helper put it in to the electrician's plan: the trace names both (the release gate)
+  if (d.npc) return `the ${d.log ?? `“${d.title}”`} ${d.name} planned and ${d.npc} (helper) put in under ${d.name}'s licence in week ${d.week}`;
   if (d.orderKind === 'repair') return `the repair “${d.title}” ${d.name} signed off in week ${d.week}`;
   if (d.log) return `the ${d.log} ${d.name} signed off in week ${d.week}`;
   return `“${d.title}”, signed off by ${d.name} in week ${d.week}`;
@@ -3485,7 +3529,8 @@ function autoRun(s: IslandState, role: Role) {
     }
     if (asset) {
       asset.health = clamp(asset.health + o.gain * sc, 0, 100);
-      asset.touchedWeek = s.week;
+      // (a perfect blind sign-off settled at this resolve keeps its no-decay week, as complete() keeps it: the max)
+      asset.touchedWeek = Math.max(asset.touchedWeek, s.week);
       // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
       // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
       if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
@@ -3510,34 +3555,58 @@ function autoRun(s: IslandState, role: Role) {
 
 /**
  * Resolve step 1c (review round 1): each electrician's helper on the payroll does up to STAFF.helper.jobs of the
- * electrician's ready routine jobs (STAFF.helper.kinds: a house's branch circuits, the generator's circuit test), the
- * most urgent first, at STAFF.helper.score: by the book (no hidden defect), as autopilot's. Never the licensed work:
- * code prep, a hazard, the grid's feed, a repair or its redo, a part chain's, a crew project's or a report.
+ * electrician's ready routine jobs, the most urgent first, at STAFF.helper.score: by the book (no hidden defect), as
+ * autopilot's. The release gate (2026-09-29) narrowed it: only the routine device swaps and the generator's circuit test
+ * (STAFF.helper.tasks, by task, not by catalog kind), never a hazard's fix (the electrician puts what they made safe back
+ * in service), only a job that was ready when the electrician ended the turn (a card approved after that, at the resolve
+ * included, waits for them), and never in a week the electrician is on autopilot (nobody supervises). Never the licensed
+ * work: the diagnosis, code prep, the grid's feed, a repair or its redo, a part chain's, a crew project's or a report.
+ * Off for stage 1 (STAFF.helper.enabled).
  */
-/** a ready job the electrician's helper may do (STAFF.helper.kinds; never the licensed work; a hazard only once made safe) */
+/** a ready job the electrician's helper may do (STAFF.helper.tasks; never the licensed work, never a hazard's fix) */
 function helperMay(s: IslandState, o: Order): boolean {
-  if (o.role !== 'elec' || o.status !== 'ready' || !STAFF.helper.kinds.includes(o.kind) || o.repair || o.redo || o.chain || o.bench || o.report) return false;
-  // a hazard only once the electrician has made it safe (the call and the isolation are theirs; the planned swap is routine)
+  if (o.role !== 'elec' || o.status !== 'ready' || o.repair || o.redo || o.chain || o.bench || o.report) return false;
+  const no = o.flow ? o.flow.task : defaultTaskNo(o.kind);
+  if (!no || !STAFF.helper.tasks.includes(no)) return false;
   const al = o.flow ? alertOf(s, o) : undefined;
-  return !(al && alertFlags(s, al).hazard && !al.safe);
+  if (al && alertFlags(s, al).hazard) return false;
+  // the electrician ended the turn: only what was ready then (a card approved later waits for them)
+  const t = s.turns.elec;
+  return !t?.ended || !!t.ready?.includes(o.id);
 }
 
-/** the jobs the helpers would take at this resolve if nobody else does them, most urgent first (the resolve, and a chip on Your move) */
-export function helperQueue(s: IslandState): Order[] {
-  const n = working(s)
-    .filter((x) => x.role === 'helper' && s.tier >= STAFF.helper.fromTier)
-    .reduce((t, x) => t + (STAFF.helper.jobs[x.skill - 1] ?? 1), 0);
-  if (!n) return [];
-  return s.orders
-    .filter((o) => helperMay(s, o))
-    .sort((a, b) => urgency(s, b) - urgency(s, a))
-    .slice(0, n);
+/**
+ * The jobs each helper would take at this resolve if nobody else does them (the resolve's order: the most skilled
+ * helper first, the most urgent job first): by helper id. The chip on Your move and each helper's line on the Staff desk.
+ */
+export function helperQueues(s: IslandState): Map<string, Order[]> {
+  const out = new Map<string, Order[]>();
+  if (!helperOn(s)) return out;
+  const jobs = s.orders.filter((o) => helperMay(s, o)).sort((a, b) => urgency(s, b) - urgency(s, a));
+  let k = 0;
+  for (const n of working(s)
+    .filter((x) => x.role === 'helper')
+    .sort((a, b) => b.skill - a.skill)) {
+    const take = STAFF.helper.jobs[n.skill - 1] ?? 1;
+    out.set(n.id, jobs.slice(k, k + take));
+    k += take;
+  }
+  return out;
 }
 
-function helperWeek(s: IslandState, line: Liner) {
+/** every job the helpers would take at this resolve, most urgent first */
+export const helperQueue = (s: IslandState): Order[] => [...helperQueues(s).values()].flat();
+
+function helperWeek(s: IslandState, line: Liner, elecAway: boolean, now: number) {
   const helpers = working(s).filter((n) => n.role === 'helper');
-  if (!helpers.length || s.tier < STAFF.helper.fromTier) return;
+  if (!helpers.length || !helperOn(s)) return;
+  // a helper works under the electrician's licence: a week the electrician is on autopilot, nobody supervises them
+  if (elecAway) {
+    line('elec', 'info', `${helpers.map((n) => n.name).join(' and ')} (electrician's ${helpers.length > 1 ? 'helpers' : 'helper'}) did nothing this week: ${nameOfRole(s, 'elec')} was away, and a helper works only under the electrician's supervision.`);
+    return;
+  }
   const theirs = (o: Order) => helperMay(s, o);
+  const did: string[] = [];
   for (const n of [...helpers].sort((a, b) => b.skill - a.skill)) {
     const sc = STAFF.helper.score[n.skill - 1] ?? 0.5;
     let left = STAFF.helper.jobs[n.skill - 1] ?? 1;
@@ -3562,20 +3631,27 @@ function helperWeek(s: IslandState, line: Liner) {
       const asset = assetOf(s, o);
       if (asset) {
         asset.health = clamp(asset.health + o.gain * sc, 0, 100);
-        asset.touchedWeek = s.week;
+        // (a perfect blind sign-off earlier in this resolve keeps its no-decay week: complete() takes the max too)
+        asset.touchedWeek = Math.max(asset.touchedWeek, s.week);
       }
       if (o.flow) {
         const al = alertOf(s, o);
         // the plan is the electrician's: a wrong task or a pick that installs but isn't right (an undersized wire, no
-        // protection the room needs) goes in as planned and surfaces later, traced to them (pillar 3). The helper's own
-        // work is by the book: no quality roll's defect, as autopilot's
+        // protection the room needs) goes in as planned and surfaces later, traced to them (pillar 3) and naming who put
+        // it in. The helper's own work is by the book: no quality roll's defect, as autopilot's
+        const k = (s.defects ?? []).length;
         flowSureDefect(s, o, al, 'elec', nameOfRole(s, 'elec'), sc);
+        for (const d of (s.defects ?? []).slice(k)) d.npc = n.name;
         if (!o.flow.wired) consume(s, o.id, asset?.id ?? null);
         if (al && al.status !== 'closed') closeAlert(s, al, o.flow.wired ? 'wired' : 'fixed');
       }
-      line('elec', 'good', `${n.name} (electrician's helper) did ${o.title}${asset ? ` on ${asset.name}` : ''}, as planned (${Math.round(sc * 100)}%).`);
+      did.push(`${o.title}${asset ? ` (${asset.name})` : ''}`);
+      line('elec', 'good', `${n.name} (electrician's helper) did ${o.title}${asset ? ` on ${asset.name}` : ''}, as ${nameOfRole(s, 'elec')} planned (${Math.round(sc * 100)}%).`);
     }
   }
+  // the island log says it too (review, release gate: after the resolve nothing the electrician looks at said so)
+  if (did.length)
+    feed(s, 'elec', 'info', `The electrician's ${helpers.length > 1 ? 'helpers' : 'helper'} put in ${did.length === 1 ? 'one' : did.length} of ${nameOfRole(s, 'elec')}'s planned jobs: ${did.join(', ')}.`, now);
 }
 
 /**
@@ -3832,8 +3908,8 @@ export function resolveWeek(s: IslandState, now: number) {
   // The job flow's cards and requisitions do the same, up to the standing limit (8.5)
   leftoverChainCard(s, line);
   standingApprovals(s, line, now);
-  // 1c. the electrician's helper (review round 1, from tier 4) does the planned routine installs nobody got to
-  helperWeek(s, line);
+  // 1c. the electrician's helper (review round 1, from tier 4; off for stage 1) does the planned routine installs nobody got to
+  helperWeek(s, line, autoRunRoles.includes('elec'), now);
 
   // 2. flights
   let passenger = 0;
@@ -4323,6 +4399,8 @@ export function resolveWeek(s: IslandState, now: number) {
   if (grossIncidents) line('fin', 'info', `Claims ${usd(grossIncidents)}, insurance paid ${usd(grossIncidents - netIncidents)}.`);
   const cashStart = s.openCash;
   const beforeLoan = Math.round(s.cash + revenue - fixed - premium - leakCost - reportLeak - netIncidents - powerCost - carried - subCost);
+  // the receiver's advances this week (the release gate: a financing inflow in the week's walk, with a bridge loan below)
+  let financing = s.loan?.adv?.week === W ? s.loan.adv.usd : 0;
   // in receivership the receiver takes its payment only out of cash above $0 (review round 1): the loan never digs the hole deeper
   const loanDue = s.loan ? Math.min(s.loan.left, s.loan.weekly) : 0;
   const loanPay = s.receivership > 0 && RECEIVER.standstill ? Math.max(0, Math.min(loanDue, beforeLoan)) : loanDue;
@@ -4382,6 +4460,8 @@ export function resolveWeek(s: IslandState, now: number) {
   // the credits' streak (A0 f, review round 1): only weeks played at the Resort count; an autopilot week graded A
   // pauses it (and says so), a lower grade ends it; the credits land on a full-crew week
   st.aStreak = aStreakAfter(s, W, grade, fullTeam);
+  // a streak carried from an older engine ends like any other: from then on only the Resort's weeks count
+  if (!st.aStreak && st.aCarry !== undefined) delete st.aCarry;
   if (!s.creditsWeek && pausedWeek(s, { week: W, grade, autoRun: autoRunRoles }))
     line(
       'all',
@@ -4398,23 +4478,30 @@ export function resolveWeek(s: IslandState, now: number) {
     s.receivership -= 1;
     if (s.receivership === 0 && s.cash < 0) s.receivership = 1;
     if (s.receivership === 0) line('fin', 'good', 'Out of receivership.');
-    // insolvent: say so to the whole crew, and what the way out is (review round 1: silent weeks at $0 locked everyone out)
+    // insolvent: say so to the whole crew in plain numbers (review round 1: silent weeks at $0 locked everyone out;
+    // the release gate: the week's burn against the allowance and the loan, not a promise of a way out)
     else if (s.cash < 0)
       line(
         'all',
         'bad',
-        `Receivership, cash ${usd(s.cash)}: the receiver funds safety-critical work up to ${usd(RECEIVER.allowance)} a week (added to the bridge loan) and takes its payment only out of cash above $0. The way out is revenue: reopen the houses, get the grid and the planes back.`,
+        `Receivership, cash −${usd(-s.cash)}: revenue ${usd(revenue)} this week against ${usd(fixed)} of overhead and payroll. The receiver funds safety-critical work up to ${usd(RECEIVER.allowance)} a week onto the bridge loan (${Math.round(RECEIVER.rate * 100)}% fee; ${s.loan ? `${usd(s.loan.left)} owed` : 'nothing owed'}) and takes its payment only out of cash above $0. It ends when cash is back above $0.`,
       );
   } else if (st.negCashStreak >= 2) {
     s.receivership = 3;
     line('fin', 'bad', 'Cash below zero 2 weeks running: the island enters receivership (3 weeks).');
-    if (!s.loan) {
-      // the receiver's bridge loan: clears the deficit plus two weeks of running costs, repaid at 15% over 10 weeks
-      const amount = Math.round((Math.max(0, -s.cash) + 2 * fixedNow(s) + 3000) / 100) * 100;
-      s.cash += amount;
-      s.loan = { left: Math.round(amount * 1.15), weekly: Math.round((amount * 1.15) / 10) };
-      line('fin', 'info', `The receiver advanced a ${usd(amount)} bridge loan: ${usd(s.loan.weekly)}/week for 10 weeks.`);
+    // the receiver's bridge loan: clears the deficit plus two weeks of running costs, repaid at 15% over 10 weeks. A
+    // second receivership gets one too, on top of what's still owed (the release gate: with a balance left it used to
+    // start below $0 with only the weekly allowance)
+    const amount = Math.round((Math.max(0, -s.cash) + 2 * fixedNow(s) + 3000) / 100) * 100;
+    const owed = s.loan?.left ?? 0;
+    s.cash += amount;
+    financing += amount;
+    if (!s.loan) s.loan = { left: Math.round(amount * 1.15), weekly: Math.round((amount * 1.15) / 10) };
+    else {
+      s.loan.left += Math.round(amount * 1.15);
+      s.loan.weekly = Math.max(s.loan.weekly, Math.ceil(s.loan.left / 10));
     }
+    line('fin', 'info', `The receiver advanced a ${usd(amount)} bridge loan${owed ? ` on top of the ${usd(owed)} still owed` : ''}: ${usd(s.loan.weekly)}/week for 10 weeks.`);
   }
 
   // 15. XP for the grade, A bonus
@@ -4485,6 +4572,7 @@ export function resolveWeek(s: IslandState, now: number) {
       labor: Math.round(s.ledger?.find((x) => x.w === W)?.sp.labor ?? 0) || undefined,
       parts: paid.parts || undefined,
       subCharter: subCost || undefined,
+      financing: financing || undefined,
     },
     housesBooked: booked.length,
     housesRentable: rentable.length,

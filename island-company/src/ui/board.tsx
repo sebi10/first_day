@@ -6,7 +6,7 @@ import type { PuzzleId } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
 import { hashSeed } from '../sim/rng';
 import { toolsFor } from '../sim/progression';
-import { creditsStreak, pausedWeek, storyEffect, tierDef } from '../sim/econ';
+import { carriedStreak, creditsStreak, onV4, pausedWeek, storyEffect, tierDef } from '../sim/econ';
 import { nextTierProgress } from '../sim/progression';
 import { ROLES, type Grade, type Incident, type IslandState, type ReportLine, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
@@ -75,6 +75,12 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
             </div>
           ))}
           <span class="label">Autopilot weeks don't count. When you qualify, the tier is built as a crew project: one job each.</span>
+          {/* the release gate: a live island's streak from before the update is kept (it counted Harbor weeks) */}
+          {carriedStreak(s) && (
+            <span class="label">
+              Your A-grade streak from before this update counts: {Math.min(8, creditsStreak(s, s.week))}/8. An A week holds it until the Resort, where each full-crew A adds one; a week below A ends it, and from then on only Resort weeks count.
+            </span>
+          )}
         </div>
       )}
       {!next && (
@@ -85,6 +91,8 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
           </span>
           {/* review round 1: the rule, so a row of A's next to a lower count reads right */}
           <span class="label">Full-crew A weeks at the Resort count toward the eight. An A with a seat on autopilot holds the streak; a week below A resets it.</span>
+          {/* the release gate: a live island's streak from before the update is kept (it counted Harbor weeks) */}
+          {carriedStreak(s) && <span class="label">Your streak from before this update counts: {Math.min(8, creditsStreak(s, s.week))}/8. Once it ends, only Resort weeks count.</span>}
         </div>
       )}
 
@@ -204,7 +212,11 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
   const caught = r.lines.filter((l) => l.tone === 'good' && l.text.endsWith('caught before it failed.'));
   // the credits' streak held by an autopilot A at the Resort: said up top, not lost past the list's nine lines (review round 1)
   const streak = r.lines.find((l) => l.role === 'all' && /toward the eight/.test(l.text));
-  const shown = new Set<ReportLine>([...traced.values(), ...caught, ...(streak ? [streak] : [])].filter((l): l is ReportLine => !!l));
+  // what the electrician's helper put in (or didn't) at the resolve: pinned too, never cut by the nine (the release gate)
+  const helper = r.lines.filter((l) => l.role === 'elec' && /\(electrician's helpers?\)/.test(l.text));
+  // the receiver's week in plain numbers: said up top too, never cut by the nine (the release gate)
+  const recv = r.lines.find((l) => l.role === 'all' && l.text.startsWith('Receivership, cash '));
+  const shown = new Set<ReportLine>([...traced.values(), ...caught, ...(streak ? [streak] : []), ...(recv ? [recv] : []), ...helper].filter((l): l is ReportLine => !!l));
   const bad = r.lines.filter((l) => l.tone === 'bad' && !shown.has(l));
   const rest = r.lines.filter((l) => l.tone !== 'bad' && !shown.has(l));
   return (
@@ -229,6 +241,11 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               {r.tierUp && <span class="chip palm">Tier {r.tierUp} unlocked: {tierDef(r.tierUp).name}!</span>}
               {s.creditsWeek === r.week && <span class="chip palm">You beat Island Company!</span>}
               {streak && <span class="label">{streak.text}</span>}
+              {recv && (
+                <span class="label" style={{ color: C.rust }}>
+                  {recv.text}
+                </span>
+              )}
             </div>
           </div>
           <div class="numbers">
@@ -247,7 +264,10 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
           {s.creditsWeek === r.week && (
             <div class="card col center" style={{ gap: 8, borderTop: `6px solid ${C.palm}` }}>
               <h2>Credits</h2>
-              <span class="muted">Eight full-crew A weeks at the Resort, none below A, after {s.stats.totalWeeks} weeks together.</span>
+              {/* (a week an older engine resolved keeps its own words: that rule counted Harbor weeks; the release gate) */}
+              <span class="muted">
+                {onV4(s, r.week) ? 'Eight full-crew A weeks at the Resort, none below A' : 'Eight straight A weeks at the Resort'}, after {s.stats.totalWeeks} weeks together.
+              </span>
               {ROLES.map((role) => (
                 <b key={role}>
                   {s.players[role]?.name} · {ROLE_LABEL[role]}
@@ -296,6 +316,18 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               ))}
             </div>
           )}
+          {helper.length > 0 && (
+            <div class="card col" style={{ gap: 6 }}>
+              <h3>The electrician's helper</h3>
+              <span class="label">Put in to {s.players.elec?.name ?? 'the electrician'}'s plans, under their licence.</span>
+              {helper.map((l, i) => (
+                <div class="feed-item" key={i}>
+                  <span class="pip" style={{ background: l.tone === 'bad' ? C.rust : l.tone === 'good' ? C.palm : ROLE_TINT.elec }} />
+                  <span>{l.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div class="card col" style={{ gap: 6 }}>
             <h3>What moved it</h3>
             {[...bad, ...rest].slice(0, 9).map((l, i) => (
@@ -334,6 +366,8 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
                 </span>
               ))}
             </div>
+            {/* money in, not a cost: the receiver's advances and a bridge loan (the release gate: the week's walk shows them) */}
+            {!!r.costs.financing && <span class="label num">Financing in +{usd(r.costs.financing)}: the receiver, onto the bridge loan.</span>}
             <span class="label num">Incident roll seed {r.seed} — every outcome is replayable.</span>
           </div>
           <div class="row" style={{ gap: 8 }}>

@@ -62,6 +62,7 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
   const proj = projectWeek(s);
   const delta = s.cash - s.openCash;
   const spend = spendable(s);
+  const last = s.history[s.history.length - 1];
   const owed = committed(s);
   // open 'leak' reports cost cash every week until someone fixes them
   const leaks = openReports(s).filter((o) => o.report!.effect === 'leak');
@@ -155,7 +156,7 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
         {/* review round 1: honest about what can still be paid for (below $0 nothing is, unless the receiver funds it) */}
         {spend < 0 && s.receivership > 0 ? (
           <span class="fault">
-            Cash below $0: the receiver funds only safety-critical work, up to {usd(RECEIVER.allowance)} a week ({usd(receiverLeft(s))} left this week), added to the bridge loan. Stock orders are frozen.
+            Cash below $0: the receiver funds only safety-critical work, up to {usd(RECEIVER.allowance)} a week ({usd(receiverLeft(s))} left this week; a bigger card can't be funded), onto the bridge loan with a {Math.round(RECEIVER.rate * 100)}% fee. Stock orders are frozen.
           </span>
         ) : spend < 0 ? (
           <span class="fault">Spendable below $0: nothing can be paid for until cash comes in. Two weeks below $0 puts the island in receivership.</span>
@@ -164,10 +165,16 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
         )}
         {s.loan && (
           <span class="label">
-            Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week{s.receivership > 0 ? ', paid only out of cash above $0 while in receivership' : ''}
+            Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week · about {Math.ceil(s.loan.left / Math.max(1, s.loan.weekly))} weeks{s.receivership > 0 ? ', paid only out of cash above $0 while in receivership' : ''}
           </span>
         )}
-        {s.receivership > 0 && <span class="fault">Receivership · {s.receivership} wk{s.cash < 0 ? ' (until cash is back above $0)' : ''}: rates capped, spend over $800 blocked except safety work, grade capped at C. The way out is revenue: reopen the houses, get the grid and the planes back.</span>}
+        {/* the release gate: the plain numbers (last week's revenue against overhead and payroll), not a promised way out */}
+        {s.receivership > 0 && (
+          <span class="fault">
+            Receivership · {s.receivership} wk{s.cash < 0 ? ' (until cash is back above $0)' : ''}: rates capped, spend over $800 blocked except safety work, grade capped at C.
+            {last ? ` Last week: revenue ${usd(last.revenue)} against ${usd(last.costs.fixed)} of overhead and payroll.` : ''}
+          </span>
+        )}
       </div>
 
       {s.pendingBonus && <Bonus ctl={ctl} />}

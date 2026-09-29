@@ -396,6 +396,9 @@ export function placePo(s: IslandState, lines: BuyLine[], buy: BuyChoice, by: Pu
   return out;
 }
 
+/** a requisition for a job whose alert grounds a plane or closes a house (the receiver's safety-critical work) */
+export const urgentReq = (s: IslandState, r: Pick<Requisition, 'order'>) => !!r.order && urgentJob(s, s.orders.find((o) => o.id === r.order));
+
 /** a PO line for a job whose alert grounds a plane (the only guest plane too) or closes a house now */
 export function urgentJob(s: IslandState, o: Order | undefined, week = s.week): boolean {
   if (!o?.flow) return false;

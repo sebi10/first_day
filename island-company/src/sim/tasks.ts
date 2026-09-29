@@ -768,6 +768,9 @@ const DEFAULT_NO: Record<string, string> = {
   genTest: 'ref:gentest',
 };
 
+/** the default task's number for a kind ('ref:outlet' for 'trip'): what a legacy (pre-flow) job goes by */
+export const defaultTaskNo = (kind: string): string | undefined => DEFAULT_NO[kind];
+
 /** the default task for a kind on an asset (undefined for kinds with no flow task: load sheets, ground power starts) */
 export function defaultTask(kind: string, asset: Pick<Asset, 'kind' | 'model'>): Task | undefined {
   const no = DEFAULT_NO[kind];
