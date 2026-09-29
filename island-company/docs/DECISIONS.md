@@ -1637,3 +1637,24 @@ A check that says what "ends with the trailer" means, `scripts/check-commits.ts`
 - **Robust:** three friends miss tier 5 in 70 of 360 (17 + 20 + 15 + 18), all average in 58 (16 + 12 + 15 + 15), 0 and 0 weeks below $0. Long columns: 61 and 12 of 360 games below $0 in weeks 24–52; the credits 0 and 0.
 - **Long:** three friends 3 of 30 games below $0 (median 0 weeks, 0 dead weeks), 6 of 7 houses rentable at week 52, revenue 69% of budget in weeks 40–52; all average 1 of 30, 7 of 7, 86%. Every number is the same as the release QA's on `c57c51e`, as an identical tree should give.
 - **Pass-and-play e2e** on phone (390×844) and desktop (1280×820): pass. The only console errors are the Manrope font 403s through the symlinked `node_modules`.
+
+## 2026-09-29: Release QA of stage 1 (v4), `1a50845`
+
+What was tested: the tip of `gaps`, `1a50845` (the gap fixes, A0, A0 review rounds 1 and 2, under the v4 gate), against the live build `bd1e1d2`. The brief named `258d0d2` and 781 tests; the branch has moved on since, and what goes live is its tip, so the tip was tested. No game code, test or script was changed; this entry is the only change.
+
+### Results
+
+- **tsc** clean. **vitest** 842 tests in 49 files, all pass. **Build** passes (dist removed).
+- **Balance, standard** (26 weeks × 30 seeds): three friends 8 / 11 / 16 / 23, all average 7 / 12 / 16 / 23, both 0 weeks below $0; solo, absent and nobody teams at tier 1. Targets met.
+- **Robust** (90 seeds × 4 crews): three friends miss tier 5 in 70 of 360 (17 + 20 + 15 + 18), all average in 58 (16 + 12 + 15 + 15), 0 and 0 weeks below $0. Long columns: 61 and 12 of 360 games below $0 in weeks 24–52; the credits by week 45, 0 and 0. All average is still over its ≤ 37 tail target (known; Seb's call, HANDOFF §1).
+- **Long** (52 weeks × 30 seeds), T1: three friends 3 of 30 games below $0 (median 0 weeks, 0 dead weeks), all average 1 of 30 (0, 0); the credits by week 45 0% for both (the one T1 line not met, a gate question). Hold line: three friends 6 of 7 rentable at week 52, revenue 69% of budget in weeks 40–52 (1 point under 70%). Same as the QA of `c57c51e`, as the identical game tree should give.
+- **Pass-and-play e2e** on phone (390×844) and desktop (1280×820): pass. The only console errors are two 403s for `manrope-latin-wght-normal.woff2` through the symlinked `node_modules` (cosmetic, worktree-only; the URL was checked).
+- **Online e2e** on its own emulator (firebase-tools 14, Firestore 8686, Auth 9696, hub 4686, logging 4696, websocket 9686, this branch's rules, its own TMPDIR; Vite 5238): 6 of 6 runs pass. Run 6 had a no-fault-found first alert on both techs (each planned the next alert), and its requested line was quarantined at receiving and landed a week later. **probe-gate** on the emulator: v:3 permission-denied, v:4 not-found, listing refused.
+- **Migration:** the eight `v3-bd1e1d2-*` fixtures `scripts/fixtures-v3.ts` makes regenerate byte for byte from a `git archive` of `bd1e1d2`. The skew, migrate and sub-charter tests (68) and the resort and robust-tail tests over the live docs pass. In the browser, the late doc (week 20, tier 4) loaded into pass-and-play at its own saved time: the week 19 review and the Harbor sheet show, the doc is left as written until the first move (engine 3), the mechanic and the electrician each hand in a ready job (engine 4 from the first write), the analyst's four tabs render, all three end the turn and week 20 resolves. The review's opening cash ($54,787) equals the doc's `openCash`, and all 7 open orders are still there (two ready, one done, two load sheets and two desk tasks cancelled at the resolve as this-week-only, as on the live engine).
+- **Reverse skew** (`scripts/reverse-skew.ts` against `bd1e1d2`): 173 of 173 moves refused on 19 docs, every one with "saved by a newer version", and the docs are untouched.
+- **islandlab** at phone width: all 34 scenes render. The beaten scene has 1,390 SVG nodes (the budget is 1,500).
+- **Diff** `bd1e1d2..HEAD`: 92 files, +9,208 / −622. No binaries, scratch files or secrets (the only key is the public web config, in `probe-gate.mts`, the same as `.env.production`). The largest files are text: `docs/JOBFLOW.md`, `docs/DECISIONS.md`, `src/sim/engine.ts` and `docs/EXPANSION.md` (216–272 kB); the largest fixture is 85 kB. No model name in the diff or in the tree.
+
+### Found, not fixed
+
+- **Commit messages over `bd1e1d2..HEAD`: 19 of 20 pass, `abda756` fails.** It ends with a `Claude-Session:` line after the cloud session's own attribution trailer, which names another model. It's pushed history (on `origin/claude/jolly-keller-gy5hs4`, which is `abda756` on the remote too), so it can't be reworded (CLAUDE.md). `scripts/check-commits.ts` over what the push publishes (`origin/claude/jolly-keller-gy5hs4..HEAD`): 19 commits, 0 failing (A0 review round 2 above).
