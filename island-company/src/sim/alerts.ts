@@ -1261,19 +1261,22 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     // an asset in critical shape with nothing open on it always gets a job; so does the grid at real risk from tier 4
     // (A0 e: grid first, the island's single point of failure): a feed job, and it goes first among the must-dos
     // (release gate: at real risk only a feed alert or job already open counts as "something open on it": a fuel-dock
-    // takeoff, a conduit run due in weeks or a dock card on the grid used to switch grid first off)
+    // takeoff, a conduit run due in weeks or a dock card on the grid used to switch grid first off; at any health,
+    // under 45 too: a grid repair or a dock job open there doesn't stand in for the feed)
     const first = (a: Asset) => a.kind === 'grid' && gridFirst(s, a);
+    const byParts = (a: { kind: string; w: number }, b: { kind: string; w: number }) =>
+      (CATALOG_BY_KIND[a.kind]?.parts ?? 0) - (CATALOG_BY_KIND[b.kind]?.parts ?? 0) || b.w - a.w;
     for (const asset of s.assets) {
-      const feedOnly = asset.health >= 45 && first(asset);
+      const feedOnly = first(asset);
       if (
-        (asset.health >= 45 && !first(asset)) ||
+        (asset.health >= 45 && !feedOnly) ||
         workable.some((o) => o.assetId === asset.id && (!feedOnly || gridFirstJob(s, o))) ||
         openAlerts.some((a) => a.assetId === asset.id && (!feedOnly || feedAlert(s, a)))
       )
         continue;
-      const fix = cands
-        .filter((c) => c.asset.id === asset.id && c.w < 100 && (!feedOnly || FEED_KINDS.has(c.kind)))
-        .sort((a, b) => (CATALOG_BY_KIND[a.kind]?.parts ?? 0) - (CATALOG_BY_KIND[b.kind]?.parts ?? 0) || b.w - a.w)[0];
+      const mine = cands.filter((c) => c.asset.id === asset.id && c.w < 100);
+      // the feed first; a grid in critical shape with no feed job to raise still gets its cheapest job, as before
+      const fix = (feedOnly ? mine.filter((c) => FEED_KINDS.has(c.kind)).sort(byParts)[0] : undefined) ?? (asset.health < 45 ? mine.sort(byParts)[0] : undefined);
       if (fix) fix.w = 100;
     }
     const issue = (kind: string, asset: Asset) => {

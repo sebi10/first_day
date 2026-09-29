@@ -241,6 +241,24 @@ describe('grid first at real risk (the correctness review: an open dock job mask
     expect(run(true)).toEqual({ feed: 1, chip: true, top: 'grid' });
   });
 
+  it('under 45 too: an open dock take-off on the grid in critical shape still lets the feed must-do through, with its chip', () => {
+    // the release QA: on 14e5811 the rule held at 54/50/46/45 and failed at 44/42/40/35
+    for (const hp of [44, 40, 35]) {
+      const s = at(4);
+      const g = s.assets.find((a) => a.kind === 'grid')!;
+      g.health = hp;
+      let gen = s.assets.find((a) => a.kind === 'generator');
+      if (!gen) s.assets.push((gen = { id: 'gen', kind: 'generator', model: 'gen', name: 'Generator house', health: 45, touchedWeek: s.week }));
+      gen.health = 45;
+      expect(gridFirst(s)).toBe(true);
+      for (let i = 0; i < 5; i++) raiseAlert(s, { role: 'elec', asset: asset(s, i % 2 ? 'h1' : 'h2'), kind: i % 2 ? 'trip' : 'flicker', due: s.week + 3 }, NOW);
+      raiseAlert(s, { role: 'elec', asset: g, sym: 'E_TAKEOFF_DOCK', due: s.week + 3 }, NOW);
+      generateAlerts(s, rng(7), NOW, () => {});
+      const onGrid = liveAlerts(s).filter((a) => a.assetId === g.id);
+      expect({ hp, feed: onGrid.filter((a) => FEED_KINDS.has(a.kind)).length, chip: onGrid.some((a) => gridFirstAlert(s, a)) }).toEqual({ hp, feed: 1, chip: true });
+    }
+  });
+
   it('a feed alert already open still counts as something open: no second feed job', () => {
     const s = at(4);
     const g = s.assets.find((a) => a.kind === 'grid')!;

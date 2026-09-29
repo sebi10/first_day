@@ -30,12 +30,18 @@ export function ReqQueue({ ctl }: { ctl: Ctl }) {
   const approve = async () => {
     if (!picked.length || busy) return;
     setBusy(true);
+    // a split batch (the receiver or the freeze funds only the urgent lines) can order part of it: say what went through
     let n = 0;
-    for (const a of reqActions(s, picked, choice)) if (await ctl.dispatch(a)) n++;
+    for (const a of reqActions(s, picked, choice)) if (a.t === 'approveReq' && (await ctl.dispatch(a))) n += a.reqs.length;
     setBusy(false);
     if (n) {
       fx.snap();
-      toast(`Ordered ${picked.length} request${picked.length > 1 ? 's' : ''}: ${usd(quote.total)}${choice.aog && quote.freight ? ' · on the AOG boat, here tonight' : ''}`);
+      const all = n === picked.length;
+      toast(
+        all
+          ? `Ordered ${n} request${n > 1 ? 's' : ''}: ${usd(quote.total)}${choice.aog && quote.freight ? ' · on the AOG boat, here tonight' : ''}`
+          : `Ordered ${n} of ${picked.length} requests: the rest can't be paid for now and stay open`,
+      );
     }
   };
   return (

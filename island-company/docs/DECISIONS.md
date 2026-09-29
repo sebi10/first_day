@@ -1741,3 +1741,10 @@ Branch `gaps` at `db306aa` (stage 1, v4, not shipped), against the live build `b
   - `t5-auto-a`'s week 23 isn't ringed
   - the receivership desk says the fee, the loan's weeks and last week's revenue against overhead and payroll
   - the review pins the receivership line and books *Financing in*
+
+## 2026-09-29: stage 1 release, the last two QA findings
+
+The release-gate QA of `14e5811` passed every check except one major and a UI minor. Both are fixed here, before the push.
+
+- **Grid first under 45 health.** The gate fix made "something open on the grid" mean a feed alert or a grid-first job only when the grid was at 45 or above. Below 45 the old critical-shape rule still let any open job or alert (a grid repair, a dock take-off) stand in for the feed, so grid first switched off exactly when the grid was worst: on the paper sim, 73 of 291 tier-4+ grid-first weeks under 45 had no feed work open (three friends, 30 seeds × 52 weeks). Now the rule holds at every health: at real risk only feed work counts, the must-do is a feed job, and a grid in critical shape with no feed job to raise still gets its cheapest job, as before. Test: `releasegate.test.ts` "under 45 too" (fails on `14e5811`). The golden digests move for four runs whose grid goes under 45 (three friends seed 3 at 26 weeks; three friends seed 1, mistakes seeds 1 and 6 at 52 weeks) and were re-recorded. The standard run is unchanged.
+- **The desk's split batch.** Under the freeze or in receivership only a batch's urgent lines can be paid, so part of a batch can go through. The toast said "Ordered 2 requests" when one went through; it now counts what was ordered ("Ordered 1 of 2 requests: the rest can't be paid for now and stay open").

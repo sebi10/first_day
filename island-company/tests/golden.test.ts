@@ -55,12 +55,12 @@ function digest(team: string, seed: number, weeks: number): string {
 const GOLDEN: Record<string, string> = {
   'three friends/1': '071e528f29483b3d',
   'three friends/2': '43b9c878f6f837bc',
-  'three friends/3': 'b1a2df6821f18a90',
+  'three friends/3': 'a0ec170f630d1a13',
   'all average/1': '937e3050847406e4',
-  'three friends/1/52': 'ac98dae6093ebb7b',
+  'three friends/1/52': 'ab9b41004c895af5',
   'all average/1/52': '48b2a3225eb43677',
-  'mistakes/1/52': '3160783043448a94',
-  'mistakes/6/52': 'a447ae4844dd9f3a',
+  'mistakes/1/52': '4c3d13c0ec4bb2b7',
+  'mistakes/6/52': 'e6495f91e0d3f02e',
   'all average/4/52': '2f13f83531354526',
 };
 
