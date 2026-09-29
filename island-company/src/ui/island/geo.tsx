@@ -299,6 +299,11 @@ export function workSites(s: Pick<IslandState, 'builds' | 'tier'>): WorkSite[] {
   const b = openBuild(s);
   if (!b) return [];
   if (b.cottage) return PLOT[b.cottage] ? [{ id: b.cottage, kind: 'house', at: PLOT[b.cottage] }] : [];
+  // G0: a renovation's site is the house itself
+  if (b.reno) {
+    const at = POS[b.reno] ?? PLOT[b.reno];
+    return at ? [{ id: b.reno, kind: 'house', at }] : [];
+  }
   const all: WorkSite[] = [];
   for (const a of TIERS[(b.tier ?? 0) - 1]?.adds ?? []) {
     const kind = a.id === 'p3' ? 'dock' : siteKindOf(a.model);

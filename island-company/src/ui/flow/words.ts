@@ -3,8 +3,8 @@
 // registration. Pure (no DOM).
 import { alertFlags, alertShort, soleGuest } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
-import { ROLE_LABEL } from '../../sim/data';
-import { alertAog, gridFirstAlert, hazardOn } from '../../sim/econ';
+import { RENO, ROLE_LABEL } from '../../sim/data';
+import { alertAog, gridFirstAlert, hazardOn, renoAwaitingFinal } from '../../sim/econ';
 import { helperQueues } from '../../sim/engine';
 import { flowStage, type FlowStage } from '../../sim/flow';
 import type { Alert, AlertSrc, Asset, IslandState, Role } from '../../sim/types';
@@ -50,6 +50,9 @@ export const SRC_WORDS: Record<AlertSrc, string> = {
 /** a flag beside an alert's stage; `why` is said on the open job (the release gate: a chip that explains itself on tap) */
 export type Flag = { text: string; tone?: 'rust' | 'sea' | 'palm' | 'ink'; why?: string };
 
+/** an alert's source in words (a renovation's permit final is a code notice the county books on the permit: G0) */
+export const srcWord = (a: Pick<Alert, 'src' | 'sym'>) => (a.sym === 'E_RENO_FINAL' ? 'Permit final' : SRC_WORDS[a.src]);
+
 /** the flags beside an alert's stage: due, MEL, made safe, AOG (the only guest plane's guests on the sub-charter), the house shut */
 export function flagsOf(s: IslandState, a: Alert): Flag[] {
   const out: Flag[] = [];
@@ -76,6 +79,9 @@ export function flagsOf(s: IslandState, a: Alert): Flag[] {
   // A0 (e): from tier 4 the grid's feed at real risk goes before code prep (every house hangs off it): the chip says
   // why it's first (the feed only: a fuel-dock trip isn't the island feed)
   if (gridFirstAlert(s, a)) out.push({ text: 'grid first', tone: 'rust' });
+  // G0: the renovated house waits on this code job's sign-off (the permit final, or a code notice doubling as it)
+  if (asset?.kind === 'house' && a.src === 'code' && renoAwaitingFinal(s, asset.id))
+    out.push({ text: 'house closed', tone: 'rust', why: `The builders finished ${asset.name}'s renovation: no guests until this final is signed off. Then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.` });
   // the electrician's helper takes this ready job at the resolve if you don't (review round 1), and says who and how
   const helper = o ? [...helperQueues(s)].find(([, q]) => q.some((x) => x.id === o.id))?.[0] : undefined;
   if (helper) {

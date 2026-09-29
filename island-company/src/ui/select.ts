@@ -1010,7 +1010,7 @@ export function inspectLabel(s: IslandState, t: ObjectRef): string {
   if (t.kind === 'site') {
     const b = (t.id === 'project' ? undefined : (s.builds ?? []).find((x) => x.id === t.id)) ?? openBuild(s);
     if (b) {
-      const w = buildSite(b);
+      const w = buildSite(b, s);
       return w.charAt(0).toUpperCase() + w.slice(1);
     }
   }

@@ -85,7 +85,8 @@ export function hotspots(s: IslandState, scene: StationId | 'region' = HOME, lay
     const e = SITE_EXTENT[kind];
     add({ kind: 'site', id, st: HOME }, siteLabel(id), [p[0] + e[0], p[1] + e[1], p[0] + e[2], p[1] + e[3]], Z.building);
   };
-  if (building) for (const ws of workSites(s)) site(building.id, ws.kind, ws.at);
+  // (a renovation's site is the house itself: its own hotspot, whose sheet says where the renovation stands)
+  if (building && !building.reno) for (const ws of workSites(s)) site(building.id, ws.kind, ws.at);
   const pj = s.project;
   if (pj && pj.tier === s.tier + 1) {
     const b = (s.builds ?? []).find((x) => x.tier === pj.tier && x.finished === undefined);

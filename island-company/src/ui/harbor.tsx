@@ -3,7 +3,7 @@
 // notice). The late game's rules in the words of docs/ONBOARDING.md 10a. Remembered per island and seat on this device
 // (localStorage, guarded: a per-viewer convenience, like What's new).
 import { useState } from 'preact/hooks';
-import { LATE } from '../sim/data';
+import { GOAL, LATE, RENO, WARRANTY } from '../sim/data';
 import { carriedStreak, creditsStreak } from '../sim/econ';
 import { STAFF } from '../sim/staff';
 import type { IslandState, Role } from '../sim/types';
@@ -16,7 +16,7 @@ export function harborLines(s: IslandState): { title: string; body: string }[] {
   const elec = nameOf(s, 'elec');
   const fin = nameOf(s, 'fin');
   // a live island's streak from before the update is kept (the release gate): say so where the rule is said
-  const carried = carriedStreak(s) ? ` Your streak from before this update counts: ${Math.min(8, creditsStreak(s, s.week))}/8. Once it ends, only Resort weeks count.` : '';
+  const carried = GOAL.rule === 'streak' && carriedStreak(s) ? ` Your streak from before this update counts: ${Math.min(8, creditsStreak(s, s.week))}/8. Once it ends, only Resort weeks count.` : '';
   return [
     {
       title: 'The grid comes first',
@@ -39,9 +39,25 @@ export function harborLines(s: IslandState): { title: string; body: string }[] {
           },
         ]
       : []),
+    // G0: the upkeep structure (the builder's warranty, the service upgrade) and the analyst's renovations
+    ...(WARRANTY.fromTier <= LATE.fromTier
+      ? [
+          {
+            title: 'New buildings last',
+            body: `From here new buildings come with a builder's warranty: ${WARRANTY.weeks} weeks at ${WARRANTY.decay} a week untouched (guests' wear, storms and incidents still hit them). The Harbor's new transformer and feeder and the Resort's bigger standby set come in the new buildings' condition, under the same warranty.`,
+          },
+        ]
+      : []),
+    {
+      title: 'Renovations',
+      body: `${fin} can renovate a house at ${RENO.maxHealth} or below from the Staff desk or its sheet: a package paid when ordered plus materials; the builders close it for their two work units, and ${elec}'s permit final opens it at ${RENO.health} with a ${RENO.warranty}-week warranty. One per house every ${RENO.cooldown} weeks.`,
+    },
     {
       title: 'The credits',
-      body: `Eight full-crew A weeks at the Resort (tier 5), none below A, beat the game. A week graded A with a seat on autopilot holds the streak without counting; a week below A resets it. Weeks at the Harbor are no head start.${carried}`,
+      body:
+        GOAL.rule === 'quarter'
+          ? `Two months on plan at the Resort (tier 5) beat the game: of the last ${GOAL.weeks} weeks counted there, ${GOAL.need} at ${GOAL.minGrade} or better and revenue at ${Math.round(GOAL.revShare * 100)}% of budget or more. A week on plan with a seat on autopilot doesn't count; one below plan does, and receivership starts the count again. Weeks at the Harbor are no head start.`
+          : `Eight full-crew A weeks at the Resort (tier 5), none below A, beat the game. A week graded A with a seat on autopilot holds the streak without counting; a week below A resets it. Weeks at the Harbor are no head start.${carried}`,
     },
   ];
 }

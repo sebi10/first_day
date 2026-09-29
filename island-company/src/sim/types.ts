@@ -23,6 +23,11 @@ export interface Asset {
   inspectionUntil?: number;
   /** planes: flights since last 100-hr inspection */
   sinceInspection?: number;
+  /**
+   * new construction (a house or the generator house a tier or the builders added), or a renovated house: the last week
+   * its builder's warranty year runs, when it decays WARRANTY.decay a week untouched (econ decayOf). Absent: none
+   */
+  warrantyUntil?: number;
 }
 
 export type OrderStatus = 'pending' | 'countered' | 'approved' | 'waiting_part' | 'ready' | 'done' | 'cancelled';
@@ -424,6 +429,8 @@ export interface WeekReport {
   mvp: Record<Role, string>;
   autoRun: Role[];
   tierUp?: number;
+  /** the week was played in receivership (G0: the credits' 'quarter' goal clears on it). Absent: it wasn't, or an older engine resolved it */
+  rcv?: true;
 }
 
 export interface FeedEvent {
@@ -515,6 +522,12 @@ export interface IslandState {
     aCarry?: number;
     /** the first week this doc resolved on v4 (a doc an older engine wrote): the weeks before it played by the old rules */
     v4From?: number;
+    /**
+     * G0 (stage 2, v5): the week a doc an older engine wrote at the Harbor or the Resort got the upkeep structure's
+     * one-time migration (migrate.ts step 9: the builder's warranty dated from its buildings, the service upgrade).
+     * Stamped once; a new island never has it
+     */
+    g0From?: number;
   };
   /** week the crew beat the game (8 full-crew A weeks played at tier 5, none below A) */
   creditsWeek?: number;
@@ -1065,9 +1078,17 @@ export interface Build {
   finished?: number;
   rework?: number;
   idle?: number;
+  /** a renovation (the analyst's capex, from tier 4): the house the builders renovate. It closes when they start */
+  reno?: string;
+  /** a renovation: the week the electrician signed off its final (the house opens again) */
+  signed?: number;
 }
 
-export type StaffAction = { t: 'hire'; cand: string; week?: number } | { t: 'letGo'; npc: string; week?: number } | { t: 'build'; what: 'cottage'; week?: number };
+export type StaffAction =
+  | { t: 'hire'; cand: string; week?: number }
+  | { t: 'letGo'; npc: string; week?: number }
+  | { t: 'build'; what: 'cottage'; week?: number }
+  | { t: 'build'; what: 'reno'; asset: string; week?: number };
 
 /** An electrical job's site (derived from the alert's seed: src/sim/alerts.ts siteOf) */
 export interface ElecSite {

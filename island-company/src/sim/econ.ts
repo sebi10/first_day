@@ -1,6 +1,6 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
 import { soleGuest, symptomOf } from './alerts';
-import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, LATE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, ROLE_LABEL, STORM_HIT, SUBCHARTER, TIERS } from './data';
+import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GOAL, GSE, LATE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, RENO, ROLE_LABEL, STORM_HIT, SUBCHARTER, TIERS, WARRANTY } from './data';
 import { charterMult, housekeepingCap, payroll, pilotCap, reviewMult } from './staff';
 import type { Alert, Asset, CableBand, Grade, GseCart, IslandState, Order, Role, TurnState, Weather, WeekReport } from './types';
 
@@ -60,7 +60,17 @@ export const rentFactor = (s: Pick<IslandState, 'alerts'>, h: Pick<Asset, 'id'>)
 /** not airworthy: the part chain's AOG, or an airworthiness alert past due */
 export const isAog = (s: IslandState, id: string) => chainAog(s, id) || !!alertAog(s, id);
 /** out of service (a safety call, or AOG): no flights or guests, and nothing can fail in service */
-export const outOfService = (s: IslandState, id: string) => isTagged(s, id) || isAog(s, id);
+export const outOfService = (s: IslandState, id: string) => isTagged(s, id) || isAog(s, id) || renovating(s, id);
+
+/**
+ * A house closed for its renovation (G0): from the week the builders start on it (they drew its first
+ * materials) until the electrician signs off its final. Nobody's in it: no guests, no decay, nothing fails in service
+ */
+export function renovating(s: Pick<IslandState, 'builds'>, id: string): boolean {
+  return (s.builds ?? []).some((b) => b.reno === id && b.signed === undefined && ((b.drawn ?? 0) > 0 || b.finished !== undefined));
+}
+/** a renovation's builders are done and its final waits on the electrician */
+export const renoAwaitingFinal = (s: Pick<IslandState, 'builds'>, id: string) => (s.builds ?? []).find((b) => b.reno === id && b.finished !== undefined && b.signed === undefined);
 export function capOf(s: IslandState, p: Asset, weather: Weather = s.weather) {
   if (outOfService(s, p.id)) return 0;
   return planeCapacity(p, s.tier, weather);
@@ -236,11 +246,14 @@ export const houseWearOf = (s: Pick<IslandState, 'tier'>) => (lateGame(s) ? LATE
  * LATE.healthyDecay.at) loses LATE.healthyDecay.decay, every plane and home asset alike; (g) and a house that's dark all
  * week (the grid down, the generator not carrying it) loses nothing: nobody's in it
  */
-export function decayOf(s: Pick<IslandState, 'tier'>, a: Pick<Asset, 'kind' | 'health'>, dark = false): number {
-  if (!lateGame(s)) return ECON.decay;
-  if (dark && LATE.darkNoDecay && a.kind === 'house') return 0;
-  return a.health >= LATE.healthyDecay.at ? LATE.healthyDecay.decay : ECON.decay;
+export function decayOf(s: Pick<IslandState, 'tier'> & { week?: number }, a: Pick<Asset, 'kind' | 'health'> & { warrantyUntil?: number }, dark = false): number {
+  const base = !lateGame(s) ? ECON.decay : dark && LATE.darkNoDecay && a.kind === 'house' ? 0 : a.health >= LATE.healthyDecay.at ? LATE.healthyDecay.decay : ECON.decay;
+  // G0: new construction (and a renovated house) under its builder's warranty wears slowly
+  return underWarranty(s, a) ? Math.min(base, WARRANTY.decay) : base;
 }
+
+/** the builder's warranty still covers this building this week */
+export const underWarranty = (s: { week?: number }, a: { warrantyUntil?: number }) => a.warrantyUntil !== undefined && s.week !== undefined && a.warrantyUntil >= s.week;
 
 /**
  * (f) The week being resolved counts toward the credits: it was played at the Resort (tier 5 reached before week `W`;
@@ -290,12 +303,57 @@ export function aStreakAfter(s: Pick<IslandState, 'tier' | 'stats'>, W: number, 
 /** a week resolved on v4 (a live doc's weeks before stats.v4From played by the old rules) */
 export const onV4 = (s: Pick<IslandState, 'stats'>, week: number) => s.stats.v4From === undefined || week >= s.stats.v4From;
 
+const GRADE_N: Record<Grade, number> = { A: 4, B: 3, C: 2, D: 1 };
+/** a week's grade is on plan for the credits' 'quarter' goal (GOAL.minGrade or better) */
+export const onPlan = (g: Grade) => GRADE_N[g] >= GRADE_N[GOAL.minGrade];
+
+/** what the credits' 'quarter' goal reads from a week's report */
+export type GoalWeek = Pick<WeekReport, 'week' | 'grade' | 'revenue' | 'budget' | 'autoRun' | 'rcv'>;
+
 /**
- * an autopilot A at the Resort: the week held the streak instead of counting (the review line, the Board's chips). Only
- * weeks v4 resolved (the release gate): on the old rule an autopilot A ended the streak
+ * The credits' window under GOAL.rule 'quarter' (G0, "two months on plan at the Resort"), computed from the week
+ * reports (s.history keeps 26 weeks; nothing is stored for it, so a live island's Resort weeks count the moment the
+ * rule is switched on): the last GOAL.weeks counted weeks at the Resort, oldest first. A full-crew week joins it; an
+ * autopilot week on plan pauses it (it isn't one of the eight: nobody wins alone); one below plan joins it as a miss
+ * (an absence never helps); a week played in receivership clears it; Harbor weeks never count. `extra`: the week being
+ * resolved, whose report isn't in the history yet.
  */
-export const pausedWeek = (s: Pick<IslandState, 'tier' | 'stats'>, r: Pick<WeekReport, 'week' | 'grade' | 'autoRun'>) =>
-  !!LATE.streakPause && r.grade === 'A' && !!r.autoRun?.length && atResort(s, r.week) && onV4(s, r.week);
+export function goalWindow(s: Pick<IslandState, 'tier' | 'stats' | 'history'>, extra?: GoalWeek): GoalWeek[] {
+  let win: GoalWeek[] = [];
+  for (const h of extra ? [...s.history, extra] : s.history) {
+    if (!atResort(s, h.week) || h.rcv) {
+      win = [];
+      continue;
+    }
+    if (h.autoRun?.length && onPlan(h.grade)) continue;
+    win.push(h);
+    if (win.length > GOAL.weeks) win.shift();
+  }
+  return win;
+}
+
+/** the window's count: weeks counted, weeks on plan, and the period's revenue against its budget */
+export function goalCount(win: GoalWeek[]): { weeks: number; onPlan: number; revenue: number; budget: number; share: number } {
+  const revenue = win.reduce((n, h) => n + h.revenue, 0);
+  const budget = win.reduce((n, h) => n + h.budget, 0);
+  return { weeks: win.length, onPlan: win.filter((h) => onPlan(h.grade)).length, revenue, budget, share: budget > 0 ? revenue / budget : 0 };
+}
+
+/** the 'quarter' goal is met: GOAL.weeks weeks counted, GOAL.need of them on plan, their revenue at GOAL.revShare of their budget or better */
+export function goalMet(win: GoalWeek[]): boolean {
+  const c = goalCount(win);
+  return c.weeks >= GOAL.weeks && c.onPlan >= GOAL.need && c.revenue >= GOAL.revShare * c.budget;
+}
+
+/**
+ * an autopilot week at the Resort that held the credits' count instead of counting (the review line, the Board's
+ * chips): under GOAL.rule 'streak' an A (only weeks v4 resolved, the release gate: on the old rule an autopilot A ended
+ * the streak); under 'quarter' a week on plan outside receivership
+ */
+export const pausedWeek = (s: Pick<IslandState, 'tier' | 'stats'>, r: Pick<WeekReport, 'week' | 'grade' | 'autoRun' | 'rcv'>) =>
+  GOAL.rule === 'quarter'
+    ? onPlan(r.grade) && !!r.autoRun?.length && atResort(s, r.week) && !r.rcv
+    : !!LATE.streakPause && r.grade === 'A' && !!r.autoRun?.length && atResort(s, r.week) && onV4(s, r.week);
 
 /** how far ahead the county's notice comes (E_CODE_DUE's lead): a prep inside this window is ready for the booked date */
 export const INSPECTION_NOTICE = 2;
@@ -369,11 +427,12 @@ export function projectCoverWeek(s: Pick<IslandState, 'project' | 'orders' | 'pl
 
 export function houseRentable(s: IslandState, h: Asset, week = s.week) {
   const hz = hazardOn(s, h.id);
-  return !isTagged(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week && !(hz && !hz.safe);
+  return !isTagged(s, h.id) && !renovating(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week && !(hz && !hz.safe);
 }
 
 export function houseBlocker(s: IslandState, h: Asset, week = s.week): string | null {
   if (isTagged(s, h.id)) return 'red-tagged';
+  if (renovating(s, h.id)) return renoAwaitingFinal(s, h.id) ? "renovation: the electrician's final" : 'renovation: the builders are on it';
   if (!powered(s).on) return 'no power';
   const hz = hazardOn(s, h.id);
   if (hz && !hz.safe) return 'hazard';
@@ -526,6 +585,8 @@ export function urgency(s: IslandState, o: Order) {
     // off it); but a code prep that reopens a closed house at this resolve goes first while the grid holds at 48+
     (gridFirstJob(s, o) ? LATE.gridFirstUrgency : 0) +
     (o.kind === 'codeprep' && reopenBeforeGrid(s, a) ? LATE.reopenUrgency : 0) +
+    // G0: a renovation's final, the house closed until it's signed off
+    (a && o.kind === 'codeprep' && renoAwaitingFinal(s, a.id) ? RENO.finalUrgency : 0) +
     // the job flow: an airworthiness or hazard alert, due now (it grounds a plane or closes a house at this resolve)
     flowUrgency(s, o)
   );

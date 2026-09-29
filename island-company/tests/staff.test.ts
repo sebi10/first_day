@@ -539,7 +539,7 @@ describe('old islands and new islands', () => {
 });
 
 describe('bots', () => {
-  it('the fin bot keeps the standard crew: it hires for a role below it, and lets the builder go at tier 5', () => {
+  it('the fin bot keeps the standard crew: it hires for a role below it, and at tier 5 keeps one builder (the renovations)', () => {
     let s = atTier(2);
     s.staff = [npc('pilot'), npc('housekeeper'), npc('builder')];
     s.hiring = { week: s.week, cands: [] };
@@ -548,10 +548,11 @@ describe('bots', () => {
     s = botStaff(s, TEAMS['three friends'].fin, rng(1), NOW);
     expect(s.staff!.some((n) => n.name === c.name)).toBe(true);
     expect(s.staff!.filter((n) => n.role === 'pilot')).toHaveLength(2);
+    // (G0: the island renovates from tier 4, so the renovation crew's one builder stays; the second goes)
     let t5 = atTier(5);
-    t5.staff = [...t5.staff!, npc('builder')];
+    t5.staff = [...t5.staff!, npc('builder'), npc('builder')];
     t5 = botStaff(t5, TEAMS['three friends'].fin, rng(1), NOW);
-    expect(t5.staff!.some((n) => n.role === 'builder')).toBe(false);
+    expect(t5.staff!.filter((n) => n.role === 'builder')).toHaveLength(1);
   });
 
   it('the builders’ materials: the next tier’s site work two units at a time; one two tiers ahead waits for the next tier’s crew project; further ahead waits', () => {

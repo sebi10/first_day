@@ -5,7 +5,7 @@ import type { Alert, IslandState, Order, Role } from '../../sim/types';
 import { Icon } from '../kit';
 import { ROLE_TINT } from '../theme';
 import { isOneTap } from './steps';
-import { assetTitle, flagsOf, moveChip, shortOf, SRC_ICON, SRC_WORDS } from './words';
+import { assetTitle, flagsOf, moveChip, shortOf, SRC_ICON, srcWord } from './words';
 
 export function AlertRow({ s, a, me, onOpen, onStart, held, quiet }: { s: IslandState; a: Alert; me: Role; onOpen(): void; onStart?(): void; /** the seat can't start anything now (turn over, a per-turn limit) */ held?: boolean; /** in the Your move group: a plain "Your move" chip says nothing new */ quiet?: boolean }) {
   const asset = s.assets.find((x) => x.id === a.assetId);
@@ -18,7 +18,7 @@ export function AlertRow({ s, a, me, onOpen, onStart, held, quiet }: { s: Island
   const tint = m.who && !m.mine ? { background: `${ROLE_TINT[m.who]}99` } : undefined;
   return (
     <div class={`jf-arow ${m.mine ? 'mine' : ''} ${a.status === 'closed' ? 'closed' : ''}`} role="listitem">
-      <button class="jf-arow-main" onClick={onOpen} aria-label={`${SRC_WORDS[a.src]}: ${shortOf(s, a)} on ${asset?.name ?? 'the asset'}. ${m.chip}`}>
+      <button class="jf-arow-main" onClick={onOpen} aria-label={`${srcWord(a)}: ${shortOf(s, a)} on ${asset?.name ?? 'the asset'}. ${m.chip}`}>
         <span class={`jf-src ${a.src}`}>
           <Icon name={SRC_ICON[a.src]} size={20} />
         </span>

@@ -103,8 +103,11 @@ describe('the staff stubs', () => {
       if (seen.has(h.week)) return;
       seen.add(h.week);
       weeks++;
-      // (the week a tier is reached is reported at the old tier, and costs the new one)
-      const tier = h.tierUp ?? h.tier;
+      // (the week a tier is reached is reported at the old tier, and costs the new one; a tier whose crew project the
+      // resolve completes (step 16, after autopilot covered the last part) is reported at the new tier and costs the
+      // old one: the G0 synthesis's upkeep levers moved seed 3's tier 5 onto such a week)
+      const atResolve = !h.tierUp && s.stats.tierReachedWeek[h.tier] === h.week;
+      const tier = h.tierUp ?? (atResolve ? h.tier - 1 : h.tier);
       expect(h.costs.fixed, `week ${h.week}`).toBe(TIERS[tier - 1].fixed);
       expect(h.costs.payroll).toBe(standardPayroll(tier));
       expect(h.costs.overhead).toBe(TIERS[tier - 1].overhead);

@@ -74,7 +74,9 @@ export function Ribbon({ x, y }: { x: number; y: number }) {
 }
 
 /** What is wrong with a house, drawn on the house itself. */
-export type Fault = { tag?: boolean; damaged?: boolean; lapsed?: boolean; smoking?: boolean };
+/** reno (G0): 'work' the builders have it closed for its renovation (scaffold and a tarp); 'final' they're done and it
+ *  waits on the electrician's permit final (a permit card staked out front) */
+export type Fault = { tag?: boolean; damaged?: boolean; lapsed?: boolean; smoking?: boolean; reno?: 'work' | 'final' };
 type FaultGeo = { w: number; h: number; door: [number, number, number, number]; shutter: [number, number]; patches: [number, number][]; crack: [number, number]; board: [number, number]; smoke: [number, number] };
 /** where a house's smoke rises from (front-centre local units), for keep-outs */
 export const SMOKE_AT: Record<'cottage' | 'villa' | 'lodge', [number, number]> = { cottage: [12, -31], villa: [14, -45], lodge: [17, -40] };
@@ -136,6 +138,23 @@ function Faults({ f, g, motion }: { f: Fault; g: FaultGeo; motion: boolean }) {
             <path d="M-2.2 5h4.4M-2.2 7.2h4.4" stroke="#fff" stroke-width=".9" />
           </g>
         </>
+      )}
+      {/* G0: under renovation: a blue tarp over the front wall's west half and a scaffold across the front (4 nodes) */}
+      {f.reno === 'work' && (
+        <>
+          <path d={`M${-g.w + 2} ${-g.h + 1}H${-1}l-1.4 ${g.h * 0.55}l-3 ${g.h * 0.3}H${-g.w + 3}l-1 ${-g.h * 0.4}z`} fill="#2f6fb8" opacity=".92" />
+          <path d={`M${-g.w + 4} ${-g.h + 4}h${g.w - 8}M${-g.w + 4} ${-g.h * 0.55}h${g.w - 9}`} stroke="#6aa6e6" stroke-width="1.1" />
+          <path d={`M${-g.w - 2} 1V${-g.h - 5}M${g.w + 2} 1V${-g.h - 5}M${-g.w - 2} ${-g.h * 0.5}L${g.w + 2} ${-g.h - 3}`} stroke="#8d969c" stroke-width="1.6" stroke-linecap="round" />
+          <path d={`M${-g.w - 4} ${-g.h * 0.5}h${2 * g.w + 8}M${-g.w - 4} ${-g.h - 3}h${2 * g.w + 8}`} stroke={K.wood} stroke-width="2.6" stroke-linecap="round" />
+        </>
+      )}
+      {/* G0: the builders are done, the permit final is the electrician's: the permit card on its stake (3 nodes) */}
+      {f.reno === 'final' && (
+        <g transform={`translate(${g.board[0]} ${g.board[1]})`}>
+          <path d="M0 0V-13" stroke={K.woodDark} stroke-width="2" />
+          <path d="M-8 -24h16v11h-16z" fill="#ffd23f" stroke={K.woodDark} stroke-width="1.4" />
+          <path d="M-5 -21h10M-5 -18h10M-5 -15.4h6" stroke={K.woodDark} stroke-width=".9" />
+        </g>
       )}
       {f.lapsed && (
         <g transform={`translate(${g.board[0]} ${g.board[1]})`}>

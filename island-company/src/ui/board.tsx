@@ -3,10 +3,10 @@
 import { useState } from 'preact/hooks';
 import { PUZZLES } from '../puzzles';
 import type { PuzzleId } from '../puzzles/types';
-import { ROLE_LABEL } from '../sim/data';
+import { GOAL, ROLE_LABEL } from '../sim/data';
 import { hashSeed } from '../sim/rng';
 import { toolsFor } from '../sim/progression';
-import { carriedStreak, creditsStreak, onV4, pausedWeek, storyEffect, tierDef } from '../sim/econ';
+import { carriedStreak, creditsStreak, goalCount, goalWindow, onV4, pausedWeek, storyEffect, tierDef } from '../sim/econ';
 import { nextTierProgress } from '../sim/progression';
 import { ROLES, type Grade, type Incident, type IslandState, type ReportLine, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
@@ -76,25 +76,14 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
           ))}
           <span class="label">Autopilot weeks don't count. When you qualify, the tier is built as a crew project: one job each.</span>
           {/* the release gate: a live island's streak from before the update is kept (it counted Harbor weeks) */}
-          {carriedStreak(s) && (
+          {GOAL.rule === 'streak' && carriedStreak(s) && (
             <span class="label">
               Your A-grade streak from before this update counts: {Math.min(8, creditsStreak(s, s.week))}/8. An A week holds it until the Resort, where each full-crew A adds one; a week below A ends it, and from then on only Resort weeks count.
             </span>
           )}
         </div>
       )}
-      {!next && (
-        <div class="card col" style={{ gap: 4 }}>
-          <h3>Endgame</h3>
-          <span class="num">
-            {s.creditsWeek ? `Beaten in week ${s.creditsWeek}. ` : ''}A-grade streak {Math.min(8, creditsStreak(s, s.week))}/8
-          </span>
-          {/* review round 1: the rule, so a row of A's next to a lower count reads right */}
-          <span class="label">Full-crew A weeks at the Resort count toward the eight. An A with a seat on autopilot holds the streak; a week below A resets it.</span>
-          {/* the release gate: a live island's streak from before the update is kept (it counted Harbor weeks) */}
-          {carriedStreak(s) && <span class="label">Your streak from before this update counts: {Math.min(8, creditsStreak(s, s.week))}/8. Once it ends, only Resort weeks count.</span>}
-        </div>
-      )}
+      {!next && <Endgame s={s} />}
 
       <Challenge ctl={ctl} />
 
@@ -114,6 +103,54 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
             </div>
           ))}
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * The Endgame card: the credits' goal, whichever rule is on (data GOAL, one switch; G0). 'streak': the A-grade streak
+ * (8 full-crew A weeks at the Resort). 'quarter': the last 8 counted Resort weeks, how many at B or better, and the
+ * period's revenue against its budget next to the 85% line
+ */
+export function Endgame({ s }: { s: IslandState }) {
+  if (GOAL.rule === 'quarter') {
+    const c = goalCount(goalWindow(s));
+    const pct = Math.round(c.share * 100);
+    const line = Math.round(GOAL.revShare * 100);
+    return (
+      <div class="card col" style={{ gap: 4 }}>
+        <h3>Endgame</h3>
+        <span class="num">
+          {s.creditsWeek ? `Beaten in week ${s.creditsWeek}. ` : ''}Two months on plan: {c.onPlan} of the last {c.weeks} Resort weeks at {GOAL.minGrade} or better ({GOAL.need} of {GOAL.weeks} needed)
+        </span>
+        {c.weeks > 0 && (
+          <div class="col" style={{ gap: 2 }} aria-label={`Revenue ${pct}% of budget; the line is ${line}%`}>
+            <div style={{ position: 'relative', height: 8, borderRadius: 4, background: C.sandDeep }}>
+              <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', borderRadius: 4, background: pct >= line ? C.palm : C.rust }} />
+              <i style={{ position: 'absolute', left: `${line}%`, top: -2, bottom: -2, width: 2, background: C.ink }} />
+            </div>
+            <span class="label num">
+              Revenue {usd(c.revenue)} of {usd(c.budget)} budget over those weeks: {pct}% (the line is {line}%)
+            </span>
+          </div>
+        )}
+        <span class="label">
+          The last {GOAL.weeks} weeks counted at the Resort: {GOAL.need} at {GOAL.minGrade} or better and revenue at {line}% of budget or more. A week on plan with a seat on autopilot doesn't count; one below plan does. A week in receivership starts the count again.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div class="card col" style={{ gap: 4 }}>
+      <h3>Endgame</h3>
+      <span class="num">
+        {s.creditsWeek ? `Beaten in week ${s.creditsWeek}. ` : ''}A-grade streak {Math.min(8, creditsStreak(s, s.week))}/8
+      </span>
+      {/* review round 1: the rule, so a row of A's next to a lower count reads right */}
+      <span class="label">Full-crew A weeks at the Resort count toward the eight. An A with a seat on autopilot holds the streak; a week below A resets it.</span>
+      {/* the release gate: a live island's streak from before the update is kept (it counted Harbor weeks) */}
+      {carriedStreak(s) && <span class="label">Your streak from before this update counts: {Math.min(8, creditsStreak(s, s.week))}/8. Once it ends, only Resort weeks count.</span>}
     </div>
   );
 }
@@ -142,7 +179,7 @@ function History({ s }: { s: IslandState }) {
       </svg>
       <div class="row" style={{ gap: 4, justifyContent: 'space-between' }}>
         {h.map((r) => (
-          <span key={r.week} class="col center" style={{ gap: 0, fontSize: 11 }} title={pausedWeek(s, r) ? `Week ${r.week}: A with autopilot covering a seat, so it held the streak` : undefined}>
+          <span key={r.week} class="col center" style={{ gap: 0, fontSize: 11 }} title={pausedWeek(s, r) ? `Week ${r.week}: ${r.grade} with autopilot covering a seat, so it didn't count toward the credits` : undefined}>
             {/* an A with a seat on autopilot at the Resort held the credits' streak: a ringed A (review round 1) */}
             <b style={{ color: GRADE_COLOR[r.grade], ...(pausedWeek(s, r) ? { boxShadow: `inset 0 0 0 1.5px ${GRADE_COLOR.A}`, borderRadius: 4, padding: '0 3px', color: C.inkSoft } : {}) }}>{r.grade}</b>
             <span class="label" style={{ fontSize: 10 }}>
@@ -151,7 +188,7 @@ function History({ s }: { s: IslandState }) {
           </span>
         ))}
       </div>
-      {h.some((r) => pausedWeek(s, r)) && <span class="label">A ringed: a seat was on autopilot, so the week held the streak instead of counting.</span>}
+      {h.some((r) => pausedWeek(s, r)) && <span class="label">Ringed: a seat was on autopilot, so the week held the credits' count instead of counting.</span>}
     </div>
   );
 }

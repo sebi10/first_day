@@ -6,7 +6,7 @@
 // field is absent. It runs at the top of apply() and in the UI's read path.
 import { SYMPTOMS } from './alerts';
 import { islandAircraft } from './chain';
-import { kitValue, STOCK, TIERS } from './data';
+import { kitValue, STOCK, TIERS, WARRANTY } from './data';
 import { bomValue, laborCost, repairLabor, repairTask, stdPick } from './flow';
 import { hashSeed } from './rng';
 import { migrateStaff } from './staff';
@@ -49,8 +49,71 @@ export function migrate(s: IslandState): IslandState {
     s.stats.v4From = W;
     if ((s.stats.aStreak ?? 0) > 0) s.stats.aCarry = s.stats.aStreak;
   }
+  // 9. G0, the upkeep structure (stage 2, v5), once, on a doc an older engine wrote at the Harbor or the Resort (read
+  // before apply() sets engine to 5, and in the UI's read path). A new island gets these as its tiers arrive; this
+  // island's Harbor and Resort went up before they existed. Stamped (stats.g0From) so it runs once.
+  if ((s.engine ?? 0) < G0_ENGINE && W > 0 && s.tier >= 4 && s.stats.g0From === undefined) {
+    s.stats.g0From = W;
+    upkeepMigrate(s, W);
+  }
   return s;
 }
+
+/** the engine that brought G0 (ENGINE_VERSION 5): a doc an older one wrote last gets step 9 */
+export const G0_ENGINE = 5;
+
+/**
+ * G0's one-time migration (step 9), fair and no gift:
+ * - the builder's warranty dated from when the buildings went up: the Harbor's and the Resort's new houses and every
+ *   extra cottage the builders finished from the Harbor on, WARRANTY.weeks from that week, only where it still runs
+ * - the service upgrade a new island gets with its tier, granted now: at the Harbor the grid (a new pad-mount
+ *   transformer and feeder) at 80 or better, at the Resort the generator (a bigger standby set and transfer switch)
+ *   too, under the warranty from this week
+ */
+function upkeepMigrate(s: IslandState, W: number): void {
+  const reached = s.stats.tierReachedWeek;
+  const running = (from: number) => from + WARRANTY.weeks >= W;
+  for (let t = Math.max(WARRANTY.fromTier, 1); t <= Math.min(s.tier, TIERS.length); t++) {
+    const at = reached[t];
+    if (at === undefined || !running(at)) continue;
+    for (const add of TIERS[t - 1].adds) {
+      const a = s.assets.find((x) => x.id === add.id);
+      if (a && (a.kind === 'house' || a.kind === 'generator') && a.warrantyUntil === undefined) a.warrantyUntil = at + WARRANTY.weeks;
+    }
+  }
+  const harbor = reached[4];
+  if (harbor !== undefined && WARRANTY.fromTier <= 4)
+    for (const b of s.builds ?? []) {
+      if (!b.cottage || b.finished === undefined || b.finished < harbor || !running(b.finished)) continue;
+      const a = s.assets.find((x) => x.id === b.cottage);
+      if (a && a.warrantyUntil === undefined) a.warrantyUntil = b.finished + WARRANTY.weeks;
+    }
+  const lines: string[] = [];
+  const upgrade = (kind: 'grid' | 'generator', what: string) => {
+    const a = s.assets.find((x) => x.kind === kind);
+    if (!a) return;
+    a.health = Math.max(a.health, UPGRADE_HEALTH);
+    a.warrantyUntil = W + WARRANTY.weeks;
+    lines.push(what);
+  };
+  if (WARRANTY.service.grid) upgrade('grid', 'the Harbor’s new pad-mount transformer and feeder');
+  if (s.tier >= 5 && WARRANTY.service.gen) upgrade('generator', 'the Resort’s bigger standby set and transfer switch');
+  if (lines.length) {
+    const id = (s.feed[s.feed.length - 1]?.id ?? 0) + 1;
+    s.feed.push({
+      id,
+      week: s.week,
+      role: 'all',
+      tone: 'good',
+      text: `This update brings ${lines.join(' and ')}: in at ${UPGRADE_HEALTH} or better, under the builder’s warranty to week ${W + WARRANTY.weeks}.`,
+      at: s.updatedAt,
+    });
+    if (s.feed.length > 60) s.feed.splice(0, s.feed.length - 60);
+  }
+}
+
+/** the service upgrade's condition on a live island (the synthesis's release grant: a new transformer and feeder, a new standby set) */
+const UPGRADE_HEALTH = 80;
 
 function convertOrders(s: IslandState, W: number) {
   for (const o of s.orders) {

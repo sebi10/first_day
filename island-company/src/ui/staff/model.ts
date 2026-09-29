@@ -1,10 +1,12 @@
 // What the staff screens say (docs/JOBFLOW.md 15.11): pure reads of the island
 // for the analyst's Staff desk and the builders' line on Home. No engine writes.
+import { RENO, WARRANTY } from '../../sim/data';
+import { underWarranty } from '../../sim/econ';
 import { helperQueues } from '../../sim/engine';
 import { itemById, priceAt } from '../../sim/items';
 import { nextTierProgress } from '../../sim/progression';
-import { buildDef, buildSite, crewOf, nextUnit, openBuild, pilotSeats, STAFF, unitLines, working } from '../../sim/staff';
-import type { Build, IslandState, ItemId, Npc, NpcRole } from '../../sim/types';
+import { buildDef, buildSite, crewOf, nextUnit, openBuild, pilotSeats, renoAgainFrom, renoOpen, STAFF, unitLines, working } from '../../sim/staff';
+import type { Asset, Build, IslandState, ItemId, Npc, NpcRole, Role } from '../../sim/types';
 
 /** building materials by their short names (the catalog's are the yard's full descriptions) */
 export const MATERIAL: Record<string, string> = {
@@ -54,7 +56,7 @@ export function doingNow(s: IslandState, n: Npc): string {
   }
   const b = openBuild(s);
   const out = STAFF.output[n.skill - 1] ?? 0;
-  return b ? `on ${buildSite(b)} · ${units(out)} unit${out === 1 ? '' : 's'} a week` : 'no site work open';
+  return b ? `on ${buildSite(b, s)} · ${units(out)} unit${out === 1 ? '' : 's'} a week` : 'no site work open';
 }
 
 /** the island's crew by role against the standard crew for its tier ("2 of 2 pilots") */
@@ -160,7 +162,7 @@ export function buildLine(s: IslandState): { text: string; tone: 'ok' | 'wait' |
     if (!hired.length) return null;
     return { text: `Builders: no site work open${s.tier >= 3 ? ' · start a cottage?' : ''}`, tone: 'none' };
   }
-  const site = buildSite(b);
+  const site = buildSite(b, s);
   const head = `${units(b.done)} of ${b.need} units on ${site}`;
   if (!hired.length) return { text: `No builder on the payroll: the site work on ${site} waits (${head.replace(` on ${site}`, '')} done). Hire one on the desk.`, tone: 'wait' };
   const u = nextUnit(s, b);
@@ -178,4 +180,43 @@ export function buildLine(s: IslandState): { text: string; tone: 'ok' | 'wait' |
     return { text: `Builders: ${head} (for tier ${b.tier}) · next ${words}: not ordered. Buy it on the desk when the cash allows.`, tone: 'wait' };
   const buy = buildBuy(s, b, 1);
   return { text: `Builders: ${head} · next ${words}: not ordered${builders.length ? '' : ' (their start is next week)'}`, tone: 'wait', buy };
+}
+
+// ---------------------------------------------------------------------------
+// G0: the builder's warranty and renovations, in words every seat reads the same
+
+export type Said = { text: string; tone: 'rust' | 'sea' | 'palm' | 'amber' | '' };
+
+/**
+ * A building's warranty line (G0): a house or the generator the builders put up from the Harbor on, a renovated house,
+ * or the grid and the generator after their service upgrade. While it runs it loses WARRANTY.decay a week untouched;
+ * an ended one is said for 26 weeks, then dropped
+ */
+export function warrantyLine(s: IslandState, a: Asset): Said | null {
+  if (a.warrantyUntil === undefined) return null;
+  const who = a.kind === 'house' ? "Builder's warranty" : a.kind === 'grid' ? 'The new transformer and feeder are under warranty' : a.kind === 'generator' ? 'The standby set is under warranty' : 'Under warranty';
+  if (underWarranty(s, a))
+    return { text: `${who} to week ${a.warrantyUntil}: it loses ${WARRANTY.decay} a week untouched instead of the usual. Guests' wear, storms and incidents still hit it.`, tone: 'palm' };
+  if (a.warrantyUntil >= s.week - 26) return { text: `${a.kind === 'house' ? "Its builder's warranty" : 'Its warranty'} ended in week ${a.warrantyUntil}: it wears at the usual rate now.`, tone: '' };
+  return null;
+}
+
+/** where a house's renovation stands, if it has one on the list or had one recently (null: neither) */
+export function renoStatus(s: IslandState, h: Asset, me?: Role): Said | null {
+  const elec = me === 'elec' ? 'you' : (s.players.elec?.name ?? 'the electrician');
+  const b = renoOpen(s, h.id);
+  if (b) {
+    if (b.finished !== undefined)
+      return {
+        text: `The builders finished its renovation in week ${b.finished}. It stays closed until ${elec} ${me === 'elec' ? 'sign' : 'signs'} off the permit final (devices, GFCI and AFCI, labels, the panel directory); then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.`,
+        tone: 'rust',
+      };
+    if ((b.drawn ?? 0) > 0) return { text: `Closed for its renovation: the builders are on it (${units(b.done)} of ${b.need} units). No guests meanwhile, and it doesn't wear.`, tone: 'rust' };
+    const ahead = openBuild(s);
+    return { text: `Renovation ordered in week ${b.started}: it stays open until the builders start${ahead && ahead.id !== b.id ? `, after ${buildSite(ahead, s)}` : ', when its materials are in'}.`, tone: 'sea' };
+  }
+  const last = (s.builds ?? []).filter((x) => x.reno === h.id && x.signed !== undefined).sort((x, y) => y.signed! - x.signed!)[0];
+  const again = renoAgainFrom(s, h.id);
+  if (last && again > s.week) return { text: `Renovated: its final was signed in week ${last.signed}. One renovation per house every ${RENO.cooldown} weeks: again from week ${again}.`, tone: 'palm' };
+  return null;
 }

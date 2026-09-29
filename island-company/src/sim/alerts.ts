@@ -10,7 +10,7 @@ import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
 import { CHECK_SYMPTOMS } from './checkdata';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
-import { FEED_KINDS, feedAlert, gridFirst, gridFirstJob } from './econ';
+import { FEED_KINDS, feedAlert, gridFirst, gridFirstJob, renovating } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
 import { helperJobs, pilotOf, squawkNff, wearMult } from './staff';
 import { defaultTask, taskOn, type Task } from './tasks';
@@ -570,6 +570,21 @@ const ELEC: Symptom[] = [
     rooms: ['panel'],
     lead: [2, 2],
     prefilled: true,
+    causes: [{ kind: 'codeprep', w: 1, fix: 'ref:inspect' }],
+  },
+  {
+    // G0: the builders finished a renovation; the house stays closed until its electrical final is signed off (the
+    // county's inspection on the renovation permit; a code notice already open on the house is the same visit)
+    key: 'E_RENO_FINAL',
+    role: 'elec',
+    src: 'code',
+    text: 'Renovation at {house}: the builders are done. The county final on the permit: devices, GFCI and AFCI, labels, the panel directory. The house stays closed until it passes.',
+    short: 'Permit final: {house} stays closed until it passes',
+    targets: HOUSES,
+    rooms: ['panel'],
+    lead: [0, 0],
+    prefilled: true,
+    auto: true,
     causes: [{ kind: 'codeprep', w: 1, fix: 'ref:inspect' }],
   },
   {
@@ -1273,6 +1288,8 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     let slots = Math.max(0, Math.min(3 + extra, target - openCount));
     const cands: { kind: string; asset: Asset; w: number }[] = [];
     for (const asset of s.assets) {
+      // a house closed for its renovation raises nothing new: nobody's in it, and its final covers the electrical side
+      if (renovating(s, asset.id)) continue;
       for (const c of CATALOG) {
         if (c.role !== role || !c.targets.includes(asset.model)) continue;
         if (openOrders.some((o) => o.kind === c.kind && o.assetId === asset.id)) continue;

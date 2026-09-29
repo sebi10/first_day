@@ -79,6 +79,13 @@ function openSite(s: IslandState, id: string, done: number, builders: number) {
   s.builds = [{ id, what: d.what, ...(d.tier ? { tier: d.tier } : {}), ...(cottage ? { cottage } : {}), done, drawn: Math.ceil(done), need: d.units.length, started: s.week - 3 }];
   staffed(s, [['pilot', 3], ['pilot', 3], ['housekeeper', 3], ...Array.from({ length: builders }, (): [NpcRole, 3] => ['builder', 3])]);
 }
+/** G0: Cottage 2 under renovation (unit 1 drawn), Cottage 1's builders done and its final waiting; two builders on it */
+function renovations(s: IslandState) {
+  staffed(s, [['pilot', 3], ['pilot', 3], ['housekeeper', 3], ['housekeeper', 3], ['builder', 3], ['builder', 3]]);
+  const reno = (id: string, done: number, finished?: number) => ({ id: `reno-cottage-${id}-${s.week - 3}`, what: 'Renovate', reno: id, done, drawn: Math.ceil(done), need: 2, started: s.week - 3, ...(finished !== undefined ? { finished } : {}) });
+  s.builds = [...(s.builds ?? []).filter((b) => b.finished !== undefined), reno('h2', 1), reno('h1', 2, s.week - 1)];
+}
+
 const siteScn = (id: string, note: string, tier: number, build: string, done: number, builders: number): Scn => ({ id, note, tier, phase: 'day', focus: 'site', tweak: (s) => openSite(s, build, done, builders) });
 
 /** an open alert, as the engine raises it (a hazard on a house, a squawk due now on a plane) */
@@ -228,6 +235,29 @@ const SCN: Scn[] = [
   siteScn('site-t4-dock', "Zoomed to the builders' site: the seaplane dock's pilings (1.4 of 4 units), three builders", 3, 't4', 1.4, 3),
   siteScn('site-t5', "Zoomed to the builders' site: the Lodge on its terrace (2.5 of 4 units), two builders", 4, 't5', 2.5, 2),
   siteScn('site-cottage', "Zoomed to the builders' site: Cottage 6 in the lagoon grove (2.2 of 5 units), three builders, a ground power cart on the apron (its tap target stays 44 px)", 3, 'cottage-h9', 2.2, 3),
+  // G0: renovations (the builders' scaffold and tarp while they work, the permit card while it waits on the final)
+  {
+    id: 'reno',
+    note: "G0, zoomed to the builders' site: Cottage 2 closed for its renovation (1 of 2 units, scaffold and tarp, two builders), Cottage 1 done and waiting on the electrician's permit final (the permit card)",
+    tier: 5,
+    phase: 'day',
+    focus: 'site',
+    tweak: (s) => renovations(s),
+  },
+  {
+    id: 'beaten-reno',
+    note: 'G0 on the heaviest day scene: the beaten Resort with two renovations on (the node budget)',
+    tier: 5,
+    phase: 'night',
+    weather: 'storm',
+    tweak: (s) => {
+      played(s, 30, { bplus: 26, perfect: 6, strength: 1.1, grade: 'A' });
+      s.stats.aStreak = 8;
+      s.creditsWeek = s.week - 1;
+      gse(s);
+      renovations(s);
+    },
+  },
   {
     id: 'beaten',
     note: 'Beat the game: tier 5 at night, 8 full-crew A weeks at the Resort, the crew statue, observatory, bunting',

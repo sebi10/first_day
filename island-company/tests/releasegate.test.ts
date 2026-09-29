@@ -126,10 +126,10 @@ describe("live islands keep the credits' streak they earned (the live-docs revie
     // stamped once, on the first v4 read: the week v4 takes over and the streak the old rule had earned
     expect(m.stats).toMatchObject({ aCarry: 7, v4From: 25 });
     expect(carriedStreak(m)).toBe(true);
-    // the first write on this build stores the same stamp (apply migrates before it stamps engine 4), once
+    // the first write on this build stores the same stamp (apply migrates before it stamps its engine), once
     const w = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
     expect(w.error).toBeUndefined();
-    expect(w.s.engine).toBe(4);
+    expect(w.s.engine).toBe(5);
     expect(w.s.stats).toMatchObject({ aStreak: 7, aCarry: 7, v4From: 25 });
     expect(migrate(structuredClone(w.s)).stats).toMatchObject({ aCarry: 7, v4From: 25 });
     // the Board reads 7/8 (on db306aa: 3/8, the Resort weeks only)
@@ -193,7 +193,7 @@ describe("live islands keep the credits' streak they earned (the live-docs revie
     s.week = 30;
     s.stats.aStreak = 5;
     migrate(s);
-    expect(s.engine).toBe(4);
+    expect(s.engine).toBe(5);
     expect(s.stats.aCarry).toBeUndefined();
     expect(s.stats.v4From).toBeUndefined();
     // and the same simulate crews' docs never get it (the golden digests read every week's doc)

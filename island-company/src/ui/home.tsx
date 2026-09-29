@@ -20,6 +20,7 @@ import { siteBox } from './island/geo';
 import { MapView } from './map/MapView';
 import { InspectSheet } from './inspect/InspectSheet';
 import { whatsNewMapPanels } from './inspect/WhatsNewMap';
+import { whatsNewUpkeepPanels } from './staff/WhatsNewUpkeep';
 import { WhatsNew } from './whatsnew';
 import type { ObjectRef } from './objects';
 import { ENGINE_VERSION } from '../sim/engine';
@@ -158,7 +159,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
       </Sheet>
       {/* stage 2's What's new: never on top of a puzzle, the week's review or the Harbor sheet (it waits for them) */}
       {tab === 'island' && !play && (
-        <WhatsNew key={`new-${role}`} s={s} role={role} version={ENGINE_VERSION} panels={whatsNewMapPanels(s, role)} hold={!!review || harborPending(s, role)} />
+        <WhatsNew key={`new-${role}`} s={s} role={role} version={ENGINE_VERSION} panels={releasePanels(s, role)} hold={!!review || harborPending(s, role)} />
       )}
       <Sheet open={gse !== undefined} onClose={() => setGse(undefined)} label="Ground power">
         {gse !== undefined && <GseSheet ctl={ctl} focus={gse} onClose={() => setGse(undefined)} />}
@@ -749,4 +750,11 @@ function Dock({
       </Sheet>
     </>
   );
+}
+
+/** v5's What's new: stage 2's map panels, with G0's (the warranty, the service upgrade, renovations) before the last one */
+function releasePanels(s: IslandState, role: Role) {
+  const map = whatsNewMapPanels(s, role);
+  const g0 = whatsNewUpkeepPanels(s, role);
+  return map.length > 1 ? [...map.slice(0, -1), ...g0, map[map.length - 1]] : [...map, ...g0];
 }

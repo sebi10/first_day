@@ -17,7 +17,7 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 import { executablePath } from './chromium.mjs';
 
-const BUDGET = ['beaten', 'beaten-storm-night', 'home-fleet', 'tern-busy', 'adair-busy', 'region'];
+const BUDGET = ['beaten', 'beaten-storm-night', 'beaten-reno', 'home-fleet', 'tern-busy', 'adair-busy', 'region'];
 const PERF = ['beaten', 'beaten-storm-night'];
 const LIMIT = { scene: 1500, region: 400 };
 

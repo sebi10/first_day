@@ -119,6 +119,11 @@ export function builderSpots(s: IslandState): Pt[] {
     const plot = PLOT[building.cottage];
     if (plot) crewAt.push(...crewSpots('house', plot[0], plot[1]));
   }
+  // G0: on a renovation, at the house (from the week they start on it: its first materials drawn)
+  if (building.reno && (building.drawn ?? 0) > 0) {
+    const at = POS[building.reno] ?? PLOT[building.reno];
+    if (at) crewAt.push(...crewSpots('house', at[0], at[1]));
+  }
   return crewAt;
 }
 

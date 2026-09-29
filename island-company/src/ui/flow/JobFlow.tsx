@@ -20,7 +20,7 @@ import { ManualView } from './ManualView';
 import { PartsStep } from './PartsStep';
 import { StockStep } from './StockStep';
 import { applies, assetOf, checkDraft, missingSlot, newDraft, pickFirstWords, preview, reduceDraft, researchRepick, sendAction, stepper, STEPS, taskFor, tierOf, type Draft, type DraftAct, type Preview, type StepKey } from './steps';
-import { assetTitle, draftKey, flagsOf, nameOf, session, SRC_ICON, SRC_WORDS } from './words';
+import { assetTitle, draftKey, flagsOf, nameOf, session, SRC_ICON, srcWord } from './words';
 
 export type JobFlowProps = {
   ctl: Ctl;
@@ -170,7 +170,7 @@ export function JobFlow({ ctl, alert: a, repick, onClose, onStart, demo }: JobFl
         </span>
         <span class="col grow" style={{ gap: 2, minWidth: 0 }}>
           <span class="label jf-where">
-            {SRC_WORDS[a.src]} · {assetTitle(s, asset)}
+            {srcWord(a)} · {assetTitle(s, asset)}
           </span>
           <b class="jf-sym">{symptomText(s, a)}</b>
         </span>

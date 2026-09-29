@@ -20,6 +20,7 @@ import { botTurn, TEAMS } from '../src/sim/bots';
 import { islandAircraft, openChain } from '../src/sim/chain';
 import { kitValue, STOCK } from '../src/sim/data';
 import { ENGINE_VERSION, apply } from '../src/sim/engine';
+import { expectLiveMigration } from './livedocs';
 import { cardOf, flowStage } from '../src/sim/flow';
 import { committed } from '../src/sim/ledger';
 import { migrate } from '../src/sim/migrate';
@@ -238,29 +239,27 @@ describe('what the migration does to the orders', () => {
 
 describe('the v3 docs the live job-flow build wrote (bd1e1d2): the v4 build reads them as they are', () => {
   const V3 = ['early', 'late', 'midweek', 'mel', 'chain', 'makesafe', 'build', 'feeder', 'restricted-t1', 'restricted-t2', 'restricted-mel'].map((n) => `v3-bd1e1d2-${n}`);
-  it("migrate() changes nothing on any of them but the one-time v4 stamp, so the app's read path (useIsland: engine below this build's → migrate a copy) shows the doc as written", () => {
+  it("migrate() changes nothing on any of them but the one-time stamps (v4's, and at tier 4-5 G0's upkeep migration), so the app's read path (useIsland: engine below this build's → migrate a copy) shows the doc as written", () => {
     for (const name of V3) {
       const doc = load(name);
       expect(doc.engine, name).toBe(3);
       expect((doc.engine ?? 0) < ENGINE_VERSION).toBe(true);
       // the release gate (DECISIONS "2026-09-29: stage 1 release gate"): the week v4 takes over, and the credits streak
-      // the old rule earned, carried; nothing else
-      const want = clone(doc);
-      want.stats.v4From = doc.week;
-      if ((doc.stats.aStreak ?? 0) > 0) want.stats.aCarry = doc.stats.aStreak;
-      expect(JSON.stringify(migrate(clone(doc))), name).toBe(JSON.stringify(want));
+      // the old rule earned, carried; G0 (v5): at the Harbor or the Resort, the builder's warranty dated from the
+      // buildings and the service upgrade, once; nothing else (tests/livedocs.ts spells it out)
+      expectLiveMigration(doc, migrate(clone(doc)), name);
       // and it's stamped once: a second read changes nothing
-      expect(JSON.stringify(migrate(migrate(clone(doc)))), name).toBe(JSON.stringify(want));
+      expect(JSON.stringify(migrate(migrate(clone(doc)))), name).toBe(JSON.stringify(migrate(clone(doc))));
       selectors(doc);
     }
   });
 
-  it('a v2 doc goes straight to engine 4 on its first move, migrated once', () => {
+  it('a v2 doc goes straight to engine 5 on its first move, migrated once', () => {
     const doc = load('v2-6c0c426-midweek');
     const r = apply(doc, { t: 'rename', role: 'fin', name: doc.players.fin!.name }, doc.updatedAt + 1000);
     expect(r.error).toBeUndefined();
     expect(r.s.engine).toBe(ENGINE_VERSION);
-    expect(ENGINE_VERSION).toBe(4);
+    expect(ENGINE_VERSION).toBe(5);
     expect(JSON.stringify(migrate(clone(r.s)))).toBe(JSON.stringify(r.s));
   });
 });

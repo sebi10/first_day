@@ -21,7 +21,7 @@ import { externalPower, fmtDate, planeModel } from '../../sim/aircraft';
 import { islandAircraft } from '../../sim/chain';
 import { GEN_PANEL, HOME_PANEL, HOUSE_CIRCUITS } from '../../sim/checkdata';
 import { canCheck, checkKindFor, type CheckKind } from '../../sim/checks';
-import { ECON, INSURANCE, MODELS, REPORTS, ROLE_LABEL } from '../../sim/data';
+import { ECON, INSURANCE, MODELS, RENO, REPORTS, ROLE_LABEL } from '../../sim/data';
 import {
   alertAog,
   cableReport,
@@ -55,7 +55,7 @@ import { moveChip } from '../flow/words';
 import { FIXTURE_NAME, HOME, OBJECT_LABEL, type ObjectKind, type ObjectRef, type StationId } from '../objects';
 import { cardVM, flowQueue } from '../purchasing/model';
 import { assetPnl, fixtureFacts, flaggable, openAlertsOn } from '../select';
-import { buildLine, doingNow, ROLE_WORD } from '../staff/model';
+import { buildLine, doingNow, renoStatus, ROLE_WORD, warrantyLine } from '../staff/model';
 
 // ---------------------------------------------------------------------------
 // The shape
@@ -95,7 +95,9 @@ export type Act =
   /** start an extra cottage (+1 confirm) */
   | { t: 'build'; label: string; usd: number; text: string; ok: boolean; why?: string }
   /** the crew board DM to a seat, with a message started (crewboard.tsx openDm) */
-  | { t: 'dm'; to: Role; label: string; prefill: string };
+  | { t: 'dm'; to: Role; label: string; prefill: string }
+  /** G0: renovate this house (the analyst's capex, from tier 4): the case, then confirm (staff/Reno.tsx RenoCard) */
+  | { t: 'reno'; assetId: string };
 
 /** the seat's own record blocks: drawn by the per-kind files */
 export type Block =
@@ -455,7 +457,14 @@ function houseFacts(s: IslandState, h: Asset, role: Role): Facts {
     primary = ratesAct(s);
     // the rest of pricing (the charter rate, the season, the rate's effect on occupancy) is on the desk's Money tab
     actions.push({ t: 'desk', desk: 'money', label: 'Pricing', sub: 'The desk’s Money tab: the demand curve and the charter rate', at: 'pricing' });
+    // G0: the analyst's renovation, from the Harbor (a house at 75 or below; its state once one is on the list)
+    if (s.tier >= RENO.fromTier) actions.push({ t: 'reno', assetId: h.id });
   }
+  // G0, every seat: where its renovation stands, and its builder's warranty
+  const reno = renoStatus(s, h, role);
+  if (reno) lines.push({ text: reno.text, tone: reno.tone });
+  const wl = warrantyLine(s, h);
+  if (wl) lines.push({ text: wl.text, tone: wl.tone });
   return {
     name: h.name,
     where: `${MODELS[h.model]?.label ?? 'House'} · ${stationName(s, HOME)}`,
@@ -537,6 +546,9 @@ function gridFacts(s: IslandState, g: Asset, role: Role): Facts {
     lines.push({ text: pnl.parts + pnl.labour > 0 ? `Repairs over 13 weeks: ${money(pnl.parts)} parts + ${money(pnl.labour)} labour.` : 'No repair spend on it in 13 weeks.' });
     for (const o of openReports(s).filter((o) => o.report!.key === 'utilityAutopay')) lines.push({ text: reportWords(s, o, role), tone: 'rust' });
   }
+  // G0: the Harbor's service upgrade (a new pad-mount transformer and feeder) under its warranty
+  const wl = role === 'mech' ? null : warrantyLine(s, g);
+  if (wl) lines.push({ text: wl.text, tone: wl.tone });
   return {
     name: g.name,
     where: `${MODELS[g.model]?.label ?? 'Grid'} · ${stationName(s, HOME)}`,
@@ -597,6 +609,9 @@ function genFacts(s: IslandState, g: Asset, role: Role): Facts {
     lines.push({ text: pnl.parts + pnl.labour > 0 ? `Repairs over 13 weeks: ${money(pnl.parts)} parts + ${money(pnl.labour)} labour.` : 'No repair spend on it in 13 weeks.' });
     for (const o of fan) lines.push({ text: reportWords(s, o, role), tone: 'rust' });
   }
+  // G0: the Resort's bigger standby set and transfer switch (or a new generator house from the Harbor on) under its warranty
+  const wl = warrantyLine(s, g);
+  if (wl) lines.push({ text: wl.text, tone: wl.tone });
   return {
     name: g.name,
     where: `${MODELS[g.model]?.label ?? 'Generator'} · ${stationName(s, HOME)}`,
@@ -847,7 +862,7 @@ function siteFacts(s: IslandState, ref: ObjectRef, role: Role): Facts {
     actions.push({ t: 'desk', desk: 'staff', label: 'Site work', sub: 'The desk’s Staff tab: the builders and what they need', at: 'site-work' });
   }
   return {
-    name: b ? cap1(buildSite(b)) : OBJECT_LABEL.site,
+    name: b ? cap1(buildSite(b, s)) : OBJECT_LABEL.site,
     where: `${OBJECT_LABEL.site} · ${stationName(s, ref.st)}`,
     status: built ? `Finished in week ${built.finished}` : b ? `${Math.floor(b.done + 1e-9)} of ${plural(b.need, 'unit')} done${b.tier ? ` (for tier ${b.tier})` : ''}` : 'No site work open',
     tone: !built && !elsewhere && bl?.tone === 'wait' ? 'amber' : '',
@@ -855,7 +870,7 @@ function siteFacts(s: IslandState, ref: ObjectRef, role: Role): Facts {
     blocks,
     actions,
     primary,
-    report: role === 'fin' ? null : { t: 'dm', head: `The builders are ${nameOf(s, 'fin')}'s`, dms: dmsFrom(s, role, b ? buildSite(b) : 'the build site', ['fin']) },
+    report: role === 'fin' ? null : { t: 'dm', head: `The builders are ${nameOf(s, 'fin')}'s`, dms: dmsFrom(s, role, b ? buildSite(b, s) : 'the build site', ['fin']) },
   };
 }
 

@@ -6,10 +6,10 @@
 //   4. autopilot's covered code prep and 100-hour inspection pass (by the book), as a blind sign-off's do
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { raiseAlert } from '../src/sim/alerts';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
-import { ECON, FLOAT_AUCTION, PROJECT_COVER } from '../src/sim/data';
+import { ECON, FLOAT_AUCTION, PROJECT_COVER, RENO_BOT } from '../src/sim/data';
 import { bookInspection, INSPECTION_SLIP, onSchedule, projectCoverWeek, renewedInspection } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { planTask, stdPick } from '../src/sim/flow';
@@ -160,6 +160,11 @@ describe('1. code inspections on the county calendar', () => {
     expect(new Set(before).size).toBe(3);
     // the base crew (no quick checks or flags): the calendar's claim, not the crew's extra work (stage 2's T7 prices that)
     const team = baseCrew(TEAMS['three friends']);
+    // (the county calendar alone: the analyst orders no renovation here. On this worn doc the fin bot would renovate
+    // two closing houses, and their finals rank above the other preps: G0, tests/warranty.test.ts)
+    const trigger = RENO_BOT.trigger;
+    RENO_BOT.trigger = 0;
+    onTestFinished(() => void (RENO_BOT.trigger = trigger));
     // the paper-sim crew plays seven weeks on this build: every house's prep comes due and is signed off once. (Six
     // before A0: from tier 4 the grid under 55 goes first, and on this doc it takes the electrician's slot in two of
     // these weeks, so the last house is prepped in the seventh, as a lapsed inspection re-done)

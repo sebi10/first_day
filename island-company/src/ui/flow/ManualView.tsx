@@ -136,7 +136,7 @@ function Preview({ s, a, d, act }: { s: IslandState; a: Alert; d: Draft; act(x: 
       )}
       {pre && (
         <div class="jf-note">
-          <b>{a.src === 'due' ? 'Due item' : a.src === 'ad' ? 'AD' : a.src === 'code' ? 'Code notice' : a.src === 'takeoff' ? 'Take-off' : a.repair ? 'Repair' : 'Write-up'}:</b> this task is named. Read it, then use it.
+          <b>{a.src === 'due' ? 'Due item' : a.src === 'ad' ? 'AD' : a.sym === 'E_RENO_FINAL' ? 'Permit final' : a.src === 'code' ? 'Code notice' : a.src === 'takeoff' ? 'Take-off' : a.repair ? 'Repair' : 'Write-up'}:</b> this task is named. Read it, then use it.
         </div>
       )}
       <div class="row spread" style={{ alignItems: 'baseline' }}>

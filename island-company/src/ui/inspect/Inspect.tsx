@@ -43,6 +43,7 @@ import { LogBlock, PlateBlock } from './plane';
 import { Schedule } from './power';
 import { DmButton, Report } from './Report';
 import { Walkaround } from './Walkaround';
+import { RenoCard } from '../staff/Reno';
 import './inspect.css';
 
 type Mode = { t: 'info' } | { t: 'check' } | { t: 'writeUp'; assetId: string } | { t: 'gse'; cart: string | null };
@@ -323,6 +324,8 @@ function ActView({ a, ctl, role, run }: { a: Act; ctl: Ctl; role: Role; run: Run
       return <HireCard ctl={ctl} a={a} onDone={() => undefined} />;
     case 'rates':
       return <RatesStepper ctl={ctl} a={a} />;
+    case 'reno':
+      return <RenoCard ctl={ctl} id={a.assetId} />;
     case 'check':
       return null;
     default: {

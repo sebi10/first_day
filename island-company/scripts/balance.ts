@@ -8,15 +8,19 @@
 //                                         # its money table (T1) and a trajectory table (does the Resort hold: houses rentable at
 //                                         # weeks 40 and 52, revenue against budget, the cash slope). `long 78` plays 78 weeks and
 //                                         # adds weeks 65 and 78 (review round 1: the 52-week window hid a delayed collapse)
+//   npm run balance -- long64             # G0 (stage 2, docs/EXPANSION.md): the long game over 64 weeks x 30 seeds, weeks 24-64 judged,
+//                                         # the credits by week 52, house health at weeks 26/39/52/64, and the G0 verdict for the two
+//                                         # target teams (env TEAMS=a,b runs only those teams; DUMP=1 prints every seed)
 //   npm run balance -- flow [team] [n]    # the first 40 alerts of one game: symptom, hidden cause, the bot's task and pick, the verdict, what came of it
 //   npm run balance -- cottages           # the three friends with an analyst who starts a cottage at tier 4 (the staff update's growth project)
 //   add checks=off to any run             # stage 2 (docs/EXPANSION.md 11.1 T7): the bots make no quick checks and no flags (the run as before they existed)
+//   add goal=quarter to any run           # G0: the credits under GOAL.rule 'quarter' (two months on plan at the Resort) instead of the default 'streak'
 // The summary's `mistakes` crew is the three friends with a human's slips (a near-miss pick on one plan in ten, a
 // stock request a week): its money and latency next to the three friends' price the mistakes the bots don't make.
 import { causeOf, fixesOf, symptomOf } from '../src/sim/alerts';
 import { simulate, TEAMS, type SimWeek, type Team } from '../src/sim/bots';
 import { stdPickFor, planTask } from '../src/sim/flow';
-import { ECON } from '../src/sim/data';
+import { ECON, GOAL } from '../src/sim/data';
 import { invValue } from '../src/sim/ledger';
 import { payroll, standardPayroll } from '../src/sim/staff';
 import { binsInUse, binsTotal } from '../src/sim/stock';
@@ -26,7 +30,14 @@ const WEEKS = 26;
 const SEEDS = 30;
 // stage 2 (T7): `checks=off` anywhere in the arguments turns the bots' quick checks and flags off
 const checksOff = process.argv.includes('checks=off');
-const args = process.argv.slice(2).filter((a) => a !== 'checks=off');
+// G0: `goal=quarter` (or goal=streak, the default) plays the run under that credits rule (data GOAL, one switch)
+const goalArg = process.argv.find((a) => a.startsWith('goal='))?.slice(5);
+if (goalArg) {
+  if (goalArg !== 'streak' && goalArg !== 'quarter') throw new Error(`goal=${goalArg}: streak or quarter`);
+  GOAL.rule = goalArg;
+  console.log(`(goal=${goalArg}: the credits are ${goalArg === 'quarter' ? 'two months on plan at the Resort' : '8 full-crew A weeks at the Resort'})`);
+}
+const args = process.argv.slice(2).filter((a) => a !== 'checks=off' && !a.startsWith('goal='));
 process.argv.splice(2, process.argv.length - 2, ...args);
 /** the long game (docs/EXPANSION.md 11.1 T1): 52 weeks, judged on weeks 24-52 (after the Resort); `long 78` plays on to week 78 */
 const LONG = 52;
@@ -141,7 +152,7 @@ type LongGame = {
   negAfter: number;
   cashAt: (week: number) => number;
 };
-function longGame(team: Team, seed: number, salt = '', trace?: (s: IslandState) => void, weeksN = LONG): { g: LongGame; weeks: SimWeek[]; final: IslandState } {
+function longGame(team: Team, seed: number, salt = '', trace?: (s: IslandState) => void, weeksN = LONG, judge = LONG): { g: LongGame; weeks: SimWeek[]; final: IslandState } {
   const hp = { house: [] as number[], grid: [] as number[] };
   const at: LongGame['at'] = {};
   const share: number[] = [];
@@ -154,7 +165,7 @@ function longGame(team: Team, seed: number, salt = '', trace?: (s: IslandState) 
     (s) => {
       trace?.(s);
       const W = s.week - 1;
-      if (s.receivership > 0 && !inRecv && W <= LONG) recv++;
+      if (s.receivership > 0 && !inRecv && W <= judge) recv++;
       inRecv = s.receivership > 0;
       const hs = s.assets.filter((a) => a.kind === 'house');
       const g = s.assets.find((a) => a.kind === 'grid');
@@ -167,7 +178,7 @@ function longGame(team: Team, seed: number, salt = '', trace?: (s: IslandState) 
     },
     salt,
   );
-  const late = weeks.filter((w) => w.week >= LONG_FROM && w.week <= LONG);
+  const late = weeks.filter((w) => w.week >= LONG_FROM && w.week <= judge);
   const at_ = (wk: number) => weeks.find((w) => w.week === wk)?.cash ?? NaN;
   const t5w = weeks.filter((w) => w.tier === 5 && w.week <= LONG);
   return {
@@ -225,8 +236,9 @@ if (arg === 'detail') {
   // a week's play never depends on how long the run is), and the last two columns are the long game's (T1).
   console.log(`\nRobustness: ${WEEKS} weeks x 90 seeds x 4 crews per team (and the long game: ${LONG} weeks)\n`);
   console.log(`team            crew  wk→T5  miss T5  weeks<0  min cash  defect/wk  latency  AOG wk  fill%  long<0 wk${LONG_FROM}+  credits≤${CREDITS_BY}`);
-  for (const name of ['three friends', 'all average']) {
-    for (const salt of ['', 'a', 'b', 'c']) {
+  // (env ROBUST_TEAMS=a,b and SALTS=-,a run a part of the sweep, for parallel runs; '-' is the unsalted crew)
+  for (const name of process.env.ROBUST_TEAMS?.split(',') ?? ['three friends', 'all average']) {
+    for (const salt of process.env.SALTS?.split(',').map((x) => (x === '-' ? '' : x)) ?? ['', 'a', 'b', 'c']) {
       const t5: number[] = [];
       let neg = 0;
       let def = 0;
@@ -313,6 +325,55 @@ if (arg === 'detail') {
   console.log(`rent@N: houses rentable at week N's resolve, of the houses there. rev/budget: the week's revenue against the tier's budget, weeks 40-52, the median game's mean. cash/wk: the median game's cash slope, weeks 39-52.`);
   console.log(`\nT1 (docs/EXPANSION.md 11.1): three friends and all average at a median of 0 weeks below $0 in weeks ${LONG_FROM}-${LONG}; at most 3 of ${SEEDS} games ever below $0; median dead weeks ≤ 2; the credits by week ${CREDITS_BY} in ≥ 50% of three-friends games; tier medians as in T0.`);
   console.log('The hold line (review round 1, proposed): the median three-friends game has at least 4 of 7 houses rentable at week 52, and revenue at 70% of budget or more in weeks 40-52.');
+} else if (arg === 'long64') {
+  // G0 (stage 2): the long game after the Resort must hold 64 weeks. Every team (or env TEAMS) over 64 weeks x 30 seeds,
+  // weeks 24-64 judged: games ever below $0, weeks below $0 and dead weeks (summed, and the median game), games that
+  // entered receivership, the median game's mean house health at weeks 26/39/52/64, the credits by week 52
+  const END = 64;
+  const BY = 52;
+  const AT = [26, 39, 52, 64];
+  const only = process.env.TEAMS?.split(',');
+  console.log(`\nG0, the long game: ${END} weeks x ${SEEDS} seeds per team (weeks ${LONG_FROM}-${END} judged; medians unless noted)\n`);
+  console.log(`team            wk→T5  top  games<0  weeks<0 (med)  dead wk (med)  recv  house@${AT.join('/')}  credits≤${BY}  cr wk  A@T5   cash@52   cash@64`);
+  const verdict: string[] = [];
+  for (const [name, team] of Object.entries(TEAMS)) {
+    if (only && !only.includes(name)) continue;
+    const gs: { g: LongGame; top: number }[] = [];
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const { g, final } = longGame(team, seed, '', undefined, END, END);
+      gs.push({ g, top: final.tier });
+      if (process.env.DUMP)
+        console.log(`  ${name} seed ${seed}: T5 ${g.t5 >= 99 ? '-' : g.t5} neg ${g.neg} dead ${g.dead} recv ${g.receiverships} credits ${g.credits >= 99 ? '-' : g.credits} house ${AT.map((w) => (g.at[w]?.house ?? NaN).toFixed(0)).join('/')} cash@64 ${usd(g.cashAt(END))}`);
+    }
+    const m = (f: (g: LongGame) => number) => med(gs.map((x) => f(x.g)));
+    const t5 = m((g) => g.t5);
+    const neg = gs.filter((x) => x.g.neg > 0).length;
+    const recv = gs.filter((x) => x.g.receiverships > 0).length;
+    const hp = AT.map((w) => m((g) => g.at[w]?.house ?? NaN));
+    const cr = gs.filter((x) => x.g.credits <= BY).length;
+    const crw = m((g) => g.credits);
+    const t5w = gs.reduce((n, x) => n + x.g.t5Weeks, 0);
+    const aw = gs.reduce((n, x) => n + x.g.aWeeks, 0);
+    const top = Math.max(...gs.map((x) => x.top));
+    console.log(
+      `${name.padEnd(15)} ${(t5 >= 99 ? '—' : String(t5)).padStart(5)} ${String(top).padStart(4)} ${`${neg}/${SEEDS}`.padStart(8)} ${`${gs.reduce((n, x) => n + x.g.neg, 0)} (${m((g) => g.neg)})`.padStart(14)} ${`${gs.reduce((n, x) => n + x.g.dead, 0)} (${m((g) => g.dead)})`.padStart(14)} ${`${recv}`.padStart(5)}  ${hp.map((h) => (Number.isNaN(h) ? '—' : h.toFixed(0))).join('/').padEnd(17)} ${`${cr}/${SEEDS}`.padStart(11)} ${(crw >= 99 ? '—' : String(crw)).padStart(6)} ${(t5w ? `${Math.round((100 * aw) / t5w)}%` : '—').padStart(5)} ${usd(m((g) => g.cashAt(52))).padStart(9)} ${usd(m((g) => g.cashAt(END))).padStart(9)}`,
+    );
+    if (name === 'three friends' || name === 'all average') {
+      const miss = [
+        m((g) => g.neg) > 0 && 'median weeks below $0',
+        neg > 3 && `${neg}/30 games below $0`,
+        m((g) => g.dead) > 2 && 'median dead weeks',
+        recv > 1 && `${recv}/30 receiverships`,
+        hp.slice(1).some((h) => !(h >= 55)) && 'house health under 55',
+        name === 'three friends' && cr < SEEDS / 2 && `the credits by week ${BY} in ${cr}/30`,
+      ].filter(Boolean);
+      verdict.push(`${name}: ${miss.length ? `misses ${miss.join(', ')}` : 'every G0 line met'}`);
+    } else if (/solo|absent|nobody/.test(name) && (top > 1 || gs.some((x) => x.g.credits < 99))) verdict.push(`${name}: CLIMBED (top tier ${top}) or won: nobody wins alone is broken`);
+  }
+  console.log(`\ngames<0: games ever below $0 in weeks ${LONG_FROM}-${END}; weeks<0 and dead wk (revenue < ${usd(DEAD_REV)}) summed over the games in weeks ${LONG_FROM}-${END} (the median game); recv: games that entered receivership by week ${END}.`);
+  console.log(`house@N: the median game's mean house health after week N's resolve. credits≤${BY}: games with the credits by week ${BY}; cr wk: the median game's credits week (— = never).`);
+  console.log(`G0: three friends and all average at a median of 0 weeks below $0; at most 3 of 30 games ever below $0; median dead weeks ≤ 2; receiverships ≤ 1/30; house health ≥ 55 at weeks 39/52/64; the credits by week ${BY} in ≥ 50% of three-friends games. Solo, absent and nobody never climb or win.`);
+  for (const v of verdict) console.log(`  ${v}`);
 } else if (arg === 'flow') {
   // the first 40 alerts of one game, to tune the symptom weights: what it looked like, what it really was, what the bot did and what came of it
   const team = process.argv[3] ?? 'three friends';

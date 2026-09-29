@@ -16,7 +16,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { alertTier, generateAlerts, liveAlerts, raiseAlert } from '../src/sim/alerts';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
-import { ALERTS, ECON, LATE } from '../src/sim/data';
+import { ALERTS, ECON, GOAL, LATE } from '../src/sim/data';
 import { aStreakAfter, atResort, bookInspection, creditsStreak, decayOf, FEED_KINDS, gridFirst, gridFirstAlert, gridFirstJob, houseWearOf, inspectionWeeks, renewedInspection, urgency } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed, rng } from '../src/sim/rng';
@@ -426,6 +426,8 @@ describe('A0 in whole seasons', () => {
   }, 120_000);
 
   it("the credits come only after 8 full-crew A weeks played at the Resort, none below A between them, and never on an autopilot week (all good seed 4 was the review's repro)", () => {
+    // (the default goal, GOAL.rule 'streak'; the G0 synthesis's 'quarter' goal is tests/goal.test.ts)
+    expect(GOAL.rule).toBe('streak');
     let paused = 0;
     let credits = 0;
     for (const [team, seeds] of [

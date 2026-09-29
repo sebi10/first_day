@@ -7,7 +7,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
-import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, subCharterOn } from '../sim/econ';
+import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, renoAwaitingFinal, renovating, subCharterOn } from '../sim/econ';
 import { openBuild, working } from '../sim/staff';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
@@ -397,8 +397,11 @@ export function Island({
     const open = houseRentable(s, h);
     const why = houseBlocker(s, h);
     const model = modelOf(h);
-    const smoking = h.health < 30;
-    const fault: Fault = { tag: why === 'red-tagged', damaged: h.health < 40, lapsed: (h.inspectionUntil ?? 0) < s.week, smoking };
+    // G0: a house closed for its renovation shows the builders' scaffold and tarp (no boarded windows: they're fixing
+    // it), then the permit card while it waits on the electrician's final
+    const reno = renovating(s, h.id) ? (renoAwaitingFinal(s, h.id) ? 'final' : 'work') : undefined;
+    const smoking = h.health < 30 && !reno;
+    const fault: Fault = { tag: why === 'red-tagged', damaged: h.health < 40 && !reno, lapsed: (h.inspectionUntil ?? 0) < s.week && !reno, smoking, ...(reno ? { reno } : {}) };
     const win: Win = !pw.on ? 'dark' : open ? (warm ? 'lit' : 'glass') : 'shut';
     const props = { tint: houseColor, win, wear, open, fault, motion };
     const el = model === 'villa' ? <Villa {...props} /> : model === 'lodge' ? <Lodge {...props} /> : <Cottage {...props} />;
@@ -424,8 +427,10 @@ export function Island({
     // carries the count, so a house shows only a trouble of its own.
     // a hazard closes it (shock or fire: no entry until it's made safe or fixed); made safe, a small tag
     const hz = hazardOn(s, h.id);
-    const icon: Icon | null = !why ? null : fault.tag || why === 'hazard' ? 'noentry' : h.health < 40 ? 'broken' : fault.lapsed ? 'clipboard' : null;
+    const icon: Icon | null = !why ? null : fault.tag || why === 'hazard' ? 'noentry' : reno ? null : h.health < 40 ? 'broken' : fault.lapsed ? 'clipboard' : null;
     if (icon) bub(h.id, x + 4, y - g.top, icon, 'alert');
+    // closed on the analyst's plan, not broken: a warning cone while the builders work, the clipboard for the final
+    else if (reno) bub(h.id, x + 4, y - g.top, reno === 'work' ? 'cone' : 'clipboard', 'warn', { small: reno === 'work' });
     else if (hz?.safe) bub(h.id, x + 4, y - g.top, 'tag', 'warn', { small: true });
   }
 

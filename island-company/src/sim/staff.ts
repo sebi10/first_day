@@ -26,8 +26,8 @@
 // never from the week's, so a staff change moves only what it touches.
 import { raiseAlert, soleGuest } from './alerts';
 import type { Bot } from './bots';
-import { CATALOG_BY_KIND, ECON, MODELS, STOCK } from './data';
-import { bookInspection, capFleet, capOf, clamp, decayOf, flightsPerPlane, houseRentable, houseWearOf, inspectionWeeks, planes, projectWeek, round10, tierDef } from './econ';
+import { CATALOG_BY_KIND, ECON, MODELS, RENO, RENO_BOT, STOCK, WARRANTY } from './data';
+import { bookInspection, capFleet, capOf, clamp, decayOf, fixedNow, flightsPerPlane, houseRentable, houseWearOf, inspectionWeeks, isTagged, planes, projectWeek, round10, tierDef, underWarranty } from './econ';
 import { apply, type ApplyResult } from './engine';
 import { itemById, priceAt } from './items';
 import { book, spendable } from './ledger';
@@ -167,18 +167,53 @@ export const COTTAGE_PLOTS: { id: string; name: string }[] = [
   { id: 'h9', name: 'Cottage 6' },
 ];
 
-export const buildDef = (id: string): BuildDef | undefined => (id === 'cottage' || id.startsWith('cottage') ? COTTAGE : BUILDS.find((b) => b.id === id));
+/** a renovation's build id: `reno-<model>-<house>-<week ordered>` (the model sizes its materials) */
+export const renoId = (h: Pick<Asset, 'id' | 'model'>, W: number) => `reno-${h.model}-${h.id}-${W}`;
+
+/** a renovation's work units: RENO.units x the house's size */
+export function renoDef(model: string): BuildDef {
+  const k = RENO.size[model] ?? 1;
+  return {
+    id: 'reno',
+    site: 'the renovation',
+    what: 'A renovation: roof flashing, trim and paint, deck and shutters',
+    units: RENO.units.map((u) => Object.fromEntries(Object.entries(u).map(([item, q]) => [item, (q ?? 0) * k]))),
+  };
+}
+
+export const buildDef = (id: string): BuildDef | undefined =>
+  id === 'cottage' || id.startsWith('cottage') ? COTTAGE : id.startsWith('reno-') ? renoDef(id.split('-')[1]) : BUILDS.find((b) => b.id === id);
+
+/** what a renovation costs to order: the package now, and its materials at list */
+export function renoCost(h: Pick<Asset, 'model'>): { pkg: number; materials: number } {
+  return { pkg: RENO.package[h.model] ?? RENO.package.cottage, materials: valueOf(renoDef(h.model).units.flatMap((u) => Object.entries(u).map(([item, qty]) => ({ item, qty: qty ?? 0 })))) };
+}
+
+/**
+ * A renovation's final signed off (the electrician's code-prep job on a house whose builders are done, or autopilot's
+ * by the book): the house opens again, under the renovation's warranty
+ */
+export function renoSignoff(s: IslandState, asset: Asset, W: number): void {
+  const b = (s.builds ?? []).find((x) => x.reno === asset.id && x.finished !== undefined && x.signed === undefined);
+  if (!b) return;
+  b.signed = W;
+  asset.warrantyUntil = W + RENO.warranty;
+  asset.touchedWeek = Math.max(asset.touchedWeek, W);
+  feed(s, 'all', 'good', `${asset.name} passed its final: open again, the renovation's warranty runs to week ${W + RENO.warranty}.`);
+}
 
 /** what a build's site is called ("the villas and the seaplane dock", "Cottage 5") */
-export function buildSite(b: Pick<Build, 'id' | 'cottage'>): string {
+export function buildSite(b: Pick<Build, 'id' | 'cottage'> & { reno?: string }, s?: Pick<IslandState, 'assets'>): string {
   if (b.cottage) return COTTAGE_PLOTS.find((p) => p.id === b.cottage)?.name ?? 'the new cottage';
+  if (b.reno) return `the renovation of ${s?.assets.find((a) => a.id === b.reno)?.name ?? 'a house'}`;
   return buildDef(b.id)?.site ?? 'the site';
 }
 
 /** the build the builders work on: the next tier's first, then the cottages the analyst queued */
 export function openBuild(s: Pick<IslandState, 'builds' | 'tier'>): Build | undefined {
   const open = (s.builds ?? []).filter((b) => b.finished === undefined && !(b.tier !== undefined && b.tier <= s.tier));
-  return open.find((b) => b.tier !== undefined) ?? open.find((b) => b.cottage !== undefined) ?? open[0];
+  // (a renovation before a cottage: a house that closes for it loses rent every week it waits)
+  return open.find((b) => b.tier !== undefined) ?? open.find((b) => b.reno !== undefined) ?? open.find((b) => b.cottage !== undefined) ?? open[0];
 }
 
 /** the materials of a build's unit k */
@@ -214,6 +249,9 @@ export function builtShare(s: IslandState, tier: number): number {
  */
 export function tidyBuilds(s: IslandState, W: number, line?: Liner): void {
   if (!s.builds) return;
+  // signed renovations are history: kept RENO.keep weeks after the final and until the house's cooldown ends (the doc budget)
+  const gone = (b: Build) => !!b.reno && b.signed !== undefined && b.signed < W - RENO.keep && b.started + RENO.cooldown <= W;
+  if (s.builds.some(gone)) s.builds = s.builds.filter((b) => !gone(b));
   for (const b of s.builds) {
     if (b.finished !== undefined || b.tier === undefined || b.tier > s.tier) continue;
     b.finished = W;
@@ -526,6 +564,8 @@ const REWORK: Record<string, string> = {
 export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void {
   if (STAFF_TEST.stubs || !s.staff || !s.builds) return;
   tidyBuilds(s, W, line);
+  // (a renovation waiting on its final whose notice went away gets it back)
+  renoFinals(s, W + 1);
   const b = openBuild(s);
   if (!b) return;
   const def = buildDef(b.id);
@@ -536,7 +576,7 @@ export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void
   if (!crew.length) return;
   const r = rng(hashSeed(s.seed, 'build', W));
   let out = 0;
-  const site = buildSite(b);
+  const site = buildSite(b, s);
   for (const n of crew) {
     if (r.chance(STAFF.rework[n.skill - 1] ?? 0)) {
       b.rework = (b.rework ?? 0) + 1;
@@ -584,11 +624,33 @@ export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void
     b.finished = W;
     if (b.cottage) {
       const plot = COTTAGE_PLOTS.find((p) => p.id === b.cottage);
+      // (G0: new construction, under its builder's warranty)
       if (plot && !s.assets.some((a) => a.id === plot.id))
-        s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + inspectionWeeks(s.tier)) });
+        s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + inspectionWeeks(s.tier)), ...(s.tier >= WARRANTY.fromTier ? { warrantyUntil: W + WARRANTY.weeks } : {}) });
       line('all', 'good', `${plot?.name ?? 'The new cottage'} is finished: it takes guests from next week.`);
+    } else if (b.reno) {
+      // the builders are done: the house in their condition, closed until the electrician signs off the final
+      const h = s.assets.find((a) => a.id === b.reno);
+      if (h) {
+        h.health = Math.max(h.health, RENO.health);
+        h.touchedWeek = W;
+      }
+      line('all', 'good', `The builders finished ${site}: it opens when the electrician signs off the final.`);
     } else line('all', 'good', `The site work on ${site} is done: ${b.tier ? `they open with tier ${b.tier} in good shape` : 'finished'}.`);
     tidyBuilds(s, W, line);
+  }
+  renoFinals(s, W + 1);
+}
+
+/**
+ * Every renovation the builders finished and nobody has signed off has its final on the electrician's list, due the
+ * week after (a code notice already live on the house is the final: the county does both on the same visit)
+ */
+export function renoFinals(s: IslandState, week: number): void {
+  for (const b of (s.builds ?? []).filter((x) => x.reno && x.finished !== undefined && x.signed === undefined)) {
+    const h = s.assets.find((a) => a.id === b.reno);
+    if (!h || (s.alerts ?? []).some((a) => a.assetId === h.id && a.status !== 'closed' && a.kind === 'codeprep')) continue;
+    raiseAlert(s, { role: 'elec', asset: h, sym: 'E_RENO_FINAL', due: week, week }, s.updatedAt);
   }
 }
 
@@ -745,6 +807,7 @@ export function staffAction(s: IslandState, prev: IslandState, a: StaffAction, n
       return { s };
     }
     case 'build': {
+      if (a.what === 'reno') return renoAction(s, prev, a.asset, now);
       if (a.what !== 'cottage') return fail('Nothing to build.');
       if (s.tier < 3) return fail('Extra cottages open at tier 3.');
       if (!COTTAGE_PLOTS.length) return fail('No plot is ready for another cottage.');
@@ -760,12 +823,62 @@ export function staffAction(s: IslandState, prev: IslandState, a: StaffAction, n
         s,
         'fin',
         'good',
-        `${plot.name} ordered: the prefab shell (${usd(COTTAGE_SHELL)}) comes from the mainland; ${ahead?.cottage === plot.id ? 'the builders start on its site work' : `the builders start on it after ${buildSite(ahead!)}`}.`,
+        `${plot.name} ordered: the prefab shell (${usd(COTTAGE_SHELL)}) comes from the mainland; ${ahead?.cottage === plot.id ? 'the builders start on its site work' : `the builders start on it after ${buildSite(ahead!, s)}`}.`,
         now,
       );
       return { s };
     }
   }
+}
+
+/** a house's renovation on the list or in its final: ordered and not yet signed off */
+export const renoOpen = (s: Pick<IslandState, 'builds'>, id: string): Build | undefined => (s.builds ?? []).find((b) => b.reno === id && b.signed === undefined);
+
+/** the week from which this house can be renovated again (RENO.cooldown after its last renovation was ordered), or 0 */
+export function renoAgainFrom(s: Pick<IslandState, 'builds'>, id: string): number {
+  const last = Math.max(-Infinity, ...(s.builds ?? []).filter((b) => b.reno === id).map((b) => b.started));
+  return Number.isFinite(last) ? last + RENO.cooldown : 0;
+}
+
+/**
+ * why the analyst can't order this house's renovation now (null: she can). The same checks as the move, in the order a
+ * person would ask them: the tier, the house, one already on the list, the cooldown, its condition, receivership, cash
+ */
+export function renoBlocker(s: IslandState, h: Asset): string | null {
+  if (s.tier < RENO.fromTier) return `Renovations open at tier ${RENO.fromTier}.`;
+  if (h.kind !== 'house') return 'Only a house can be renovated.';
+  if (renoOpen(s, h.id)) return `${h.name}'s renovation is already on the list.`;
+  const again = renoAgainFrom(s, h.id);
+  if (again > s.week) return `${h.name} was renovated recently: one renovation per house every ${RENO.cooldown} weeks (again from week ${again}).`;
+  if (h.health > RENO.maxHealth) return `${h.name} is in good shape (reliability ${Math.round(h.health)}): the builders renovate a house at ${RENO.maxHealth} or below.`;
+  if (s.receivership > 0) return 'In receivership: no new building.';
+  const { pkg } = renoCost(h);
+  if (spendable(s) < pkg) return `Not enough cash for the renovation package (${usd(pkg)}).`;
+  return null;
+}
+
+/** order a renovation (G0): the package is paid now, the builders take it after the next tier's site work */
+function renoAction(s: IslandState, prev: IslandState, id: string, now: number): ApplyResult {
+  const fail = (error: string): ApplyResult => ({ s: prev, error });
+  const W = s.week;
+  const h = s.assets.find((x) => x.id === id && x.kind === 'house');
+  if (s.tier >= RENO.fromTier && !h) return fail('No such house.');
+  const why = h ? renoBlocker(s, h) : `Renovations open at tier ${RENO.fromTier}.`;
+  if (why || !h) return fail(why ?? 'No such house.');
+  const { pkg } = renoCost(h);
+  s.cash -= pkg;
+  book(s, 'building', pkg, { trade: 'build', asset: h.id });
+  const b: Build = { id: renoId(h, W), what: `Renovate ${h.name}: roof flashing, trim and paint, deck and shutters`, reno: h.id, done: 0, drawn: 0, need: RENO.units.length, started: W };
+  (s.builds ??= []).push(b);
+  const ahead = openBuild(s);
+  feed(
+    s,
+    'fin',
+    'good',
+    `${h.name}'s renovation ordered (${usd(pkg)} package): ${ahead?.id === b.id ? 'the builders start when its materials are in' : `the builders start after ${buildSite(ahead!, s)}`}; it closes while they work, then the electrician signs off the final.`,
+    now,
+  );
+  return { s };
 }
 
 // ---------------------------------------------------------------------------
@@ -895,7 +1008,7 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
       const real = cand ? [...base, { ...me, start: who.start }] : withMe;
       const withEta = buildEta(s, real, b);
       const withoutEta = buildEta(s, base, b);
-      const site = buildSite(b);
+      const site = buildSite(b, s);
       if (hire)
         need.push(!withoutEta ? `${site} done wk ${withEta} (nobody on it now)` : withEta === withoutEta ? `${site} done wk ${withEta} either way: no sooner with them` : `${site} done wk ${withEta} instead of wk ${withoutEta}`);
       else need.push(!withoutEta ? `the site work on ${site} stops` : withEta === withoutEta ? `${site} still done wk ${withEta}` : `${site} done wk ${withoutEta} instead of wk ${withEta}`);
@@ -1004,6 +1117,37 @@ export function cottagePlan(s: IslandState): { plot: { id: string; name: string 
   return { plot, cost, rent: Math.max(0, rent), housekeeper, payback: net > 0 ? Math.ceil(cost / net) : null, upkeep, open };
 }
 
+/**
+ * A renovation's case, for the analyst's Renovate card and the house's sheet (G0): what it costs (the package now, the
+ * materials at list as the builders go), what the house rents in a normal week, the weeks it's closed (the builders'
+ * two work units at their output, then the electrician's final), the rent lost meanwhile (none while it's closed
+ * anyway), how soon it closes if nobody touches it (under 40 at its wear a booked week), the condition it gets back
+ * and what those points cost at the electrician's routine job prices, and the weeks until the rent it keeps pays for
+ * it all. `blocker`: why it can't be ordered now (renoBlocker)
+ */
+export function renoPlan(
+  s: IslandState,
+  h: Asset,
+): { pkg: number; materials: number; total: number; rent: number; out: number; weeksClosed: number | null; rentLost: number; wear: number; closesIn: number; restore: number; restoreValue: number; payback: number | null; againFrom: number; blocker: string | null } {
+  const { pkg, materials } = renoCost(h);
+  const total = pkg + materials;
+  const rent = Math.max(0, Math.round(normalRevenue(s, s) - normalRevenue(s, { ...s, assets: s.assets.filter((a) => a.id !== h.id) })));
+  const out = working(s)
+    .filter((n) => n.role === 'builder')
+    .reduce((t, n) => t + (STAFF.output[n.skill - 1] ?? 0), 0);
+  // (the builders' units, then the week the electrician's final is due)
+  const weeksClosed = out > 0 ? Math.ceil(RENO.units.length / out - 1e-9) + 1 : null;
+  const open = houseRentable(s, h);
+  const rentLost = open && weeksClosed !== null ? rent * weeksClosed : 0;
+  const wear = Math.max(0.5, decayOf(s, h) + houseWearOf(s));
+  const closesIn = open ? Math.max(0, Math.ceil((h.health - 40) / wear)) : 0;
+  const restore = Math.max(0, Math.round(RENO.health - h.health));
+  const restoreValue = round10(restore * perHp());
+  // the rent it keeps: from the week it would have closed (or reopens, if later), until the package, the materials and the rent lost are back
+  const payback = rent > 0 ? Math.max(closesIn, weeksClosed ?? 0) + Math.ceil((total + rentLost) / rent) : null;
+  return { pkg, materials, total, rent, out, weeksClosed, rentLost, wear, closesIn, restore, restoreValue, payback, againFrom: renoAgainFrom(s, h.id), blocker: renoBlocker(s, h) };
+}
+
 // ---------------------------------------------------------------------------
 // Bots (15.12)
 
@@ -1071,6 +1215,7 @@ export function botStaff(s: IslandState, bot: Bot, _r: Rng, now: number): Island
       if (dear) step({ t: 'letGo', npc: dear.id, week: W });
       return s;
     }
+    naiveReno(s, step);
     // (a skill 4-5 hire starts next week: count every wage on the list, started or not)
     const wages = () => s.staff!.reduce((t, n) => t + n.wage, 0);
     for (const c of [...(s.hiring?.week === W ? s.hiring.cands : [])]) {
@@ -1079,14 +1224,27 @@ export function botStaff(s: IslandState, bot: Bot, _r: Rng, now: number): Island
     }
     return s;
   }
-  // the builder goes at tier 5 once there's no site work (the standard crew has none there)
-  if (s.tier >= 5 && !openBuild(s)) for (const n of s.staff.filter((x) => x.role === 'builder')) step({ t: 'letGo', npc: n.id, week: W });
+  // G0: the renovation programme, then the builders it needs
+  if (RENO_BOT.trigger > 0) botReno(s, step);
+  // the builder goes at tier 5 once there's no site work (the standard crew has none there), unless the island
+  // renovates: then one builder stays on the payroll for it
+  const renovates = RENO_BOT.trigger > 0 && s.tier >= RENO.fromTier;
+  // the renovation crew: one builder, a second while RENO_BOT.crew2 houses or more are worn or being renovated (kept
+  // until the list is empty, so nobody is let go and hired back a week later)
+  const demand = renovates ? renoDemand(s) : 0;
+  const builders = s.staff.filter((x) => x.role === 'builder').length;
+  const crewWant = !renovates ? 0 : RENO_BOT.crew2 > 0 && (demand >= RENO_BOT.crew2 || (builders >= 2 && demand > 0)) ? 2 : 1;
+  if (s.tier >= 5 && !openBuild(s)) for (const n of s.staff.filter((x) => x.role === 'builder').sort(bestFirst).slice(crewWant)) step({ t: 'letGo', npc: n.id, week: W });
   const lost = lostLastWeek(s);
   for (const role of NPC_ROLES) {
     // the standard crew's pilots all fly guests: a green cargo pilot doesn't count toward it
     const have = s.staff.filter((n) => n.role === role && (role !== 'pilot' || n.skill >= STAFF.guestMinSkill)).length;
     const below = have < standardCount(s.tier, role) && (role !== 'builder' || !!openBuild(s));
-    const short = (role === 'pilot' && lost.pilot) || (role === 'housekeeper' && lost.housekeeper) || (role === 'builder' && have === 0 && !!openBuild(s) && s.tier >= 5);
+    const short =
+      (role === 'pilot' && lost.pilot) ||
+      (role === 'housekeeper' && lost.housekeeper) ||
+      (role === 'builder' && have === 0 && !!openBuild(s) && s.tier >= 5) ||
+      (role === 'builder' && renovates && have < crewWant && s.staff.length < STAFF.maxStaff);
     if (!below && !short) continue;
     const min = role === 'pilot' ? STAFF.guestMinSkill : 2;
     const c = bestCand((s.hiring?.week === W ? s.hiring.cands : []).filter((x) => x.role === role && x.skill >= min && x.ask <= 1.25 * STAFF.wage[role]));
@@ -1114,7 +1272,69 @@ export function botStaff(s: IslandState, bot: Bot, _r: Rng, now: number): Island
     const go = !ahead || (b.tier === s.tier + 2 && (s.project?.tier === s.tier + 1 || (gate > 0 && spendable(s) - valueOf(lines) >= gate + ECON.freezeBelow + 500)));
     if (go && lines.length && spendable(s) >= ECON.freezeBelow + 500) step({ t: 'buy', lines, week: W });
   }
+  // the queued renovations' materials too, so the builders go from one house to the next without an idle week
+  if (renovates && s.staff.some((n) => n.role === 'builder')) {
+    const lines = renoShort(s);
+    if (lines.length && spendable(s) >= ECON.freezeBelow + 500) step({ t: 'buy', lines, week: W });
+  }
   return s;
+}
+
+/** the renovation list: renovations the builders haven't finished, and worn houses out of warranty waiting for one */
+export function renoDemand(s: IslandState): number {
+  const open = (s.builds ?? []).filter((b) => b.reno && b.finished === undefined);
+  const worn = s.assets.filter((h) => h.kind === 'house' && h.health < RENO_BOT.trigger && !underWarranty(s, h) && !open.some((b) => b.reno === h.id) && renoAgainFrom(s, h.id) <= s.week).length;
+  return open.length + worn;
+}
+
+/** every unfinished renovation's undrawn materials that are neither on the shelf nor on order */
+export function renoShort(s: IslandState): { item: ItemId; qty: number }[] {
+  const need = new Map<ItemId, number>();
+  for (const b of (s.builds ?? []).filter((x) => x.reno && x.finished === undefined))
+    for (let k = b.drawn ?? 0; k < b.need; k++) for (const l of unitLines(b, k)) need.set(l.item, (need.get(l.item) ?? 0) + l.qty);
+  const out: { item: ItemId; qty: number }[] = [];
+  for (const [item, q] of need) {
+    const short = q - available(s, item) - onOrderFree(s, item).qty;
+    if (short > 0) out.push({ item, qty: short });
+  }
+  return out;
+}
+
+/**
+ * The naive analyst's renovations (G0): the cheapest house not in good shape first (under
+ * RENO.maxHealth, in its warranty or not) while the cash looks healthy (spendable over RENO_BOT.naiveOver), up to
+ * two queued, with or without a builder on the payroll, and never mind the next tier's cash gate
+ */
+function naiveReno(s: IslandState, step: (a: Parameters<typeof apply>[1]) => boolean): void {
+  if (s.tier < RENO.fromTier || spendable(s) <= RENO_BOT.naiveOver || (s.builds ?? []).filter((b) => b.reno && b.signed === undefined).length >= 2) return;
+  const h = s.assets
+    .filter((x) => x.kind === 'house' && x.health <= RENO.maxHealth && !renoOpen(s, x.id) && renoAgainFrom(s, x.id) <= s.week)
+    .sort((a, b) => renoCost(a).pkg - renoCost(b).pkg || a.health - b.health || (a.id < b.id ? -1 : 1))[0];
+  if (h) step({ t: 'build', what: 'reno', asset: h.id, week: s.week });
+}
+
+/**
+ * The fin bot's renovation policy (G0): up to RENO_BOT.maxOpen renovations the builders haven't finished
+ * (one on site, the next with its materials coming); the house under RENO_BOT.trigger, out of its warranty and not
+ * red-tagged, with the most rent at stake (its revenue multiple x how far under the trigger it is); ordered when the
+ * cash after its package and materials stays over RENO_BOT.keep and the reserve, and at tier 4 over the tier-5 cash
+ * gate too (the Resort comes first), unless the house is about to close (under RENO_BOT.gateUnder).
+ */
+function botReno(s: IslandState, step: (a: Parameters<typeof apply>[1]) => boolean): void {
+  if (s.tier < RENO.fromTier || s.receivership > 0) return;
+  // (a renovation the builders haven't finished counts against the queue; one waiting on its final doesn't)
+  if ((s.builds ?? []).filter((b) => b.reno && b.finished === undefined).length >= RENO_BOT.maxOpen) return;
+  const worn = s.assets
+    .filter((h) => h.kind === 'house' && h.health < RENO_BOT.trigger && !underWarranty(s, h) && !isTagged(s, h.id) && !renoOpen(s, h.id) && renoAgainFrom(s, h.id) <= s.week)
+    .map((h) => ({ h, at: (MODELS[h.model]?.mult ?? 1) * (RENO_BOT.trigger - h.health + 5) }))
+    .sort((a, b) => b.at - a.at || (a.h.id < b.h.id ? -1 : 1));
+  const pick = worn[0]?.h;
+  if (!pick) return;
+  const c = renoCost(pick);
+  // (at tier 4 the Resort's cash gate comes first, except for a house about to close: it earns nothing closed)
+  const gate = s.tier < 5 && pick.health >= RENO_BOT.gateUnder ? nextCashGate(s) : 0;
+  const reserve = 1500 + fixedNow(s);
+  if (spendable(s) - c.pkg - c.materials >= Math.max(RENO_BOT.keep, reserve) + gate) step({ t: 'build', what: 'reno', asset: pick.id, week: s.week });
 }
 
 /**
@@ -1135,7 +1355,8 @@ export function autoStaff(s: IslandState): void {
   }
   // the next tier's site work (a build further ahead, or a cottage, is a person's call)
   const b = openBuild(s);
-  if (!b || b.tier === undefined || b.tier > s.tier + 1 || !s.staff.some((n) => n.role === 'builder')) return;
+  // (a renovation the analyst ordered is committed: autopilot buys its materials too)
+  if (!b || (b.tier === undefined && !b.reno) || (b.tier !== undefined && b.tier > s.tier + 1) || !s.staff.some((n) => n.role === 'builder')) return;
   const lines = buildShort(s, 1);
   const value = valueOf(lines);
   if (lines.length && value <= STOCK.autopilotCap && spendable(s) - value >= ECON.freezeBelow) placePo(s, lines, {}, 'auto', s.updatedAt);

@@ -1715,7 +1715,7 @@ Today's steps are unchanged except where marked. **Every network addition is ski
 
 ### 10.2 `migrate()`
 
-- **Nothing for any stage:** every field is lazy.
+- **Nothing for any stage:** every field is lazy. **One exception, G0 (stage 2, 11.2a):** a doc an older engine wrote (engine < 5) at tier 4–5 gets, once (stamped `stats.g0From`), the builder's warranty dated from its Harbor and Resort buildings and the service upgrade at release; a doc this build wrote is never migrated (the golden test checks it).
 - It must stay idempotent. It must not write `s.net`, `checked`, `flagged` or any asset field. The golden test (13.1) fails if it does.
 
 ### 10.3 Fixtures and skew (every stage)
@@ -1777,6 +1777,12 @@ Today's steps are unchanged except where marked. **Every network addition is ski
      - If T1 is met, record the levers and the numbers in `docs/DECISIONS.md`.
      - **If it isn't, stop and send Seb the table:** the best combination's numbers against T1, and the call: ship stage 3 on it anyway, or keep working A0. The network doesn't wait with no end date.
   4. **The golden digests** (13.1) are recorded **after** A0, since A0 is allowed to change play from tier 4.
+
+### 11.2a G0: the Resort holds for 64 weeks (stage 2, v5)
+
+> **Status (2026-09-30, branch `s2rel`, v5; DECISIONS "G0, the Resort holds for 64 weeks"): built. The 64-week line is met.** The G0 probes and their synthesis chose the upkeep structure with the electrician's helper off: **the builder's warranty** (from tier 4 new construction loses 1 a week untouched for 26 weeks), **the service upgrade** (the grid's new transformer and feeder at tier 4, the Resort's standby set at tier 5, under the same warranty), and **renovations** (the analyst's capex from tier 4 on a house at 75 or below; the builders close it for two work units, the electrician's permit final reopens it at 85 under a 13-week warranty; one per house every 26 weeks), with the fin bot's policy (`RENO_BOT`). The credits' goal is **one data switch** (`GOAL.rule`: `streak`, the default, or `quarter`, two months on plan at the Resort, computed from the week reports); Seb decides which ships. Live islands at tier 4–5 get a one-time migration (the warranty dated from their buildings, the upgrade granted at release). This is the one stage that migrates (10.2), and it bumps the version constants to 5 here.
+>
+> `balance.ts long64` (64 weeks × 30 seeds, weeks 24–64): three friends 0/30 games below $0, 0 receiverships, houses 71/63/59 at weeks 39/52/64 (e810cc5: 28/30, 28/30, 22/4/3); all average 0/30, 0, 79/74/71 (17/30, 14/30, 46/9/3). The credits by week 52: `streak` 0/30 and 0/30; `quarter` 25/30 (median week 36) and 30/30 (week 34). T0 unchanged (standard medians 8/11/16/23 and 7/12/16/23, 0 weeks below $0; solo, absent and nobody at tier 1); robust misses 61 and 39 of 360 (e810cc5: 70 and 64), the robust long column 2 and 0 of 360 games below $0 (248 and 115). After week 64 (to 91) the 26-week renovation cooldown costs three friends 4 more receiverships of 30 than a 13-week one (7 vs 3): Seb's call. Live islands switched at week 26: three friends 4/30 into receivership by week 64 (12/30 without the migration); switched later the houses are too far gone on stage 1 (week 39: 20/30).
 
 ### 11.3 Network knobs
 

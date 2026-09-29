@@ -105,8 +105,101 @@ export const LATE = {
  */
 export const RECEIVER = { allowance: 1500, rate: 0.15, standstill: true };
 
+/**
+ * The credits' goal (G0), one data switch; Seb's call which ships.
+ * - `rule: 'streak'` (the default, stage 1's goal): 8 full-crew A weeks played at the Resort, none below A; an
+ *   autopilot A holds the streak; a live island's streak from before v4 is carried (stats.aCarry).
+ * - `rule: 'quarter'` (the G0 synthesis's "two months on plan at the Resort", judged the way a board judges a period):
+ *   over the last `weeks` counted weeks AT the Resort, at least `need` graded `minGrade` or better, and the period's
+ *   revenue at `revShare` of its budget or better (the weekly revenue grade's B line, on the period's totals). A
+ *   full-crew week joins the window; an autopilot week on plan pauses it (it isn't one of the eight: nobody wins
+ *   alone); one below plan joins it as a miss (an absence never helps); a week in receivership clears it; Harbor weeks
+ *   never count. The credits land on a full-crew week. It is computed from the week reports (econ goalWindow), not
+ *   stored, so a live island's Resort weeks count the moment it is switched on.
+ */
+export const GOAL = {
+  rule: 'streak' as 'streak' | 'quarter',
+  weeks: 8,
+  need: 6,
+  minGrade: 'B' as 'A' | 'B',
+  revShare: 0.85,
+};
+
 /** a storm's hit on the houses and the grid (resolve step 9; halved by the storm shield) */
 export const STORM_HIT = { house: 6, grid: 8 };
+
+/**
+ * G0, the upkeep structure: new construction wears slowly. From the Harbor (`fromTier`) a tier's new
+ * buildings, an extra cottage the builders finish and the service upgrade below carry their builder's warranty: for
+ * their first `weeks` weeks they lose `decay` a week untouched instead of the usual (a new building needs little
+ * upkeep in its first months: a tight roof, new devices, fresh finishes). Guests' wear and storms hit them as they hit
+ * any house. A renovated house gets RENO.warranty weeks of it from its final.
+ */
+export const WARRANTY = {
+  /**
+   * the island tier from which new construction comes with the warranty: 4, the late game's rules (LATE.fromTier), so
+   * tiers 1-3 play byte for byte as before. Measured (G0 synthesis): 3 (the Village's generator house too) holds the
+   * long game about as well but brings three friends' median tier 5 from week 23 to 22 (T0 moves)
+   */
+  fromTier: 4,
+  weeks: 26,
+  decay: 1,
+  /**
+   * The service upgrade (G0): the Harbor's villas need a bigger service, so at tier 4 the utility sets a
+   * new pad-mount transformer and the crew project's conduit is the new underground feeder: the island grid starts at
+   * the new buildings' health (if it was below) under the warranty. `gen`: the Resort's Lodge needs a bigger standby
+   * set and transfer switch at tier 5, the same way. false = off
+   */
+  service: { grid: true, gen: true },
+};
+
+/**
+ * G0, the upkeep structure: a renovation, the analyst's capex from tier 4. The builders (carpentry, roofing, finishes: no
+ * licensed work) renovate a worn house in two builder-weeks, drawing building materials; the mainland package (roofing
+ * membrane, flooring, fixtures, paint, the permit) is paid when it's ordered. The house closes from the week the
+ * builders start until the electrician signs off its final (the county's inspection on the permit: devices, GFCI and
+ * AFCI, labels): then it opens in the builders' condition, inspected, under a shorter warranty.
+ */
+export const RENO = {
+  fromTier: 4,
+  /** the two work units' materials for a cottage (x `size` for bigger houses) */
+  units: [{ 'BLD-FLASH': 1, 'BLD-TRIM': 1 }, { 'BLD-DECK': 1, 'BLD-SHUT': 1 }] as Partial<Record<string, number>>[],
+  size: { cottage: 1, villa: 2, lodge: 3 } as Record<string, number>,
+  /** the mainland package, paid at order, by house model */
+  package: { cottage: 6000, villa: 12000, lodge: 16000 } as Record<string, number>,
+  /** the condition the builders leave it in (a new cottage from the builders is 80) */
+  health: 85,
+  /** the renovation's warranty, weeks from the final */
+  warranty: 13,
+  /** a house in better shape than this has nothing for the builders to renovate */
+  maxHealth: 75,
+  /** the final's urgency on the electrician's list: a closed house waits on it (as a plane waits on a part chain) */
+  finalUrgency: 120,
+  /**
+   * one renovation per house every this many weeks, counted from the week it was ordered (G0's Goodhart guard: a
+   * renovation resets a house to RENO.health under a fresh warranty, so without it an analyst could keep a house new
+   * by renovating it on repeat instead of maintaining it; the electrician's upkeep stays the job)
+   */
+  cooldown: 26,
+  /** a signed renovation stays on the list at least this many weeks after its final (and until its cooldown ends), then it's dropped (the doc budget) */
+  keep: 8,
+};
+
+/** the fin bot's renovation policy (staff.ts botReno; the naive analyst's is staff.ts naiveReno) */
+export const RENO_BOT = {
+  /** a house under this health, out of its warranty, is worth renovating */
+  trigger: 55,
+  /** renovations the builders haven't finished, at most (one on site, the next with its materials in) */
+  maxOpen: 2,
+  /** a second builder while this many houses are worn or being renovated (0: never) */
+  crew2: 3,
+  /** cash kept after the renovation's package and materials (at tier 4 on top of the tier-5 cash gate) */
+  keep: 20000,
+  /** at tier 4, a house under this is renovated without waiting for the tier-5 cash gate (it's closing) */
+  gateUnder: 40,
+  /** the naive analyst: renovates the cheapest house under RENO.maxHealth while spendable is over this, up to 2 queued */
+  naiveOver: 15000,
+};
 
 export const INSURANCE: Record<Insurance, { label: string; premium: number; cover: number }> = {
   none: { label: 'None', premium: 0, cover: 0 },

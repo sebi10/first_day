@@ -13,9 +13,10 @@ import { Btn, Icon, Sheet, toast, usd } from '../kit';
 import { C } from '../theme';
 import type { Ctl } from '../useIsland';
 import { buildBuy, buildRows, cashGate, crewCounts, doingNow, materialName, ROLE_ICON, ROLE_PLURAL, ROLE_WORD } from './model';
+import { Renovations, RenoSheet } from './Reno';
 import './staff.css';
 
-type Pick = { kind: 'hire'; c: Candidate } | { kind: 'letGo'; n: Npc } | { kind: 'cottage' } | null;
+type Pick = { kind: 'hire'; c: Candidate } | { kind: 'letGo'; n: Npc } | { kind: 'cottage' } | { kind: 'reno'; id: string } | null;
 
 export function StaffDesk({ ctl }: { ctl: Ctl }) {
   const { s } = ctl;
@@ -81,11 +82,14 @@ export function StaffDesk({ ctl }: { ctl: Ctl }) {
       )}
 
       <Builds ctl={ctl} onCottage={() => setPick({ kind: 'cottage' })} />
+      {/* G0: the renovations, next to the extra cottages (the analyst's other building capex) */}
+      <Renovations ctl={ctl} onPick={(id) => setPick({ kind: 'reno', id })} />
 
-      <Sheet open={!!pick} onClose={close} label={pick?.kind === 'hire' ? 'Hire' : pick?.kind === 'letGo' ? 'Let go' : 'Start a cottage'}>
+      <Sheet open={!!pick} onClose={close} label={pick?.kind === 'hire' ? 'Hire' : pick?.kind === 'letGo' ? 'Let go' : pick?.kind === 'reno' ? 'Renovate' : 'Start a cottage'}>
         {pick?.kind === 'hire' && <HireSheet ctl={ctl} c={pick.c} onDone={close} />}
         {pick?.kind === 'letGo' && <LetGoSheet ctl={ctl} n={pick.n} onDone={close} />}
         {pick?.kind === 'cottage' && <CottageSheet ctl={ctl} onDone={close} />}
+        {pick?.kind === 'reno' && <RenoSheet ctl={ctl} id={pick.id} onDone={close} />}
       </Sheet>
     </section>
   );
@@ -287,7 +291,8 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
     .filter((n) => n.role === 'builder')
     .reduce((t, n) => t + (STAFF.output[n.skill - 1] ?? 0), 0);
   const plan = s.tier >= 3 ? cottagePlan(s) : null;
-  const queued = (s.builds ?? []).filter((x) => x.cottage && x.finished === undefined && x !== b);
+  const queued = (s.builds ?? []).filter((x) => (x.cottage || x.reno) && x.finished === undefined && x !== b);
+  const queuedCottages = queued.filter((x) => x.cottage);
   const done = (s.builds ?? []).filter((x) => x.finished !== undefined && x.cottage);
   const buy = (count: number) => {
     if (!b) return;
@@ -317,8 +322,8 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
       {b && (
         <div class="card st-build">
           <div class="row spread" style={{ alignItems: 'baseline' }}>
-            <b>{b.cottage ? buildSite(b) : b.what.split(':')[0]}</b>
-            <span class="label num">{b.tier ? `for tier ${b.tier}` : 'extra cottage'}</span>
+            <b>{b.cottage || b.reno ? cap1(buildSite(b, s)) : b.what.split(':')[0]}</b>
+            <span class="label num">{b.tier ? `for tier ${b.tier}` : b.reno ? ((b.drawn ?? 0) > 0 ? 'renovation · house closed' : 'renovation · open until they start') : 'extra cottage'}</span>
           </div>
           <div class="bar" role="meter" aria-valuenow={b.done} aria-valuemin={0} aria-valuemax={b.need} aria-label="Site work done">
             <i style={{ width: `${(100 * b.done) / b.need}%`, background: C.palm }} />
@@ -362,12 +367,12 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
           )}
         </div>
       )}
-      {queued.length > 0 && <span class="label">Queued after it: {queued.map((x) => buildSite(x)).join(', ')}.</span>}
+      {queued.length > 0 && <span class="label">Queued after it: {queued.map((x) => buildSite(x, s)).join(', ')}.</span>}
       {s.tier >= 3 && (
         <div class="card col st-cottage" style={{ gap: 8 }}>
           <div class="row spread">
             <b>Extra cottages</b>
-            <span class="label">{done.length + queued.length + (b?.cottage ? 1 : 0)} of 2</span>
+            <span class="label">{done.length + queuedCottages.length + (b?.cottage ? 1 : 0)} of 2</span>
           </div>
           {plan?.plot ? (
             <>
@@ -391,6 +396,8 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
     </>
   );
 }
+
+const cap1 = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 function CottageSheet({ ctl, onDone }: { ctl: Ctl; onDone(): void }) {
   const { s } = ctl;
@@ -416,7 +423,7 @@ function CottageSheet({ ctl, onDone }: { ctl: Ctl; onDone(): void }) {
         <b class={plan.payback ? 'st-good' : 'st-bad'}>{plan.payback ? `Pays back in about ${plan.payback} weeks, after the upkeep` : 'No payback at this week’s bookings'}</b>
       </div>
       <span class="label">
-        {b && !b.cottage ? `The builders finish ${buildSite(b)} first. ` : ''}Cash now {usd(s.cash)} → {usd(s.cash - COTTAGE_SHELL)}. It joins the island at health 80 and brings its own electrical work
+        {b && !b.cottage ? `The builders finish ${buildSite(b, s)} first. ` : ''}Cash now {usd(s.cash)} → {usd(s.cash - COTTAGE_SHELL)}. It joins the island at health 80 and brings its own electrical work
         {plan.open >= 6 ? `: with ${plan.open} alerts open already, a house nobody gets to closes, and then it pays back nothing` : ''}.
       </span>
       <div class="sheet-actions col" style={{ gap: 8 }}>

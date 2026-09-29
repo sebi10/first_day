@@ -46,6 +46,7 @@ import { alertAog, downtimeOf, melOn, projectWeek, rentFactor, SUB_FEE, subChart
 import { ENGINE_VERSION, apply, healOpenChain } from '../src/sim/engine';
 import { cardOf, flowStage } from '../src/sim/flow';
 import { migrate } from '../src/sim/migrate';
+import { expectLiveMigration } from './livedocs';
 import { rng, hashSeed } from '../src/sim/rng';
 import { stockFlags } from '../src/sim/stock';
 import { ROLES, type IslandState, type Order } from '../src/sim/types';
@@ -206,13 +207,13 @@ describe('a chain step handed in after its week closed', () => {
 });
 
 describe('the job flow’s version gate (docs/JOBFLOW.md 19.1)', () => {
-  it('the engine, the doc and the rules are all at 4 (the sub-charter release; see the v4 gate below)', () => {
-    expect(ENGINE_VERSION).toBe(4);
+  it('the engine, the doc and the rules are all at 5 (stage 2 and G0; see the v4 gate below)', () => {
+    expect(ENGINE_VERSION).toBe(5);
     const net = readFileSync(resolve(import.meta.dirname, '..', 'src', 'net', 'firebase.ts'), 'utf8');
-    expect(net).toMatch(/const DOC_VERSION = 4;/);
+    expect(net).toMatch(/const DOC_VERSION = 5;/);
     const rules = readFileSync(resolve(import.meta.dirname, '..', 'firestore.rules'), 'utf8');
-    expect(rules).toMatch(/request\.resource\.data\.v == 4;/);
-    expect(rules).not.toMatch(/data\.v == [123]\b/);
+    expect(rules).toMatch(/request\.resource\.data\.v == 5;/);
+    expect(rules).not.toMatch(/data\.v == [1234]\b/);
   });
 
   it('the live and skew docs migrate on their first move: kits become store credit, the stock, the crew and the ledger come up', () => {
@@ -294,11 +295,9 @@ describe('island docs written by the live job-flow build (bd1e1d2, engine 3)', (
       expect(doc.engine).toBe(3);
       screens(doc);
       // nothing to migrate: the live build wrote every job-flow field already (only the one-time v4 stamp: the week v4
-      // takes over and a credits streak the old rule earned, carried; the release gate)
-      const want = structuredClone(doc);
-      want.stats.v4From = doc.week;
-      if ((doc.stats.aStreak ?? 0) > 0) want.stats.aCarry = doc.stats.aStreak;
-      expect(JSON.stringify(migrate(structuredClone(doc)))).toBe(JSON.stringify(want));
+      // takes over and a credits streak the old rule earned, carried; the release gate. And at tier 4-5 G0's one-time
+      // upkeep migration: the builder's warranty dated from the buildings, the service upgrade; tests/livedocs.ts)
+      expectLiveMigration(doc, migrate(structuredClone(doc)));
       // the first move on this build stamps its version and leaves the money and the work as they were
       const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
       expect(r.error).toBeUndefined();
@@ -421,13 +420,13 @@ describe('island docs written by the live job-flow build (bd1e1d2, engine 3)', (
     screens(doc);
   });
 
-  it('reverse skew: every doc this build writes is engine 4, and an engine older than the doc (the live v3 one) refuses to write it', () => {
+  it('reverse skew: every doc this build writes is engine 5, and an engine older than the doc (the live v3 one) refuses to write it', () => {
     for (const name of V3) {
       const doc = load(name);
       const r4 = apply(doc, { t: 'rename', role: 'elec', name: doc.players.elec!.name }, doc.updatedAt + 1000);
       expect(r4.error, name).toBeUndefined();
       const v4 = r4.s;
-      expect(v4.engine, name).toBe(4);
+      expect(v4.engine, name).toBe(5);
       // bd1e1d2's apply() opens with the same guard as this one, `(prev.engine ?? 0) > ENGINE_VERSION`, at 3:
       // a doc one version ahead of the engine is refused whole, and the tab reloads (useIsland's ic:stale)
       expect(v4.engine! > 3).toBe(true);

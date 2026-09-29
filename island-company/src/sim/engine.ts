@@ -15,6 +15,7 @@ import {
   FIN_TASKS,
   FLOAT_AUCTION,
   FREIGHT,
+  GOAL,
   GSE,
   incidentText,
   inspects,
@@ -33,6 +34,7 @@ import {
   STORM_HIT,
   SUPPLIERS,
   TIERS,
+  WARRANTY,
   type ReportDef,
 } from './data';
 import {
@@ -96,10 +98,12 @@ import {
   urgentReq,
   vendorFor,
 } from './stock';
-import { builtShare, buildWeek, charterMult, helperOn, housekeepingCap, newIslandStaff, payroll, pilotCap, reviewMult, STAFF, staffAction, staffAfterFlights, staffOpenWeek, autoStaff, working } from './staff';
+import { builtShare, buildWeek, charterMult, helperOn, housekeepingCap, newIslandStaff, payroll, pilotCap, renoSignoff, reviewMult, STAFF, staffAction, staffAfterFlights, staffOpenWeek, autoStaff, working } from './staff';
 import { benchFor, defaultTask, defaultTaskNo, fixedFor, laborMin, plannable, taskById, taskOn, tasksFor, type Task } from './tasks';
 import {
   aStreakAfter,
+  goalMet,
+  goalWindow,
   atResort,
   pausedWeek,
   alertAog,
@@ -120,6 +124,7 @@ import {
   subCharterWords,
   isTagged,
   outOfService,
+  renovating,
   isBlind,
   isRework,
   SIGNOFF,
@@ -226,7 +231,7 @@ export type ApplyResult = { s: IslandState; error?: string };
  * what the island doc means; firestore.rules keeps builds from before this
  * existed out (they write v:1).
  */
-export const ENGINE_VERSION = 4;
+export const ENGINE_VERSION = 5;
 
 const OPS: OpsRole[] = ['mech', 'elec'];
 
@@ -399,7 +404,17 @@ function finishProjectIfDone(s: IslandState, now: number) {
   s.stats.tierReachedWeek[p.tier] = s.week;
   // the builders set how good the new buildings are (15.5); planes and the grid keep today's health
   const base = 60 + 30 * quality;
-  addTierAssets(s, p.tier, s.week, Math.round(base), Math.round(base - 15 * (1 - builtShare(s, p.tier))));
+  const built = Math.round(base - 15 * (1 - builtShare(s, p.tier)));
+  addTierAssets(s, p.tier, s.week, Math.round(base), built);
+  // the service upgrade (WARRANTY.service): the Harbor's new transformer and feeder, the Resort's bigger standby set,
+  // installed with the tier: at the new buildings' health (if it was below), under the builder's warranty
+  const up = p.tier === 4 && WARRANTY.service.grid ? 'grid' : p.tier === 5 && WARRANTY.service.gen ? 'generator' : null;
+  const svc = up ? s.assets.find((x) => x.kind === up) : undefined;
+  if (svc) {
+    svc.health = Math.max(svc.health, built);
+    svc.touchedWeek = Math.max(svc.touchedWeek, s.week);
+    svc.warrantyUntil = s.week + WARRANTY.weeks;
+  }
   // the new tier's spares come with it (19.3)
   addStarter(s, p.tier);
   s.project = null;
@@ -422,6 +437,8 @@ function addTierAssets(s: IslandState, tier: number, week: number, health = 80, 
       touchedWeek: week,
       // the county books each house a week of its own (a tier's pair gets its notices a week apart)
       ...(kind === 'house' ? { inspectionUntil: bookInspection(s, a.id, week + inspectionWeeks(s.tier)) } : {}),
+      // G0: new construction from WARRANTY.fromTier comes with its builder's warranty
+      ...(!fresh && tier >= WARRANTY.fromTier && (kind === 'house' || kind === 'generator') ? { warrantyUntil: week + WARRANTY.weeks } : {}),
       ...(kind === 'plane' ? { sinceInspection: 4 } : {}),
     });
   }
@@ -1105,6 +1122,8 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     const signed = blind || a.score >= SIGNOFF;
     if (o.kind === 'inspect100' && signed) asset.sinceInspection = 0;
     if (o.kind === 'codeprep' && signed) asset.inspectionUntil = renewedInspection(s, asset, s.week);
+    // a renovation's final: the house opens again, under the renovation's warranty (G0)
+    if (o.kind === 'codeprep' && signed) renoSignoff(s, asset, s.week);
   }
 
   if (o.kind === 'report') {
@@ -3580,6 +3599,7 @@ function autoRun(s: IslandState, role: Role) {
       // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
       // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
       if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
+      if (o.kind === 'codeprep') renoSignoff(s, asset, s.week);
       if (o.kind === 'inspect100') asset.sinceInspection = 0;
     }
     // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
@@ -4359,7 +4379,8 @@ export function resolveWeek(s: IslandState, now: number) {
   const shield = s.modifiers.some((m) => m.kind === 'stormShield' && m.until >= W) ? 0.5 : 1;
   // A0 (from tier 4): a maintained asset wears slower, and a house dark all week (grid down, no generator) not at all
   for (const a of s.assets) {
-    if (a.touchedWeek < W) a.health -= decayOf(s, a, !pw.on);
+    // (G0: a house closed for its renovation doesn't decay; the builders are on it)
+    if (a.touchedWeek < W && !renovating(s, a.id)) a.health -= decayOf(s, a, !pw.on);
     if (s.weather === 'storm') {
       if (a.kind === 'house') a.health -= STORM_HIT.house * shield;
       if (a.kind === 'grid') a.health -= STORM_HIT.grid * shield;
@@ -4496,6 +4517,8 @@ export function resolveWeek(s: IslandState, now: number) {
   // Autopilot weeks never lose progress, but they don't count toward unlocks
   // or the credits: nobody wins alone.
   const fullTeam = autoRunRoles.length === 0;
+  // the week was played in receivership (set at the resolve before; this one may end it): the week's report says so
+  const playedInRecv = s.receivership > 0;
   const st = s.stats;
   st.totalWeeks += 1;
   if (GRADE_VALUE[grade] >= 3 && fullTeam) {
@@ -4508,15 +4531,31 @@ export function resolveWeek(s: IslandState, now: number) {
   st.aStreak = aStreakAfter(s, W, grade, fullTeam);
   // a streak carried from an older engine ends like any other: from then on only the Resort's weeks count
   if (!st.aStreak && st.aCarry !== undefined) delete st.aCarry;
-  if (!s.creditsWeek && pausedWeek(s, { week: W, grade, autoRun: autoRunRoles }))
-    line(
-      'all',
-      'info',
-      `An A with autopilot covering ${autoRunRoles.map((r) => nameOfRole(s, r)).join(' and ')} doesn't count toward the eight${st.aStreak ? `: the streak holds at ${st.aStreak}/8` : ''}.`,
-    );
-  if (atResort(s, W) && fullTeam && (st.aStreak ?? 0) >= 8 && !s.creditsWeek) {
-    s.creditsWeek = W;
-    line('all', 'good', 'Eight full-crew A weeks at the Resort, none below A. You beat Island Company!');
+  if (GOAL.rule === 'quarter') {
+    // the credits (G0, one data switch): the Resort's two months on plan, read from the week reports (goalWindow), Resort
+    // weeks only, landing on a full-crew week
+    const win = goalWindow(s, { week: W, grade, revenue, budget, autoRun: autoRunRoles, ...(playedInRecv ? { rcv: true } : {}) });
+    if (!s.creditsWeek && pausedWeek(s, { week: W, grade, autoRun: autoRunRoles, rcv: playedInRecv || undefined }))
+      line(
+        'all',
+        'info',
+        `A week on plan with autopilot covering ${autoRunRoles.map((r) => nameOfRole(s, r)).join(' and ')} doesn't count toward the two months on plan: ${win.length} of ${GOAL.weeks} weeks counted.`,
+      );
+    if (atResort(s, W) && fullTeam && !playedInRecv && goalMet(win) && !s.creditsWeek) {
+      s.creditsWeek = W;
+      line('all', 'good', `Two months on plan at the Resort: ${GOAL.need} of ${GOAL.weeks} weeks at ${GOAL.minGrade} or better, revenue at ${Math.round(GOAL.revShare * 100)}% of budget or more. You beat Island Company!`);
+    }
+  } else {
+    if (!s.creditsWeek && pausedWeek(s, { week: W, grade, autoRun: autoRunRoles }))
+      line(
+        'all',
+        'info',
+        `An A with autopilot covering ${autoRunRoles.map((r) => nameOfRole(s, r)).join(' and ')} doesn't count toward the eight${st.aStreak ? `: the streak holds at ${st.aStreak}/8` : ''}.`,
+      );
+    if (atResort(s, W) && fullTeam && (st.aStreak ?? 0) >= 8 && !s.creditsWeek) {
+      s.creditsWeek = W;
+      line('all', 'good', 'Eight full-crew A weeks at the Resort, none below A. You beat Island Company!');
+    }
   }
   st.recentIncidents = [...st.recentIncidents, incidents.length].slice(-4);
   st.negCashStreak = s.cash < 0 ? st.negCashStreak + 1 : 0;
@@ -4633,6 +4672,7 @@ export function resolveWeek(s: IslandState, now: number) {
     mvp,
     autoRun: autoRunRoles,
     tierUp,
+    ...(playedInRecv ? { rcv: true as const } : {}),
   };
   s.history.push(report);
   // the week reports keep as many weeks as the ledger (every screen reads 12 at most): the doc budget (2.8)
