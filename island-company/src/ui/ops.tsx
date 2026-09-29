@@ -281,7 +281,7 @@ export function CapNotice({ cap }: { cap: NonNullable<ReturnType<typeof capNow>>
 }
 
 /** Squawk: the trade judges what an asset needs and writes it up. Knowing which job fits is the skill. */
-function WriteUp({ ctl, role, asset, can, onDone }: { ctl: Ctl; role: Role; asset: Asset; can: boolean; onDone(): void }) {
+export function WriteUp({ ctl, role, asset, can, onDone }: { ctl: Ctl; role: Role; asset: Asset; can: boolean; onDone(): void }) {
   const { s } = ctl;
   const a = s.assets.find((x) => x.id === asset.id) ?? asset;
   const openKinds = new Set(s.orders.filter((o) => o.assetId === a.id && o.status !== 'done' && o.status !== 'cancelled').map((o) => o.kind));
@@ -329,7 +329,7 @@ function WriteUp({ ctl, role, asset, can, onDone }: { ctl: Ctl; role: Role; asse
  * Safety call: ground a plane / red-tag a house for this week. Out of service = no flights or guests, but nothing can
  * fail in service. `sub`: the only guest plane, whose guests a mainland sub-charter flies while it's grounded (at a price)
  */
-function SafetyCall({ ctl, role, id, on, word, sub }: { ctl: Ctl; role: Role; id: string; on: boolean; word: string; sub?: boolean }) {
+export function SafetyCall({ ctl, role, id, on, word, sub }: { ctl: Ctl; role: Role; id: string; on: boolean; word: string; sub?: boolean }) {
   const ended = !!ctl.s.turns[role]?.ended;
   return (
     <button

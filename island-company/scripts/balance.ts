@@ -10,6 +10,7 @@
 //                                         # adds weeks 65 and 78 (review round 1: the 52-week window hid a delayed collapse)
 //   npm run balance -- flow [team] [n]    # the first 40 alerts of one game: symptom, hidden cause, the bot's task and pick, the verdict, what came of it
 //   npm run balance -- cottages           # the three friends with an analyst who starts a cottage at tier 4 (the staff update's growth project)
+//   add checks=off to any run             # stage 2 (docs/EXPANSION.md 11.1 T7): the bots make no quick checks and no flags (the run as before they existed)
 // The summary's `mistakes` crew is the three friends with a human's slips (a near-miss pick on one plan in ten, a
 // stock request a week): its money and latency next to the three friends' price the mistakes the bots don't make.
 import { causeOf, fixesOf, symptomOf } from '../src/sim/alerts';
@@ -23,6 +24,10 @@ import type { Alert, IslandState, Order } from '../src/sim/types';
 
 const WEEKS = 26;
 const SEEDS = 30;
+// stage 2 (T7): `checks=off` anywhere in the arguments turns the bots' quick checks and flags off
+const checksOff = process.argv.includes('checks=off');
+const args = process.argv.slice(2).filter((a) => a !== 'checks=off');
+process.argv.splice(2, process.argv.length - 2, ...args);
 /** the long game (docs/EXPANSION.md 11.1 T1): 52 weeks, judged on weeks 24-52 (after the Resort); `long 78` plays on to week 78 */
 const LONG = 52;
 const LONG_FROM = 24;
@@ -32,6 +37,10 @@ const DEAD_REV = 2000;
 /** the T1 target: the credits (8 full-crew A weeks at the Resort, none below A) by this week */
 const CREDITS_BY = 45;
 const arg = process.argv[2];
+/** a team as the run plays it: with checks=off, no bot makes a quick check or a flag */
+const crew = (t: Team): Team =>
+  checksOff ? { mech: { ...t.mech, checks: false, flags: false }, elec: { ...t.elec, checks: false, flags: false }, fin: { ...t.fin, checks: false, flags: false } } : t;
+if (checksOff) console.log('(checks=off: no quick checks or flags)');
 
 const usd = (n: number) => (n < 0 ? '-' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
 const med = (xs: number[]) => {
@@ -54,9 +63,14 @@ type Flow = {
   reqs: number;
   restock: number;
   wiring: number;
+  /** stage 2: quick-check write-ups (right calls, wrong calls) and flags raised, per game */
+  chkRight: number;
+  chkWrong: number;
+  flags: number;
 };
 function flowTrace(): { f: Flow; trace: (s: IslandState) => void } {
-  const f: Flow = { latency: [], aog: { stock: 0, approval: 0, plan: 0, carrier: 0 }, subWeeks: 0, fill: [0, 0], wait: 0, weeks: 0, returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0 };
+  const f: Flow = { latency: [], aog: { stock: 0, approval: 0, plan: 0, carrier: 0 }, subWeeks: 0, fill: [0, 0], wait: 0, weeks: 0, returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0, chkRight: 0, chkWrong: 0, flags: 0 };
+  const checked = new Set<string>();
   const closed = new Set<string>();
   const stopped = new Set<string>();
   const asked = new Set<string>();
@@ -66,6 +80,12 @@ function flowTrace(): { f: Flow; trace: (s: IslandState) => void } {
     for (const o of s.orders) if (o.flow?.stop && once(stopped, o.id)) f.stops++;
     for (const q of s.reqs ?? []) if (!q.order && once(asked, q.id)) f.reqs++;
     for (const a of s.alerts ?? []) if (a.kind === 'wiring' && once(wired, a.id)) f.wiring++;
+    for (const a of s.alerts ?? []) {
+      if ((a.src !== 'check' && a.src !== 'flag') || !once(checked, a.id)) continue;
+      if (a.src === 'flag') f.flags++;
+      else if (a.early) f.chkRight++;
+      else f.chkWrong++;
+    }
     const W = s.week - 1;
     f.weeks++;
     const row = s.ledger?.find((r) => r.w === W);
@@ -180,7 +200,7 @@ if (arg === 'detail') {
   const seed = Number(process.argv[4] ?? 1);
   const extra: string[] = [];
   const seen = new Set<string>();
-  const { weeks } = simulate(TEAMS[team], WEEKS, seed, (s) => {
+  const { weeks } = simulate(crew(TEAMS[team]), WEEKS, seed, (s) => {
     const W = s.week - 1;
     const raised = (s.alerts ?? []).filter((a) => a.week === W && !seen.has(a.id));
     for (const a of raised) seen.add(a.id);
@@ -219,7 +239,7 @@ if (arg === 'detail') {
       let credits = 0;
       for (let seed = 1; seed <= 90; seed++) {
         const { f, trace } = flowTrace();
-        const { g, weeks } = longGame(TEAMS[name], seed, salt, (s) => {
+        const { g, weeks } = longGame(crew(TEAMS[name]), seed, salt, (s) => {
           if (s.week - 1 <= WEEKS) trace(s);
         });
         t5.push(g.t5 <= WEEKS ? g.t5 : 99);
@@ -254,7 +274,7 @@ if (arg === 'detail') {
   for (const [name, team] of Object.entries(TEAMS)) {
     const gs: LongGame[] = [];
     for (let seed = 1; seed <= SEEDS; seed++) {
-      gs.push(longGame(team, seed, '', undefined, LONG_MAX).g);
+      gs.push(longGame(crew(team), seed, '', undefined, LONG_MAX).g);
       sims++;
     }
     all.push([name, gs]);
@@ -299,7 +319,7 @@ if (arg === 'detail') {
   const seed = Number(process.argv[4] ?? 1);
   type Row = { a: Alert; o?: Order; stop?: string; pick?: string; std?: string; task?: string; fixes: string[]; defects: string[]; again: boolean };
   const rows = new Map<string, Row>();
-  simulate(TEAMS[team], WEEKS, seed, (s) => {
+  simulate(crew(TEAMS[team]), WEEKS, seed, (s) => {
     for (const a of s.alerts ?? []) {
       if (!rows.has(a.id) && rows.size < 40) rows.set(a.id, { a, fixes: fixesOf(s, a), defects: [], again: false });
       const row = rows.get(a.id);
@@ -353,7 +373,7 @@ if (arg === 'detail') {
       : Object.entries(TEAMS);
   console.log(`\nPaper sim: ${WEEKS} weeks x ${SEEDS} seeds per team (medians unless noted)\n`);
   console.log(
-    'team            tier@26  wk→T2 wk→T3 wk→T4 wk→T5  %B+  min cash  weeks<0  incid/wk  defect/wk  rev/wk  latency  AOG wk (stk/apr/pln/car)    sub  fill%  wait/wk  inv@26  bins@26  payroll@26  late bld  ret/stp/req  restock  wiring',
+    'team            tier@26  wk→T2 wk→T3 wk→T4 wk→T5  %B+  min cash  weeks<0  incid/wk  defect/wk  rev/wk  latency  AOG wk (stk/apr/pln/car)    sub  fill%  wait/wk  inv@26  bins@26  payroll@26  late bld  ret/stp/req  restock  wiring  chk r/w/flag',
   );
   const t0 = Date.now();
   let sims = 0;
@@ -377,10 +397,10 @@ if (arg === 'detail') {
     const bins: number[] = [];
     const pay: number[] = [];
     let late = 0;
-    const slip = { returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0 };
+    const slip = { returns: 0, stops: 0, reqs: 0, restock: 0, wiring: 0, chkRight: 0, chkWrong: 0, flags: 0 };
     for (let seed = 1; seed <= SEEDS; seed++) {
       const { f, trace } = flowTrace();
-      const { weeks, final, minCash } = simulate(team, WEEKS, seed, trace);
+      const { weeks, final, minCash } = simulate(crew(team), WEEKS, seed, trace);
       sims++;
       tiers.push(final.tier);
       for (const t of [2, 3, 4, 5]) reach[t].push(final.stats.tierReachedWeek[t] ?? 99);
@@ -413,7 +433,7 @@ if (arg === 'detail') {
     };
     const g = (n: number) => (n / SEEDS).toFixed(1);
     console.log(
-      `${name.padEnd(15)} ${String(med(tiers)).padStart(7)}   ${wk(2)}   ${wk(3)}   ${wk(4)}   ${wk(5)} ${String(Math.round((100 * bplus) / total)).padStart(4)} ${usd(Math.min(...mins)).padStart(9)} ${String(neg).padStart(8)} ${(inc / total).toFixed(2).padStart(9)} ${(def / total).toFixed(3).padStart(10)} ${usd(rev / total).padStart(7)} ${mean(lat).toFixed(2).padStart(8)}  ${`${g(aog.stock)}/${g(aog.approval)}/${g(aog.plan)}/${g(aog.carrier)}`.padStart(23)} ${g(subWeeks).padStart(6)} ${String(fill[1] ? Math.round((100 * fill[0]) / fill[1]) : 0).padStart(6)} ${(wait / Math.max(1, weeksAll)).toFixed(2).padStart(8)} ${usd(med(inv)).padStart(7)} ${`${Math.round(100 * med(bins))}%`.padStart(8)} ${`${Math.round(100 * med(pay))}%`.padStart(11)} ${`${Math.round((100 * late) / SEEDS)}%`.padStart(9)}  ${`${g(slip.returns)}/${g(slip.stops)}/${g(slip.reqs)}`.padStart(11)} ${usd(slip.restock / SEEDS).padStart(8)} ${g(slip.wiring).padStart(7)}`,
+      `${name.padEnd(15)} ${String(med(tiers)).padStart(7)}   ${wk(2)}   ${wk(3)}   ${wk(4)}   ${wk(5)} ${String(Math.round((100 * bplus) / total)).padStart(4)} ${usd(Math.min(...mins)).padStart(9)} ${String(neg).padStart(8)} ${(inc / total).toFixed(2).padStart(9)} ${(def / total).toFixed(3).padStart(10)} ${usd(rev / total).padStart(7)} ${mean(lat).toFixed(2).padStart(8)}  ${`${g(aog.stock)}/${g(aog.approval)}/${g(aog.plan)}/${g(aog.carrier)}`.padStart(23)} ${g(subWeeks).padStart(6)} ${String(fill[1] ? Math.round((100 * fill[0]) / fill[1]) : 0).padStart(6)} ${(wait / Math.max(1, weeksAll)).toFixed(2).padStart(8)} ${usd(med(inv)).padStart(7)} ${`${Math.round(100 * med(bins))}%`.padStart(8)} ${`${Math.round(100 * med(pay))}%`.padStart(11)} ${`${Math.round((100 * late) / SEEDS)}%`.padStart(9)}  ${`${g(slip.returns)}/${g(slip.stops)}/${g(slip.reqs)}`.padStart(11)} ${usd(slip.restock / SEEDS).padStart(8)} ${g(slip.wiring).padStart(7)}  ${`${g(slip.chkRight)}/${g(slip.chkWrong)}/${g(slip.flags)}`.padStart(12)}`,
     );
   }
   const ms = (Date.now() - t0) / Math.max(1, sims);
@@ -422,5 +442,6 @@ if (arg === 'detail') {
   console.log('latency: weeks from an alert to its sign-off. sub: weeks a mainland sub-charter flew the guests (the only guest plane on the ground), per game. fill%: main-slot value from stock at plan time, weeks 8-26.');
   console.log('payroll@26: the crew\'s payroll against the standard crew\'s. late bld: games where a new tier\'s buildings started before the builders finished them.');
   console.log('ret/stp/req: receiving returns, install stops and stock requests per game; restock: restocking fees per game; wiring: wiring faults met per game (5.4).');
+  console.log('chk r/w/flag (stage 2): quick-check write-ups per game, right calls (found early) / wrong calls (no-fault write-ups), and flags raised.');
   console.log('\nExit test (spec phase 0): "no role can win alone" + "no week ends with cash < 0 under sensible play".');
 }

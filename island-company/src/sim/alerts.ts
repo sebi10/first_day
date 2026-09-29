@@ -8,6 +8,7 @@
 // alert's seed.
 import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
+import { CHECK_SYMPTOMS } from './checkdata';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
 import { FEED_KINDS, feedAlert, gridFirst, gridFirstJob } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
@@ -72,6 +73,8 @@ export type Symptom = {
   auto?: boolean;
   /** a write-up (the squawk action): the catalog kind it names */
   writeUp?: string;
+  /** stage 2: the alert in a few words (alertShort), when its text doesn't start with them (the quick checks' write-ups) */
+  short?: string;
 };
 
 const ALL: PlaneModel[] = ['twin', 'cargo', 'float'];
@@ -798,7 +801,8 @@ const DEFAULT_FIX: Record<string, string> = {
 /** a repair alert (a hidden defect found or surfaced): its words are the defect's */
 const REPAIR: Symptom = { key: 'R_REPAIR', role: 'mech', src: 'finding', text: '{problem}', lead: [0, 0], causes: [{ kind: 'repair', w: 1 }], auto: true };
 
-export const SYMPTOMS: Record<string, Symptom> = Object.fromEntries([...MECH, ...ELEC, ...writeUps(), REPAIR].map((x) => [x.key, x]));
+// stage 2 (docs/EXPANSION.md 6.4): the quick checks' write-up rows (checkdata.ts) come last, so every earlier row keeps its place
+export const SYMPTOMS: Record<string, Symptom> = Object.fromEntries([...MECH, ...ELEC, ...writeUps(), REPAIR, ...CHECK_SYMPTOMS].map((x) => [x.key, x]));
 export const symptomOf = (a: Pick<Alert, 'sym'>): Symptom | undefined => SYMPTOMS[a.sym];
 
 // ---------------------------------------------------------------------------
@@ -879,6 +883,8 @@ function vars(s: IslandState, a: Alert): Record<string, string> {
     leg,
     Leg: leg.charAt(0).toUpperCase() + leg.slice(1),
     problem: a.repair?.problem ?? 'a known defect',
+    // stage 2: who wrote up a quick check's finding
+    who: a.who ?? 'the tech',
   };
 }
 
@@ -922,6 +928,8 @@ export function symptomText(s: IslandState, a: Alert): string {
   if (sym.alt && s.history.find((h) => h.week === a.week - 1)?.weather !== 'storm') raw = sym.alt;
   let text = fill(raw, v);
   if (sym.writeUp) text = `Written up by ${a.who ?? 'the crew'}: ${lowerFirst(text)}`;
+  // stage 2 (docs/EXPANSION.md 6.5): a crewmate's flag, in the flagger's name, on the asset (a guest's or a log's words without their "Guest at …:")
+  else if (a.src === 'flag') text = `Flagged by ${a.who ?? 'a crewmate'} on ${asset?.name ?? 'the asset'}: ${lowerFirst(text.replace(WHO_SAID, ''))}`;
   else if (a.who && sym.src === 'squawk') text = `Written up by ${a.who}: ${lowerFirst(text)}`;
   if (a.again !== undefined) text = `Written up again: ${lowerFirst(text)}`;
   return text;
@@ -933,17 +941,23 @@ export function symptomText(s: IslandState, a: Alert): string {
  * ("low-voltage light (L/H engine)"), lower case unless it opens on an acronym ("GEN OFF light on the ground run").
  */
 export function alertShort(s: IslandState, a: Alert): string {
-  let t = symptomText(s, a).replace(/^Written up (again|by [^:]+): /i, '');
+  // stage 2: a quick check's write-up says it in its own few words
+  const own = SYMPTOMS[a.sym]?.short;
+  if (own) return lowerFirst(fill(own, vars(s, a)));
+  let t = symptomText(s, a).replace(/^(Written up (again|by [^:]+)|Flagged by [^:]+): /i, '');
   let eng = '';
   const m = /^(L\/H|R\/H) engine: /i.exec(t);
   if (m) {
     eng = ` (${m[1]} engine)`;
     t = t.slice(m[0].length);
   }
-  t = t.replace(/^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm|Weekly test|Weekly generator run): /i, '');
+  t = t.replace(WHO_SAID, '');
   const first = t.split(/[;:]|\.(?=\s|$)/)[0].trim();
   return lowerFirst(first) + eng;
 }
+
+/** who noticed it, at the start of a symptom's text ("Guest at Cottage 1:", "Utility log:") */
+const WHO_SAID = /^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm|Weekly test|Weekly generator run): /i;
 
 /** the site of an electrical job (derived from the seed): room, circuit, AWG, run, protection upstream */
 export function siteOf(s: IslandState, a: Pick<Alert, 'seed' | 'sym' | 'cause' | 'role' | 'assetId'>): ElecSite | null {
@@ -1104,7 +1118,7 @@ export type RaiseOpts = {
 };
 
 /** does a symptom fit an asset (its model, or its targets) */
-function fits(sym: Symptom, asset: Asset): boolean {
+export function fits(sym: Symptom, asset: Asset): boolean {
   if (asset.kind === 'plane') return !!sym.models?.includes(planeModel(asset.model));
   return !!sym.targets?.includes(asset.model);
 }
@@ -1115,7 +1129,7 @@ function fits(sym: Symptom, asset: Asset): boolean {
  * weights: the com radio's dead transmit is the wiring 3 in 10, the alternator's no output 1 in 5, the
  * starter-generator's 1 in 4. The alert still fills the kind's slot (`slotKind`).
  */
-function pairsFor(kind: string, asset: Asset, sole: boolean): { sym: Symptom; cause: number; w: number }[] {
+export function pairsFor(kind: string, asset: Asset, sole: boolean): { sym: Symptom; cause: number; w: number }[] {
   const out: { sym: Symptom; cause: number; w: number }[] = [];
   const onModel = (c: Cause) => !(c.models && asset.kind === 'plane' && !c.models.includes(planeModel(asset.model)));
   for (const sym of Object.values(SYMPTOMS)) {
@@ -1244,7 +1258,9 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     // the electrician's helper (review round 1) walks the houses too: their rounds write up as much more as they do
     const extra = role === 'elec' ? helperJobs(s) : 0;
     const target = (s.tier >= 3 ? 5 : 4) + extra;
-    let openCount = workable.length + openAlerts.length;
+    // stage 2 (docs/EXPANSION.md 4.5, 6.4): a quick check's wrong call (a no-fault write-up) holds a slot until it's closed on site
+    const checkUps = (s.alerts ?? []).filter((a) => a.role === role && a.status === 'open' && a.src === 'check' && a.cause < 0).length;
+    let openCount = workable.length + openAlerts.length + checkUps;
     let slots = Math.max(0, Math.min(3 + extra, target - openCount));
     const cands: { kind: string; asset: Asset; w: number }[] = [];
     for (const asset of s.assets) {

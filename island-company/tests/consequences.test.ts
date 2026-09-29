@@ -707,13 +707,15 @@ describe('paper sim with consequences', () => {
 
   it('three friends keep cash positive every week and get to the late game (tier 4+, tier 5 on most seeds)', () => {
     const tiers: number[] = [];
-    for (const seed of [1, 2, 3, 4, 5]) {
+    // (ten seeds, not five, since stage 2: the crew's quick checks and flags reshuffle every seed, and three of five is
+    // a coin flip at the tier-5 line; the share asked for is the same)
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
       const { final, minCash } = simulate(TEAMS['three friends'], 26, seed);
       expect(minCash, `seed ${seed}`).toBeGreaterThanOrEqual(0);
       expect(final.tier, `seed ${seed}`).toBeGreaterThanOrEqual(4);
       tiers.push(final.tier);
     }
-    expect(tiers.filter((t) => t === 5).length).toBeGreaterThanOrEqual(3);
+    expect(tiers.filter((t) => t === 5).length).toBeGreaterThanOrEqual(6);
   });
 });
 

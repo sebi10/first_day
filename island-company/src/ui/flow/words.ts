@@ -24,6 +24,9 @@ export const SRC_ICON: Record<AlertSrc, string> = {
   utility: 'meter',
   code: 'board',
   takeoff: 'takeoff',
+  // stage 2 (docs/EXPANSION.md 6.4, 6.5): a quick check's write-up (right or wrong call look alike), a crewmate's flag
+  check: 'wrench',
+  flag: 'alert',
 };
 
 /** "Pilot squawk", "Guest complaint": the source in words (the row's aria label and the sheet's header) */
@@ -40,6 +43,8 @@ export const SRC_WORDS: Record<AlertSrc, string> = {
   utility: 'Utility reading',
   code: 'Code notice',
   takeoff: 'Install take-off',
+  check: 'Quick check',
+  flag: 'Reported by a crewmate',
 };
 
 /** a flag beside an alert's stage; `why` is said on the open job (the release gate: a chip that explains itself on tap) */

@@ -46,12 +46,16 @@ export function harborLines(s: IslandState): { title: string; body: string }[] {
   ];
 }
 
-export function HarborSheet({ s, role, hold }: { s: IslandState; role: Role; hold: boolean }) {
+/** the Harbor sheet is still to show for this seat on this device (the stage-2 What's new waits for it) */
+export const harborPending = (s: IslandState, role: Role) => s.tier >= LATE.fromTier && !local.get(harborKey(s.id, role));
+
+export function HarborSheet({ s, role, hold, onDone }: { s: IslandState; role: Role; hold: boolean; onDone?: () => void }) {
   const key = harborKey(s.id, role);
   const [seen, setSeen] = useState(() => !!local.get(key));
   const done = () => {
     local.set(key, '1');
     setSeen(true);
+    onDone?.();
   };
   const open = s.tier >= LATE.fromTier && !seen && !hold;
   return (

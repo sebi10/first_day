@@ -30,6 +30,7 @@ import {
   wearMult,
 } from '../src/sim/staff';
 import { ROLES, type Asset, type IslandState } from '../src/sim/types';
+import { baseCrew } from './crews';
 
 vi.setConfig({ testTimeout: 30000 });
 beforeAll(() => void (STAFF_TEST.stubs = true));
@@ -95,7 +96,9 @@ describe('the staff stubs', () => {
   it('a season on the stubs: every week’s fixed cost is the tier’s, nothing lost to pilots or housekeeping, no hard landings', () => {
     const seen = new Set<number>();
     let weeks = 0;
-    simulate(TEAMS['three friends'], 26, 3, (s) => {
+    // the base crew (stage 2's quick checks reshuffle the seed; with them, seed 3's tier 5 comes by the crew-project
+    // cover at the resolve, whose week reports the new tier at the old tier's costs: see docs/DECISIONS.md "Airline network")
+    simulate(baseCrew(TEAMS['three friends']), 26, 3, (s) => {
       const h = s.history.at(-1)!;
       if (seen.has(h.week)) return;
       seen.add(h.week);

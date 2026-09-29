@@ -52,7 +52,9 @@ import {
   symptomOf,
   symptomText,
 } from './alerts';
-import { acOf, assignSlots, bomValue, cardOf, fillOf, fixTaskFor, installCheck, judgeElecPick, judgeSlot, laborCost, planTask, realFault, repairLabor, stdPick } from './flow';
+import { acOf, assignSlots, bomValue, cardOf, earlyLess, fillOf, fixTaskFor, installCheck, judgeElecPick, judgeSlot, laborCost, planTask, realFault, repairLabor, stdPick } from './flow';
+import { canCheck, checkDid, checkReviewLines, checkView, flagCheck, flagPick, raiseCheckWriteUp, raiseFlag } from './checks';
+import { CHECK_ROWS } from './checkdata';
 import { itemById, priceAt } from './items';
 import { book, bookAog, bookFill, bookWait, closeLedger, spendable } from './ledger';
 import { migrate } from './migrate';
@@ -812,7 +814,48 @@ function applyMove(prev: IslandState, a: Action, now: number): ApplyResult {
     case 'letGo':
     case 'build':
       return staffAction(s, prev, a, now);
+    // stage 2 (docs/EXPANSION.md 7): the quick check and Report a problem
+    case 'check':
+      return checkMove(s, prev, a, now);
+    case 'flag':
+      return flagMove(s, prev, a, now);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2 (docs/EXPANSION.md 6.4, 6.5, 7): the quick check and Report a problem. Their effects happen at the move,
+// never at the resolve (the resolve only writes this week's lines, step 17b). The logic is checks.ts's.
+
+function checkMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'check' }>, now: number): ApplyResult {
+  const fail = (error: string): ApplyResult => ({ s: prev, error });
+  const can = canCheck(s, a.role, a.assetId);
+  if (!can.ok) return fail(can.why);
+  const view = checkView(s, a.role, a.assetId)!;
+  if (a.item !== null && !view.items.some((i) => i.id === a.item)) return fail("That isn't on this check.");
+  const asset = s.assets.find((x) => x.id === a.assetId)!;
+  const who = nameOf(s, a.role);
+  s.checked = { ...(s.checked ?? {}), [a.role]: s.week };
+  // blind: the words never say whether the call was right
+  if (a.item === null) {
+    feed(s, a.role, 'info', `${who} ${checkDid(view.kind, asset)}: all ${view.kind === 'walkaround' ? 'serviceable' : 'normal'}.`, now);
+    return { s };
+  }
+  const al = raiseCheckWriteUp(s, a.role, asset, view.kind, a.item, who, now);
+  feed(s, a.role, 'info', `${who} ${checkDid(view.kind, asset)} and wrote up the ${CHECK_ROWS[al.sym]?.word ?? a.item}: it's on the alert list.`, now);
+  return { s };
+}
+
+function flagMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'flag' }>, now: number): ApplyResult {
+  const fail = (error: string): ApplyResult => ({ s: prev, error });
+  const f = flagCheck(s, a.role, a.assetId);
+  if (!f.ok) return fail(f.why);
+  const asset = s.assets.find((x) => x.id === a.assetId)!;
+  const pick = flagPick(s, a.role, asset, f.to);
+  if (!pick) return fail('Nothing there anyone could report.');
+  s.flagged = { ...(s.flagged ?? {}), [a.role]: s.week };
+  raiseFlag(s, a.role, asset, f.to, pick, now);
+  feed(s, f.to, 'info', `${nameOf(s, a.role)} flagged ${asset.name} for ${nameOf(s, f.to)}: it's on the alert list.`, now);
+  return { s };
 }
 
 /** Crew board limits: long enough for a plan, small enough for one Firestore document. */
@@ -1527,8 +1570,10 @@ function planAlert(s: IslandState, al: Alert, taskId: string, rawPick: PickLine[
       assetId: asset.id,
       title: task.short,
       puzzle: c.puzzle,
-      tier: orderTier(kind, asset, s.tier),
-      cost: laborCost(s, kind, task, asset, site, needsOf(s, al)),
+      // stage 2 (docs/EXPANSION.md 6.4): found early by a quick check, the job plays one order tier easier (never under 1)
+      tier: Math.max(1, orderTier(kind, asset, s.tier) - earlyLess(al)),
+      // (and prices one tier lower: caught early, it's less work)
+      cost: laborCost(s, kind, task, asset, site, needsOf(s, al), earlyLess(al)),
       parts: 0,
       gain: c.gain,
       status: 'pending',
@@ -3814,7 +3859,7 @@ function unplannedLabour(s: IslandState, al: Alert, asset: Asset, kind: string, 
     return repairLabor(s, { cost: d.cost, puzzle: d.puzzle, role: d.role, orderKind: d.rule ?? d.orderKind, variant: d.variant, job: d.job });
   }
   const task = fixTaskFor(s, al) ?? defaultTask(kind, asset);
-  if (task?.kind) return laborCost(s, task.kind, task, asset, siteOf(s, al), needsOf(s, al));
+  if (task?.kind) return laborCost(s, task.kind, task, asset, siteOf(s, al), needsOf(s, al), earlyLess(al));
   return CATALOG_BY_KIND[kind] ? orderCost(kind, tier) : DEFECT.minBase;
 }
 
@@ -4525,6 +4570,10 @@ export function resolveWeek(s: IslandState, now: number) {
     const def = STORIES[hashSeed(s.seed, 'story', W) % STORIES.length];
     s.story = { id: def.id, week: W + 1, title: def.title, body: def.body, options: def.options.map((o) => ({ ...o, effect: storyEffect(s, def.id, o) })) };
   }
+
+  // 17b. stage 2 (docs/EXPANSION.md 6.4, 6.5): this week's quick-check write-ups and flags, in the review. Blind: a line
+  // never says whether a call was right (nothing is written for a week with none)
+  for (const l of checkReviewLines(s, W)) line(l.role, l.tone, l.text);
 
   // 18. MVP lines
   const doneThisWeek = (role: Role) => s.orders.filter((o) => o.result?.week === W && o.result.by === role && !o.result.auto);

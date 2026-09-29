@@ -875,8 +875,9 @@ describe('alert volume (5.1)', () => {
           if (seen.has(a.id)) continue;
           seen.add(a.id);
           const sym = SYMPTOMS[a.sym];
-          // repairs, write-ups, hard landings and comebacks don't come from the week's slots
-          if (a.repair || sym?.writeUp || sym?.auto || a.again !== undefined) continue;
+          // repairs, write-ups, hard landings and comebacks don't come from the week's slots; a quick check's write-up
+          // (stage 2) does: it takes one of the trade's slots, right call or wrong
+          if (a.repair || sym?.writeUp || (sym?.auto && a.src !== 'check') || a.again !== undefined) continue;
           (a.cause < 0 ? nff : real)[a.role as 'mech' | 'elec']++;
         }
       });

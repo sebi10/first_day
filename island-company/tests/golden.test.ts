@@ -8,6 +8,10 @@
 // five are 52, because tier 5 comes around weeks 21-23 and the network (stage 3) opens two tiers later: 26 weeks
 // would cover almost none of the time stage 3 changes (review round 1).
 //
+// Stage 2 (the free map, the objects, quick checks and Report a problem) runs these crews with checks and flags off
+// (`baseCrew`, tests/crews.ts): the bots' checks and flags have their own rng streams, so with them off a run must be
+// byte for byte stage 1's (e810cc5), nothing stage 2 is written to any week's doc, and migrate() adds nothing.
+//
 // A digest changes only when the game's rules or content change on purpose. When that is the change you meant
 // (a balance pass, a new job), re-record with `GOLDEN=print npx vitest run tests/golden.test.ts` and say why in
 // docs/DECISIONS.md. When it isn't, something you built leaks into home play: find it.
@@ -15,7 +19,11 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { simulate, TEAMS } from '../src/sim/bots';
 import { LATE, RECEIVER } from '../src/sim/data';
+import { cloneState } from '../src/sim/engine';
+import { migrate } from '../src/sim/migrate';
 import { STAFF } from '../src/sim/staff';
+import type { IslandState } from '../src/sim/types';
+import { baseCrew } from './crews';
 
 // 26- and 52-week sims: CI runners are about 1.5x slower
 vi.setConfig({ testTimeout: 60000 });
@@ -37,13 +45,26 @@ const RUNS: [team: string, seed: number, weeks: number][] = [
 ];
 const key = (team: string, seed: number, weeks: number) => `${team}/${seed}${weeks === 26 ? '' : `/${weeks}`}`;
 
-/** sha-256 (first 16 hex) of the run: every week's doc after its resolve, then the week-by-week table and the final doc */
-function digest(team: string, seed: number, weeks: number): string {
+/** nothing stage 2 is written to a doc no check or flag touched (EXPANSION 0.2 rule 2, 10.2) */
+const stage2Free = (s: IslandState) =>
+  s.checked === undefined && s.flagged === undefined && !(s.alerts ?? []).some((a) => a.src === 'check' || a.src === 'flag' || a.early);
+
+/**
+ * sha-256 (first 16 hex) of the run: every week's doc after its resolve, then the week-by-week table and the final
+ * doc. The crews play with quick checks and flags off (stage 2 unused); `leaks` counts the weeks a doc carried a
+ * stage-2 field anyway.
+ */
+function run(team: string, seed: number, weeks: number): { d: string; leaks: number; final: IslandState } {
   const h = createHash('sha256');
-  const { weeks: rows, final } = simulate(TEAMS[team], weeks, seed, (s) => h.update(JSON.stringify(s)));
+  let leaks = 0;
+  const { weeks: rows, final } = simulate(baseCrew(TEAMS[team]), weeks, seed, (s) => {
+    if (!stage2Free(s)) leaks++;
+    h.update(JSON.stringify(s));
+  });
   h.update(JSON.stringify({ weeks: rows, final }));
-  return h.digest('hex').slice(0, 16);
+  return { d: h.digest('hex').slice(0, 16), leaks, final };
 }
+const digest = (team: string, seed: number, weeks: number) => run(team, seed, weeks).d;
 
 /**
  * recorded on branch `gaps` at the stage 1 release gate (2026-09-29): the electrician's helper held back (the hiring
@@ -67,11 +88,21 @@ const GOLDEN: Record<string, string> = {
 describe('golden digests: home plays byte-identical (the paper-sim crews, 26 and 52 weeks)', () => {
   for (const [team, seed, weeks] of RUNS) {
     it(`${team}, seed ${seed}, ${weeks} weeks`, () => {
-      const d = digest(team, seed, weeks);
+      const { d, leaks, final } = run(team, seed, weeks);
       if (process.env.GOLDEN === 'print') console.log(`  '${key(team, seed, weeks)}': '${d}',`);
       expect(d).toBe(GOLDEN[key(team, seed, weeks)]);
+      // stage 2 unused: no week's doc carries its fields, and migrate() adds nothing
+      expect(leaks).toBe(0);
+      expect(JSON.stringify(migrate(cloneState(final)))).toBe(JSON.stringify(final));
     });
   }
+
+  it('the crews with checks and flags on (the default) really do play differently: the identity above is not vacuous', () => {
+    const { final } = simulate(TEAMS['three friends'], 26, 1);
+    const h = createHash('sha256');
+    expect(final.checked).toBeDefined();
+    expect(h.update(JSON.stringify(final)).digest('hex')).not.toBe(createHash('sha256').update(JSON.stringify(run('three friends', 1, 26).final)).digest('hex'));
+  });
 
   it('the digest sees a one-dollar change anywhere in the run', () => {
     const { weeks, final } = simulate(TEAMS['all average'], 3, 1);

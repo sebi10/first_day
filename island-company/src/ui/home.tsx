@@ -11,16 +11,23 @@ import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
 import { ChainBanner } from './chain';
 import { GseSheet, weakBatteryNow } from './gse';
-import { HarborSheet } from './harbor';
+import { HarborSheet, harborPending } from './harbor';
 import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
 import { unreadBoard } from './crewboard';
-import { Island } from './island';
 import { siteBox } from './island/geo';
+// stage 2 (docs/EXPANSION.md 14.2): the map (B), the inspect sheet (C), the version-keyed What's new (A's shell, C's panels)
+import { MapView } from './map/MapView';
+import { InspectSheet } from './inspect/InspectSheet';
+import { whatsNewMapPanels } from './inspect/WhatsNewMap';
+import { WhatsNew } from './whatsnew';
+import { isAssetRef, OBJECT_LABEL, type ObjectRef } from './objects';
+import { buildSite, crewOf, openBuild } from '../sim/staff';
+import { ENGINE_VERSION } from '../sim/engine';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
-import { blocks, capNow, dockNext, endTurnChecks, launchFor, mateStatus, openTarget, owedBy, standingLimit, teamNumbers } from './select';
+import { blocks, capNow, dockNext, endTurnChecks, launchFor, mateStatus, openTarget, owedBy, standingLimit, teamNumbers, type DockTarget } from './select';
 import { settings } from './settings';
 import { shareText } from './share';
 import { C, ROLE_TINT } from './theme';
@@ -43,7 +50,31 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
   const [handoff, setHandoff] = useState<Role | null>(null);
   // the ground power sheet: closed (undefined), all carts (null), or one cart first
   const [gse, setGse] = useState<string | null | undefined>(undefined);
+  // stage 2: the object whose inspect sheet is open (a tap on the map, or openTarget({ object }))
+  const [inspect, setInspect] = useState<ObjectRef | null>(null);
+  // a re-render when a one-time sheet (the Harbor's) closes, so the next one (What's new) can open
+  const [, bump] = useState(0);
   const reduce = settings.get().reduceMotion;
+  // openTarget({ object }) opens its sheet on the island tab; openDm (crewboard.tsx) goes to the board's DM
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const t = (e as CustomEvent<DockTarget>).detail;
+      if (!t || !('object' in t)) return;
+      setTab('island');
+      setInspect(t.object);
+    };
+    const onDm = () => {
+      setInspect(null);
+      setTab('board');
+      window.scrollTo({ top: 0 });
+    };
+    window.addEventListener('ic:open', onOpen);
+    window.addEventListener('ic:dm', onDm);
+    return () => {
+      window.removeEventListener('ic:open', onOpen);
+      window.removeEventListener('ic:dm', onDm);
+    };
+  }, []);
 
   // auto-open the newest board review once, but never on top of a running puzzle
   const lastWeek = s?.history[s.history.length - 1]?.week ?? 0;
@@ -96,7 +127,7 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
 
   return (
     <div class={`${reduce ? 'reduce-motion' : ''} ${lefty}`}>
-      {tab === 'island' && <Home ctl={ctl} onPlay={onPlay} onSeat={() => setHandoff(role)} onGse={setGse} />}
+      {tab === 'island' && <Home ctl={ctl} onPlay={onPlay} onSeat={() => setHandoff(role)} onGse={setGse} onObject={(o) => (o.kind === 'cart' ? setGse(o.id) : setInspect(o))} />}
       {tab === 'board' && <Board ctl={ctl} onReview={setReview} />}
       {tab === 'me' && <Me ctl={ctl} onLeave={() => (location.hash = '#/')} />}
 
@@ -121,7 +152,15 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
         />
       )}
       {/* the late game's rules, once per seat when tier 4 arrives or on the first open at tier 4+ (review round 1) */}
-      <HarborSheet s={s} role={role} hold={!!review || !!play} />
+      <HarborSheet key={`harbor-${role}`} s={s} role={role} hold={!!review || !!play} onDone={() => bump((n) => n + 1)} />
+      {/* stage 2: the inspect sheet (C's; D's NetObjectSheet takes station and route refs in stage 3) */}
+      <Sheet open={!!inspect} onClose={() => setInspect(null)} label={inspect ? inspectLabel(s, inspect) : 'Inspect'}>
+        {inspect && <InspectSheet s={s} ctl={ctl} role={role} target={inspect} onClose={() => setInspect(null)} />}
+      </Sheet>
+      {/* stage 2's What's new: never on top of a puzzle, the week's review or the Harbor sheet (it waits for them) */}
+      {tab === 'island' && !play && (
+        <WhatsNew key={`new-${role}`} s={s} role={role} version={ENGINE_VERSION} panels={whatsNewMapPanels(s, role)} hold={!!review || harborPending(s, role)} />
+      )}
       <Sheet open={gse !== undefined} onClose={() => setGse(undefined)} label="Ground power">
         {gse !== undefined && <GseSheet ctl={ctl} focus={gse} onClose={() => setGse(undefined)} />}
       </Sheet>
@@ -151,6 +190,31 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
       </Sheet>
     </div>
   );
+}
+
+/**
+ * The inspect sheet's label (its dialog name): an asset's name, a staff figure's (the npc's own name), a build site's
+ * (the build's), a cart's, else the kind's ("Hangar"). The same names the sheet's own header shows (inspect/facts.ts).
+ */
+export function inspectLabel(s: IslandState, t: ObjectRef): string {
+  if (isAssetRef(t)) return s.assets.find((a) => a.id === t.id)?.name ?? OBJECT_LABEL[t.kind];
+  if (t.kind === 'staff') {
+    const crew = crewOf(s);
+    const n = crew.find((x) => x.id === t.id) ?? crew.find((x) => x.role === t.id);
+    if (n?.name) return n.name;
+  }
+  if (t.kind === 'site') {
+    const b = (t.id === 'project' ? undefined : (s.builds ?? []).find((x) => x.id === t.id)) ?? openBuild(s);
+    if (b) {
+      const w = buildSite(b);
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    }
+  }
+  if (t.kind === 'cart') {
+    const c = gseCarts(s).find((x) => x.id === t.id);
+    if (c) return c.name;
+  }
+  return OBJECT_LABEL[t.kind];
 }
 
 /** This device can read the island but holds no seat: never joined, or its sign-in was reset. */
@@ -191,17 +255,17 @@ function Loading({ text, back }: { text: string; back?: boolean }) {
   );
 }
 
-function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void; onGse(cart: string | null): void }) {
+function Home({ ctl, onPlay, onSeat, onGse, onObject }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void; onGse(cart: string | null): void; onObject(o: ObjectRef): void }) {
   const { s, role, ref, sync } = ctl;
   const r = role!;
-  // the island's zoom: the seat's own zone, the builders' site (docs/JOBFLOW.md 15.5), or the whole island
-  const [view, setView] = useState<'zone' | 'site' | null>(null);
+  // the map's view (the seat's zone, the builders' site, the whole island) lives in MapView (B); the builders' line
+  // on Home jumps it to the build site (docs/JOBFLOW.md 15.5)
+  const [go, setGo] = useState<{ preset: string; n: number } | undefined>(undefined);
   const site = siteBox(s);
-  const zoom = view === 'site' && !site ? null : view;
   const wrap = useRef<HTMLDivElement>(null);
   const seeSite = () => {
     fx.tap();
-    setView('site');
+    setGo({ preset: 'site', n: (go?.n ?? 0) + 1 });
     // on a phone the island is up the page: bring it into view
     wrap.current?.scrollIntoView?.({ behavior: settings.get().reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
   };
@@ -238,38 +302,9 @@ function Home({ ctl, onPlay, onSeat, onGse }: { ctl: Ctl; onPlay(o: Order, cover
           <span class={`chip num ${s.cash < 2000 ? 'rust' : ''}`}>{usd(s.cash)}</span>
         </div>
 
-        <div class="island-wrap" style={{ cursor: 'pointer' }} ref={wrap}>
-          <Island
-            s={s}
-            focus={zoom === 'zone' ? r : zoom}
-            reduceMotion={settings.get().reduceMotion}
-            onTap={() => {
-              fx.tap();
-              setView(zoom ? null : 'zone');
-            }}
-            onCart={(id) => {
-              fx.tap();
-              onGse(id);
-            }}
-            onBuilders={site && zoom !== 'site' ? seeSite : undefined}
-          />
-          {zoom === 'site' ? (
-            <button
-              class="island-back"
-              onClick={() => {
-                fx.tap();
-                setView(null);
-              }}
-            >
-              <Icon name="island" size={16} /> See the island
-            </button>
-          ) : (
-            <span class="island-hint">
-              {s.weather === 'clear' ? '☀' : s.weather === 'wind' ? '〰 wind' : '⛈ storm'} · tap to {zoom ? 'see the island' : 'zoom to your zone'}
-              {/* a builder figure is a tap target of its own (fix round 1: a tap near one opened the site unannounced) */}
-              {site && !zoom ? ' · a builder: the site' : ''}
-            </span>
-          )}
+        {/* the builders' line scrolls the map back into view on a phone, with the island's header above it */}
+        <div ref={wrap} style={{ scrollMarginTop: 75 }}>
+          <MapView s={s} role={r} onObject={onObject} onCart={(id) => onGse(id)} go={go} />
         </div>
 
         <div class="team">
