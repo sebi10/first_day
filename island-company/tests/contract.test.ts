@@ -102,7 +102,15 @@ describe('the stage-2 contract (14.3)', () => {
           // a station: nothing yet (stage 3)
           expect(fixtureFacts(s, kind, 'tern', role).lines).toEqual([]);
         }
-      expect(whatsNewMapPanels(s, 'mech')).toEqual([]);
+      // stage 2's What's new (C's panels): every seat gets at least the map's panel, each with a title and a body
+      for (const role of ROLES as Role[]) {
+        const panels = whatsNewMapPanels(s, role);
+        expect(panels.length).toBeGreaterThan(0);
+        for (const p of panels) {
+          expect(typeof p.title === 'string' && p.title.length > 0).toBe(true);
+          expect(p.body).toBeTruthy();
+        }
+      }
       // reading never writes
       expect(JSON.stringify(s)).toBe(before);
       // nothing stage 2 on the live docs
