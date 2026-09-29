@@ -1591,3 +1591,49 @@ What was tested: the tip of `gaps`, `c57c51e` (the gap fixes, A0 and A0 review r
 
 - `a46bd49` (the expansion-spec merge, not pushed): its message ends with git's leftover `# Conflicts:` block after the trailer. git's own trailer parser still finds the trailer. Fixing it means rewriting `a46bd49` and every commit after it, which changes the release SHAs, and other worktrees are built on `25afc96`. So it's left to whoever deploys: `git filter-branch --msg-filter` over `a46bd49^..gaps` to drop the `# Conflicts` lines (the trees stay identical, per HANDOFF §6.4 item 7), or leave it as it is.
 - `abda756` (already pushed to `claude/jolly-keller-gy5hs4`): it ends with a `Claude-Session:` line and the cloud session's own attribution trailer. It's pushed history, so it can't be rewritten.
+
+## 2026-09-29: A0 review round 2 (the commit-message check; no game change)
+
+Branch `gaps`, still under the unshipped v4 gate. The release QA's check 9 (commit trailers) found two blockers, both in commit messages. No game code, balance, rule or fixture changed, so the golden digests stand as recorded.
+
+### Reproduced
+
+A check that says what "ends with the trailer" means, `scripts/check-commits.ts` (new, below), on the old tip `f398ed4`:
+
+- over `origin/claude/jolly-keller-gy5hs4..gaps`, what a deploy push publishes: 18 commits, 1 failing. `a46bd49` (the expansion-spec merge): after the trailer come a blank line, `# Conflicts:` and `#<tab>island-company/docs/DECISIONS.md`, git's conflict note, which an editor commit strips and this merge kept. `git interpret-trailers --parse` still finds the trailer, which is how it got through.
+- over `bd1e1d2..gaps` (the QA's range, from the live build): 19 commits, 2 failing, the second `abda756` ("Handoff and deploy log", the cloud session's): its last line is a `Claude-Session:` URL after that session's own attribution trailer. It's on `origin/claude/jolly-keller-gy5hs4`.
+
+### Fixed
+
+1. **`a46bd49` reworded, trees identical.** It and the three commits on top were rebuilt object by object (`git cat-file commit` → drop the conflict block, or point the parent line at the rebuilt parent → `git hash-object -t commit -w`), then `git update-ref` moved `gaps`. Per pair, `diff` of the raw objects shows only those lines: author, committer, dates and trees are byte for byte the same (`git diff --quiet f398ed4 4a7ff22`), so every result measured on the old SHAs holds on the new ones, the release QA of `c57c51e` included.
+
+   | before | after | commit |
+   |---|---|---|
+   | `a46bd49` | `09ca693` | Merge expansion-spec: the expansion plan (docs only) |
+   | `25afc96` | `e4908db` | A0: a Resort that holds |
+   | `c57c51e` | `dd73915` | A0: review round 1 (the tree the release QA passed) |
+   | `f398ed4` | `4a7ff22` | Release QA log: stage 1 (v4) |
+
+   Safe because none of them was pushed (no remote branch contains them). The stage 2 branches (`stage2`, `s2-b1`, `s2-c1`) are built on `258d0d2`, which didn't change. The wfG0 experiment worktrees are detached at the old `25afc96` with uncommitted work; their checkouts are untouched and the old commits stay reachable from them and from the `gaps` reflog. **Bring their work over as a patch or with `git rebase --onto e4908db 25afc96`, never a merge**: a merge would bring the old messages back into `gaps`, and the check would fail on them. Entries above this one keep the old SHAs (the log isn't rewritten); this table maps them. `tests/resort.test.ts`'s comment points at `e4908db`.
+2. **`abda756` is not reworded, and the check is scoped to what the push publishes.** It is pushed history (CLAUDE.md: never rewrite it), and it can't leave `gaps`' history either: the deploy branch already holds it, so every push of `gaps` lands on top of it. So the check covers `base..HEAD`, with `base` the deploy branch as the remote has it: the commits the push adds. That is HANDOFF §6.4 item 7's own scope ("for unpushed commits only"), now written down and run by a script. It isn't weaker than what QA ran. Every commit the push adds is checked, and more strictly than a trailer parser would:
+   - the trailer is the very last line (a parser accepts `a46bd49`)
+   - no git comment line is left in
+   - no second attribution trailer, and the model isn't named outside the trailer
+   - `base` must already be in HEAD. A diverged base fails, where before it silently made the range bigger or smaller.
+
+   Given the live build as the base, the script still lists `abda756`, marked as already on the remote.
+   - Rejected: `git replace` or notes (they only change what this clone shows), an allowlist of SHAs (a standing exception), and rebuilding `gaps` without `abda756` (the push would then need a force push, which rewrites pushed history).
+
+### New
+
+- `scripts/check-commits.ts`: `git fetch origin`, then `TRAILER='<your attribution line>' npx tsx scripts/check-commits.ts [base]` from `island-company/`. It exits 1 on any failure and prints each problem. The model's name isn't in the file: it comes from `TRAILER` at run time. `tests/commits.test.ts` (5) covers the message rules on a stand-in trailer: a46bd49's and abda756's shapes, trailing blank lines, and `CLAUDE.md` or `#12` not tripping the name or comment rules.
+- Docs: CLAUDE.md (the scripts list, the commands, the git rule: the trailer as the very last line), HANDOFF §1 (the SHA map) and §6.4 item 7 (the check and how to reword).
+
+### Verified
+
+- The check on the new tip: `origin/claude/jolly-keller-gy5hs4..gaps`, 19 commits including this one, 0 failing.
+- **tsc** clean; **vitest** 842 tests in 49 files, all pass; **build** passes (dist removed).
+- **Balance, standard:** three friends 8 / 11 / 16 / 23, all average 7 / 12 / 16 / 23, both 0 weeks below $0; solo, absent and nobody teams at tier 1.
+- **Robust:** three friends miss tier 5 in 70 of 360 (17 + 20 + 15 + 18), all average in 58 (16 + 12 + 15 + 15), 0 and 0 weeks below $0. Long columns: 61 and 12 of 360 games below $0 in weeks 24–52; the credits 0 and 0.
+- **Long:** three friends 3 of 30 games below $0 (median 0 weeks, 0 dead weeks), 6 of 7 houses rentable at week 52, revenue 69% of budget in weeks 40–52; all average 1 of 30, 7 of 7, 86%. Every number is the same as the release QA's on `c57c51e`, as an identical tree should give.
+- **Pass-and-play e2e** on phone (390×844) and desktop (1280×820): pass. The only console errors are the Manrope font 403s through the symlinked `node_modules`.

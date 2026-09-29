@@ -53,6 +53,7 @@ Claude Code loads this file automatically. It holds the rules that don't change.
   - `e2e.mjs`: pass-and-play in Chromium
   - `e2e-online.mjs`: 4 devices against the Firebase emulator
   - `island-shots.mjs`: island lab screenshots and node counts
+  - `check-commits.ts`: the commit-message check before a deploy push (HANDOFF §6.4 item 7)
 - Labs (dev server):
   - `/lab.html?p=<puzzle>&tier=0-5&seed=N&notimer=1[&blind=1]`
   - `/islandlab.html?w=358[&only=<scene>][&still]`
@@ -73,6 +74,7 @@ npx tsx scripts/balance.ts robust             # 90 seeds x 4 crews (+ the long g
 npx tsx scripts/balance.ts long [78]          # the long game: 52 wk x 30 seeds, the T1 table + the trajectory (docs/EXPANSION.md 11.1); 78 plays on to week 78
 npm run build                                 # tsc + vite build (then rm -rf dist)
 BASE=http://localhost:5173 node scripts/e2e.mjs /tmp/e2e [desktop]
+TRAILER='<your attribution line>' npx tsx scripts/check-commits.ts [base]   # every commit the push publishes (base..HEAD) ends with it
 ```
 
 - **Chromium for scripts:** the scripts launch the browser from `scripts/chromium.mjs`: `$CHROMIUM_PATH`, else `/opt/pw-browsers/chromium` (the cloud container's path) if it exists, else Playwright's own install (`npx playwright@1.56 install chromium`).
@@ -111,7 +113,7 @@ BASE=http://localhost:5173 node scripts/e2e.mjs /tmp/e2e [desktop]
 
 - Never rewrite pushed history.
 - Never create a PR unless the owner asks.
-- Commit messages: end with the attribution trailer your Claude Code session is configured with. Never put model names or ids in code, docs or commit bodies.
+- Commit messages: end with the attribution trailer your Claude Code session is configured with, as the very last line (nothing after it: no session line, no leftover `# Conflicts:` block from a merge). Never put model names or ids in code, docs or commit bodies. `scripts/check-commits.ts` checks every unpushed commit before a deploy.
 - Parallel agent work happens in `git worktree`s under `.claude/worktrees/<branch>` (gitignored).
   - Symlink `island-company/node_modules` into each worktree.
   - Give each agent its own dev-server port and its own `VITE_CACHE_DIR`.

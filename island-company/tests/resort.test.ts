@@ -455,7 +455,7 @@ describe('A0 in whole seasons', () => {
     // docs/EXPANSION.md 11.1 T1 asks for a median of 0 weeks below $0, at most 3 of 30 games ever below $0, median dead
     // weeks ≤ 2 and the credits in half of the three friends' games by week 45. On these seeds, weeks 24-52:
     //   before A0 (258d0d2): three friends 10 of 10 games below $0, 127 weeks, 192 dead weeks; all average 10, 103, 180
-    //   A0 (25afc96):        three friends 6 of 10, 24, 49; all average 2 of 10, 4, 21 (and the houses at 0-10 by week 52)
+    //   A0 (e4908db):        three friends 6 of 10, 24, 49; all average 2 of 10, 4, 21 (and the houses at 0-10 by week 52)
     //   review round 1:      three friends 0 of 10, 0, 4; all average 0, 0, 0; median houses rentable at week 52 7 of 7
     //                        and 7 of 7, median house health at week 52 about 48 and 70
     // The guard keeps room for noise, and reads the houses at week 52 too (review round 1: a lever that regresses shows
