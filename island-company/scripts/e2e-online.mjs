@@ -231,6 +231,19 @@ async function device(name, opts) {
       if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).click();
       await page.waitForTimeout(800);
     },
+    /**
+     * stage 2's What's new (src/ui/whatsnew.tsx): once per island and seat on each device, from week 1, on the seat's
+     * first look at Home. Screenshot it, then Skip (it would sit over the tabs and the Dock)
+     */
+    dismissNew: async () => {
+      const s = page.locator('.sheet[aria-label="What\'s new"]');
+      if (!(await s.count())) await page.waitForTimeout(800);
+      if (!(await s.count())) return false;
+      await d.shot('whats-new');
+      await s.getByRole('button', { name: 'Skip' }).click();
+      await page.waitForTimeout(300);
+      return true;
+    },
     /** the week's review, if it's up: its text, then Onward and close */
     closeReview: async () => {
       const text = await page.locator('.overlay').first().innerText().catch(() => '');
@@ -285,6 +298,8 @@ for (const [d, role, label] of [
 }
 await seb.week0('mech');
 await seb.page.waitForTimeout(2500);
+// week 1 on every device: stage 2's What's new opens on each seat's first look at Home
+for (const d of [seb, mia, ravi]) if (!(await d.dismissNew())) throw new Error(`${d.name}: stage 2's What's new didn't open in week 1`);
 await seb.shot('week1');
 await ravi.shot('week1-desk');
 
@@ -300,6 +315,8 @@ await sebLaptop.page.getByPlaceholder('e.g. Seb').last().fill('Seb');
 await sebLaptop.page.locator('.sheet button', { hasText: 'A&P mechanic' }).first().click({ timeout: 15000 });
 await sebLaptop.page.locator('.sheet input[maxlength="6"]').fill(seatCode);
 await sebLaptop.click('Link this device', { wait: 2500 });
+// a new device: the seat's What's new again (it's kept per device)
+await sebLaptop.dismissNew();
 await sebLaptop.shot('linked');
 
 // 4. Seb takes an alert through the job flow on the laptop (a no-fault-found first alert: the next one), and asks

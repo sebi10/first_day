@@ -1885,3 +1885,47 @@ Branch `s2-c1`, from A1's contract commit `3e04cfb`. Files: `src/ui/inspect/*` a
 - `flagTo` picks the generator's receiver from open alerts' hidden kinds (`slotKind`): the analyst's "Report a problem to Ana / Ben" on the generator can shift with a hidden cause. Use the alerts' visible symptoms instead.
 
 ### The network desk (D)
+
+### Integration (stage 2)
+
+#### 2026-09-29: stage 2 on the live stage 1: the free map, per-seat objects, quick checks
+
+Branch `s2rel`, from the live `e810cc5` (engine 4, doc 4, rules `v == 4`). The three packages merged with `--no-ff`, in order: `stage2` (A1, `3e04cfb`, built on `258d0d2`, before A0 and the stage-1 fix rounds) as `c5c8cef`, `s2-b1` (`bae368d`) as `419fa7d`, `s2-c1` (`0100ab8`) as `fc7dc86`. Every feature whole, no stage-1 behaviour dropped. No version bump here: stage 2 ships as v5 in a later step (A1's reasons: two new moves, two alert sources the open work counts, `alert.early`).
+
+**The A1 merge** (the only one with conflicts; the rest merged clean):
+- `alerts.ts` `generateAlerts`: A0's helper slots (held back, `STAFF.helper.enabled` false) and A1's held slot for an open wrong-call write-up, both kept. Grid first unchanged: at real risk only an open feed alert with a real cause stands in for the feed, so a wrong call's no-fault write-up on the grid never switches grid first off, and a right IR call on the grid (an `xfmr` or `panelUp` alert on the panel) counts as feed work.
+- `bots.ts`: A0's receiver approvals with A1's check and flag imports. `home.tsx`: the Harbor sheet and stage 2's inspect sheet and What's new all mounted; What's new waits for the week's review and the Harbor sheet. `balance.ts`: A0's long game and A1's `checks=off` together. `golden.test.ts`: stage 1's nine runs and the knob test, played by the base crew (no checks, no flags).
+- The asset lists' health bars carry stage 1's tick marks (A0 review round 1); the inspect sheet's bar now carries the same marks (C1 was built before them).
+
+**What the packages asked of the integrator, done:**
+- `tests/contract.test.ts` checks the What's new panels' shape (a title and a body each) on every live fixture, not A1's empty stub.
+- `DockTarget` `{ desk: 'approvals' | 'stock' | 'money' | 'staff'; at?: string }`, routed by the desk's `ic:open` handler to any tab and scrolled to the section `at` names (kept across the desk's lazy load, like the tab). The analyst's sheets link to it: a house to **Pricing** (Money), a crew member to the **Hiring board** (Staff), the build site to **Site work** (Staff).
+- `checkdata.ts` realism:
+  - **The main is two parallel sets of 250 kcmil Al (410 A at 75 °C), not 500 kcmil Al (310 A) and not 600 kcmil Al.** Table 310.12's 400 A row (600 kcmil Al) is for a dwelling's service or feeder; this panel feeds the hangar, the office and the fuel dock too, so Table 310.16 applies, where 600 kcmil Al is 340 A (240.4(B) would allow a 350 A breaker, not 400). Two sets of 250 kcmil Al are right under either table. A test checks every breaker on both panels against its conductor's 75 °C ampacity.
+  - **The generator's main breaker is 60 A on #6 Cu,** no bigger than the 60 A transfer switch it feeds (the switch as installed, which the electrician's `transfer` job later finds the houses have outgrown).
+- `checks.ts` `flagTo`: **the analyst's flag on the generator goes by what she can see.** Before, the receiver was the tech with more upcoming wear on it (catalog weights and the alerts' hidden kinds), and the sheet names the receiver before the flag, so it told her which trade's wear was ahead. Now: the tech who already has an open alert on it (the sheet's chips show them), else the mechanic, or the electrician when the mechanic already has this week's flag. What the flag raises is still drawn from what's coming, as on every asset (6.5).
+- **A flagged airworthiness squawk is due next week at the earliest** (`FLAG.awLead` 1). A pilot-squawk row with a lead of 0, raised mid-week by a crewmate, grounded the plane at once, possibly after the mechanic had ended his turn. A crewmate's report is a heads-up, not a grounding.
+- Wording: the grid and the generator read as things mid-sentence (`nameMid` in `alerts.ts`): "Ben IR-scanned the island grid", "Cy flagged the generator house for Ana", "Flagged by Cy on the island grid: …", "Tell Ben about the island grid".
+- The inspect sheet's dialog name is the sheet's own header name for every object: an asset's, a crew member's, the build's, a cart's, and a fixture's own name ("Fuel dock", "Dock and boats", `FIXTURE_NAME` in `objects.ts`). It moved to `select.ts` (`inspectLabel`), still out of the sheet's lazy chunk, with a test over every object on every fixture.
+- `scripts/e2e.mjs` and `scripts/e2e-online.mjs` dismiss stage 2's What's new on each seat's first view (the week-1 one is screenshotted). **`e2e.mjs` has a map pass** (phone and desktop): on the new island each seat moves the map (two-finger pinch and pan, or Ctrl + wheel and a mouse drag; the camera must move), taps an object at its hotspot and reads its own sheet (the mechanic a plane's walkaround, the electrician a house's meter check, the analyst the nightly rate, then Pricing lands on the Money tab); then, on a tier-2 save past week 3 (`scripts/stage2-save.ts`, generated by the run), the mechanic walks round the plane that shows a sign, writes it up (it's on his list, `checked` stamped), reports a problem on a house that lands on the electrician's list in the mechanic's name (opened: "Flagged by Ana on Cottage 1: …"), the electrician IR-scans the grid (the PPE line, 2 × 250 kcmil Al, All normal), and the analyst is told the electrician already has this week's flag.
+
+**Checks** (on this tree):
+- `npx tsc --noEmit -p .`; **997 of 997 tests in 57 files** (new: the panels' ampacity and the generator's breaker, the grid's words, the generator's receiver by what's visible, the flagged squawk's lead, the desk links, the dialog names). An earlier full run hit four 30 s timeouts while other agents loaded the machine (load average 65); alone it runs in 45 s.
+- **The golden digests are unchanged** (not re-recorded): with quick checks and flags unused, every run is byte for byte `e810cc5`'s, no week's doc carries a stage-2 field, and `migrate()` adds nothing. `balance.ts checks=off` reproduces `e810cc5`'s standard and robust tables exactly.
+- **Balance, T0 and T7** (standard 26 weeks × 30 seeds; robust 90 seeds × 4 crews; checks and flags on vs off):
+
+| Run | Team | T2 / T3 / T4 / T5 (median week) | weeks < $0 | robust: T5 misses of 360 | robust: games below $0 in weeks 24–52 | credits by week 45 |
+|---|---|---|---|---|---|---|
+| off (= `e810cc5`) | three friends | 8 / 11 / 16 / 23 | 0 | 70 | 248 | 0 |
+| on | three friends | 8 / 11 / 16 / 23 | 0 | 74 | 209 | 0 |
+| off (= `e810cc5`) | all average | 7 / 12 / 16 / 23 | 0 | 64 | 115 | 0 |
+| on | all average | 7 / 12 / 16 / 23 | 0 | 49 | 80 | 4 |
+
+  T0 holds with them on: the standard medians are unchanged, 0 weeks below $0, solo, absent and nobody stay at tier 1 in every seed (their rows are identical: checks start at tier 2, and they flag nothing). **The tier-3 unlock week doesn't move** (11 for three friends and 12 for all average, on and off). Robust: three friends' misses 70 → 74 of 360 (inside the run's noise, about ±8 games), all average 64 → 49; weeks below $0 0 and 0; the robust medians to tier 5 read 23 / 24 / 23 / 24 and 23 / 24 / 23 / 23 across the crews (all 23 off). The long columns improve: games below $0 after the Resort 248 → 209 and 115 → 80 of 360. Per game the bots make about 9.6 right calls, 1.3 wrong calls and 0.8 flags (three friends).
+- `npm run build`. Island lab at 358 px: beaten 1,390 SVG nodes plain and 1,392 through the map; `beaten-storm-night` 1,345 and 1,348 (budget 1,500), phone and desktop, no errors.
+- The pass-and-play e2e with the map pass at 390 × 844 and 1280 × 820; a scripted run at 360 px (every check screen, the desk links, no horizontal overflow); the online e2e on the emulators (four devices, What's new dismissed on each); only the Manrope 403s.
+- **Live v4 docs:** six docs written by `e810cc5`'s own engine and bots (tiers 1 to 5, weeks 4 to 40, one mid-week) load, need no migration, render every object's sheet for every seat, take a quick check from each tech and a flag from the analyst, and play ten more weeks through the resolve, the same in memory and through JSON, with no open order dropped (a scratch check; the v5 step commits fixtures from the live build).
+
+**Not done here:**
+- The v5 version gate (a later step): `ENGINE_VERSION` / `DOC_VERSION` 5, rules `v == 5`, fixtures written by `e810cc5`, the skew and reverse-skew runs, the rules probe.
+- Autopilot never closes a no-fault alert (stage 1's rule: it plans only real faults). A wrong call's walkaround write-up on a plane, left open by a mechanic who then goes away, grounds that plane from its due week until he's back, as a pilot's no-fault squawk already does. The robust numbers above include it; worth a look in review.

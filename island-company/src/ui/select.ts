@@ -20,7 +20,8 @@ import { downtimeOf, houseRentable, houseWeekRevenue, rentFactor, tierDef } from
 import { invValue, runway } from '../sim/ledger';
 import { binsInUse, binsTotal, carryCost } from '../sim/stock';
 import { INSURANCE, REPORTS } from '../sim/data';
-import type { ObjectKind, ObjectRef, StationId } from './objects';
+import { FIXTURE_NAME, isAssetRef, OBJECT_LABEL, type ObjectKind, type ObjectRef, type StationId } from './objects';
+import { buildSite, crewOf, openBuild } from '../sim/staff';
 
 /** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
 export type Block = { from: Role; to: Role; text: string; kind?: CrossMove['kind'] };
@@ -329,8 +330,12 @@ export function healthMarks(s: IslandState, a: Pick<Asset, 'kind'>): { at: numbe
   return out;
 }
 
-/** `object`: an object's inspect sheet (stage 2, docs/EXPANSION.md 2.5; home.tsx opens it) */
-export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' } | { object: ObjectRef };
+/**
+ * `desk`: one of the analyst's desk tabs (desk.tsx), and optionally a section of it to scroll to (`at`: an element id,
+ * 'pricing' on Money, 'hiring' and 'site-work' on Staff: the inspect sheets' Pricing, Hiring board and Site work links).
+ * `object`: an object's inspect sheet (stage 2, docs/EXPANSION.md 2.5; home.tsx opens it)
+ */
+export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' | 'money' | 'staff'; at?: string } | { object: ObjectRef };
 
 /**
  * This week's work that earns the week's money but isn't an alert (16): the charter load sheet (no sheet, half a
@@ -491,13 +496,21 @@ export function openTarget(t: DockTarget): void {
   if (typeof window === 'undefined') return;
   // the desk is a chunk of its own (lazy.tsx): a desk tab asked for before it has loaded opens once it has
   deskAsked = 'desk' in t ? t.desk : null;
+  deskAt = 'desk' in t ? (t.at ?? null) : null;
   window.dispatchEvent(new CustomEvent('ic:open', { detail: t }));
 }
 let deskAsked: Extract<DockTarget, { desk: unknown }>['desk'] | null = null;
+let deskAt: string | null = null;
 /** the desk tab asked for (by the Dock's Next) before the desk was on screen, once */
 export function takeDeskAsked() {
   const d = deskAsked;
   deskAsked = null;
+  return d;
+}
+/** the section of that tab asked for (the inspect sheets' Pricing, Hiring board and Site work links), once */
+export function takeDeskAt() {
+  const d = deskAt;
+  deskAt = null;
   return d;
 }
 
@@ -981,4 +994,29 @@ export function fixtureFacts(s: IslandState, kind: ObjectKind, st: StationId, ro
   }
   for (const o of reports) lines.push(reportLine(o));
   return { lines };
+}
+
+/**
+ * The inspect sheet's label (its dialog name): an asset's name, a staff figure's (the npc's own name), a build site's
+ * (the build's), a cart's, else the kind's ("Hangar"). The same names the sheet's own header shows (inspect/facts.ts).
+ */
+export function inspectLabel(s: IslandState, t: ObjectRef): string {
+  if (isAssetRef(t)) return s.assets.find((a) => a.id === t.id)?.name ?? OBJECT_LABEL[t.kind];
+  if (t.kind === 'staff') {
+    const crew = crewOf(s);
+    const n = crew.find((x) => x.id === t.id) ?? crew.find((x) => x.role === t.id);
+    if (n?.name) return n.name;
+  }
+  if (t.kind === 'site') {
+    const b = (t.id === 'project' ? undefined : (s.builds ?? []).find((x) => x.id === t.id)) ?? openBuild(s);
+    if (b) {
+      const w = buildSite(b);
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    }
+  }
+  if (t.kind === 'cart') {
+    const c = gseCarts(s).find((x) => x.id === t.id);
+    if (c) return c.name;
+  }
+  return FIXTURE_NAME[t.kind] ?? OBJECT_LABEL[t.kind];
 }

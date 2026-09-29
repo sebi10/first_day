@@ -17,7 +17,7 @@
 // `checkTruth` is for the sim only (the engine, the bots). UI code never imports
 // it: tests/check.test.ts guards that.
 import { planeModel } from './aircraft';
-import { fits, liveAlerts, pairsFor, raiseAlert, slotKind, soleGuest, SYMPTOMS, type Symptom } from './alerts';
+import { fits, liveAlerts, nameMid, pairsFor, raiseAlert, slotKind, soleGuest, SYMPTOMS, type Symptom } from './alerts';
 import {
   CHECK_ROWS,
   checkRowKey,
@@ -364,8 +364,9 @@ function meterView(s: IslandState, a: Asset, W: number, tell: Tell | null): Chec
 // The call (the engine's `check` move)
 
 /** "walked around Twin N-12", "IR-scanned the island grid", "meter-checked Cottage 1" */
-export function checkDid(kind: CheckKind, a: Pick<Asset, 'name'>): string {
-  return kind === 'walkaround' ? `walked around ${a.name}` : kind === 'ir' ? `IR-scanned ${a.name}` : `meter-checked ${a.name}`;
+export function checkDid(kind: CheckKind, a: Pick<Asset, 'name' | 'kind'>): string {
+  const n = nameMid(a);
+  return kind === 'walkaround' ? `walked around ${n}` : kind === 'ir' ? `IR-scanned ${n}` : `meter-checked ${n}`;
 }
 
 /**
@@ -391,7 +392,7 @@ export { checkRowKey };
 // Report a problem (6.5)
 
 /** the sources a layperson's report can come from, and the kinds it never names */
-export const FLAG = { srcs: ['guest', 'squawk', 'utility'] as string[], never: ['wb', 'inspect100', 'codeprep', 'gpustart'] };
+export const FLAG = { srcs: ['guest', 'squawk', 'utility'] as string[], never: ['wb', 'inspect100', 'codeprep', 'gpustart'], /** weeks before a flagged airworthiness squawk grounds its plane */ awLead: 1 };
 
 /** the trade whose work the asset is (the generator: both techs'; stage 2's twin of objects.ts ownerOf) */
 const ownerKind = (a: Asset): OpsRole | 'both' => (a.kind === 'plane' ? 'mech' : a.kind === 'generator' ? 'both' : 'elec');
@@ -426,15 +427,21 @@ export function openWork(s: IslandState, role: OpsRole): { open: number; target:
 
 const flaggedThisWeek = (s: IslandState, to: OpsRole) => (s.alerts ?? []).some((x) => x.src === 'flag' && x.role === to && x.week === s.week);
 
-/** who receives a flag on this asset: its trade; the generator (the analyst's flag): the trade with more coming on it, the mechanic on a tie */
+/**
+ * who receives a flag on this asset: its trade. The generator is both techs' (only the analyst flags it): the tech
+ * who already has it on their list (an open alert on it, as every seat's sheet shows it), else the mechanic (the
+ * engine is what a passer-by sees and hears), or the electrician when the mechanic already has this week's flag.
+ * Only what the flagger can see decides it, never what is coming (the wear, an alert's hidden cause): the sheet
+ * names the receiver before the flag, and it must not tell the analyst which trade's wear is ahead.
+ */
 export function flagTo(s: IslandState, a: Asset): OpsRole {
   const own = ownerKind(a);
   if (own !== 'both') return own;
-  const load = (r: OpsRole) => flagKinds(s, r, a, s.week).reduce((n, k) => n + k.w, 0);
-  const m = load('mech');
-  const e = load('elec');
-  if (m === 0 && e === 0) return flaggedThisWeek(s, 'mech') && !flaggedThisWeek(s, 'elec') ? 'elec' : 'mech';
-  return e > m ? 'elec' : 'mech';
+  const on = (r: OpsRole) => liveAlerts(s).some((x) => x.assetId === a.id && x.role === r);
+  const m = on('mech');
+  const e = on('elec');
+  if (m !== e) return m ? 'mech' : 'elec';
+  return flaggedThisWeek(s, 'mech') && !flaggedThisWeek(s, 'elec') ? 'elec' : 'mech';
 }
 
 /** whether the seat can flag the asset now (from week 3, one a week, one received per trade, never its own trade's), and to whom */
@@ -474,9 +481,15 @@ export function flagPick(s: IslandState, role: Role, a: Asset, to: OpsRole, W = 
   return sym ? { sym: sym.key, cause: -1 } : null;
 }
 
-/** the flag's alert for the owner trade (the engine's `flag` move) */
+/**
+ * the flag's alert for the owner trade (the engine's `flag` move). An airworthiness squawk a crewmate flags gives the
+ * mechanic a week to act: raised mid-week with its row's lead of 0 it grounded the plane at once, maybe after his turn
+ * had ended (a crewmate's report is a heads-up, not a grounding)
+ */
 export function raiseFlag(s: IslandState, role: Role, a: Asset, to: OpsRole, pick: { sym: string; cause: number }, now: number): Alert {
-  return raiseAlert(s, { role: to, asset: a, sym: pick.sym, cause: pick.cause, src: 'flag', who: nameOf(s, role) }, now);
+  const al = raiseAlert(s, { role: to, asset: a, sym: pick.sym, cause: pick.cause, src: 'flag', who: nameOf(s, role) }, now);
+  if (SYMPTOMS[al.sym]?.aw && al.due < s.week + FLAG.awLead) al.due = s.week + FLAG.awLead;
+  return al;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +504,7 @@ export function checkReviewLines(s: IslandState, W: number): ReportLine[] {
     if (al.src === 'check') {
       const row = CHECK_ROWS[al.sym];
       if (row) out.push({ role: al.role, tone: 'info', text: `${al.who ?? nameOf(s, al.role)} ${checkDid(row.kind, a)} and wrote up the ${row.word}.` });
-    } else out.push({ role: al.role, tone: 'info', text: `${al.who ?? 'A crewmate'} flagged ${a.name} for ${nameOf(s, al.role)}.` });
+    } else out.push({ role: al.role, tone: 'info', text: `${al.who ?? 'A crewmate'} flagged ${nameMid(a)} for ${nameOf(s, al.role)}.` });
   }
   return out;
 }

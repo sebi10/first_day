@@ -910,6 +910,15 @@ export function lowerFirst(t: string): string {
   return /^([A-Z0-9]{2}|[A-Z]\/[A-Z]|[A-Z]-)/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1);
 }
 
+/**
+ * An asset's name mid-sentence (stage 2's check and flag words): a plane or a house by its own name ("Twin N-12",
+ * "Cottage 1"), the grid and the generator as things ("the island grid", "the generator house")
+ */
+export function nameMid(a: Pick<Asset, 'name' | 'kind'> | undefined): string {
+  if (!a) return 'the asset';
+  return a.kind === 'grid' || a.kind === 'generator' ? `the ${lowerFirst(a.name)}` : a.name;
+}
+
 /** "L/H brake pedal soft; pulls right on the landing roll." (a pilot's squawk carries the pilot's name; a comeback says so) */
 export function symptomText(s: IslandState, a: Alert): string {
   const sym = SYMPTOMS[a.sym];
@@ -929,7 +938,7 @@ export function symptomText(s: IslandState, a: Alert): string {
   let text = fill(raw, v);
   if (sym.writeUp) text = `Written up by ${a.who ?? 'the crew'}: ${lowerFirst(text)}`;
   // stage 2 (docs/EXPANSION.md 6.5): a crewmate's flag, in the flagger's name, on the asset (a guest's or a log's words without their "Guest at …:")
-  else if (a.src === 'flag') text = `Flagged by ${a.who ?? 'a crewmate'} on ${asset?.name ?? 'the asset'}: ${lowerFirst(text.replace(WHO_SAID, ''))}`;
+  else if (a.src === 'flag') text = `Flagged by ${a.who ?? 'a crewmate'} on ${nameMid(asset)}: ${lowerFirst(text.replace(WHO_SAID, ''))}`;
   else if (a.who && sym.src === 'squawk') text = `Written up by ${a.who}: ${lowerFirst(text)}`;
   if (a.again !== undefined) text = `Written up again: ${lowerFirst(text)}`;
   return text;

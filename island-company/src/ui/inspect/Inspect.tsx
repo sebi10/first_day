@@ -26,9 +26,9 @@ import { fx } from '../feedback';
 import { openStores } from '../flow/FlowHost';
 import { GseSheet } from '../gse';
 import { Btn, Health, Icon, toast } from '../kit';
-import type { ObjectRef } from '../objects';
+import { ASSET_KINDS, type ObjectRef } from '../objects';
 import { WriteUp, SafetyCall } from '../ops';
-import { openTarget } from '../select';
+import { healthMarks, openTarget } from '../select';
 import { C, ROLE_TINT } from '../theme';
 import type { Ctl } from '../useIsland';
 import { facts, type Act, type Block, type Facts } from './facts';
@@ -221,7 +221,8 @@ function Header({ s, f, kind, onClose }: { s: IslandState; f: Facts; kind: Objec
         </button>
       </div>
       <span class={`insp-status ${f.tone ?? ''}`}>{f.status}</span>
-      {f.health && <Health value={f.health.value} label={f.health.label} />}
+      {/* the same tick marks as the asset lists' bars (stage 1: the late game's thresholds) */}
+      {f.health && <Health value={f.health.value} label={f.health.label} marks={ASSET_KINDS.includes(kind) ? healthMarks(s, { kind: kind as 'plane' | 'house' | 'grid' | 'generator' }) : undefined} />}
       {al && al.mech + al.elec > 0 && (
         <div class="insp-chips" aria-label="Open alerts by trade">
           {(['mech', 'elec'] as OpsRole[])
@@ -279,9 +280,9 @@ function act(a: Act, x: { ctl: Ctl; role: Role; onClose(): void; setMode(m: Mode
       return;
     case 'desk':
       x.onClose();
-      openTarget({ desk: a.desk });
-      // the desk sits below Home's map on a phone: bring its tabs into view
-      requestAnimationFrame(() => document.getElementById('approvals')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
+      openTarget({ desk: a.desk, ...(a.at ? { at: a.at } : {}) });
+      // the desk sits below Home's map on a phone: bring its tabs into view (a section asked for: the desk scrolls to it)
+      if (!a.at) requestAnimationFrame(() => document.getElementById('approvals')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
       return;
     case 'approve':
       void x.ctl.dispatch({ t: 'approve', orderId: a.order }).then((ok) => {

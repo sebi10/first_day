@@ -4,8 +4,18 @@
 // manual, the IPC or catalog, stock and Send; the mechanic asks Stores for a
 // line; the analyst sees it at once and buys it, approves the cards, hires),
 // resolve, and check week 2 (the line landed: on hand), the review and board.
+// Then the map (stage 2, docs/EXPANSION.md 5, 6, 13.5): each seat moves the
+// island (two fingers on a phone; Ctrl + wheel and a drag on a computer), taps
+// an object and reads its own sheet; on a tier-2 save past week 3
+// (scripts/stage2-save.ts) the mechanic walks round a plane and writes up what he
+// sees, reports a problem on a house that lands on the electrician's list, the
+// electrician IR-scans the grid, and the analyst is told the electrician already
+// has this week's flag and follows the house's Pricing link to the desk.
 //   BASE=http://localhost:5173 node scripts/e2e.mjs out-dir [desktop]
-import { mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { executablePath } from './chromium.mjs';
 
@@ -214,18 +224,35 @@ const startReady = async (tag) => {
   await finishPuzzle();
   return true;
 };
+/**
+ * Stage 2's What's new (src/ui/whatsnew.tsx): once per island and seat on this device, from week 1, on the seat's
+ * first look at Home. Its first showing on a run is screenshotted; then Skip
+ */
+let newShots = 0;
+const dismissNew = async (pg = page) => {
+  const s = pg.locator('.sheet[aria-label="What\'s new"]');
+  if (!(await s.count())) await pg.waitForTimeout(500);
+  if (!(await s.count())) return false;
+  if (pg === page && newShots++ < 1) await shot('whats-new');
+  await s.getByRole('button', { name: 'Skip' }).click();
+  await pg.waitForTimeout(300);
+  return true;
+};
 const endTurn = async () => {
+  await dismissNew();
   await page.evaluate(() => window.scrollTo({ top: 0 }));
   await click('End turn', { wait: 400 });
   if (await page.locator('.sheet').count()) await page.locator('.sheet button', { hasText: 'End turn' }).last().click();
   await page.waitForTimeout(600);
 };
-const passTo = async (label) => {
-  await page.evaluate(() => window.scrollTo({ top: 0 }));
-  await page.locator('button:has-text("Pass")').first().click();
-  await page.waitForTimeout(300);
-  await page.locator('.sheet button', { hasText: label }).first().click();
-  await page.waitForTimeout(600);
+const passTo = async (label, pg = page) => {
+  await dismissNew(pg);
+  await pg.evaluate(() => window.scrollTo({ top: 0 }));
+  await pg.locator('button:has-text("Pass")').first().click();
+  await pg.waitForTimeout(300);
+  await pg.locator('.sheet button', { hasText: label }).first().click();
+  await pg.waitForTimeout(600);
+  await dismissNew(pg);
 };
 /** the mechanic's Stores: the first shelf row (its P/N and how many are on hand) */
 const storesRow = async (pn) => {
@@ -282,6 +309,7 @@ for (const seat of ['mech', 'elec', 'fin']) {
   }
 }
 await shot('week1-fin-first-look');
+if (!(await dismissNew())) fail("week 1: the stage-2 What's new didn't open on the analyst's first look");
 
 // --- week 1, the mechanic: an alert through the flow, a ready job started, a line asked of Stores
 await passTo('Mechanic');
@@ -413,6 +441,229 @@ await tab('Me');
 await shot('me');
 await page.mouse.wheel(0, 900);
 await shot('me-scrolled');
+
+// --- the map (stage 2, docs/EXPANSION.md 5, 6, 13.5): the free camera, and every seat's own sheet on an object
+/** the map's viewport and camera, read back from the drawing (the zoom group's translate and the svg's scale) */
+const mapState = (pg, sel = '.map-vp') =>
+  pg.$eval(sel, (vp) => {
+    const r = vp.getBoundingClientRect();
+    const svg = vp.querySelector('svg.island-svg');
+    const vb = svg.getAttribute('viewBox').split(' ').map(Number);
+    const left = parseFloat(svg.style.left) || 0;
+    const top = parseFloat(svg.style.top) || 0;
+    const S = (parseFloat(svg.style.width) || r.width) / vb[2];
+    const m = /translate\((-?[\d.]+) (-?[\d.]+)\)/.exec(svg.querySelector('.island-zoom').getAttribute('transform') || '');
+    return { r: { x: r.left, y: r.top, w: r.width, h: r.height }, S, x0: m ? -Number(m[1]) : 0, y0: m ? -Number(m[2]) : 0, left, top, k: S / (r.width / 800) };
+  });
+const toScreen = (m, p) => [m.r.x + m.left + (p[0] - m.x0) * m.S, m.r.y + m.top + (p[1] - m.y0) * m.S];
+/** touches through CDP (Playwright's touchscreen has no second finger) */
+const touches = async (pg, frames, ms = 30) => {
+  const cdp = await pg.context().newCDPSession(pg);
+  for (let i = 0; i < frames.length; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: i === 0 ? 'touchStart' : 'touchMove', touchPoints: frames[i].map(([x, y], id) => ({ x, y, id: id + 1 })) });
+    await pg.waitForTimeout(ms);
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+};
+const pinch = (pg, cx, cy, d0, d1, dx = 0, dy = 0, steps = 12) =>
+  touches(pg, Array.from({ length: steps + 1 }, (_, i) => { const f = i / steps; const d = d0 + (d1 - d0) * f; return [[cx - d / 2 + dx * f, cy + dy * f], [cx + d / 2 + dx * f, cy + dy * f]]; }));
+const tapAt = async (pg, x, y) => (desktop ? pg.mouse.click(x, y) : touches(pg, [[[x, y]]], 60));
+/** an object's hotspot (its middle in map units and its name), as the app draws this island (the local store's doc) */
+const spotOf = (pg, kind, id) =>
+  pg.evaluate(async ([kind, id]) => {
+    const { hotspots } = await import('/src/ui/map/hotspots.ts');
+    const isl = /#\/i\/(\w+)/.exec(location.hash)[1];
+    const s = JSON.parse(localStorage.getItem('ic.local.' + isl));
+    const h = hotspots(s).find((x) => x.ref.kind === kind && (!id || x.ref.id === id));
+    return h && { id: h.ref.id, label: h.label, p: [(h.foot[0] + h.foot[2]) / 2, (h.foot[1] + h.foot[3]) / 2] };
+  }, [kind, id]);
+const wholeIsland = async (pg) => {
+  await pg.locator('.map-ctl button[aria-label="The whole island"]').first().click();
+  await pg.waitForTimeout(700);
+};
+/** move the island: pinch in and pan with two fingers (a phone), or Ctrl + wheel and a drag (a computer); the camera must move */
+const moveMap = async (pg, tag) => {
+  await pg.evaluate(() => window.scrollTo({ top: 0 }));
+  await pg.waitForTimeout(200);
+  let m = await mapState(pg);
+  const [cx, cy] = [m.r.x + m.r.w * 0.55, m.r.y + m.r.h * 0.55];
+  if (desktop) {
+    await pg.mouse.move(cx, cy);
+    await pg.keyboard.down('Control');
+    for (let i = 0; i < 5; i++) {
+      await pg.mouse.wheel(0, -100);
+      await pg.waitForTimeout(40);
+    }
+    await pg.keyboard.up('Control');
+  } else await pinch(pg, cx, cy, 70, 200);
+  await pg.waitForTimeout(600);
+  const zoomed = await mapState(pg);
+  if (!(zoomed.k > 1.2)) fail(`${tag}: the map didn't zoom (k ${zoomed.k.toFixed(2)})`);
+  if (desktop) {
+    await pg.mouse.move(cx, cy);
+    await pg.mouse.down();
+    for (let i = 1; i <= 10; i++) await pg.mouse.move(cx - 14 * i, cy + 4 * i);
+    await pg.mouse.up();
+  } else await pinch(pg, cx, cy, 120, 120, -140, 30);
+  await pg.waitForTimeout(600);
+  m = await mapState(pg);
+  // where the island's middle is on screen, before and after (the drawing's region and its offset both move)
+  const [a, b] = [toScreen(zoomed, [400, 300]), toScreen(m, [400, 300])];
+  if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 20) fail(`${tag}: the map didn't pan (${Math.round(b[0] - a[0])}, ${Math.round(b[1] - a[1])} px)`);
+  console.log(`${tag}: zoomed to ${zoomed.k.toFixed(2)}, panned ${Math.round(b[0] - a[0])}, ${Math.round(b[1] - a[1])} px`);
+  return m;
+};
+/** tap an object on the map (the whole island in view) and wait for its sheet: the sheet's name is the object's */
+const tapObject = async (pg, kind, id) => {
+  const o = await spotOf(pg, kind, id);
+  if (!o) fail(`no ${kind} ${id ?? ''} on the map`);
+  await pg.evaluate(() => window.scrollTo({ top: 0 }));
+  await wholeIsland(pg);
+  const [x, y] = toScreen(await mapState(pg), o.p);
+  await tapAt(pg, x, y);
+  const sheet = pg.locator(`.sheet[aria-label="${o.label}"]`);
+  await sheet.waitFor({ state: 'visible', timeout: 5000 }).catch(() => fail(`a tap on ${o.label} opened no sheet`));
+  await sheet.locator('.insp-head').waitFor({ state: 'visible', timeout: 5000 });
+  await pg.waitForTimeout(300);
+  return { ...o, sheet };
+};
+const closeInspect = async (pg) => {
+  const x = pg.locator('.sheet .insp-x');
+  if (await x.count()) await x.first().click();
+  await pg.waitForTimeout(300);
+};
+
+await tab('Island');
+for (const [label, seat, kind, want] of [
+  ['Mechanic', 'mech', 'plane', /Walkaround/],
+  ['Electrician', 'elec', 'house', /Meter check/],
+  ['Analyst', 'fin', 'house', /Nightly rate|a night/],
+]) {
+  await passTo(label);
+  await moveMap(page, `map (${seat})`);
+  await shot(`map-${seat}-moved`);
+  const o = await tapObject(page, kind);
+  const text = await o.sheet.innerText();
+  if (!want.test(text)) fail(`${seat}'s sheet on ${o.label} doesn't show ${want}: ${text.slice(0, 200)}`);
+  await shot(`map-${seat}-${kind}-sheet`);
+  if (seat === 'fin') {
+    // the house's Pricing link: the desk's Money tab, at Pricing
+    await o.sheet.locator('.insp-act', { hasText: 'Pricing' }).first().click();
+    await page.waitForTimeout(900);
+    const on = (await page.locator('.pd-tabs button[aria-current="true"]').first().innerText()).trim();
+    const at = await page.locator('#pricing').boundingBox();
+    if (on !== 'Money' || !at || at.y < 0 || at.y > (desktop ? 820 : 844)) fail(`the Pricing link landed on ${on} (Pricing at ${at?.y})`);
+    await shot('map-fin-pricing-link');
+  } else await closeInspect(page);
+  console.log(`map (${seat}): tapped ${o.label}, its sheet shows ${want}`);
+}
+
+// A tier-2 save past week 3 (scripts/stage2-save.ts): a quick check, and a Report a problem that lands on the other seat
+{
+  const here = dirname(fileURLToPath(import.meta.url));
+  const saveDir = resolve(out, 'save');
+  execFileSync(process.execPath, [resolve(here, '../node_modules/tsx/dist/cli.mjs'), resolve(here, 'stage2-save.ts'), saveDir], { stdio: 'pipe' });
+  const sctx = await browser.newContext(
+    desktop ? { viewport: { width: 1280, height: 820 } } : { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true },
+  );
+  await sctx.addInitScript(readFileSync(resolve(saveDir, 'stage2-inject.js'), 'utf8'));
+  const sp = await sctx.newPage();
+  sp.on('pageerror', (e) => errors.push(String(e)));
+  sp.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && errors.push(m.text()));
+  const sshot = async (name) => {
+    await sp.waitForTimeout(350);
+    await sp.screenshot({ path: `${out}/${String(++n).padStart(2, '0')}-save-${name}.png` });
+  };
+  await sp.goto(base + '/');
+  await sp.waitForSelector('.map-vp svg.island-svg', { timeout: 20000 });
+  await sp.waitForTimeout(600);
+  await sshot('whats-new');
+  if (!(await dismissNew(sp))) fail("the save: stage 2's What's new didn't open for the mechanic");
+  const doc = () => sp.evaluate(() => JSON.parse(localStorage.getItem('ic.local.' + /#\/i\/(\w+)/.exec(location.hash)[1])));
+  const d0 = await doc();
+  // the mechanic: the plane whose walkaround shows a sign this week (the sim's truth, read here to make the right call)
+  const tell = await sp.evaluate(async () => {
+    const { checkTruth, checkView } = await import('/src/sim/checks.ts');
+    const s = JSON.parse(localStorage.getItem('ic.local.' + /#\/i\/(\w+)/.exec(location.hash)[1]));
+    for (const a of s.assets.filter((x) => x.kind === 'plane')) {
+      const t = checkTruth(s, 'mech', a.id, s.week);
+      if (t) return { id: a.id, item: checkView(s, 'mech', a.id).items.find((i) => i.id === t.item).label };
+    }
+    return null;
+  });
+  if (!tell) fail('the save has no walkaround tell');
+  await moveMap(sp, 'save (mech)');
+  const plane = await tapObject(sp, 'plane', tell.id);
+  await sshot('mech-plane-sheet');
+  await plane.sheet.locator('.sheet-actions button', { hasText: 'Walkaround' }).click();
+  await sp.waitForTimeout(400);
+  await sshot('mech-walkaround');
+  await plane.sheet.locator('.qc-item', { hasText: tell.item }).first().click();
+  await plane.sheet.getByRole('button', { name: /^Write it up/ }).click();
+  await sp.waitForTimeout(600);
+  const done = (await plane.sheet.locator('.insp-done').innerText().catch(() => '')).trim();
+  if (!/^Walkaround done: you wrote up the /.test(done)) fail(`the walkaround's write-up didn't land: "${done}"`);
+  await sshot('mech-walkaround-written-up');
+  await closeInspect(sp);
+  const d1 = await doc();
+  const wrote = d1.alerts.find((a) => a.src === 'check' && a.role === 'mech' && a.week === d1.week);
+  if (!wrote || d1.checked?.mech !== d1.week) fail('the walkaround wrote nothing to the island');
+  // the mechanic's Report a problem on a house: it lands on the electrician's list
+  const house = await tapObject(sp, 'house');
+  await house.sheet.getByRole('button', { name: /^Report a problem to / }).click();
+  await sshot('mech-report-confirm');
+  await house.sheet.getByRole('button', { name: 'Report it', exact: true }).click();
+  await sp.waitForTimeout(600);
+  await closeInspect(sp);
+  const d2 = await doc();
+  const flag = d2.alerts.find((a) => a.src === 'flag' && a.week === d2.week);
+  if (!flag || flag.role !== 'elec' || flag.assetId !== house.id) fail(`the flag didn't land on the electrician: ${JSON.stringify(flag)}`);
+  console.log(`save: the mechanic wrote up the ${tell.item} on ${plane.label} and flagged ${house.label} for the electrician (${d0.alerts.length} → ${d2.alerts.length} alerts)`);
+  // the electrician sees it on his list, in the mechanic's name
+  await passTo('Electrician', sp);
+  const short = await sp.evaluate(async (id) => {
+    const { alertShort } = await import('/src/sim/alerts.ts');
+    const s = JSON.parse(localStorage.getItem('ic.local.' + /#\/i\/(\w+)/.exec(location.hash)[1]));
+    return alertShort(s, s.alerts.find((a) => a.id === id));
+  }, flag.id);
+  await sp.evaluate(() => window.scrollTo({ top: 0 }));
+  const row = sp.locator('.jf-arow', { hasText: short }).first();
+  await row.waitFor({ state: 'visible', timeout: 5000 }).catch(() => fail(`the flag ("${short}") isn't on the electrician's list`));
+  await row.scrollIntoViewIfNeeded();
+  await sshot('elec-flag-on-list');
+  await row.locator('.jf-arow-main').first().click();
+  await sp.waitForTimeout(600);
+  const flagged = await sp.locator('.jf-sheet').first().innerText();
+  if (!new RegExp(`Flagged by ${d2.players.mech.name} on ${house.label}`).test(flagged)) fail(`the flag's job sheet doesn't say who flagged it: ${flagged.slice(0, 200)}`);
+  await sshot('elec-flag-sheet');
+  const x = sp.locator('.jf-sheet .jf-x[aria-label="Close"]').first();
+  if (await x.count()) await x.click();
+  await sp.waitForTimeout(300);
+  // his quick check: an IR scan of the grid, all normal (2 taps)
+  const grid = await tapObject(sp, 'grid');
+  await grid.sheet.locator('.sheet-actions button', { hasText: 'IR scan' }).click();
+  await sp.waitForTimeout(400);
+  const scan = await grid.sheet.innerText();
+  if (!/Dead front off: arc-rated PPE per NFPA 70E/.test(scan) || !/2 × 250 kcmil Al/.test(scan)) fail(`the IR scan didn't open on its PPE line and the panel: ${scan.slice(0, 200)}`);
+  await sshot('elec-ir-scan');
+  await grid.sheet.getByRole('button', { name: 'All normal', exact: true }).click();
+  await sp.waitForTimeout(500);
+  if (!/IR scan done: all normal/.test(await grid.sheet.innerText())) fail("the IR scan's call didn't land");
+  await closeInspect(sp);
+  // the analyst: the electrician already has this week's flag (one received a week), and the house's Pricing link
+  await passTo('Analyst', sp);
+  const fh = await tapObject(sp, 'house');
+  const cap = await fh.sheet.locator('.insp-report').innerText();
+  if (!new RegExp(`${d2.players.elec.name} already has a flag this week`).test(cap)) fail(`the analyst wasn't told the electrician has a flag: ${cap}`);
+  await sshot('fin-house-flag-cap');
+  await fh.sheet.locator('.insp-act', { hasText: 'Pricing' }).first().click();
+  await sp.waitForTimeout(900);
+  if ((await sp.locator('.pd-tabs button[aria-current="true"]').first().innerText()).trim() !== 'Money') fail("the Pricing link didn't open the Money tab");
+  await sshot('fin-pricing');
+  console.log('save: the electrician read the flag on his list and scanned the grid; the analyst was told to message instead, and Pricing opened the Money tab');
+  await sctx.close();
+}
 
 // Blind sign-off (a real job at tier 2+): a wrong move is accepted silently. No "Wrong",
 // no hint of the right answer, and the job carries on; the score still counts it.

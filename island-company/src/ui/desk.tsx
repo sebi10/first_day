@@ -25,7 +25,8 @@ import { ReqQueue } from './purchasing/ReqQueue';
 import { StockPlanner, type PlannerFocus } from './purchasing/StockPlanner';
 import { WhatsNew } from './purchasing/WhatsNew';
 import './purchasing/purchasing.css';
-import { capNow, chainGrounds, openOrders, takeDeskAsked, type DockTarget } from './select';
+import { capNow, chainGrounds, openOrders, takeDeskAsked, takeDeskAt, type DockTarget } from './select';
+import { settings } from './settings';
 import { C, ROLE_TINT } from './theme';
 import type { Ctl } from './useIsland';
 
@@ -94,13 +95,21 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
     });
   };
   const [focus, setFocus] = useState<PlannerFocus | null>(null);
-  // the Dock's Next (and anything else) opens the desk's Approvals or Stock (select.ts openTarget)
+  // a section of a tab (the inspect sheets' Pricing, Hiring board and Site work links): scrolled to once the tab has drawn
+  const scrollTo = (id: string | null | undefined) => {
+    if (id) setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ block: 'start', behavior: settings.get().reduceMotion ? 'auto' : 'smooth' }), 60);
+  };
+  // the Dock's Next (and anything else) opens a desk tab, and maybe a section of it (select.ts openTarget)
   useEffect(() => {
+    // asked for while the desk's chunk was loading
+    scrollTo(takeDeskAt());
     const on = (e: Event) => {
       const d = (e as CustomEvent<DockTarget>).detail;
       if (d && 'desk' in d) {
         takeDeskAsked();
-        setTab(d.desk === 'stock' ? 'stock' : 'approvals');
+        takeDeskAt();
+        setTab(d.desk);
+        scrollTo(d.at);
       }
     };
     window.addEventListener('ic:open', on);
@@ -210,7 +219,9 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
             setFocus({ fam, n: Date.now() });
           }}
         >
-          <h2 style={{ marginTop: 4 }}>Pricing</h2>
+          <h2 id="pricing" style={{ marginTop: 4, scrollMarginTop: 72 }}>
+            Pricing
+          </h2>
           <Pricing ctl={ctl} />
           <h2 style={{ marginTop: 4 }}>Insurance</h2>
           <Insurance ctl={ctl} />

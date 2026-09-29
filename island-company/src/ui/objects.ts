@@ -40,6 +40,9 @@ export const OBJECT_LABEL: Record<ObjectKind, string> = {
   route: 'Route',
 };
 
+/** a fixture's own name where it differs from its kind's label (its sheet's header and the sheet's dialog name) */
+export const FIXTURE_NAME: Partial<Record<ObjectKind, string>> = { fuel: 'Fuel dock', dock: 'Dock and boats', estop: 'Fuel E-stop' };
+
 /** the asset kinds (their ref's id is the asset's id) */
 export const ASSET_KINDS: readonly ObjectKind[] = ['plane', 'house', 'grid', 'generator'];
 /** the fixtures (their ref's id is their kind) */

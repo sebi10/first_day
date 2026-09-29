@@ -63,7 +63,9 @@ export function StaffDesk({ ctl }: { ctl: Ctl }) {
       </div>
 
       <div class="st-h">
-        <h3>Hiring board · week {s.week}</h3>
+        <h3 id="hiring" style={{ scrollMarginTop: 72 }}>
+          Hiring board · week {s.week}
+        </h3>
         <span class="label">new names every week</span>
       </div>
       {board.length === 0 && <div class="card muted">{s.week < 1 ? 'The board opens with week 1.' : 'Nobody new this week: the board fills again when the next week opens.'}</div>}
@@ -301,7 +303,9 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
   return (
     <>
       <div class="st-h">
-        <h3>Site work</h3>
+        <h3 id="site-work" style={{ scrollMarginTop: 72 }}>
+          Site work
+        </h3>
         <span class="label">{builders.length ? `${builders.length} builder${builders.length > 1 ? 's' : ''} · ${out ? `${out % 1 ? out.toFixed(2).replace(/0$/, '') : out} unit${out === 1 ? '' : 's'} a week` : 'starting next week'}` : 'no builder'}</span>
       </div>
       {!b && (

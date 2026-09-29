@@ -45,6 +45,7 @@ import {
   fixesOf,
   generateAlerts,
   liveAlerts,
+  nameMid,
   needsOf,
   pruneAlerts,
   raiseAlert,
@@ -854,7 +855,7 @@ function flagMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'fl
   if (!pick) return fail('Nothing there anyone could report.');
   s.flagged = { ...(s.flagged ?? {}), [a.role]: s.week };
   raiseFlag(s, a.role, asset, f.to, pick, now);
-  feed(s, f.to, 'info', `${nameOf(s, a.role)} flagged ${asset.name} for ${nameOf(s, f.to)}: it's on the alert list.`, now);
+  feed(s, f.to, 'info', `${nameOf(s, a.role)} flagged ${nameMid(asset)} for ${nameOf(s, f.to)}: it's on the alert list.`, now);
   return { s };
 }
 

@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SYMPTOMS, symptomText } from '../src/sim/alerts';
 import { FLAG, flagCheck, flagPick, openWork } from '../src/sim/checks';
 import { REPORT } from '../src/sim/data';
+import { alertAog } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
 import { addStarter } from '../src/sim/stock';
 import { ROLES, type IslandState } from '../src/sim/types';
@@ -77,6 +78,30 @@ describe('who can flag what (6.5)', () => {
     expect(flaggable(s, 'fin', 'nope')).toMatchObject({ ok: false, why: 'No such asset.' });
   });
 
+  it("the analyst's flag on the generator goes by what she can see, never by what's coming on it", () => {
+    // the same sheet (no alert on it) whatever the hidden wear: the receiver doesn't move with the health or the causes
+    const seen = new Set<string>();
+    for (const health of [20, 45, 60, 80, 100]) {
+      const s = island(5, health);
+      const g = flaggable(s, 'fin', 'gen');
+      expect(g.ok).toBe(true);
+      seen.add((g as { to: string }).to);
+    }
+    expect([...seen]).toEqual(['mech']);
+    // an open alert on it is on the sheet: the tech who has it gets the flag, whatever its hidden cause
+    for (const cause of [0, -1]) {
+      const s = island(5, 60);
+      s.alerts = [{ id: 'a1', role: 'elec', assetId: 'gen', sym: 'E_GEN_TEST', src: 'utility', week: 6, due: 8, seed: 1, kind: cause < 0 ? 'nff' : 'genTest', cause, status: 'open' }];
+      expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'elec' });
+      s.alerts.push({ ...s.alerts[0], id: 'a2', role: 'mech', kind: 'genService' });
+      expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'mech' });
+    }
+    // the mechanic already has this week's flag: the electrician
+    let s = island(5, 60);
+    s = ok(s, { t: 'flag', role: 'elec', assetId: 'p1', week: s.week });
+    expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'elec' });
+  });
+
   it('each trade receives one flag a week: the second flagger is told to message instead', () => {
     let s = island();
     s = ok(s, { t: 'flag', role: 'fin', assetId: 'h1', week: s.week });
@@ -101,6 +126,22 @@ describe('what a flag raises (6.5)', () => {
     expect(symptomText(s, a)).toMatch(/^Flagged by Cy on Twin N-12: /);
     expect(openWork(s, 'mech').open).toBe(before + 1);
     expect(s.feed.at(-1)!.text).toBe("Cy flagged Twin N-12 for Ana: it's on the alert list.");
+  });
+
+  it('a flagged airworthiness squawk gives the mechanic a week: it never grounds the plane the week it is flagged', () => {
+    let tried = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      let s = island(seed, 40 + (seed % 40));
+      s = ok(s, { t: 'flag', role: 'fin', assetId: 'p1', week: s.week });
+      const a = s.alerts!.at(-1)!;
+      if (!SYMPTOMS[a.sym].aw) continue;
+      tried++;
+      expect(a.due, `seed ${seed}: ${a.sym}`).toBeGreaterThanOrEqual(s.week + 1);
+      expect(alertAog(s, 'p1'), `seed ${seed}`).toBeUndefined();
+      // and it grounds the plane from its due week if nobody acts on it
+      expect(alertAog(s, 'p1', a.due)).toBeDefined();
+    }
+    expect(tried).toBeGreaterThan(5);
   });
 
   it('a healthy twin: a no-fault write-up that takes no slot, and costs the mechanic a close', () => {

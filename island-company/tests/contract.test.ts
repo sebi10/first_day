@@ -14,7 +14,7 @@ import { InspectSheet } from '../src/ui/inspect/InspectSheet';
 import { whatsNewMapPanels } from '../src/ui/inspect/WhatsNewMap';
 import { MapView } from '../src/ui/map/MapView';
 import { ASSET_KINDS, FIXTURE_KINDS, HOME, OBJECT_LABEL, assetRef, ownerOf, type ObjectKind, type ObjectRef, type StationId } from '../src/ui/objects';
-import { assetPnl, fixtureFacts, flaggable, openAlertsOn, openTarget, type DockTarget } from '../src/ui/select';
+import { assetPnl, fixtureFacts, flaggable, openAlertsOn, openTarget, takeDeskAsked, takeDeskAt, type DockTarget } from '../src/ui/select';
 import { WhatsNew } from '../src/ui/whatsnew';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -59,12 +59,20 @@ describe('the stage-2 contract (14.3)', () => {
     try {
       openDm('elec', 'About the hangar: ');
       openTarget({ object: { kind: 'hangar', id: 'hangar', st: HOME } });
+      // the sheets' Pricing and Hiring board links: a desk tab and a section of it, kept for a desk still loading
+      openTarget({ desk: 'money', at: 'pricing' });
+      expect([takeDeskAsked(), takeDeskAt()]).toEqual(['money', 'pricing']);
+      expect([takeDeskAsked(), takeDeskAt()]).toEqual([null, null]);
+      openTarget({ desk: 'staff' });
+      expect([takeDeskAsked(), takeDeskAt()]).toEqual(['staff', null]);
     } finally {
       w.window = had;
     }
     expect(seen).toEqual([
       { type: 'ic:dm', detail: { role: 'elec', prefill: 'About the hangar: ' } },
       { type: 'ic:open', detail: { object: { kind: 'hangar', id: 'hangar', st: 'home' } } },
+      { type: 'ic:open', detail: { desk: 'money', at: 'pricing' } },
+      { type: 'ic:open', detail: { desk: 'staff' } },
     ]);
   });
 

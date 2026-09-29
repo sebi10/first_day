@@ -33,6 +33,7 @@ import { crewOf } from '../src/sim/staff';
 import { addStarter } from '../src/sim/stock';
 import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Role } from '../src/sim/types';
 import { facts, factsText, type Facts } from '../src/ui/inspect/facts';
+import { inspectLabel } from '../src/ui/select';
 import { InspectBody } from '../src/ui/inspect/Inspect';
 import { InspectSheet } from '../src/ui/inspect/InspectSheet';
 import { IrScan } from '../src/ui/inspect/IrScan';
@@ -408,6 +409,14 @@ describe('facts: every object kind x every seat (6.3, 13.3)', () => {
         }
     });
 
+  it("the sheet's dialog name (home.tsx: select.ts inspectLabel, in Home's chunk) is its header's name, for every object", () => {
+    for (const [, s] of states)
+      for (const ref of refs(s)) {
+        if (ref.kind === 'station' || ref.kind === 'route') continue;
+        expect(inspectLabel(s, ref), `${ref.kind}:${ref.id}`).toBe(facts(s, ref, 'fin').name);
+      }
+  });
+
   it('each seat sees what it cares about on the same plane, house and grid', () => {
     const s = island(6, 3);
     const plane = (r: Role) => facts(s, assetRef(s.assets.find((a) => a.id === 'p1')!), r);
@@ -507,6 +516,25 @@ describe('the sheets render and their moves dispatch (6.2, 9.2)', () => {
     await click(button(m.root, 'Confirm the hire'));
     expect(m.calls).toEqual([{ t: 'hire', cand: 'cx1' }]);
     m.unmount();
+  });
+
+  it("the analyst's deep links: a house to Pricing on the Money tab, a staff figure to the hiring board, the build site to Site work", async () => {
+    const s = island(6, 3);
+    const ev = listen();
+    const pilot = crewOf(s).find((x) => x.role === 'pilot')!;
+    const cases: [ObjectRef, string, unknown][] = [
+      [assetRef(s.assets.find((a) => a.id === 'h1')!), 'Pricing', { desk: 'money', at: 'pricing' }],
+      [{ kind: 'staff', id: pilot.id, st: HOME }, 'Hiring board', { desk: 'staff', at: 'hiring' }],
+      [{ kind: 'site', id: 'project', st: HOME }, 'Site work', { desk: 'staff', at: 'site-work' }],
+    ];
+    for (const [ref, label, detail] of cases) {
+      const m = await mount(s, 'fin', ref);
+      await click(button(m.root, label));
+      expect(ev.seen.at(-1), label).toEqual({ type: 'ic:open', detail });
+      expect(m.closed()).toBe(1);
+      m.unmount();
+    }
+    ev.stop();
   });
 
   it("the techs' moves: the safety call, an alert's job sheet, the cart sheet, Stores", async () => {

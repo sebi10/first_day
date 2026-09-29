@@ -7,7 +7,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { alertShort, findingOf, generateAlerts, raiseAlert, symptomText, SYMPTOMS } from '../src/sim/alerts';
-import { CHECK_ROWS, GFCI_OK, GFCI_TELL, IR, METER, WALK_BENIGN, WALK_SCOPE, WALK_ZONES } from '../src/sim/checkdata';
+import { CHECK_ROWS, GEN_PANEL, GFCI_OK, GFCI_TELL, HOME_PANEL, IR, METER, WALK_BENIGN, WALK_SCOPE, WALK_ZONES } from '../src/sim/checkdata';
 import { CHECK, canCheck, checkKindFor, checkTruth, checkView, openWork, wearFromOf, type CheckKind } from '../src/sim/checks';
 import { CATALOG_BY_KIND, DEFECT } from '../src/sim/data';
 import { apply, createIsland } from '../src/sim/engine';
@@ -105,6 +105,39 @@ describe('who checks what, when (6.4, 7)', () => {
     s = ok(s, { t: 'check', role: 'mech', assetId: 'p1', item: null, week: s.week });
     expect(s.alerts!.length).toBe(before);
     expect(s.feed.at(-1)!.text).toBe('Ana walked around Twin N-12: all serviceable.');
+  });
+
+  it('the grid and the generator read as things mid-sentence: "IR-scanned the island grid", "walked around the generator house"', () => {
+    let s = island(5, 70, 3);
+    s = ok(s, { t: 'check', role: 'elec', assetId: 'g1', item: null, week: s.week });
+    expect(s.feed.at(-1)!.text).toBe('Ben IR-scanned the island grid: all normal.');
+    s = ok(s, { t: 'check', role: 'mech', assetId: 'gen', item: null, week: s.week });
+    expect(s.feed.at(-1)!.text).toBe('Ana walked around the generator house: all serviceable.');
+  });
+});
+
+describe('the check data a working electrician reads (6.4, the integrator’s realism pass)', () => {
+  // NEC Table 310.16, 75 °C column (the terminations' rating): copper and aluminium ampacities
+  const CU: Record<string, number> = { '#14': 20, '#12': 25, '#10': 35, '#8': 50, '#6': 65, '#4': 85, '#3': 100, '#2': 115, '#1': 130, '1/0': 150, '2/0': 175, '3/0': 200, '4/0': 230 };
+  const AL: Record<string, number> = { '250 kcmil': 205, '300 kcmil': 230, '350 kcmil': 250, '500 kcmil': 310, '600 kcmil': 340, '750 kcmil': 385 };
+  const ampacity = (awg: string): number => {
+    const par = /^(\d+) × (.+)$/.exec(awg);
+    if (par) return Number(par[1]) * ampacity(par[2]);
+    const m = /^(.+) (Cu|Al)$/.exec(awg)!;
+    return (m[2] === 'Cu' ? CU : AL)[m[1]];
+  };
+  it('every breaker on the panels is on a conductor rated for it at 75 °C: the 400 A main on two sets of 250 kcmil Al, not one 500 kcmil', () => {
+    for (const b of [...HOME_PANEL, ...GEN_PANEL]) {
+      const a = ampacity(b.awg);
+      expect(a, `${b.label} ${b.awg}`).toBeGreaterThan(0);
+      expect(a, `${b.label}: ${b.amps} A on ${b.awg} (${a} A)`).toBeGreaterThanOrEqual(b.amps);
+    }
+    expect(HOME_PANEL.find((b) => b.id === 'main')).toMatchObject({ amps: 400, awg: '2 × 250 kcmil Al' });
+  });
+  it("the generator's main breaker is no bigger than the transfer switch it feeds", () => {
+    const sw = GEN_PANEL.filter((b) => b.id.startsWith('xfer'));
+    const brk = GEN_PANEL.find((b) => b.id === 'genbrk')!;
+    for (const x of sw) expect(brk.amps, x.label).toBeLessThanOrEqual(x.amps);
   });
 });
 

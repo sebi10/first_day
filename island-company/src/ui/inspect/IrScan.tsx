@@ -200,7 +200,7 @@ export function IrScan({ s, a, view, busy, onCall }: { s: IslandState; a: Pick<A
         </div>
       )}
       <p class="qc-lead">
-        {a.kind === 'generator' ? 'The transfer switch, scanned on the weekly test run with the set carrying the backed-up load.' : `${a.name}'s panel under load.`} Tap the one you'd open up, or call it all normal.
+        {a.kind === 'generator' ? 'The transfer switch, scanned on the weekly test run with the set carrying the backed-up load.' : `${a.kind === 'grid' ? `The ${a.name.charAt(0).toLowerCase()}${a.name.slice(1)}` : a.name}'s panel under load.`} Tap the one you'd open up, or call it all normal.
       </p>
       <IrImage view={view} amb={amb} pick={pick} onPick={toggle} />
       <div class="qc-items">

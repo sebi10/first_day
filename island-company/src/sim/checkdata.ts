@@ -177,9 +177,14 @@ export const WALK_BENIGN: Record<WalkZone, string[]> = {
 
 export type IrBreaker = { id: string; label: string; amps: number; awg: string; from: number };
 
-/** the island's distribution panel (home: derived from the tier's feeders; 6.4) */
+/**
+ * the island's distribution panel (home: derived from the tier's feeders; 6.4). Every conductor at its 75 °C ampacity
+ * (NEC Table 310.16) for its breaker. The main: two parallel sets of 250 kcmil Al (205 A each, 410 A), not a single
+ * run: 500 kcmil Al is 310 A, and Table 310.12's 600 kcmil Al for 400 A is a dwelling's service (this panel feeds the
+ * hangar, the office and the fuel dock too; under 310.16 600 kcmil Al is 340 A)
+ */
 export const HOME_PANEL: IrBreaker[] = [
-  { id: 'main', label: 'Main', amps: 400, awg: '500 kcmil Al', from: 1 },
+  { id: 'main', label: 'Main', amps: 400, awg: '2 × 250 kcmil Al', from: 1 },
   { id: 'cfeedE', label: 'East cottages feeder', amps: 100, awg: '#3 Cu', from: 1 },
   { id: 'hangar', label: 'Hangar', amps: 60, awg: '#6 Cu', from: 1 },
   { id: 'office', label: 'Office', amps: 30, awg: '#10 Cu', from: 1 },
@@ -191,11 +196,15 @@ export const HOME_PANEL: IrBreaker[] = [
   { id: 'edge', label: 'Runway edge lights', amps: 20, awg: '#12 Cu', from: 5 },
 ];
 
-/** the generator house, scanned during the weekly test run (the set carrying the backed-up load) */
+/**
+ * the generator house, scanned during the weekly test run (the set carrying the backed-up load). The transfer switch as
+ * installed is 60 A on #6 (the electrician's `transfer` job finds the houses have outgrown it); the generator's main
+ * breaker feeding it is 60 A too: a switch is rated at least the breaker ahead of it
+ */
 export const GEN_PANEL: IrBreaker[] = [
   { id: 'xferG', label: 'Transfer switch, generator-side lugs', amps: 60, awg: '#6 Cu', from: 3 },
   { id: 'xferL', label: 'Transfer switch, load-side lugs', amps: 60, awg: '#6 Cu', from: 3 },
-  { id: 'genbrk', label: 'Generator main breaker', amps: 70, awg: '#4 Cu', from: 3 },
+  { id: 'genbrk', label: 'Generator main breaker', amps: 60, awg: '#6 Cu', from: 3 },
   { id: 'xferU', label: 'Transfer switch, utility-side lugs (open)', amps: 60, awg: '#6 Cu', from: 3 },
 ];
 

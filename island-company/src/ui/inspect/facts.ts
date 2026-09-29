@@ -16,7 +16,7 @@
 // alerts in their own words, the ledger and the catalog. Never an alert's hidden
 // cause or its early flag, a hidden defect, a cart cable's hidden wear, or a quick
 // check's truth (the sim's own; UI code never imports it).
-import { alertShort, liveAlerts, soleGuest } from '../../sim/alerts';
+import { alertShort, liveAlerts, nameMid, soleGuest } from '../../sim/alerts';
 import { externalPower, fmtDate, planeModel } from '../../sim/aircraft';
 import { islandAircraft } from '../../sim/chain';
 import { GEN_PANEL, HOME_PANEL, HOUSE_CIRCUITS } from '../../sim/checkdata';
@@ -52,7 +52,7 @@ import { buildSite, COTTAGE_SHELL, cottagePlan, crewOf, housekeepingCap, openBui
 import type { Alert, Asset, Candidate, IslandState, Npc, OpsRole, Order, Role } from '../../sim/types';
 import { cableWords, cartWhere, weakBatteryNow } from '../gse';
 import { moveChip } from '../flow/words';
-import { HOME, OBJECT_LABEL, type ObjectKind, type ObjectRef, type StationId } from '../objects';
+import { FIXTURE_NAME, HOME, OBJECT_LABEL, type ObjectKind, type ObjectRef, type StationId } from '../objects';
 import { cardVM, flowQueue } from '../purchasing/model';
 import { assetPnl, fixtureFacts, flaggable, openAlertsOn } from '../select';
 import { buildLine, doingNow, ROLE_WORD } from '../staff/model';
@@ -80,8 +80,8 @@ export type Act =
   | { t: 'gse'; cart: string | null; label: string }
   /** the tech's read-only Stores */
   | { t: 'stores'; label: string }
-  /** the analyst's desk tab */
-  | { t: 'desk'; desk: 'approvals' | 'stock'; label: string }
+  /** the analyst's desk tab, and a section of it (`at`: 'pricing' on Money, 'hiring' and 'site-work' on Staff) */
+  | { t: 'desk'; desk: 'approvals' | 'stock' | 'money' | 'staff'; label: string; at?: string; sub?: string }
   /** approve a flow card on this asset, inline (the analyst) */
   | { t: 'approve'; order: string; label: string; usd: number; sub: string }
   /** the island's nightly rate, stepped inline (the analyst): ±step, with this week's projected effect */
@@ -239,17 +239,18 @@ function assetReport(s: IslandState, role: Role, a: Asset): Report | null {
       assetId: a.id,
       to: f.to,
       toName: n,
-      head: `Tell ${n} about ${a.name}`,
+      head: `Tell ${n} about ${nameMid(a)}`,
       ok: true,
       // true of every flag, a real fault or none (a no-fault one still costs a close), and it says nothing of which
       words: `Adds one alert for ${n} now, in your name. It's on ${n}'s list until ${n} closes it.`,
-      dms: [dmOne(s, f.to, a.name)],
+      dms: [dmOne(s, f.to, nameMid(a))],
     };
   }
   // who it would go to: the asset's trade (the generator, for the analyst: either tech; message the one it names)
   const to: OpsRole | null = own === 'both' ? null : own;
   const toName = to ? nameOf(s, to) : 'the techs';
-  return { t: 'flag', assetId: a.id, to, toName, head: `Tell ${toName} about ${a.name}`, ok: false, why: f.why, dms: to ? [dmOne(s, to, a.name)] : dmsFrom(s, role, a.name, ['mech', 'elec']) };
+  const about = nameMid(a);
+  return { t: 'flag', assetId: a.id, to, toName, head: `Tell ${toName} about ${about}`, ok: false, why: f.why, dms: to ? [dmOne(s, to, about)] : dmsFrom(s, role, about, ['mech', 'elec']) };
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +453,8 @@ function houseFacts(s: IslandState, h: Asset, role: Role): Facts {
       if (plan.plot) lines.push({ text: plan.payback ? `An extra cottage like it: ${money(plan.cost)}, rents about ${money(plan.rent)} a week, pays back in about ${plural(plan.payback, 'week')}.` : `An extra cottage like it: ${money(plan.cost)}; at this week's bookings it would sit empty.` });
     }
     primary = ratesAct(s);
+    // the rest of pricing (the charter rate, the season, the rate's effect on occupancy) is on the desk's Money tab
+    actions.push({ t: 'desk', desk: 'money', label: 'Pricing', sub: 'The desk’s Money tab: the demand curve and the charter rate', at: 'pricing' });
   }
   return {
     name: h.name,
@@ -553,7 +556,7 @@ function gridFacts(s: IslandState, g: Asset, role: Role): Facts {
 function genInstalled(): string {
   const x = GEN_PANEL.find((b) => b.id === 'xferG');
   const m = GEN_PANEL.find((b) => b.id === 'genbrk');
-  return `Transfer switch ${x?.amps ?? 60} A on ${x?.awg ?? '#6 Cu'} THWN; generator main ${m?.amps ?? 70} A on ${m?.awg ?? '#4 Cu'}.`;
+  return `Transfer switch ${x?.amps ?? 60} A on ${x?.awg ?? '#6 Cu'} THWN; generator main ${m?.amps ?? 60} A on ${m?.awg ?? '#6 Cu'}.`;
 }
 /** the belly tank as the set's plate reads it: 36 gal of diesel, about 0.95 gal an hour at the backed-up load (about 40 A at 240 V) */
 const GEN_FUEL = { tank: 36, burn: 0.95 };
@@ -629,7 +632,6 @@ const ABOUT: Partial<Record<ObjectKind, string>> = {
   windsock: 'the weather',
   terminal: 'the terminal',
 };
-const FIXTURE_NAME: Partial<Record<ObjectKind, string>> = { fuel: 'Fuel dock', dock: 'Dock and boats', estop: 'Fuel E-stop' };
 
 function fixtureFactsFor(s: IslandState, ref: ObjectRef, role: Role): Facts {
   const kind = ref.kind;
@@ -751,6 +753,7 @@ function staffFacts(s: IslandState, ref: ObjectRef, role: Role): Facts {
     if (best) primary = hireAct(s, best.c, best.e);
     else lines.push({ text: `No ${ROLE_WORD[n.role].toLowerCase()} on this week's hiring board.` });
     if (!n.id.startsWith('std-') && s.staff?.some((x) => x.id === n.id)) actions.push(letGoAct(s, n));
+    actions.push({ t: 'desk', desk: 'staff', label: 'Hiring board', sub: 'The desk’s Staff tab: every candidate this week', at: 'hiring' });
   } else {
     lines.push({ text: `On the island's payroll: ${nameOf(s, 'fin')} hires and lets go.` });
   }
@@ -841,6 +844,7 @@ function siteFacts(s: IslandState, ref: ObjectRef, role: Role): Facts {
         else primary = act;
       }
     }
+    actions.push({ t: 'desk', desk: 'staff', label: 'Site work', sub: 'The desk’s Staff tab: the builders and what they need', at: 'site-work' });
   }
   return {
     name: b ? cap1(buildSite(b)) : OBJECT_LABEL.site,

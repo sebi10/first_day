@@ -21,13 +21,12 @@ import { MapView } from './map/MapView';
 import { InspectSheet } from './inspect/InspectSheet';
 import { whatsNewMapPanels } from './inspect/WhatsNewMap';
 import { WhatsNew } from './whatsnew';
-import { isAssetRef, OBJECT_LABEL, type ObjectRef } from './objects';
-import { buildSite, crewOf, openBuild } from '../sim/staff';
+import type { ObjectRef } from './objects';
 import { ENGINE_VERSION } from '../sim/engine';
 import { Me, inviteUrl } from './me';
 import { OpsPanel } from './ops';
 import { PuzzleHost, type PuzzleLaunch } from './puzzlehost';
-import { blocks, capNow, dockNext, endTurnChecks, launchFor, mateStatus, openTarget, owedBy, standingLimit, teamNumbers, type DockTarget } from './select';
+import { blocks, capNow, dockNext, endTurnChecks, inspectLabel, launchFor, mateStatus, openTarget, owedBy, standingLimit, teamNumbers, type DockTarget } from './select';
 import { settings } from './settings';
 import { shareText } from './share';
 import { C, ROLE_TINT } from './theme';
@@ -190,31 +189,6 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
       </Sheet>
     </div>
   );
-}
-
-/**
- * The inspect sheet's label (its dialog name): an asset's name, a staff figure's (the npc's own name), a build site's
- * (the build's), a cart's, else the kind's ("Hangar"). The same names the sheet's own header shows (inspect/facts.ts).
- */
-export function inspectLabel(s: IslandState, t: ObjectRef): string {
-  if (isAssetRef(t)) return s.assets.find((a) => a.id === t.id)?.name ?? OBJECT_LABEL[t.kind];
-  if (t.kind === 'staff') {
-    const crew = crewOf(s);
-    const n = crew.find((x) => x.id === t.id) ?? crew.find((x) => x.role === t.id);
-    if (n?.name) return n.name;
-  }
-  if (t.kind === 'site') {
-    const b = (t.id === 'project' ? undefined : (s.builds ?? []).find((x) => x.id === t.id)) ?? openBuild(s);
-    if (b) {
-      const w = buildSite(b);
-      return w.charAt(0).toUpperCase() + w.slice(1);
-    }
-  }
-  if (t.kind === 'cart') {
-    const c = gseCarts(s).find((x) => x.id === t.id);
-    if (c) return c.name;
-  }
-  return OBJECT_LABEL[t.kind];
 }
 
 /** This device can read the island but holds no seat: never joined, or its sign-in was reset. */
