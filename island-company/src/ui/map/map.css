@@ -1,0 +1,262 @@
+/* The map (docs/EXPANSION.md 5): the inline card, Explore, the controls. The
+   controls are HTML (no SVG nodes: the scene's node budget is the island's). */
+
+.map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* the viewport: the gesture surface. Inline it is today's card (.island-wrap: 4:3, rounded, the sea behind) */
+.map-vp {
+  position: relative;
+  overflow: hidden;
+  outline: none;
+  cursor: grab;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.map-vp:active {
+  cursor: grabbing;
+}
+.map-vp:focus-visible {
+  box-shadow: 0 0 0 3px var(--sea), var(--shadow);
+}
+/* the drawing, moved as a picture during a gesture (transform only) */
+.map-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.map-stage .island-svg {
+  display: block;
+  overflow: hidden;
+}
+/* under the camera the region's corner is a translate on the zoom group: no easing on it */
+.island-svg.cam .island-zoom {
+  transition: none;
+}
+/* the ambient motion holds still while a finger moves the map, so the moving picture is never repainted */
+.map-vp.gesturing .island-svg,
+.map-vp.gesturing .island-svg * {
+  animation-play-state: paused !important;
+}
+
+/* controls: 44 px, in the map's corner */
+.map-ctl {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+.map-ctl-x {
+  top: auto;
+  bottom: calc(12px + var(--safe-b, 0px));
+  right: 12px;
+  flex-direction: column;
+}
+.map-btn {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 14px;
+  padding: 0;
+  font: inherit;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--paper);
+  background: rgba(31, 42, 48, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-btn:active {
+  transform: scale(0.94);
+}
+.map-btn:focus-visible {
+  outline: 3px solid var(--sea-light);
+  outline-offset: 1px;
+}
+
+/* the preset chips: under the map inline, across the top in Explore */
+.map-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.map-chips::-webkit-scrollbar {
+  display: none;
+}
+.map-chip {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 99px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--sand-deep);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-chip[aria-pressed='true'] {
+  color: var(--paper);
+  background: var(--ink);
+}
+.map-chip:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 1px;
+}
+
+/* a mouse over an object: its name by the pointer */
+.map-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  pointer-events: none;
+  max-width: 220px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--paper);
+  background: rgba(31, 42, 48, 0.8);
+}
+
+/* the one-time hints ride where the weather line is */
+.map-hint {
+  background: rgba(31, 42, 48, 0.78);
+}
+
+/* two close objects at the most zoom: pick one */
+.map-choose {
+  position: absolute;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  z-index: 2;
+}
+/* the keyboard's (and screen reader's) way in: every object in view */
+.map-list {
+  position: absolute;
+  inset: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  z-index: 3;
+}
+.map-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 0 4px 6px;
+}
+.map-list-head .map-btn {
+  width: 44px;
+  font-size: 18px;
+}
+.map-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  color: var(--ink);
+  background: var(--sand);
+  cursor: pointer;
+}
+.map-list-item span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.map-list-item:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 1px;
+}
+
+/* ---- Explore: the same map over the whole screen (the sea behind a letterboxed island) */
+.overlay.map-explore {
+  padding: 0;
+  gap: 0;
+  background: #1560b4;
+  overscroll-behavior: contain;
+}
+.map-explore .map-vp {
+  flex: 1;
+  min-height: 0;
+  cursor: grab;
+}
+.map-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(8px + var(--safe-t, 0px)) 12px 8px;
+  background: rgba(31, 42, 48, 0.55);
+}
+.map-top .map-chips {
+  flex: 1;
+  min-width: 0;
+}
+.map-top .map-chip {
+  background: rgba(251, 245, 233, 0.92);
+}
+.map-top .map-chip[aria-pressed='true'] {
+  color: var(--ink);
+  background: #ffd23f;
+}
+.map-close {
+  margin-left: auto;
+  font-size: 18px;
+}
+@media (min-width: 900px) {
+  .overlay.map-explore {
+    padding: 0;
+    background: #1560b4;
+  }
+}
+
+/* a sheet opened from Explore rides above it */
+html.map-exploring .scrim {
+  z-index: 60;
+}
+html.map-exploring .sheet {
+  z-index: 61;
+}

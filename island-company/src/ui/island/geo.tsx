@@ -278,7 +278,7 @@ export const siteKindOf = (model: string): SiteKind | null =>
 export type WorkSite = { id: string; kind: SiteKind | 'dock'; at: Pt };
 /** a site's screen extent around its ground point [x0, y0, x1, y1], as sites.tsx draws it: the dug plot, the
  *  frame, the tower crane at its tallest, the lumber, the barrier and the builders on it */
-const SITE_EXTENT: Record<WorkSite['kind'], Box> = {
+export const SITE_EXTENT: Record<WorkSite['kind'], Box> = {
   house: [-38, -80, 45, 26],
   villa: [-49, -72, 50, 24],
   lodge: [-49, -62, 52, 24],

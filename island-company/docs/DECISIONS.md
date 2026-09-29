@@ -1805,6 +1805,47 @@ Solo, absent and nobody stay at tier 1 either way (their numbers are identical: 
 
 ### The map (B)
 
+#### 2026-09-29: B1, the free map: camera, gestures, presets, Explore, hotspots
+
+Branch `s2-b1`, from A1's `3e04cfb`. UI only: no engine, selector or state change, nothing stored in the island doc (the preset in use and the one-time hints are per-device `localStorage`, guarded). Balance is unchanged by construction.
+
+**What's in it:**
+- `src/ui/map/camera.ts` (pure): the camera `{ x, y, k }` with a contain fit, clamping, zoom about a point, the pinch (spread and midpoint), pan, the presets (`camForBox`: in the inline 4:3 map exactly `zoomOf`'s view, tested for every role, tier and build), the stage transform between two cameras, the raster region (`frameOf`) and the flight plan. Ready for stage 3: `REGION_SCENE`, `SceneKind`, and limits that carry a `kMin` (the region's transient 0.8).
+- `gestures.ts` (the pure tap/drag/pinch classifier), `controller.ts` (a CSS transform per animation frame, one commit at the end; flights), `hotspots.ts` (the registry and hit-test), `place.ts` (where the planes, carts, builders and staff are drawn: the art and the hit-test read the same spots), `layouts.ts` (`SceneLayout` and `LAYOUTS.home`; the station layouts are B2's), `MapView.tsx` (replaces A1's stub; the 14.3 props plus A1's `go`, and optional `phase` / `reduceMotion` for the lab), `map.css`.
+- `island.tsx` takes `frame` (the camera) and a `probe` (where it placed the bubbles); `focus` stays for the lab, week 0 and the start screen. The placement code moved to `map/place.ts` unchanged: all 34 island-lab scenes render pixel-identical to `3e04cfb` (still, 358 px, dpr 2).
+- The island lab: `&map=1` renders every scene in the map; a `beaten-storm-night` scene. `scripts/island-shots.mjs` checks the budget list (5.7) drawn plain and through the map, and has a `perf` mode (5.6).
+
+**Decisions beyond the spec (reasons):**
+- **A committed camera draws a region, not just the viewport.** The whole scene when it fits 4 M device px (the phone card, at every zoom), else the view grown on every side as far as that budget allows (Explore close up, a retina desktop). Why: the spec's wrapper transform alone shows bare sea wherever a pan or a pinch-out uncovers what was off screen. The `viewBox` keeps its origin at 0 0 and the region's corner is a translate on the zoom group, so the ambient animations (`transform-box: view-box`, origin 0 0) still pivot where they should. A letterboxed view (a portrait Explore) draws the scene's own sea overhang (60 units) into the bands.
+- **Flights pick their order** so the ground is drawn all the way (`planFlight`): the drawing on screen flies to the new view when it covers it (the phone card, always), else the new camera is drawn first and flies in from the old view (a flip), else the whole island is drawn, flown across, and the end drawn (two distant close-ups in Explore).
+- **The reach is 22 CSS px from an object's middle, not from its footprint's edge.** From the edge, 22 px at k = 1 on a 358 px card is 49 map units round every footprint: the beaten island had 14% empty ground (tier 1: 28%), against the 40% the zone toggle needs (13.2). From the middle (gap-zoom's rule for the builders, a 44 px disc round every object; a building's own footprint is bigger than that) it's 46% (tier 3: 55%, tier 1: 60%), and a small thing (a figure, the windsock, the bowser) still has its 44 px target.
+- **A cart's own 44 px target yields to another object's drawn footprint.** At k = 1 it is ~98 map units square and buried the twin parked beside the charger (5 px of it was tappable: the plane's sheet, the mechanic's main new screen, was unreachable at the default view). Where the cart is drawn it still wins over the plane beside it (z 60, tested); on open ground its target is its SVG button's size, max(44 map units, 44 CSS px), at every zoom.
+- **Taps are handled at pointer-up, and the click that follows is swallowed window-wide.** The sheet a tap opens is under the finger by the time the browser's click arrives: its scrim took that click and closed the sheet at once. A click with no pointer sequence before it (a screen reader's) still reaches a cart's SVG button.
+- **A builder or a build site opens the site's sheet and frames the build site behind it** (so gap-zoom's "tap a builder: the site" habit still lands there when the sheet closes).
+- **After a pinch, the finger left on the glass pans on**, inline too, until it lifts; a lone finger inline never pans (5.1).
+- **A double tap at the most zoom goes back to the whole island** (the double tap is otherwise a no-op there).
+- **The bubble scale is min(1, 1.3 / k)**: continuous under a free zoom; every preset's bubbles are as before.
+- **The idle stillness is a class toggle, not a render** (`useStill`), so the first touch after 20 s idle doesn't re-render the island under the finger.
+- **Explore is the same instance, in a root of its own** (a portal without `preact/compat`, whose option hooks would change the whole app), lifted to `body`: out of `.side`'s sticky stacking context on desktop, under which the dock would paint over it. The slot keeps its height. A sheet opened from Explore rides above it (`html.map-exploring` raises `.scrim` and `.sheet`).
+- **The controls are text glyphs** (+ − ⌖ ⤢ ✕), so the map adds no SVG nodes; the beaten scene is 1,392 nodes through the map (1,390 plain: the two carts' hit rects, as on Home today) and `beaten-storm-night` 1,348.
+- **A mouse over the map shows the pointer and a name tag** over whatever a click would open (desktop only; written to the DOM directly, no render). It makes "click around" discoverable on a computer.
+- **`hotspots()` takes an optional `phase`**: the staff (and their hotspots) are off at night and in a storm, as drawn.
+
+**What the map emits** (for C): `plane`, `house`, `grid`, `generator` (the asset's id); `hangar`, `office`, `runway`, `fuel` (the bowser), `windsock`, `dock` (the seaplane dock, from tier 4; before it the works are a `site`), id = the kind; `staff` (a pilot's or a housekeeper's npc id); `site` (the build's id, or `project` for a crew project's sites with no build); carts go to `onCart`. Every `st` is `home`.
+
+**Performance** (`island-shots.mjs perf`: 390 × 844, dpr 2, touch, CPU throttled 4×, ambient motion on; frame times from `requestAnimationFrame` over 60 touch moves at 60 Hz each, which CDP's dispatch stretches to about 2 s):
+
+| Scene | pinch (median, p95) | two-finger pan | one-finger drag in Explore |
+|---|---|---|---|
+| `beaten` | 16.7 ms, 16.8 ms | 16.7, 16.7 | 16.7, 16.7 |
+| `beaten-storm-night` | 16.7, 16.7 | 16.7, 16.7 | 16.7, 16.8 |
+
+A trace of the throttled pinch: 2 paints in the whole gesture (the drawing moves as a picture), 4 ms of main thread a frame; the commit after the lift is ~46 ms of main thread over 3 frames at 4× (no long task). Headless Chromium rasters on the CPU; a real phone's GPU raster isn't measured here.
+
+**Checks:** `npx tsc --noEmit -p .`; 861 of 861 tests in 52 files (`tests/camera.test.ts`, `hotspots.test.ts`, `scenes.test.ts`: the math, the classifier, render counts through the real map in a small DOM, Explore's one scene, the budget); `npm run build`; balance standard and robust as A1's; `island-shots.mjs` (budget: no errors); the pass-and-play e2e at 390 × 844 and 1280 × 820 (only the Manrope 403s); scripted runs at 390 and 360 px and 1280 × 820: one-finger page scroll, a tap on every object kind, pinch on the far side, two-finger pan, double tap, each preset, the ground toggle, Explore (pinch, drag, a sheet above it, ✕), Ctrl + wheel about the cursor, the plain-wheel hint, drag, double-click, the keys and the object list, Esc; idle stillness and reduced motion.
+
+**Not done (stage 3, B2):** the station scenes, the region view and pin fly-to, `home-fleet` / `tern-busy` / `adair-busy` / `region` lab scenes (the budget list already names them), the layout-only ZZ scene test.
+
 ### Objects (C)
 
 ### The network desk (D)

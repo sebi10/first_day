@@ -5,32 +5,34 @@
 // y-sorted buildings/planes/people, wires, sky, the light of the hour,
 // bubbles; rain and wind streaks sit outside the zoom.
 import type { JSX } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { COSMETICS, TIERS } from '../sim/data';
 import { cableReport, gseCarts, hazardOn, houseBlocker, houseRentable, isAog, melOn, planeCapacity, powered, subCharterOn } from '../sim/econ';
-import { openBuild, pilotSeats, working } from '../sim/staff';
+import { openBuild, working } from '../sim/staff';
 import { developmentOf, type Development, type Flourish } from '../sim/growth';
 import type { Asset, IslandState, Role } from '../sim/types';
 import { Cottage, GenHouse, Hangar, Lodge, Office, Pole, POLE_H, Ribbon, SMOKE_AT, Substation, Villa, WINDOWS, winPath, type Fault, type Win } from './island/buildings';
 import { FlyingPlane, Plane, type PlaneModel } from './island/craft';
-import { CART_HOME, CART_OUTLET, cartBeside, cartLight, GpuCart, receptacle } from './island/gse';
+import { cartLight, GpuCart } from './island/gse';
 import {
   APRON_PROPS, ApronLights, ApronProps, BeachBar, Bench, Boardwalk, Confetti, Dock, Festoon, Fireworks, FishingBoats, Fountain, GardenBeds, Lamp, Lighthouse, Market, NewFlags,
   Observatory, Statue, Bunting, buntingBulbs, YachtAt, YachtLights,
 } from './island/extras';
 import {
-  along, AOG_SPOT, curve, DOCK, focusBox, H, HANGAR, hitUnits, OFFICE, P, PATHS, PLOT, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, siteBox, siteKindOf, SPOT, viewOf, W, workSites, zoomK,
-  zoomOf, type Pt,
+  along, curve, DOCK, focusBox, H, HANGAR, hitUnits, OFFICE, P, PATHS, PLOT, POS, RUNWAY, RUNWAY_ANGLE, RUNWAY_C, RUNWAY_LEN, siteBox, siteKindOf, SPOT, viewOf, W, zoomK,
+  zoomOf, type Box, type Pt,
 } from './island/geo';
 import { blob } from './island/rocks';
 import { Clouds, DawnGrade, GoldenGrade, Gulls, Guy, LifeDefs, NightGrade, NightSky, Rain, SeaLife, StormGrade, Wind } from './island/life';
 import { K } from './island/paint';
-import { crewSpots, DOCK_CREW, DockSite, Site } from './island/sites';
+import { DockSite, Site } from './island/sites';
 import { NpcFigure, OfficeLate, StaffDefs } from './island/staff';
-import { Bubble, bubbleK, NewBadge, spread, type Icon, type KeepOut, type Rect, type Tone } from './island/status';
+import { Bubble, bubbleBox, bubbleK, NewBadge, spread, type Icon, type KeepOut, type Rect, type Tone } from './island/status';
 import { COAST_LINE, Terrain, TerrainDefs } from './island/terrain';
+import type { Frame } from './map/camera';
+import { at as placeAt, cartPlaces, figurePlaces, FOOT, footAt, houseGeo, modelOf, planePlaces, type Phase } from './map/place';
 
-type Phase = 'dawn' | 'day' | 'golden' | 'night';
+export type { Phase };
 export const phaseOf = (d = new Date()): Phase => {
   const h = d.getHours();
   return h >= 5 && h < 8 ? 'dawn' : h >= 8 && h < 17 ? 'day' : h >= 17 && h < 20 ? 'golden' : 'night';
@@ -39,15 +41,7 @@ export const phaseOf = (d = new Date()): Phase => {
 const cosmeticColor = (role: Role, id: string | undefined) => COSMETICS[role].find((c) => c.id === id)?.color ?? COSMETICS[role][0].color;
 const add = (a: Pt, b: Pt): Pt => [a[0] + b[0], a[1] + b[1]];
 
-// house geometry, for bubbles and wires (k = the scale it is drawn at)
-const HOUSE = {
-  cottage: { top: 42, w: 20, h: 18, d: 26, k: 1 },
-  villa: { top: 54, w: 30, h: 32, d: 32, k: 0.92 },
-  lodge: { top: 66, w: 30, h: 20, d: 40, k: 1 },
-} as const;
-type HouseModel = keyof typeof HOUSE;
-const modelOf = (a: Asset): HouseModel => ((a.model as HouseModel) in HOUSE ? (a.model as HouseModel) : 'cottage');
-const houseGeo = (a: Asset) => HOUSE[modelOf(a)];
+// house geometry (HOUSE, modelOf, houseGeo) and every drawn spot live in map/place.ts, which the hit-test reads too
 
 // Power: the substation feeds its own pole Q on the west bank; the line
 // crosses the river to the junction S, then runs up the east bank and along
@@ -76,20 +70,6 @@ const sag = (a: Pt, b: Pt, k = 0.12) => {
 
 const PLANE_ROT: Record<string, number> = { p1: 94, p2: 91, p3: -84 };
 const PLANE_SIZE: Record<string, number> = { p3: 0.8 };
-/** Keep plane footprints apart (wingspan ~76, depth ~50): a safety net over the fixed spots. */
-function unclutter(ps: { id: string; x: number; y: number }[]) {
-  for (let pass = 0; pass < 4; pass++)
-    for (let i = 0; i < ps.length; i++)
-      for (let j = i + 1; j < ps.length; j++) {
-        const a = ps[i], b = ps[j];
-        const ox = 80 - Math.abs(a.x - b.x), oy = 52 - Math.abs(a.y - b.y);
-        if (ox <= 0 || oy <= 0) continue;
-        const s = (a.x <= b.x ? -1 : 1) * (ox / 2);
-        a.x += s;
-        b.x -= s;
-      }
-  return ps;
-}
 
 // Ambient motion is decoration, so it must cost nothing when nobody is looking:
 // it stops after 20 s without input, off-screen, in a background tab, and under
@@ -106,8 +86,17 @@ if (typeof window !== 'undefined') {
   for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll']) window.addEventListener(ev, poke, { passive: true, capture: true });
 }
 
+/**
+ * Holds the ambient motion still (`.still` on the <svg>, and SMIL paused) while nobody is looking. The class is set on
+ * the element directly, never through a render: the first touch after an idle spell wakes the motion without
+ * re-rendering the island under the finger (the map's gestures must not render, docs/EXPANSION.md 5.6).
+ */
 function useStill(ref: { current: SVGSVGElement | null }) {
-  const [still, setStill] = useState(false);
+  const still = useRef(false);
+  // a render that changes the class string rewrites the attribute: put `still` back
+  useLayoutEffect(() => {
+    if (still.current) ref.current?.classList.add('still');
+  });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -115,7 +104,11 @@ function useStill(ref: { current: SVGSVGElement | null }) {
     const check = () => {
       const covered = [...document.querySelectorAll('.overlay')].some((o) => !o.contains(el));
       const s = !visible || document.hidden || covered || performance.now() - lastInput > IDLE_MS;
-      setStill(s);
+      if (s !== still.current || el.classList.contains('still') !== s) {
+        still.current = s;
+        if (s) el.classList.add('still');
+        else el.classList.remove('still');
+      }
       if (s) el.pauseAnimations?.();
       else el.unpauseAnimations?.();
     };
@@ -132,10 +125,7 @@ function useStill(ref: { current: SVGSVGElement | null }) {
       document.removeEventListener('visibilitychange', check);
     };
   }, []);
-  return still;
 }
-
-const MODELS_CARGO = (p: Asset) => p.model === 'cargo';
 
 /** the runway's markings: bubbles are pushed off it */
 const RUNWAY_BOX: Rect = [RUNWAY.a[0] - 6, Math.min(RUNWAY.a[1], RUNWAY.b[1]) - RUNWAY.w / 2 - 4, RUNWAY.b[0] + 6, Math.max(RUNWAY.a[1], RUNWAY.b[1]) + RUNWAY.w / 2 + 4];
@@ -143,26 +133,14 @@ const RUNWAY_BOX: Rect = [RUNWAY.a[0] - 6, Math.min(RUNWAY.a[1], RUNWAY.b[1]) - 
 type Item = { y: number; el: JSX.Element };
 type Bub = { x: number; y: number; k: number; dx: number; dy: number; icon: Icon; tone: Tone; small?: boolean; key: string; owner: string; fixed?: boolean; count?: number };
 
-/** Screen footprints (front-centre ground point p) that other assets' bubbles keep off. */
-const FOOT = {
-  hangar: [-52, -66, 68, 2],
-  office: [-34, -58, 44, 4],
-  plane: [-38, -22, 38, 22],
-  float: [-30, -16, 30, 16],
-  cottage: [-22, -42, 30, 2],
-  villa: [-30, -50, 36, 4],
-  lodge: [-62, -66, 44, 8],
-  g1: [-18, -26, 26, 2],
-  gen: [-18, -30, 40, 2],
-  fountain: [-20, -24, 20, 6],
-  stall: [-14, -26, 16, 4],
-  statue: [-22, -48, 22, 6],
-} satisfies Record<string, Rect>;
-const footAt = (p: Pt, f: Rect): Rect => [p[0] + f[0], p[1] + f[1], p[0] + f[2], p[1] + f[3]];
+/** what the island drew, for the map's hit-test (map/MapView.tsx): each placed bubble's rect and whose it is */
+export type IslandProbe = { bubbles: { owner: string; r: Box }[] };
 
 export function Island({
   s,
-  focus,
+  focus = null,
+  frame,
+  probe,
   onTap,
   onCart,
   onBuilders,
@@ -170,8 +148,15 @@ export function Island({
   phase: phaseProp,
 }: {
   s: IslandState;
-  /** zoomed to a seat's zone, to the builders' site (geo.tsx siteBox), or the whole island */
-  focus: Role | 'site' | null;
+  /** zoomed to a seat's zone, to the builders' site (geo.tsx siteBox), or the whole island (the lab and old callers) */
+  focus?: Role | 'site' | null;
+  /**
+   * the map camera's frame (map/camera.ts frameOf): the drawing covers `region` at `S` CSS px a unit, placed so that
+   * `view` fills the viewport. It replaces `focus`; the map (MapView) handles every tap itself.
+   */
+  frame?: Frame;
+  /** filled on every render with what was drawn where (the placed bubbles), for the map's hit-test */
+  probe?: { current: IslandProbe | null };
   onTap?: () => void;
   /** a ground power cart was tapped: open its sheet */
   onCart?: (id: string) => void;
@@ -183,19 +168,20 @@ export function Island({
   const phase = phaseProp ?? phaseOf();
   const motion = !reduceMotion;
   const svgRef = useRef<SVGSVGElement>(null);
-  const still = useStill(svgRef);
+  useStill(svgRef);
   // the drawing's width on screen (CSS px): a cart's tap target is sized to stay at least 44 px, zoomed or not
+  // (under the map's camera the frame says it: no measuring, so a commit never re-renders twice)
   const [cssW, setCssW] = useState(360);
   useEffect(() => {
     const el = svgRef.current;
-    if (!el) return;
+    if (!el || frame) return;
     const read = () => el.clientWidth > 0 && setCssW(el.clientWidth);
     read();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(read);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [!!frame]);
   const dev = developmentOf(s);
   const has = (f: Flourish) => dev.flourishes.includes(f);
   const pw = powered(s);
@@ -208,6 +194,7 @@ export function Island({
   const houseColor = cosmeticColor('elec', s.players.elec?.cosmetic);
   const officeColor = cosmeticColor('fin', s.players.fin?.cosmetic);
   const planes = s.assets.filter((a) => a.kind === 'plane');
+  const places = planePlaces(s);
   const houses = s.assets.filter((a) => a.kind === 'house');
   const grid = s.assets.find((a) => a.kind === 'grid');
   const gen = s.assets.find((a) => a.kind === 'generator');
@@ -215,10 +202,13 @@ export function Island({
   const flying = planes.some((p) => !tagged(p) && planeCapacity(p, s.tier, s.weather) > 0 && !p.model.includes('cargo'));
   const rentable = houses.filter((h) => houseRentable(s, h));
   const booked = rentable.length;
-  const z = focus === 'site' ? siteBox(s) : focus ? focusBox(focus, s.tier) : null;
-  const bscale = z ? 1.3 / zoomK(z) : 1;
+  const z = frame ? null : focus === 'site' ? siteBox(s) : focus ? focusBox(focus, s.tier) : null;
+  // the bubbles grow to 1.3x on screen once zoomed in (the same as ever for the presets, continuous in between)
+  const bscale = frame ? Math.min(1, 1.3 / frame.cam.k) : z ? 1.3 / zoomK(z) : 1;
   // 44 CSS px in drawing units, under the zoom (never smaller than the cart's own 44-unit box)
-  const cartHit = Math.max(44, hitUnits(44, cssW, z));
+  const cartHit = Math.max(44, frame ? 44 / frame.S : hitUnits(44, cssW, z));
+  /** the part of the island on screen: bubbles stay inside it */
+  const view: Box = frame ? [Math.max(0, frame.view[0]), Math.max(0, frame.view[1]), Math.min(W, frame.view[2]), Math.min(H, frame.view[3])] : viewOf(z);
   const newIds = new Set(dev.justBuilt ? TIERS[dev.justBuilt - 1].adds.map((a) => a.id) : []);
   const paved = has('paved-paths');
   const carrying = pw.gridDown && pw.genOK;
@@ -279,15 +269,14 @@ export function Island({
   const foot = (owner: string, p: Pt, f: Rect) => keep.push({ owner, r: footAt(p, f) });
   const bub = (key: string, x: number, y: number, icon: Icon, tone: Tone, o: { small?: boolean; dx?: number; dy?: number; owner?: string; fixed?: boolean; count?: number } = {}) =>
     bubbles.push({ key, x, y, k: bubbleK(bscale, o.small), dx: (o.dx ?? 0) * bscale, dy: (o.dy ?? 0) * bscale, icon, tone, small: o.small, owner: o.owner ?? key, fixed: o.fixed, count: o.count });
-  const at = (id: string) => POS[id] ?? PLOT[id];
+  const at = (id: string) => placeAt(id) ?? POS.p1;
 
   // ---- airfield: every plane has its own stand and its own AOG spot (worn out, or waiting on a part: the part chain)
   const isDown = (p: Asset) => p.health < 40 || isAog(s, p.id);
   const aog = planes.filter(isDown);
   items.push({ y: HANGAR[1], el: <At key="hangar" p={HANGAR}><Hangar tint={hangarColor} wear={wear} doorOpen={aog.some((p) => p.id === 'p1')} /></At> });
   foot('hangar', HANGAR, FOOT.hangar);
-  const spots = unclutter(planes.map((p) => ({ id: p.id, x: (isDown(p) ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[0], y: (isDown(p) ? AOG_SPOT[p.id] ?? POS[p.id] : POS[p.id] ?? POS.p1)[1] })));
-  const spotOf = (id: string) => spots.find((q) => q.id === id)!;
+  const spotOf = (id: string) => places.find((q) => q.a.id === id)!;
   const float = planes.find((p) => p.model === 'float');
   for (const p of planes) {
     const { x, y } = spotOf(p.id);
@@ -317,13 +306,8 @@ export function Island({
     }
   }
   // ---- ground power carts: on the charger by the hangar, or beside the plane they're hooked up to
-  const carts = gseCarts(s);
   const cartLamps: [number, number, string][] = [];
-  carts.forEach((c, i) => {
-    const plane = c.hookedTo ? planes.find((p) => p.id === c.hookedTo) : undefined;
-    const ps = plane ? spotOf(plane.id) : null;
-    const at: Pt = plane && ps ? cartBeside(plane.model, [ps.x, ps.y]) : CART_HOME[i % CART_HOME.length];
-    const plug: Pt | null = plane && ps ? receptacle(plane.model, [ps.x, ps.y]) : c.charging ? CART_OUTLET[i % CART_OUTLET.length] : null;
+  cartPlaces(s, places).forEach(({ c, at, plug, plane }) => {
     const tagged = !!cableReport(s, c.id);
     const where = plane ? `hooked up to ${plane.name}` : c.charging ? 'on charge' : 'parked';
     items.push({
@@ -455,17 +439,13 @@ export function Island({
     const k = Math.min(2, Math.floor((3 * b.done) / Math.max(1, b.need) + 1e-9)) as 0 | 1 | 2;
     return b.finished !== undefined || b.done > 0 || (b === building && onSite) ? k : -1;
   };
-  /** where the builders stand: the sites of the open build's unit they work, one each (up to 3) */
-  const crewAt: Pt[] = [];
-  const worked = new Set(workSites(s).map((w) => w.id));
+  // (where the builders stand on the sites they work: map/place.ts builderSpots, drawn with the staff below)
   for (const t of TIERS.filter((t) => t.n > s.tier)) {
     const b = (s.builds ?? []).find((x) => x.tier === t.n);
     const stage = Math.max(cons && cons.tier === t.n ? cons.stage : -1, buildStage(b)) as -1 | 0 | 1 | 2;
-    const spots: Pt[][] = [];
     for (const a of t.adds) {
       if (a.id === 'p3') {
         flat.push(<DockSite key="dock" stage={stage} motion={motion} />);
-        if (worked.has(a.id)) spots.push(DOCK_CREW);
         continue;
       }
       const kind = siteKindOf(a.model);
@@ -473,17 +453,13 @@ export function Island({
       if (stage < 0 && t.n > s.tier + 2) continue; // far future: nothing staked out yet
       const [x, y] = POS[a.id];
       items.push({ y, el: <Site key={`site${a.id}`} x={x} y={y} kind={kind} stage={stage} /> });
-      if (worked.has(a.id)) spots.push(crewSpots(kind, x, y));
     }
-    // one builder to each of the build's sites in turn
-    if (b && b === building && onSite) for (let i = 0; i < 3; i++) if (spots.length) crewAt.push(spots[i % spots.length][Math.floor(i / spots.length)] ?? spots[0][0]);
   }
   // the extra cottages the analyst started: their plots in the grove (a finished one is a house above)
   for (const b of (s.builds ?? []).filter((x) => x.cottage && !s.assets.some((a) => a.id === x.cottage))) {
     const plot = PLOT[b.cottage!];
     if (!plot) continue;
     items.push({ y: plot[1], el: <Site key={`site${b.cottage}`} x={plot[0]} y={plot[1]} kind="house" stage={buildStage(b)} /> });
-    if (b === building && onSite) crewAt.push(...crewSpots('house', plot[0], plot[1]));
   }
   if (s.tier >= 4) flat.push(<Dock key="dockbuilt" />);
 
@@ -531,29 +507,15 @@ export function Island({
   /** the builders drawn at work (a tap on one frames their site) */
   const drawnBuilders: Pt[] = [];
   if (!storm && !night) {
-    builders.slice(0, 3).forEach((_, i) => {
-      const p = crewAt[i];
-      if (p) items.push({ y: p[1], el: <NpcFigure key={`bld${i}`} kind="builder" x={p[0]} y={p[1]} flip={i % 2 === 1} motion={motion} /> });
-      if (p) drawnBuilders.push(p);
-    });
-    const seats = pilotSeats(s);
-    const lead = planes.find((p) => !MODELS_CARGO(p) && !isDown(p) && !tagged(p) && (seats.get(p.id) ?? []).length);
-    const cargo = planes.find((p) => MODELS_CARGO(p) && !isDown(p) && !tagged(p) && (seats.get(p.id) ?? []).length);
-    for (const p of [lead, cargo]) {
-      if (!p || p.model === 'float') continue;
-      const { x, y } = spotOf(p.id);
-      items.push({ y: y + 14, el: <NpcFigure key={`plt${p.id}`} kind="pilot" x={x - 24} y={y + 14} /> });
+    let bi = 0;
+    for (const f of figurePlaces(s, phase, places)) {
+      const [x, y] = f.at;
+      if (f.kind === 'builder') {
+        items.push({ y, el: <NpcFigure key={`bld${bi++}`} kind="builder" x={x} y={y} flip={f.flip} motion={motion} /> });
+        drawnBuilders.push(f.at);
+      } else if (f.kind === 'pilot') items.push({ y, el: <NpcFigure key={`plt${f.of}`} kind="pilot" x={x} y={y} /> });
+      else items.push({ y, el: <NpcFigure key={`hk${f.of}`} kind="keeper" x={x} y={y} flip={f.flip} /> });
     }
-    const keepers = working(s).filter((n) => n.role === 'housekeeper').length;
-    rentable
-      .slice()
-      .sort((a, b) => b.health - a.health)
-      .slice(0, Math.min(2, keepers))
-      .forEach((h, i) => {
-        const [x, y] = at(h.id) ?? [0, 0];
-        const g = houseGeo(h);
-        items.push({ y: y + 6, el: <NpcFigure key={`hk${h.id}`} kind="keeper" x={x + g.w * g.k + 6} y={y + 6} flip={i % 2 === 1} /> });
-      });
   } else if (night && pw.on) litFigure = true;
 
   // ---- people: busier with prosperity, guests walking when houses are booked
@@ -608,19 +570,25 @@ export function Island({
 
   // ---- bubbles: above their asset, never on each other, on other assets or
   // on the runway, and always inside the (zoomed) view
-  spread(bubbles, keep, viewOf(z));
+  spread(bubbles, keep, view);
+  if (probe) probe.current = { bubbles: bubbles.map((b) => ({ owner: b.owner, r: bubbleBox(b, b.dx, b.dy) })) };
 
+  // under the map's camera the drawing covers the frame's region, placed so its view fills the viewport; the weather
+  // that sits outside the zoom covers the view
+  const fr = frame ? frameBox(frame) : null;
   return (
     <svg
       ref={svgRef}
-      class={`island-svg${still ? ' still' : ''}${s.weather !== 'clear' ? ' windy' : ''}`}
-      viewBox={`0 0 ${W} ${H}`}
+      class={`island-svg${s.weather !== 'clear' ? ' windy' : ''}${frame ? ' cam' : ''}`}
+      viewBox={fr ? fr.viewBox : `0 0 ${W} ${H}`}
+      style={fr?.style}
+      preserveAspectRatio={fr ? 'none' : undefined}
       role={onCart ? 'group' : 'img'}
       aria-label={describe(s, pw, rentable.length, dev)}
-      onClick={(e) => (onBuilders && drawnBuilders.length && svgRef.current && onBuilder(e, svgRef.current, viewOf(z), drawnBuilders) ? onBuilders() : onTap?.())}
+      onClick={frame ? undefined : (e) => (onBuilders && drawnBuilders.length && svgRef.current && onBuilder(e, svgRef.current, viewOf(z), drawnBuilders) ? onBuilders() : onTap?.())}
     >
       {defs}
-      <g class="island-zoom" style={{ transform: zoomOf(z) }}>
+      <g class="island-zoom" style={fr ? undefined : { transform: zoomOf(z) }} transform={fr?.zoom}>
         {ground}
         {sea}
         {flat}
@@ -700,8 +668,17 @@ export function Island({
             <Bubble key={b.key} x={b.x} y={b.y} dx={b.dx} dy={b.dy} icon={b.icon} tone={b.tone} small={b.small} scale={bscale} motion={motion} delay={(i * 0.37) % 1.6} count={b.count} />
           ))}
       </g>
-      {storm && <Rain motion={motion} />}
-      {s.weather === 'wind' && <Wind motion={motion} />}
+      {fr && s.weather !== 'clear' ? (
+        <g transform={fr.weather}>
+          {storm && <Rain motion={motion} />}
+          {s.weather === 'wind' && <Wind motion={motion} />}
+        </g>
+      ) : (
+        <>
+          {storm && <Rain motion={motion} />}
+          {s.weather === 'wind' && <Wind motion={motion} />}
+        </>
+      )}
     </svg>
   );
 }
@@ -724,6 +701,25 @@ function NavLights() {
       <circle cx={4} cy={0} r={1.3} fill="#fff8d8" />
     </g>
   );
+}
+
+/**
+ * Where a camera's drawing sits in the viewport (CSS px), its viewBox, the zoom group's offset and the weather
+ * layer's cover of the view. The viewBox keeps its origin at 0 0 (the region's corner is a translate on the zoom
+ * group), so every animated part still pivots on its own origin (styles.css: transform-box view-box).
+ */
+function frameBox(f: Frame) {
+  const [x0, y0, x1, y1] = f.region;
+  const [v0, w0, v1, w1] = f.view;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  // the rain and wind are drawn for the whole 800 x 600 card: scaled to cover the view, centred on it
+  const c = Math.max((v1 - v0) / W, (w1 - w0) / H);
+  return {
+    viewBox: `0 0 ${x1 - x0} ${y1 - y0}`,
+    style: { position: 'absolute', left: `${r2((x0 - v0) * f.S)}px`, top: `${r2((y0 - w0) * f.S)}px`, width: `${r2((x1 - x0) * f.S)}px`, height: `${r2((y1 - y0) * f.S)}px` },
+    zoom: x0 || y0 ? `translate(${-x0} ${-y0})` : undefined,
+    weather: `translate(${r2((v0 + v1) / 2 - (W * c) / 2 - x0)} ${r2((w0 + w1) / 2 - (H * c) / 2 - y0)}) scale(${r2(c)})`,
+  };
 }
 
 const At = ({ p, children }: { p: Pt; children: JSX.Element }) => <g transform={`translate(${p[0]} ${p[1]})`}>{children}</g>;
