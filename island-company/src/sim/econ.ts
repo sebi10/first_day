@@ -1,8 +1,8 @@
 // Pure economic formulas shared by the engine, the UI previews and the balance sim.
 import { soleGuest, symptomOf } from './alerts';
-import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, LATE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, ROLE_LABEL, SUBCHARTER, TIERS } from './data';
+import { CATALOG_BY_KIND, DEFECT, ECON, FREIGHT, GSE, LATE, MODELS, PROJECT_COVER, REPORT, REPORT_BY_KEY, ROLE_LABEL, STORM_HIT, SUBCHARTER, TIERS } from './data';
 import { charterMult, housekeepingCap, payroll, pilotCap, reviewMult } from './staff';
-import type { Alert, Asset, CableBand, Grade, GseCart, IslandState, Order, Role, TurnState, Weather } from './types';
+import type { Alert, Asset, CableBand, Grade, GseCart, IslandState, Order, Role, TurnState, Weather, WeekReport } from './types';
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const round10 = (v: number) => Math.round(v / 10) * 10;
@@ -162,15 +162,71 @@ export function powered(s: IslandState) {
 /** the late game's upkeep rules apply on this island (tier 4 and up) */
 export const lateGame = (s: Pick<IslandState, 'tier'>) => s.tier >= LATE.fromTier;
 
-/** (e) grid first: the island grid is under LATE.gridFirst at tier 4+, so its work is a must-do that ranks above code prep */
+/**
+ * (e) grid first: at tier 4+ the island grid is under LATE.gridFirst and at real risk: the generator can't carry the
+ * houses (under 50), or a week's decay and a storm would take it under 40 (down). Then its feed job is a must-do that
+ * ranks above code prep. (Review round 1: a grid at 53 with the generator at 66 is ordinary work: the houses are
+ * carried either way and it can't go down by the next resolve.)
+ */
 export function gridFirst(s: Pick<IslandState, 'tier' | 'assets'>, a?: Pick<Asset, 'kind' | 'health'>): boolean {
   if (!LATE.gridFirst || !lateGame(s)) return false;
   const g = a ?? s.assets.find((x) => x.kind === 'grid');
-  return !!g && g.kind === 'grid' && g.health < LATE.gridFirst;
+  if (!g || g.kind !== 'grid' || g.health >= LATE.gridFirst) return false;
+  if (!LATE.gridAtRisk) return true;
+  const gen = s.assets.find((x) => x.kind === 'generator');
+  if (!gen || gen.health < 50) return true;
+  return g.health - decayOf(s, g) - STORM_HIT.grid < 40;
+}
+
+/** the grid's feed jobs (the feeder, a dead circuit or a hot lug at the panel, the panel upgrade): what grid first means; the fuel dock's run isn't the island feed */
+export const FEED_KINDS: ReadonlySet<string> = new Set(['feeder', 'xfmr', 'panelUp']);
+
+/** a grid alert about the island feed (its symptom is at the panel, not the fuel dock): visible from the symptom, not its hidden cause */
+export function feedAlert(s: Pick<IslandState, 'assets'>, al: Pick<Alert, 'assetId' | 'sym'>): boolean {
+  const asset = s.assets.find((x) => x.id === al.assetId);
+  if (!asset || asset.kind !== 'grid') return false;
+  return !!symptomOf(al)?.rooms?.includes('panel');
+}
+
+/** (e) this alert goes first: the grid at real risk (gridFirst) and the alert is on its feed */
+export function gridFirstAlert(s: IslandState, al: Pick<Alert, 'assetId' | 'sym'>): boolean {
+  return gridFirst(s) && feedAlert(s, al);
+}
+
+/** (e) this job goes first: the grid at real risk, and it's the feed (a flow job by its alert's symptom, a legacy one by its kind) */
+export function gridFirstJob(s: IslandState, o: Pick<Order, 'assetId' | 'kind' | 'flow'>): boolean {
+  const a = s.assets.find((x) => x.id === o.assetId);
+  if (!a || a.kind !== 'grid' || !gridFirst(s, a)) return false;
+  if (o.flow) {
+    const al = s.alerts?.find((x) => x.id === o.flow!.alert);
+    return !!al && feedAlert(s, al);
+  }
+  return FEED_KINDS.has(o.kind);
+}
+
+/**
+ * (e, review round 1) a code prep on a house whose inspection has lapsed (it's closed at this resolve without the prep)
+ * goes before grid first while the grid holds at LATE.gridHold or more: the grid is up at this resolve either way,
+ * and next week's grid-first job still catches it. Under LATE.gridHold the grid goes first.
+ */
+export function reopenBeforeGrid(s: IslandState, h: Pick<Asset, 'kind' | 'inspectionUntil'> | undefined): boolean {
+  if (!h || h.kind !== 'house' || (h.inspectionUntil ?? 0) >= s.week || !gridFirst(s)) return false;
+  const g = s.assets.find((x) => x.kind === 'grid');
+  return !!g && g.health >= LATE.gridHold;
 }
 
 /** (a) weeks from a code inspection to the next one: every 8 weeks, every 13 from tier 4 */
 export const inspectionWeeks = (tier: number) => (tier >= LATE.fromTier ? LATE.inspectionWeeks : ECON.houseInspectionWeeks);
+
+/**
+ * A story option's effect as this island reads it (review round 1): the inspector's renewals show the one cadence that
+ * applies (every 8 weeks, every 13 from tier 4), also on a card an older build dealt with both numbers in it
+ */
+export function storyEffect(s: Pick<IslandState, 'tier'>, storyId: string, o: { key: string; effect: string }): string {
+  if (storyId === 'inspector' && o.key === 'book')
+    return `−$400, every house passes now; the county books each renewal a week of its own, about ${inspectionWeeks(s.tier)} weeks out`;
+  return o.effect.replace('{weeks}', String(inspectionWeeks(s.tier)));
+}
 
 /** (b) a booked week's wear on a house */
 export const houseWearOf = (s: Pick<IslandState, 'tier'>) => (lateGame(s) ? LATE.houseWear : ECON.houseWear);
@@ -187,17 +243,43 @@ export function decayOf(s: Pick<IslandState, 'tier'>, a: Pick<Asset, 'kind' | 'h
 }
 
 /**
- * (f) The credits' A streak after this week's grade (resolve step 14): a full-crew A week adds one; any week graded
- * below A ends it, whoever played. An A week that autopilot covered a seat for doesn't count (nobody wins alone):
- * before tier 4 it ends the streak, as it always did; from tier 4 it pauses it (one missed evening no longer wipes
- * a 7-week run at the Resort).
+ * (f) The week being resolved counts toward the credits: it was played at the Resort (tier 5 reached before week `W`;
+ * the week the Resort arrives was played at the Harbor). Review round 1: before, a Harbor streak paid out the week
+ * the Resort arrived.
  */
-export function aStreakAfter(s: Pick<IslandState, 'tier' | 'stats'>, grade: Grade, fullTeam: boolean): number {
-  const now = s.stats.aStreak ?? 0;
-  if (grade !== 'A') return 0;
-  if (fullTeam) return now + 1;
-  return LATE.streakPause && lateGame(s) ? now : 0;
+export function atResort(s: Pick<IslandState, 'tier' | 'stats'>, W: number): boolean {
+  if (s.tier < 5) return false;
+  const t5 = s.stats.tierReachedWeek[5];
+  return t5 === undefined || t5 < W;
 }
+
+/**
+ * The credits' streak as it stands before week `W` resolves: the stored one, never more than the weeks played at the
+ * Resort before `W` (a live doc's streak from an older build may hold Harbor weeks). Derived, never stored.
+ */
+export function creditsStreak(s: Pick<IslandState, 'tier' | 'stats'>, W: number): number {
+  if (s.tier < 5) return 0;
+  const t5 = s.stats.tierReachedWeek[5];
+  const max = t5 === undefined ? Infinity : Math.max(0, W - 1 - t5);
+  return Math.min(s.stats.aStreak ?? 0, max);
+}
+
+/**
+ * (f) The credits' A streak after week `W`'s grade (resolve step 14). Only weeks played at the Resort count: before
+ * it, 0. A full-crew A week adds one; any week graded below A ends it, whoever played. An A week that autopilot
+ * covered a seat for doesn't count (nobody wins alone) and pauses the streak (one missed evening doesn't wipe a
+ * 7-week run). The credits come at 8, on a full-crew week.
+ */
+export function aStreakAfter(s: Pick<IslandState, 'tier' | 'stats'>, W: number, grade: Grade, fullTeam: boolean): number {
+  if (!atResort(s, W) || grade !== 'A') return 0;
+  const now = creditsStreak(s, W);
+  if (fullTeam) return now + 1;
+  return LATE.streakPause ? now : 0;
+}
+
+/** an autopilot A at the Resort: the week held the streak instead of counting (the review line, the Board's chips) */
+export const pausedWeek = (s: Pick<IslandState, 'tier' | 'stats'>, r: Pick<WeekReport, 'week' | 'grade' | 'autoRun'>) =>
+  !!LATE.streakPause && r.grade === 'A' && !!r.autoRun?.length && atResort(s, r.week);
 
 /** how far ahead the county's notice comes (E_CODE_DUE's lead): a prep inside this window is ready for the booked date */
 export const INSPECTION_NOTICE = 2;
@@ -424,8 +506,10 @@ export function urgency(s: IslandState, o: Order) {
     (o.redo ? 15 : 0) +
     // a plane is down until the part chain is through
     (o.chain ? 120 : 0) +
-    // A0 (e): the grid under 55 at tier 4+ goes before code prep, like a hazard due now (every house hangs off it)
-    (a && gridFirst(s, a) ? LATE.gridFirstUrgency : 0) +
+    // A0 (e): the grid's feed at real risk at tier 4+ goes before code prep, like a hazard due now (every house hangs
+    // off it); but a code prep that reopens a closed house at this resolve goes first while the grid holds at 48+
+    (gridFirstJob(s, o) ? LATE.gridFirstUrgency : 0) +
+    (o.kind === 'codeprep' && reopenBeforeGrid(s, a) ? LATE.reopenUrgency : 0) +
     // the job flow: an airworthiness or hazard alert, due now (it grounds a plane or closes a house at this resolve)
     flowUrgency(s, o)
   );

@@ -81,7 +81,10 @@ export function Icon({ name, size = 20, color = 'currentColor', stroke = 2 }: { 
 
 export const healthColor = (h: number) => (h >= 80 ? C.sea : h >= 60 ? C.palm : h >= 40 ? '#C9A86A' : C.rust);
 
-export function Health({ value, label }: { value: number; label?: string }) {
+/** a tick on a health bar: the line where a rule changes (70: the lighter wear from tier 4; the grid's 55 and 40) */
+export type BarMark = { at: number; title: string };
+
+export function Health({ value, label, marks }: { value: number; label?: string; marks?: BarMark[] }) {
   const v = Math.round(value);
   return (
     <div class="col" style={{ gap: 4, minWidth: 0 }}>
@@ -92,8 +95,9 @@ export function Health({ value, label }: { value: number; label?: string }) {
           {v}
         </span>
       </div>
-      <div class="bar" role="meter" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+      <div class={`bar ${marks?.length ? 'marked' : ''}`} role="meter" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
         <i style={{ width: `${v}%`, background: healthColor(v) }} />
+        {marks?.map((m) => <b key={m.at} class="bar-mark" style={{ left: `${m.at}%` }} title={m.title} aria-hidden="true" />)}
       </div>
     </div>
   );

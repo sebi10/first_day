@@ -4,7 +4,7 @@ import { planeModel, type Ata } from './aircraft';
 import { alertFlags, alertTier, causeOf, fixesOf, liveAlerts, needsOf, siteOf, symptomOf } from './alerts';
 import { botChainData, islandAircraft, needsFreight, openChain, wrongPn } from './chain';
 import { ECON, FLOAT_AUCTION, GSE, STOCK, TIERS } from './data';
-import { apply, createIsland, forecastContext } from './engine';
+import { apply, createIsland, forecastContext, isEmergency, receiverFunds } from './engine';
 import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, logistic, needsCart, occupancy, startCart, urgency } from './econ';
 import { cardOf, judgeSlot, planTask, repairTask, stdPick } from './flow';
 import { allItems, buyUnits, itemById, priceAt } from './items';
@@ -217,7 +217,8 @@ function playFin(s: IslandState, bot: Bot, r: Rng, now: number) {
     const freight = !!c && o.chain!.step === 'buy' && needsFreight(s, c);
     const ship: 'boat' | 'flight' | undefined = freight ? (downtimeOf(s, c!.assetId).usd > ECON.boatKit ? 'boat' : 'flight') : undefined;
     const aog = !!o.chain && s.cash - o.cost - (ship === 'boat' ? ECON.boatKit : 0) >= 0;
-    if ((worth && s.cash - o.cost >= reserve) || cheapCritical || aog) s = step(s, { t: 'approve', orderId: o.id, ...(ship ? { ship } : {}) }, now);
+    const receiver = receiverFunds(s, o.cost + (ship === 'boat' ? ECON.boatKit : 0), isEmergency(s, o), s.cash) !== null;
+    if ((worth && s.cash - o.cost >= reserve) || cheapCritical || aog || receiver) s = step(s, { t: 'approve', orderId: o.id, ...(ship ? { ship } : {}) }, now);
     else if (o.lastDeferredWeek !== s.week) s = step(s, { t: 'defer', orderId: o.id, reason: s.cash - o.cost < reserve ? 'cash' : 'priority' }, now);
   }
   const skill = bot.skill - (bot.tierDrop ?? 0) * (s.tier - 1);
@@ -491,7 +492,9 @@ function finCard(s: IslandState, o: Order, reserve: number, now: number): Island
   const critical = urgent || isSafetyJob(s, o) || o.kind === 'inspect100' || o.kind === 'codeprep' || (asset && asset.health < 70) || o.deferrals >= 2;
   const worth = exp >= card.total * 0.6 || critical;
   const room = spendable(s) - card.total;
-  if ((worth && room >= reserve) || (critical && room >= ECON.freezeBelow) || (urgent && room >= 0)) return step(s, { t: 'approve', orderId: o.id, buy: { freight: card.freight.pick }, week: s.week }, now);
+  // in receivership the receiver funds safety-critical work the island can't pay for (its weekly allowance)
+  const receiver = receiverFunds(s, card.total, isEmergency(s, o)) !== null;
+  if ((worth && room >= reserve) || (critical && room >= ECON.freezeBelow) || (urgent && room >= 0) || receiver) return step(s, { t: 'approve', orderId: o.id, buy: { freight: card.freight.pick }, week: s.week }, now);
   if (o.lastDeferredWeek !== s.week) return step(s, { t: 'defer', orderId: o.id, reason: room < reserve ? 'cash' : 'priority', week: s.week }, now);
   return s;
 }

@@ -206,6 +206,10 @@
 /* ---- the approval card (a swipe card whose height follows its lines) ---- */
 .pc-stack {
   position: relative;
+  /* the card flies 440 px out on approve or defer: clipped here, or a phone's layout viewport grows to fit it and the
+     whole page (the dock, the toasts) goes wider than the screen (review round 1); the margin keeps the shadow */
+  overflow-x: clip;
+  overflow-clip-margin: 24px;
 }
 .pc {
   position: relative;

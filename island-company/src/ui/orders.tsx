@@ -205,7 +205,7 @@ export function OrderDetail({ s, o, role }: { s: IslandState; o: Order; role: Ro
       )}
       {o.status === 'done' && o.result && !o.result.blind && (
         <p class="muted" style={{ margin: 0 }}>
-          {Math.round(o.result.score * 100)}% · {Math.round(Math.min(1.15, o.result.credit) * 100)}% credit{o.result.auto ? ' · autopilot' : ''}
+          {Math.round(o.result.score * 100)}% · {Math.round(Math.min(1.15, o.result.credit) * 100)}% credit{o.result.npc ? ` · ${o.result.npc} (helper)` : o.result.auto ? ' · autopilot' : ''}
           {o.result.covered ? ' · covered by a teammate' : ''}
           {o.result.summary ? ` · ${o.result.summary}` : ''}
         </p>

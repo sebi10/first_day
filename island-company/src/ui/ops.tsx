@@ -16,7 +16,7 @@ import { GroundPowerCard } from './gse';
 import { Btn, Health, Icon, Sheet, TierDots, toast, usd } from './kit';
 import { hasManual, ManualSection } from './manual';
 import { OrderCard, OrderDetail } from './orders';
-import { capNow } from './select';
+import { capNow, healthMarks } from './select';
 import type { Ctl } from './useIsland';
 
 export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' | 'elec'; onPlay(o: Order, cover?: boolean): void; /** open the ground power sheet (on one cart) */ onGse?(cart: string | null): void }) {
@@ -75,7 +75,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                 <div class="asset" key={p.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name="plane" size={22} />
                   <button class="asset-tap" onClick={() => setWriteUp(p)} aria-label={`${p.name}: details and write-up`}>
-                    <Health value={p.health} label={`${p.name} · ${MODELS[p.model].label}`} />
+                    <Health value={p.health} label={`${p.name} · ${MODELS[p.model].label}`} marks={healthMarks(s, p)} />
                   </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     <b class={`num ${cap === 0 && !grounded ? 'fault' : ''}`}>{grounded ? 'GND' : cap === 0 ? 'AOG' : `${cap} fl`}</b>
@@ -104,7 +104,7 @@ export function OpsPanel({ ctl, role, onPlay, onGse }: { ctl: Ctl; role: 'mech' 
                 <div class="asset" key={h.id} style={{ gridTemplateColumns: '26px 1fr auto auto' }}>
                   <Icon name={h.kind === 'house' ? 'house' : 'bolt'} size={22} />
                   <button class="asset-tap" onClick={() => setWriteUp(h)} aria-label={`${h.name}: details and write-up`}>
-                    <Health value={h.health} label={label} />
+                    <Health value={h.health} label={label} marks={healthMarks(s, h)} />
                   </button>
                   <span class="col" style={{ gap: 0, alignItems: 'flex-end' }}>
                     {h.kind === 'house' ? (

@@ -35,6 +35,8 @@ export interface OrderResult {
   by: Role;
   week: number;
   auto?: boolean;
+  /** done by an NPC (the electrician's helper): their name */
+  npc?: string;
   covered?: boolean;
   summary?: string;
   /** blind sign-off (a real job at puzzle tier 2+): the UI shows "Signed off", never the score; the engine still uses it */
@@ -501,13 +503,16 @@ export interface IslandState {
     /** consecutive full-team A weeks (endgame: 8 at the Resort) */
     aStreak?: number;
   };
-  /** week the crew beat the game (8 straight A weeks at tier 5) */
+  /** week the crew beat the game (8 full-crew A weeks played at tier 5, none below A) */
   creditsWeek?: number;
   /** weekly crew challenge: same seed for everyone, bragging rights only */
   challenge?: { week: number; scores: Record<string, Partial<Record<Role, number>>> };
   receivership: number;
-  /** receiver's bridge loan: taken once on entering receivership, repaid weekly */
-  loan?: { left: number; weekly: number } | null;
+  /**
+   * receiver's bridge loan: taken once on entering receivership, repaid weekly. `adv`: what the receiver advanced this
+   * week under its repair allowance (review round 1: safety-critical work while cash is below $0), added to `left`
+   */
+  loan?: { left: number; weekly: number; adv?: { week: number; usd: number } } | null;
   pendingBonus: number | null;
   story: StoryCard | null;
   modifiers: Modifier[];
@@ -995,7 +1000,8 @@ export interface WeekLedger {
   aog?: Partial<Record<'stock' | 'approval' | 'plan' | 'carrier', number>>;
 }
 
-export type NpcRole = 'pilot' | 'housekeeper' | 'builder';
+/** 'helper': the electrician's helper (review round 1, from tier 4): does the electrician's planned routine installs */
+export type NpcRole = 'pilot' | 'housekeeper' | 'builder' | 'helper';
 export interface Npc {
   id: string;
   name: string;

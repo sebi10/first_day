@@ -9,8 +9,9 @@
 import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
+import { FEED_KINDS, gridFirst } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
-import { pilotOf, squawkNff, wearMult } from './staff';
+import { helperJobs, pilotOf, squawkNff, wearMult } from './staff';
 import { defaultTask, taskOn, type Task } from './tasks';
 import type { Alert, AlertSrc, Asset, ElecSite, IslandState, OpsRole, RepairInfo, Role, TaskId } from './types';
 
@@ -1240,9 +1241,11 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     // a no-fault alert doesn't take a slot (5.1), and doesn't count as work on its asset
     const openAlerts = (s.alerts ?? []).filter((a) => a.role === role && a.status === 'open' && a.cause >= 0);
     const live = liveAlerts(s);
-    const target = s.tier >= 3 ? 5 : 4;
+    // the electrician's helper (review round 1) walks the houses too: their rounds write up as much more as they do
+    const extra = role === 'elec' ? helperJobs(s) : 0;
+    const target = (s.tier >= 3 ? 5 : 4) + extra;
     let openCount = workable.length + openAlerts.length;
-    let slots = Math.max(0, Math.min(3, target - openCount));
+    let slots = Math.max(0, Math.min(3 + extra, target - openCount));
     const cands: { kind: string; asset: Asset; w: number }[] = [];
     for (const asset of s.assets) {
       for (const c of CATALOG) {
@@ -1255,12 +1258,15 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
         if (w > 0) cands.push({ kind: c.kind, asset, w });
       }
     }
-    // an asset in critical shape with nothing open on it always gets a job; so does the grid under 55 from tier 4
-    // (A0 e: grid first, the island's single point of failure), and its job goes first among the must-dos
-    const gridFirst = (a: Asset) => !!LATE.gridFirst && s.tier >= LATE.fromTier && a.kind === 'grid' && a.health < LATE.gridFirst;
+    // an asset in critical shape with nothing open on it always gets a job; so does the grid at real risk from tier 4
+    // (A0 e: grid first, the island's single point of failure): a feed job, and it goes first among the must-dos
+    const first = (a: Asset) => a.kind === 'grid' && gridFirst(s, a);
     for (const asset of s.assets) {
-      if ((asset.health >= 45 && !gridFirst(asset)) || workable.some((o) => o.assetId === asset.id) || openAlerts.some((a) => a.assetId === asset.id)) continue;
-      const fix = cands.filter((c) => c.asset.id === asset.id && c.w < 100).sort((a, b) => (CATALOG_BY_KIND[a.kind]?.parts ?? 0) - (CATALOG_BY_KIND[b.kind]?.parts ?? 0) || b.w - a.w)[0];
+      if ((asset.health >= 45 && !first(asset)) || workable.some((o) => o.assetId === asset.id) || openAlerts.some((a) => a.assetId === asset.id)) continue;
+      const feedOnly = asset.health >= 45 && first(asset);
+      const fix = cands
+        .filter((c) => c.asset.id === asset.id && c.w < 100 && (!feedOnly || FEED_KINDS.has(c.kind)))
+        .sort((a, b) => (CATALOG_BY_KIND[a.kind]?.parts ?? 0) - (CATALOG_BY_KIND[b.kind]?.parts ?? 0) || b.w - a.w)[0];
       if (fix) fix.w = 100;
     }
     const issue = (kind: string, asset: Asset) => {
@@ -1268,7 +1274,7 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
       else raiseAlert(s, { role, asset, kind }, now);
     };
     // must-do work (inspections, critical repairs) jumps the queue, capped at 8 open per role (the grid first, A0 e)
-    for (const m of cands.filter((c) => c.w >= 100).sort((a, b) => Number(gridFirst(b.asset)) - Number(gridFirst(a.asset)))) {
+    for (const m of cands.filter((c) => c.w >= 100).sort((a, b) => Number(first(b.asset) && FEED_KINDS.has(b.kind)) - Number(first(a.asset) && FEED_KINDS.has(a.kind)))) {
       if (openCount >= 8) break;
       issue(m.kind, m.asset);
       openCount++;

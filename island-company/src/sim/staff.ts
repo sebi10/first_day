@@ -1,8 +1,12 @@
 // NPC staff: pilots, housekeepers and builders on the island's payroll
-// (docs/JOBFLOW.md 15). NPCs never do mechanic, electrician or analyst work:
-// they fly the planes, turn the houses over between guests and do the site
-// work for new buildings. The analyst decides who is on the payroll (hire, let
-// go, and how skilled: a better hire costs more and does more).
+// (docs/JOBFLOW.md 15), and from the Harbor (tier 4) the electrician's helper.
+// NPCs never do the mechanic's or the analyst's work: they fly the planes, turn
+// the houses over between guests and do the site work for new buildings. The
+// helper (review round 1) does the electrician's planned routine installs at
+// the resolve (outlets, GFCIs, switches, fixtures, the generator's circuit
+// test); the licensed work stays the electrician's: diagnosis and the plan,
+// code prep, hazards, the grid's feed and repairs. The analyst decides who is on
+// the payroll (hire, let go, and how skilled: a better hire costs more and does more).
 //
 // Stored: the staff, this week's hiring board and the builds. Everything that
 // follows from them (who flies which plane, the caps, the payroll, the effect
@@ -16,8 +20,8 @@
 // never from the week's, so a staff change moves only what it touches.
 import { raiseAlert, soleGuest } from './alerts';
 import type { Bot } from './bots';
-import { ECON, MODELS, STOCK } from './data';
-import { bookInspection, capFleet, capOf, clamp, flightsPerPlane, houseRentable, inspectionWeeks, planes, projectWeek, round10, tierDef } from './econ';
+import { CATALOG_BY_KIND, ECON, MODELS, STOCK } from './data';
+import { bookInspection, capFleet, capOf, clamp, decayOf, flightsPerPlane, houseRentable, houseWeekRevenue, houseWearOf, inspectionWeeks, planes, projectWeek, round10, tierDef } from './econ';
 import { apply, type ApplyResult } from './engine';
 import { itemById, priceAt } from './items';
 import { book, spendable } from './ledger';
@@ -29,7 +33,7 @@ import type { Asset, Build, Candidate, IslandState, ItemId, Liner, Npc, NpcRole,
 
 export const STAFF = {
   /** weekly cost to the company at skill 3 */
-  wage: { pilot: 320, housekeeper: 180, builder: 260 } as Record<NpcRole, number>,
+  wage: { pilot: 320, housekeeper: 180, builder: 260, helper: 280 } as Record<NpcRole, number>,
   /** x wage, skill 1..5 */
   skillWage: [0.7, 0.85, 1, 1.2, 1.45],
   severanceWeeks: 2,
@@ -67,8 +71,23 @@ export const STAFF = {
   /** the hiring board: candidates a week (4 from tier 3), role weights for the open slots, skill weights 1..5 */
   board: 3,
   boardT3: 4,
-  roleWeight: { pilot: 3, housekeeper: 3, builder: 2 } as Record<NpcRole, number>,
+  roleWeight: { pilot: 3, housekeeper: 3, builder: 2, helper: 2 } as Record<NpcRole, number>,
   skillWeight: [25, 30, 25, 15, 5],
+  /**
+   * the electrician's helper (review round 1): on the board from tier 4; each week at the resolve they do this many of
+   * the electrician's ready routine jobs (skill 1..5), signed at this score (by the book: no hidden defect, as
+   * autopilot's), the most urgent first. Only these kinds: the house's branch circuits and the generator's circuit test
+   */
+  helper: {
+    fromTier: 4,
+    jobs: [1, 1, 2, 2, 2],
+    score: [0.5, 0.55, 0.6, 0.65, 0.7],
+    kinds: ['trip', 'gfci', 'switch3', 'flicker', 'hottub', 'storm', 'genTest'] as string[],
+    /** the board offers one when the electrician has this many alerts open (and there's no helper) */
+    need: 6,
+    /** ... or when the houses average under the first (no helper yet), or the second (one on the payroll) */
+    houses: [65, 55] as [number, number],
+  },
 };
 
 /**
@@ -78,8 +97,11 @@ export const STAFF = {
  */
 export const STAFF_TEST = { stubs: false, hardLandings: true };
 
-export const NPC_ROLES: NpcRole[] = ['pilot', 'housekeeper', 'builder'];
-export const ROLE_NAME: Record<NpcRole, string> = { pilot: 'Pilot', housekeeper: 'Housekeeper', builder: 'Builder' };
+export const NPC_ROLES: NpcRole[] = ['pilot', 'housekeeper', 'builder', 'helper'];
+export const ROLE_NAME: Record<NpcRole, string> = { pilot: 'Pilot', housekeeper: 'Housekeeper', builder: 'Builder', helper: "Electrician's helper" };
+
+/** the roles the hiring board can offer on this island (the helper from tier 4) */
+export const boardRoles = (s: Pick<IslandState, 'tier'>): NpcRole[] => NPC_ROLES.filter((r) => r !== 'helper' || s.tier >= STAFF.helper.fromTier);
 
 /** the standard crew's payroll a week: 760, 1,080, 1,080, 1,260, 1,320 */
 export function standardPayroll(tier: number): number {
@@ -569,7 +591,30 @@ export function boardNeeds(s: IslandState): NpcRole[] {
   if (lost.flights > 0) add('pilot');
   if (lost.houses > 0) add('housekeeper');
   if (build && !crew.some((n) => n.role === 'builder')) add('builder');
+  if (helperWanted(s)) add('helper');
   return out;
+}
+
+/** the jobs a week the electrician's helpers on the payroll do (0 before tier 4 or without one) */
+export function helperJobs(s: Pick<IslandState, 'staff' | 'tier' | 'week'>): number {
+  if (s.tier < STAFF.helper.fromTier) return 0;
+  return working(s)
+    .filter((n) => n.role === 'helper')
+    .reduce((t, n) => t + (STAFF.helper.jobs[n.skill - 1] ?? 1), 0);
+}
+
+/** the electrician's open alerts (not closed): the helper's need on the board and in the effect statement */
+export const elecOpen = (s: IslandState) => (s.alerts ?? []).filter((a) => a.role === 'elec' && a.status !== 'closed').length;
+
+/** from tier 4, no helper on the payroll and the electrician with STAFF.helper.need alerts or more open */
+export function helperWanted(s: IslandState): boolean {
+  if (s.tier < STAFF.helper.fromTier) return false;
+  const n = crewOf(s).filter((x) => x.role === 'helper').length;
+  const hs = s.assets.filter((a) => a.kind === 'house');
+  const houses = hs.length ? hs.reduce((t, h) => t + h.health, 0) / hs.length : 100;
+  // the first when the electrician's list runs long or the houses slip under 65 on average; a second under 55
+  if (n === 0) return elecOpen(s) >= STAFF.helper.need || houses < STAFF.helper.houses[0];
+  return n < 2 && houses < STAFF.helper.houses[1];
 }
 
 /**
@@ -605,7 +650,9 @@ export function staffOpenWeek(s: IslandState, _r: Rng, now: number): void {
   const n = s.tier >= 3 ? STAFF.boardT3 : STAFF.board;
   const needs = boardNeeds(s).slice(0, n);
   const roles = [...needs];
-  while (roles.length < n) roles.push(r.weighted(NPC_ROLES, (x) => STAFF.roleWeight[x]) ?? 'pilot');
+  // (the helper only from tier 4: before it the draw is exactly as it was)
+  const pool = boardRoles(s);
+  while (roles.length < n) roles.push(r.weighted(pool, (x) => STAFF.roleWeight[x]) ?? 'pilot');
   s.hiring = { week: W, cands: [] };
   roles.forEach((role, i) => {
     // a candidate for a need can fill it: a pilot for the guest planes (skill 3+), anyone else skill 2+
@@ -653,6 +700,7 @@ export function staffAction(s: IslandState, prev: IslandState, a: StaffAction, n
       if (!c) return fail('That candidate took another job.');
       if ((s.staff ?? []).length >= STAFF.maxStaff) return fail('No room on the island for more staff.');
       if (s.receivership > 0) return fail('In receivership: no new hires.');
+      if (c.role === 'helper' && s.tier < STAFF.helper.fromTier) return fail("An electrician's helper comes with the Harbor (tier 4).");
       hireNow(s, c, now);
       return { s };
     }
@@ -795,6 +843,19 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
     else need.push(hire ? 'every booking already has a turnover: a spare' : 'the others turn over every booking');
     // a housekeeper's skill moves the reviews (occupancy) whether or not they add a turnover
     if (dBooked <= 0 && dRev !== 0) need.push(`reviews ${(hire ? dRev : -dRev) > 0 ? 'up' : 'down'}: ${sign(hire ? dRev : -dRev)}${usd(Math.abs(dRev))} a week`);
+  } else if (me.role === 'helper') {
+    const jobs = STAFF.helper.jobs[me.skill - 1] ?? 1;
+    const pct = Math.round((STAFF.helper.score[me.skill - 1] ?? 0.5) * 100);
+    const elec = s.players.elec?.name ?? 'the electrician';
+    does = `does ${plural(jobs, 'planned routine job')} of ${elec}'s a week, at ${pct}%`;
+    const open = elecOpen(s);
+    const others = crewOf(s).filter((n) => n.role === 'helper' && n.id !== me.id).length;
+    // the licensed work stays the electrician's: the helper only installs what they planned
+    need.push(
+      hire
+        ? `${elec} has ${plural(open, 'alert')} open${others ? ` and ${plural(others, 'helper')} already` : ''}: the helper puts in the outlets, GFCIs, switches, fixtures and the generator's circuit test ${elec} has planned (a hazard once it's made safe); the diagnosis, making a hazard safe, code prep, the grid's feed and repairs stay ${elec}'s`
+        : `${elec} takes back ${plural(jobs, 'routine job')} a week (${plural(open, 'alert')} open)`,
+    );
   } else {
     const o = STAFF.output[me.skill - 1] ?? 0;
     does = `${fmtUnits(o)} unit${o === 1 ? '' : 's'} of site work a week`;
@@ -819,11 +880,17 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
     }
   }
   const sev = hire ? 0 : severanceOf(s, who as Npc);
-  const net = hire ? dRev - wage : wage - dRev;
+  // the helper's money is the houses they keep open: one cottage's rent a week against the wage while the electrician's
+  // list runs long (the board's need); the week's projection can't see it
+  const houseRent = me.role === 'helper' ? Math.round(Math.max(0, ...s.assets.filter((a) => a.kind === 'house' && a.model === 'cottage').map((h) => houseWeekRevenue(s, h)))) : 0;
+  const wanted = me.role === 'helper' && helperWanted({ ...s, staff: base });
+  const net = me.role === 'helper' ? (hire ? (wanted ? houseRent - wage : -wage) : wage - (wanted ? houseRent : 0)) : hire ? dRev - wage : wage - dRev;
   let money: string;
   let payback: number | undefined;
   // (a hire that adds no revenue this week, a builder or a spare, says so rather than repeating its wage as the net)
-  if (hire) money = dRev === 0 ? `${usd(wage)} a week · no new income` : `${usd(wage)} a week · net about ${net >= 0 ? '+' : '−'}${usd(Math.abs(net))} a week`;
+  if (hire && me.role === 'helper')
+    money = wanted ? `${usd(wage)} a week · pays for itself if it keeps one cottage open (about ${usd(houseRent)} a week in rent)` : `${usd(wage)} a week · the electrician's list is short: not needed yet`;
+  else if (hire) money = dRev === 0 ? `${usd(wage)} a week · no new income` : `${usd(wage)} a week · net about ${net >= 0 ? '+' : '−'}${usd(Math.abs(net))} a week`;
   else {
     const save = wage - dRev;
     if (save > 0 && sev > 0) payback = Math.ceil(sev / save);
@@ -835,18 +902,24 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
   return { does, need: `${later && me.role !== 'builder' ? 'from next week: ' : ''}${need.join(' · ')}`, money, net, ...(payback !== undefined ? { payback } : {}) };
 }
 
+/** the electrician's routine house jobs' card price per health point they land (the cottage's upkeep estimate) */
+const HOUSE_JOBS = ['trip', 'gfci', 'switch3', 'flicker', 'hottub', 'storm'];
+const perHp = () => HOUSE_JOBS.reduce((n, k) => n + (CATALOG_BY_KIND[k] ? CATALOG_BY_KIND[k].cost / CATALOG_BY_KIND[k].gain : 0), 0) / HOUSE_JOBS.length;
+
 /**
  * An extra cottage: what it costs (the shell and its site work at list), what
  * it would rent in a normal week (every plane flying, no house closed) at this
  * week's rates, averaged over the last 8 weeks' season (one week with two planes
  * down says nothing about a building that stands for years), whether it needs
- * another housekeeper to turn it over, and the weeks it takes to pay back (net
- * of that wage).
+ * another housekeeper to turn it over, its upkeep (review round 1: the parts and
+ * labour for the health it loses a week, and the electrician's list it joins),
+ * and the weeks it takes to pay back (net of that wage and the upkeep).
  */
-export function cottagePlan(s: IslandState): { plot: { id: string; name: string } | null; cost: number; rent: number; housekeeper: boolean; payback: number | null } {
+export function cottagePlan(s: IslandState): { plot: { id: string; name: string } | null; cost: number; rent: number; housekeeper: boolean; payback: number | null; upkeep: number; open: number } {
   const plot = freePlots(s)[0] ?? null;
   const cost = COTTAGE_SHELL + valueOf(COTTAGE.units.flatMap((u) => Object.entries(u).map(([item, qty]) => ({ item, qty: qty ?? 0 }))));
-  if (!plot) return { plot, cost, rent: 0, housekeeper: false, payback: null };
+  const open = elecOpen(s);
+  if (!plot) return { plot, cost, rent: 0, housekeeper: false, payback: null, upkeep: 0, open };
   const extra: Asset = { id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: s.week, inspectionUntil: s.week + inspectionWeeks(s.tier) };
   // a normal week: nothing grounded or closed for an alert, no safety tag, no plane chain-grounded
   const normal = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
@@ -866,8 +939,10 @@ export function cottagePlan(s: IslandState): { plot: { id: string; name: string 
       housekeeper = true;
     }
   }
-  const net = rent - (housekeeper ? STAFF.wage.housekeeper : 0);
-  return { plot, cost, rent: Math.max(0, rent), housekeeper, payback: net > 0 ? Math.ceil(cost / net) : null };
+  // what it loses a week, kept up (it starts at 80: the maintained rate from tier 4), in the electrician's parts and labour
+  const upkeep = round10((decayOf(s, extra) + houseWearOf(s)) * perHp());
+  const net = rent - (housekeeper ? STAFF.wage.housekeeper : 0) - upkeep;
+  return { plot, cost, rent: Math.max(0, rent), housekeeper, payback: net > 0 ? Math.ceil(cost / net) : null, upkeep, open };
 }
 
 // ---------------------------------------------------------------------------
@@ -956,6 +1031,13 @@ export function botStaff(s: IslandState, bot: Bot, _r: Rng, now: number): Island
     if (!below && !short) continue;
     const min = role === 'pilot' ? STAFF.guestMinSkill : 2;
     const c = bestCand((s.hiring?.week === W ? s.hiring.cands : []).filter((x) => x.role === role && x.skill >= min && x.ask <= 1.25 * STAFF.wage[role]));
+    if (c) step({ t: 'hire', cand: c.id, week: W });
+  }
+  // the electrician's helper (review round 1), from tier 4: when the board says the electrician needs one, the best
+  // candidate of skill 2+ asking at most 1.25 x the skill-3 wage, while spendable covers a month of it on top of the
+  // next tier's cash gate (at the Harbor the Resort's $60,000 comes first: payroll added before it only delays the tier)
+  if (helperWanted(s) && spendable(s) >= ECON.freezeBelow + 4 * STAFF.wage.helper + nextCashGate(s)) {
+    const c = bestCand((s.hiring?.week === W ? s.hiring.cands : []).filter((x) => x.role === 'helper' && x.skill >= 2 && x.ask <= 1.25 * STAFF.wage.helper));
     if (c) step({ t: 'hire', cand: c.id, week: W });
   }
   // the builders' materials, once a builder is on the payroll: the next tier's site work (or a cottage) two units

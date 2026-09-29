@@ -11,6 +11,7 @@ import { fmtCountdown } from '../sim/time';
 import { Board, Review } from './board';
 import { ChainBanner } from './chain';
 import { GseSheet, weakBatteryNow } from './gse';
+import { HarborSheet } from './harbor';
 import { fx } from './feedback';
 import { Btn, Icon, Sheet, toast, useNow, usd } from './kit';
 import { unreadBoard } from './crewboard';
@@ -119,6 +120,8 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
           }}
         />
       )}
+      {/* the late game's rules, once per seat when tier 4 arrives or on the first open at tier 4+ (review round 1) */}
+      <HarborSheet s={s} role={role} hold={!!review || !!play} />
       <Sheet open={gse !== undefined} onClose={() => setGse(undefined)} label="Ground power">
         {gse !== undefined && <GseSheet ctl={ctl} focus={gse} onClose={() => setGse(undefined)} />}
       </Sheet>

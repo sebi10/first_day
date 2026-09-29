@@ -47,6 +47,13 @@ export type Development = {
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
+/** the full-crew A weeks in a row at the end of the week reports, at any tier (the bunting: 3 in a row, while it lasts) */
+export function aRun(s: Pick<IslandState, 'history'>): number {
+  let n = 0;
+  for (let i = s.history.length - 1; i >= 0 && s.history[i].grade === 'A' && !s.history[i].autoRun?.length; i--) n++;
+  return n;
+}
+
 export function prosperityOf(s: IslandState) {
   const recent = s.history.slice(-3).filter((h) => h.budget > 0);
   if (!recent.length) return 0.5;
@@ -70,7 +77,9 @@ export function developmentOf(s: IslandState): Development {
   if (s.tier >= 4 && weeks >= 18) f.push('boardwalk');
   if (s.tier >= 4 && prosperity >= 0.85) f.push('yacht');
   if (weeks >= 26) f.push('observatory');
-  if ((st.aStreak ?? 0) >= 3) f.push('bunting');
+  // the bunting: 3 full-crew A weeks in a row at any tier, while it lasts (read off the week reports, not the credits' streak,
+  // which counts only Resort weeks: review round 1)
+  if (aRun(s) >= 3) f.push('bunting');
   if (s.creditsWeek) f.push('statue');
 
   let construction: Construction | null = null;

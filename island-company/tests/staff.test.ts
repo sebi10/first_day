@@ -406,7 +406,9 @@ describe('builders and the site work', () => {
     // (the queued Cottage 5 holds its plot: the next one would be Cottage 6)
     expect(plan).toMatchObject({ plot: { id: 'h9', name: 'Cottage 6' }, cost: COTTAGE_SHELL + 1090, housekeeper: true });
     expect(plan.rent).toBeGreaterThan(0);
-    expect(plan.payback).toBe(Math.ceil(plan.cost / (plan.rent - STAFF.wage.housekeeper)));
+    // (net of the housekeeper's wage and the cottage's upkeep: review round 1)
+    expect(plan.upkeep).toBeGreaterThan(0);
+    expect(plan.payback).toBe(Math.ceil(plan.cost / (plan.rent - STAFF.wage.housekeeper - plan.upkeep)));
     buildWeek(s, rng(1), s.week, line);
     const h8 = s.assets.find((a) => a.id === 'h8')!;
     expect(h8).toMatchObject({ kind: 'house', model: 'cottage', name: 'Cottage 5', health: 80 });
@@ -611,8 +613,12 @@ describe('bots', () => {
 
   it('a season: the three friends keep payroll near the standard crew’s, and no solo player leaves tier 1', () => {
     const { final } = simulate(TEAMS['three friends'], 26, 2);
-    expect(payroll(final) / standardPayroll(final.tier)).toBeGreaterThan(0.85);
-    expect(payroll(final) / standardPayroll(final.tier)).toBeLessThan(1.15);
+    // (the electrician's helper, review round 1, is the analyst's one call above the standard crew: at most two)
+    const helpers = (final.staff ?? []).filter((n) => n.role === 'helper');
+    expect(helpers.length).toBeLessThanOrEqual(2);
+    const crew = payroll(final) - helpers.reduce((t, n) => t + n.wage, 0);
+    expect(crew / standardPayroll(final.tier)).toBeGreaterThan(0.85);
+    expect(crew / standardPayroll(final.tier)).toBeLessThan(1.15);
     for (const team of ['solo fin', 'fin absent']) expect(simulate(TEAMS[team], 26, 3).final.tier, team).toBe(1);
   });
 

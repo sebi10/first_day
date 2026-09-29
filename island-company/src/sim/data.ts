@@ -54,16 +54,30 @@ export const LATE = {
   /** the island tier these rules start at */
   fromTier: 4,
   /**
-   * (e) Grid first: the island grid under this reliability is must-do work (it gets a job whatever else is open)
-   * and ranks above code prep in the bots', autopilot's and the Dock's order. The grid is the single point of
-   * failure: under 40 it's down, and every house without the generator goes dark. 0 = off.
+   * (e) Grid first: the island grid under this reliability, and at real risk (the generator can't carry the houses,
+   * or a week's decay and a storm would take the grid under 40, down), is must-do work: its feed job (the feeder,
+   * the panel, a dead circuit at the panel; not the fuel dock's run) gets a slot whatever else is open and ranks
+   * above code prep in the bots', autopilot's and the Dock's order. 0 = off. (Review round 1: at real risk only,
+   * and the feed only.)
    */
   gridFirst: 55,
+  /** review round 1: grid first only at real risk (false: every grid under `gridFirst`, as A0 first built it) */
+  gridAtRisk: true,
   /** the grid-first job's urgency bonus (econ `urgency`): as much as a hazard or airworthiness item due now */
   gridFirstUrgency: 150,
-  /** (g) the spiral breaker: a house that's dark all week (grid down, generator not carrying) doesn't decay: nobody's in it */
-  darkNoDecay: true,
-  /** (a) the county's code inspection comes every this many weeks (ECON.houseInspectionWeeks before tier 4) */
+  /**
+   * a code prep whose house is closed at this resolve without it (the inspection lapsed) goes before grid first while
+   * the grid is at or above this: the grid is up at this resolve either way, and next week's grid-first job still
+   * catches it (review round 1). Its urgency bonus beats grid first's.
+   */
+  gridHold: 48,
+  reopenUrgency: 180,
+  /**
+   * (g) the spiral breaker, a house dark all week not decaying: dropped in review round 1 (false). A tropical house with
+   * no power (no AC, no dehumidifier) rots faster, not slower, and it had no measurable effect. The knob stays.
+   */
+  darkNoDecay: false,
+  /** (a) the county's code inspection comes every this many weeks (ECON.houseInspectionWeeks before tier 4): the Harbor's rental licence puts the island on the county's quarterly schedule */
   inspectionWeeks: 13,
   /** (b) a booked week's wear on a house (ECON.houseWear before tier 4) */
   houseWear: 1,
@@ -74,9 +88,25 @@ export const LATE = {
    * measurable effect on the long run, and a worn-out asset really is the harder job
    */
   lowHealthTierBump: true,
-  /** (f) the credits' A streak pauses on an autopilot week graded A (the week doesn't count; a lower grade still breaks it) */
+  /**
+   * (f) the credits' A streak pauses on an autopilot week graded A (the week doesn't count; a lower grade still breaks
+   * it). Only weeks played at the Resort (opened at tier 5) count or pause (review round 1): a Harbor streak is no
+   * head start.
+   */
   streakPause: true,
 };
+
+/**
+ * The receiver (review round 1): an island in receivership that can't pay is not locked out. The receiver funds
+ * safety-critical work (what `isEmergency` passes: an inspection, a known defect's repair, a grounded plane's part, a
+ * job whose alert closes a house or grounds a plane, an asset under 60) up to `allowance` a week, added to the
+ * bridge loan at `rate`; and it takes its weekly payment only out of cash above $0, so the loan never digs the hole
+ * deeper while the island climbs out.
+ */
+export const RECEIVER = { allowance: 1500, rate: 0.15, standstill: true };
+
+/** a storm's hit on the houses and the grid (resolve step 9; halved by the storm shield) */
+export const STORM_HIT = { house: 6, grid: 8 };
 
 export const INSURANCE: Record<Insurance, { label: string; premium: number; cover: number }> = {
   none: { label: 'None', premium: 0, cover: 0 },
@@ -1455,7 +1485,8 @@ export const STORIES = [
     title: 'County inspector in town',
     body: 'She can do every house this week if you pay the call-out.',
     options: [
-      { key: 'book', label: 'Book her', effect: '−$400, every house passes now; the county books each renewal a week of its own, about 8 weeks out (13 from tier 4)' },
+      // ({weeks}: the island's inspection cadence, filled in when the card is dealt and when it's shown: econ storyEffect)
+      { key: 'book', label: 'Book her', effect: '−$400, every house passes now; the county books each renewal a week of its own, about {weeks} weeks out' },
       { key: 'wait', label: 'Wait', effect: 'Nothing changes' },
     ],
   },

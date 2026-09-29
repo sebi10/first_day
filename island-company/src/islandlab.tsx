@@ -227,7 +227,7 @@ const SCN: Scn[] = [
   siteScn('site-cottage', "Zoomed to the builders' site: Cottage 6 in the lagoon grove (2.2 of 5 units), three builders, a ground power cart on the apron (its tap target stays 44 px)", 3, 'cottage-h9', 2.2, 3),
   {
     id: 'beaten',
-    note: 'Beat the game: tier 5 at night, 8 straight A weeks, the crew statue, observatory, bunting',
+    note: 'Beat the game: tier 5 at night, 8 full-crew A weeks at the Resort, the crew statue, observatory, bunting',
     tier: 5,
     phase: 'night',
     tweak: (s) => {

@@ -172,9 +172,10 @@ describe('1. code inspections on the county calendar', () => {
       if (s.week === W) s = apply(s, { t: 'resolve', week: W }, (s.deadline ?? NOW) + 1000).s;
       expect(s.week).toBe(W + 1);
     }
-    // every house renewed once, each on a week of its own
+    // every house renewed once, each on a week of its own (review round 1: with the electrician's helper this doc can
+    // reach the Resort inside the seven weeks; the Lodge it brings is booked a week of its own too)
     const after = s.assets.filter((a) => a.kind === 'house').map((a) => a.inspectionUntil!);
-    after.forEach((d, i) => expect(d, `house ${i + 1}`).toBeGreaterThan(before[i]!));
+    before.forEach((d, i) => expect(after[i], `house ${i + 1}`).toBeGreaterThan(d!));
     expect(new Set(after).size).toBe(after.length);
   });
 });

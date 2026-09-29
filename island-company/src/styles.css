@@ -226,6 +226,19 @@ h3 {
   border-radius: 99px;
   transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+/* the lines where a rule changes (review round 1): 70 on every asset from tier 4, the grid's 55 and 40 */
+.bar.marked {
+  position: relative;
+}
+.bar > .bar-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  opacity: 0.45;
+}
 
 /* header */
 .topbar {
@@ -1061,8 +1074,12 @@ h3 {
 .toast {
   position: fixed;
   top: calc(12px + var(--safe-t));
-  left: 50%;
-  transform: translateX(-50%);
+  /* centred without a translate (review round 1): a long toast at left: 50% overflowed a phone's width, and the
+     mobile viewport grew to fit it */
+  left: 16px;
+  right: 16px;
+  margin-inline: auto;
+  width: fit-content;
   z-index: 90;
   background: var(--ink);
   color: var(--paper);
@@ -1070,7 +1087,7 @@ h3 {
   border-radius: 14px;
   font-size: 15px;
   font-weight: 700;
-  max-width: calc(100% - 32px);
+  max-width: 560px;
   box-shadow: var(--shadow);
   animation: slide-up 0.2s ease both;
 }
@@ -1536,11 +1553,11 @@ code,
 }
 @keyframes toast-in {
   from {
-    transform: translate(-50%, -12px);
+    transform: translateY(-12px);
     opacity: 0;
   }
   to {
-    transform: translate(-50%, 0);
+    transform: none;
     opacity: 1;
   }
 }

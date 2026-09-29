@@ -7,7 +7,7 @@
 // family's, a need has no P/N.
 import { alertFlags, liveAlerts, soleGuest, symptomText } from '../../sim/alerts';
 import { DEFAULT_SUPPLIER, FREIGHT, MODELS, ROLE_LABEL, STOCK, SUPPLIERS } from '../../sim/data';
-import { expectedDeferralCost, fixedNow, groundsFrom, outOfService, projectWeek, subCharterNeed, subCharterOn, tierDef, urgency } from '../../sim/econ';
+import { expectedDeferralCost, fixedNow, gridFirstJob, groundsFrom, outOfService, projectWeek, subCharterNeed, subCharterOn, tierDef, urgency } from '../../sim/econ';
 import { cardOf, outWeeks, repairTask, type Card } from '../../sim/flow';
 import { allItems, buyUnits, famOf, itemById, priceAt } from '../../sim/items';
 import { assetSpend, capitalCost, cashInStock, committed, fillRate, payable, poOwed, runway, spendable, spendSeries, stockBuiltUsed, tradeSpend, waitWeeks, type OutCat } from '../../sim/ledger';
@@ -348,6 +348,9 @@ export function cardVM(s: IslandState, o: Order, buy?: BuyChoice): CardVM {
   // the only guest plane: grounded past due, a mainland sub-charter flies the guests (before it happens too, so the analyst sees it coming)
   if (card.sub) chips.push({ text: card.aog ? `Sub-charter ~${usd(card.sub.usd)}/wk` : `From wk ${a ? groundsFrom(s, a) : W}: sub-charter ~${usd(card.sub.usd)}/wk`, tone: card.aog ? 'rust' : 'amber' });
   if (card.shut) chips.push({ text: 'House closed', tone: 'rust' });
+  // the grid's feed at real risk goes first for the electrician (A0 e): the analyst sees why it's first, and that it
+  // goes through tonight on the standing approval whatever the limit (review round 1)
+  if (gridFirstJob(s, o)) chips.push({ text: 'grid first', tone: 'rust' });
   if (a) chips.push(a.due <= W ? { text: 'Due now', tone: 'rust' } : { text: `Due wk ${a.due}`, tone: '' });
   if (card.mel) chips.push(card.mel.until >= W ? { text: `MEL to wk ${card.mel.until}${card.mel.ext ? ' (extended)' : ''}`, tone: 'ink' } : { text: `MEL ran out wk ${card.mel.until}`, tone: 'rust' });
   const st = outState(s, a);
@@ -1248,7 +1251,7 @@ export const OVERHEAD_SPLIT: { label: string; share: number }[] = [
   { label: 'Licences and fees', share: 0.1 },
 ];
 
-const ROLE_WORD: Record<NpcRole, [string, string]> = { pilot: ['pilot', 'pilots'], housekeeper: ['housekeeper', 'housekeepers'], builder: ['builder', 'builders'] };
+const ROLE_WORD: Record<NpcRole, [string, string]> = { pilot: ['pilot', 'pilots'], housekeeper: ['housekeeper', 'housekeepers'], builder: ['builder', 'builders'], helper: ["electrician's helper", "electrician's helpers"] };
 
 /** whole dollars that add up to the total: each share rounded down, the dollars left go to the largest remainders */
 export function splitWhole(total: number, shares: number[]): number[] {

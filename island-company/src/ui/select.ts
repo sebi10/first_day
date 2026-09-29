@@ -3,9 +3,9 @@ import type { PuzzleId, PuzzleSite } from '../puzzles/types';
 import { alertFlags, alertShort, causeOf, liveAlerts, siteOf, soleGuest } from '../sim/alerts';
 import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { externalPower } from '../sim/aircraft';
-import { CABLE_REPORT, ECON, FLOAT_AUCTION, GSE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
+import { CABLE_REPORT, ECON, FLOAT_AUCTION, GSE, LATE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
 import { chainWouldOpen, forecastContext, listPrice } from '../sim/engine';
-import { alertAog, cartOn, flightsAvailable, flightsPerPlane, gridFirst, groundsFrom, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, launchTier, needsCart, openReports, planes, powered, reportCap, subCharterNeed, subCharterOn } from '../sim/econ';
+import { alertAog, cartOn, flightsAvailable, flightsPerPlane, gridFirstAlert, groundsFrom, gseCarts, hazardOn, houses, housesRentable, isBlind, isRework, lateGame, launchTier, needsCart, openReports, planes, powered, reopenBeforeGrid, reportCap, subCharterNeed, subCharterOn } from '../sim/econ';
 import { cardOf, flowStage } from '../sim/flow';
 import { itemById, priceAt } from '../sim/items';
 import { toolsFor } from '../sim/progression';
@@ -13,7 +13,7 @@ import { hashSeed } from '../sim/rng';
 import { invoiceContext, reqValue, stockFlags, urgentJob } from '../sim/stock';
 import { spendable } from '../sim/ledger';
 import { taskById } from '../sim/tasks';
-import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Order, type PartChain, type Role } from '../sim/types';
+import { ROLES, type Action, type Alert, type Asset, type IslandState, type OpsRole, type Order, type PartChain, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
 
 /** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
@@ -37,7 +37,9 @@ export function blocks(s: IslandState): Block[] {
   if (cargo && cargo.health < 40 && stuck > 0) out.push({ from: 'mech', to: 'elec', text: `cargo plane grounded: ${stuck} PO${stuck > 1 ? 's' : ''} waiting for a flight` });
   if (powered(s).gridDown) out.push({ from: 'elec', to: 'mech', text: 'grid down: hangar tools offline' });
   if (houses(s).length && housesRentable(s) === 0) out.push({ from: 'elec', to: 'fin', text: 'no rentable houses: no revenue' });
-  if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
+  if (s.cash < 0 && s.receivership > 0) out.push({ from: 'fin', to: 'mech', text: 'cash below $0: the receiver funds only safety-critical work, up to $1,500 a week' });
+  else if (s.cash < 0) out.push({ from: 'fin', to: 'mech', text: 'cash below $0: nothing gets approved until cash comes in' });
+  else if (s.cash < ECON.freezeBelow) out.push({ from: 'fin', to: 'mech', text: 'cash under $2,000: only safety-critical work gets approved' });
   // cross-trade moves: a crewmate's report, the part chain and the job flow, counted the same way. The flow's
   // cards and requisitions are one line per pair of seats (16); a grounded plane or a closed house gets its own
   const tally = new Map<string, { from: Role; to: Role; cards: number; reqs: number; usd: number }>();
@@ -276,20 +278,20 @@ export function dueNow(s: IslandState, role: OpsRole): Alert[] {
     })
     .sort((a, b) => a.due - b.due || rank(s, a) - rank(s, b));
 }
-/** A0 (e) grid first: the alert is on the island grid while it's under 55 at tier 4+ (every house hangs off it) */
-const onGridFirst = (s: IslandState, a: Alert) => {
-  const asset = s.assets.find((x) => x.id === a.assetId);
-  return !!asset && gridFirst(s, asset);
-};
+/** A0 (e) grid first: the alert is on the island grid's feed while the grid is at real risk at tier 4+ (every house hangs off it) */
+const onGridFirst = (s: IslandState, a: Alert) => gridFirstAlert(s, a);
+/** (e, review round 1) a code notice on a house whose inspection has lapsed, while the grid holds at 48+: it reopens the house at this resolve, so it goes before grid first */
+const reopensFirst = (s: IslandState, a: Alert) => a.src === 'code' && reopenBeforeGrid(s, s.assets.find((x) => x.id === a.assetId));
 const rank = (s: IslandState, a: Alert) => {
   const f = alertFlags(s, a);
-  return f.hazard ? 0 : f.aw ? 1 : onGridFirst(s, a) ? 1.5 : 2;
+  return f.hazard ? 0 : f.aw ? 1 : reopensFirst(s, a) ? 1.25 : onGridFirst(s, a) ? 1.5 : 2;
 };
 
 /**
  * the tech's "Your move" rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then
- * by due week. From tier 4 the grid under 55 counts as due now and ranks after hazards and airworthiness, so it goes
- * before a code prep (A0 e: grid first; the Dock's button is the first row)
+ * by due week. From tier 4 the grid's feed at real risk counts as due now and ranks after hazards and airworthiness, so
+ * it goes before a code prep (A0 e: grid first; the Dock's button is the first row), unless the prep reopens a closed
+ * house at this resolve and the grid holds at 48 or more
  */
 export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?: Order }[] {
   const rows: { alert: Alert; order?: Order }[] = [];
@@ -302,6 +304,23 @@ export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?
   }
   const now = (a: Alert) => a.due <= s.week || onGridFirst(s, a);
   return rows.sort((x, y) => Number(now(y.alert)) - Number(now(x.alert)) || rank(s, x.alert) - rank(s, y.alert) || x.alert.due - y.alert.due || (x.alert.id < y.alert.id ? -1 : 1));
+}
+
+/**
+ * The ticks on an asset's health bar (review round 1: the rules had no marks in the game): the grid's 40 (under it the
+ * grid is down) at every tier; from tier 4 every asset's 70 (at or above it, 3 a week of wear, not 5), the grid's 55
+ * (under it, and at risk, grid first) and the generator's 50 (under it, it can't carry the houses)
+ */
+export function healthMarks(s: IslandState, a: Pick<Asset, 'kind'>): { at: number; title: string }[] {
+  const out: { at: number; title: string }[] = [];
+  const late = lateGame(s);
+  if (late) out.push({ at: LATE.healthyDecay.at, title: `At ${LATE.healthyDecay.at} or better it wears ${LATE.healthyDecay.decay} a week untouched, not ${ECON.decay}` });
+  if (a.kind === 'grid') {
+    if (late && LATE.gridFirst) out.push({ at: LATE.gridFirst, title: `Under ${LATE.gridFirst}, at risk: grid first` });
+    out.push({ at: 40, title: 'Under 40 the grid is down' });
+  }
+  if (late && a.kind === 'generator') out.push({ at: 50, title: "Under 50 it can't carry the houses" });
+  return out;
 }
 
 export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' };
@@ -429,7 +448,7 @@ export const standingLimit = (s: IslandState) => s.standing ?? (s.autoBudget.mec
  * A card that comes in after the analyst ended the turn (8.5), in the tech's words: the standing approval takes it
  * tonight when it fits the limit (and the cash), or it waits for the analyst. null while the analyst's turn is open.
  */
-export function standingWords(s: IslandState, total: number, safety = false, lateSafe = false): string | null {
+export function standingWords(s: IslandState, total: number, safety = false, lateSafe = false, grid = false): string | null {
   if (!s.turns.fin?.ended) return null;
   const fin = nameOf(s, 'fin');
   const limit = standingLimit(s);
@@ -437,7 +456,7 @@ export function standingWords(s: IslandState, total: number, safety = false, lat
   if (lateSafe)
     return spendable(s) - total < 0
       ? `${fin} has ended the turn, and there isn't the cash for it: it waits for ${fin}'s approval.`
-      : `${fin} has ended the turn: it goes through tonight on the standing approval whatever the limit (safety work due this week or next).`;
+      : `${fin} has ended the turn: it goes through tonight on the standing approval whatever the limit (${grid ? 'the grid first' : 'safety work due this week or next'}).`;
   if (total > limit) return `${fin} has ended the turn, and it's over the standing limit (${usdWords(limit)}): it waits for ${fin}'s approval.`;
   if (spendable(s) - total < (safety ? 0 : ECON.freezeBelow)) return `${fin} has ended the turn, and spendable cash is under the freeze: it waits for ${fin}'s approval.`;
   return `${fin} has ended the turn: it goes through tonight on the standing approval (up to ${usdWords(limit)}) unless deferred.`;
@@ -450,6 +469,8 @@ export function standingWords(s: IslandState, total: number, safety = false, lat
 export function lateSafeAlert(s: IslandState, a: Alert): boolean {
   const asset = s.assets.find((x) => x.id === a.assetId);
   if (!asset) return false;
+  // the grid's feed at real risk goes through like safety work due now (A0 e, review round 1: the engine's standing approval)
+  if (gridFirstAlert(s, a)) return true;
   if (asset.kind === 'plane') return [s.week, s.week + 1].some((w) => alertAog(s, asset.id, w)?.id === a.id);
   if (asset.kind === 'house') {
     const h = hazardOn(s, asset.id);

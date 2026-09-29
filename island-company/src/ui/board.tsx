@@ -6,7 +6,7 @@ import type { PuzzleId } from '../puzzles/types';
 import { ROLE_LABEL } from '../sim/data';
 import { hashSeed } from '../sim/rng';
 import { toolsFor } from '../sim/progression';
-import { tierDef } from '../sim/econ';
+import { creditsStreak, pausedWeek, storyEffect, tierDef } from '../sim/econ';
 import { nextTierProgress } from '../sim/progression';
 import { ROLES, type Grade, type Incident, type IslandState, type ReportLine, type Role, type WeekReport } from '../sim/types';
 import { fx } from './feedback';
@@ -81,8 +81,10 @@ export function Board({ ctl, onReview }: { ctl: Ctl; onReview(r: WeekReport): vo
         <div class="card col" style={{ gap: 4 }}>
           <h3>Endgame</h3>
           <span class="num">
-            {s.creditsWeek ? `Beaten in week ${s.creditsWeek}. ` : ''}A-grade streak {Math.min(8, s.stats.aStreak ?? 0)}/8
+            {s.creditsWeek ? `Beaten in week ${s.creditsWeek}. ` : ''}A-grade streak {Math.min(8, creditsStreak(s, s.week))}/8
           </span>
+          {/* review round 1: the rule, so a row of A's next to a lower count reads right */}
+          <span class="label">Full-crew A weeks at the Resort count toward the eight. An A with a seat on autopilot holds the streak; a week below A resets it.</span>
         </div>
       )}
 
@@ -132,14 +134,16 @@ function History({ s }: { s: IslandState }) {
       </svg>
       <div class="row" style={{ gap: 4, justifyContent: 'space-between' }}>
         {h.map((r) => (
-          <span key={r.week} class="col center" style={{ gap: 0, fontSize: 11 }}>
-            <b style={{ color: GRADE_COLOR[r.grade] }}>{r.grade}</b>
+          <span key={r.week} class="col center" style={{ gap: 0, fontSize: 11 }} title={pausedWeek(s, r) ? `Week ${r.week}: A with autopilot covering a seat, so it held the streak` : undefined}>
+            {/* an A with a seat on autopilot at the Resort held the credits' streak: a ringed A (review round 1) */}
+            <b style={{ color: GRADE_COLOR[r.grade], ...(pausedWeek(s, r) ? { boxShadow: `inset 0 0 0 1.5px ${GRADE_COLOR.A}`, borderRadius: 4, padding: '0 3px', color: C.inkSoft } : {}) }}>{r.grade}</b>
             <span class="label" style={{ fontSize: 10 }}>
               {r.week}
             </span>
           </span>
         ))}
       </div>
+      {h.some((r) => pausedWeek(s, r)) && <span class="label">A ringed: a seat was on autopilot, so the week held the streak instead of counting.</span>}
     </div>
   );
 }
@@ -179,7 +183,7 @@ function StoryCard({ ctl }: { ctl: Ctl }) {
                 ))}
               </span>
             </div>
-            <div class="label">{o.effect}</div>
+            <div class="label">{storyEffect(ctl.s, card.id, o)}</div>
           </button>
         );
       })}
@@ -198,7 +202,9 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
   const defects = r.incidents.filter((i) => i.kind === 'defect');
   const traced = new Map<Incident, ReportLine | undefined>(defects.map((i) => [i, r.lines.find((l) => l.text.startsWith(`${i.title}. Traced to `))]));
   const caught = r.lines.filter((l) => l.tone === 'good' && l.text.endsWith('caught before it failed.'));
-  const shown = new Set<ReportLine>([...traced.values(), ...caught].filter((l): l is ReportLine => !!l));
+  // the credits' streak held by an autopilot A at the Resort: said up top, not lost past the list's nine lines (review round 1)
+  const streak = r.lines.find((l) => l.role === 'all' && /toward the eight/.test(l.text));
+  const shown = new Set<ReportLine>([...traced.values(), ...caught, ...(streak ? [streak] : [])].filter((l): l is ReportLine => !!l));
   const bad = r.lines.filter((l) => l.tone === 'bad' && !shown.has(l));
   const rest = r.lines.filter((l) => l.tone !== 'bad' && !shown.has(l));
   return (
@@ -222,6 +228,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
               </span>
               {r.tierUp && <span class="chip palm">Tier {r.tierUp} unlocked: {tierDef(r.tierUp).name}!</span>}
               {s.creditsWeek === r.week && <span class="chip palm">You beat Island Company!</span>}
+              {streak && <span class="label">{streak.text}</span>}
             </div>
           </div>
           <div class="numbers">
@@ -240,7 +247,7 @@ export function Review({ s, r, onClose }: { s: IslandState; r: WeekReport; onClo
           {s.creditsWeek === r.week && (
             <div class="card col center" style={{ gap: 8, borderTop: `6px solid ${C.palm}` }}>
               <h2>Credits</h2>
-              <span class="muted">Eight straight A weeks at the Resort, after {s.stats.totalWeeks} weeks together.</span>
+              <span class="muted">Eight full-crew A weeks at the Resort, none below A, after {s.stats.totalWeeks} weeks together.</span>
               {ROLES.map((role) => (
                 <b key={role}>
                   {s.players[role]?.name} · {ROLE_LABEL[role]}

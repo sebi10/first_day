@@ -1,22 +1,26 @@
 // A0, "a Resort that holds" (docs/EXPANSION.md 11.2, docs/DECISIONS.md "2026-09-29: A0"): the late game's upkeep
 // rules from tier 4 (data LATE), one lever at a time, then in whole seasons:
-//   (e) grid first: the grid under 55 is a must-do that ranks above code prep (the bots, autopilot, the Dock)
-//   (g) the spiral breaker: a house dark all week (grid down, no generator) doesn't decay
+//   (e) grid first: the grid's feed at real risk (under 55, and the generator can't carry the houses or a week's decay
+//       and a storm would take it under 40) is a must-do that ranks above code prep (the bots, autopilot, the Dock),
+//       unless the prep reopens a closed house at this resolve and the grid holds at 48+ (review round 1)
+//   (g) the spiral breaker, a dark house not decaying: dropped in review round 1 (the knob stays, off)
 //   (a) code inspections every 13 weeks
 //   (b) a booked week wears a house 1, not 2
 //   (c) a maintained asset (70+) decays 3 a week, not 5, planes and home assets alike
 //   (d) no "+1 alert tier under 50" (tested, not kept: no measurable effect)
-//   (f) the credits' A streak pauses on an autopilot week graded A (it still doesn't count)
+//   (f) the credits' A streak pauses on an autopilot week graded A (it still doesn't count); only weeks played at
+//       the Resort count (review round 1: a Harbor streak paid out the week the Resort arrived)
 // Tiers 1-3 play exactly as before.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { alertTier, generateAlerts, liveAlerts, raiseAlert } from '../src/sim/alerts';
-import { simulate, TEAMS } from '../src/sim/bots';
+import { botTurn, simulate, TEAMS } from '../src/sim/bots';
 import { ALERTS, ECON, LATE } from '../src/sim/data';
-import { aStreakAfter, bookInspection, decayOf, gridFirst, houseWearOf, inspectionWeeks, renewedInspection, urgency } from '../src/sim/econ';
+import { aStreakAfter, atResort, bookInspection, creditsStreak, decayOf, FEED_KINDS, gridFirst, gridFirstAlert, gridFirstJob, houseWearOf, inspectionWeeks, renewedInspection, urgency } from '../src/sim/econ';
 import { apply, createIsland } from '../src/sim/engine';
-import { rng } from '../src/sim/rng';
+import { hashSeed, rng } from '../src/sim/rng';
+import { flagsOf } from '../src/ui/flow/words';
 import { dockNext, yourMoves } from '../src/ui/select';
 import { ROLES, type Asset, type IslandState, type Order, type Role } from '../src/sim/types';
 
@@ -160,30 +164,34 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
     }
   });
 
-  it('(g) a house dark all week (grid down, no generator to carry it) loses nothing to decay from tier 4; before tier 4 it still decays', () => {
-    expect(decayOf({ tier: 4 }, { kind: 'house', health: 50 }, true)).toBe(0);
-    expect(decayOf({ tier: 4 }, { kind: 'house', health: 90 }, true)).toBe(0);
-    expect(decayOf({ tier: 4 }, { kind: 'plane', health: 50 }, true)).toBe(5);
-    expect(decayOf({ tier: 3 }, { kind: 'house', health: 50 }, true)).toBe(5);
-    for (const [tier, loss] of [
-      [3, 5],
-      [4, 0],
-    ] as const) {
-      let s = at(tier);
-      s.weather = 'clear';
-      s.orders = [];
-      s.alerts = [];
-      grid(s).health = 20;
-      for (const h of s.assets.filter((a) => a.kind === 'house')) {
-        h.health = 55;
-        h.touchedWeek = s.week - 1;
-      }
-      s = endWeek(s, ['mech', 'fin']);
-      // (the electrician's autopilot may work one house: the other one shows the rule)
-      const untouched = s.assets.filter((a) => a.kind === 'house' && a.touchedWeek < s.week - 1);
-      expect(untouched.length, `tier ${tier}`).toBeGreaterThan(0);
-      for (const h of untouched) expect(h.health, `tier ${tier} ${h.id}`).toBe(55 - loss);
+  it('(g, dropped in review round 1) a house dark all week decays like any other: a house with no power rots faster, not slower; the knob would stop it', () => {
+    expect(LATE.darkNoDecay).toBe(false);
+    expect(decayOf({ tier: 4 }, { kind: 'house', health: 50 }, true)).toBe(5);
+    expect(decayOf({ tier: 4 }, { kind: 'house', health: 90 }, true)).toBe(3);
+    LATE.darkNoDecay = true;
+    try {
+      expect(decayOf({ tier: 4 }, { kind: 'house', health: 50 }, true)).toBe(0);
+      expect(decayOf({ tier: 4 }, { kind: 'plane', health: 50 }, true)).toBe(5);
+      expect(decayOf({ tier: 3 }, { kind: 'house', health: 50 }, true)).toBe(5);
+    } finally {
+      LATE.darkNoDecay = false;
     }
+    // in the resolve: a grid-down week at tier 4, the houses dark (no generator to carry them), and they decay
+    let s = at(4);
+    s.weather = 'clear';
+    s.orders = [];
+    s.alerts = [];
+    grid(s).health = 20;
+    const gen = s.assets.find((a) => a.kind === 'generator');
+    if (gen) gen.health = 20;
+    for (const h of s.assets.filter((a) => a.kind === 'house')) {
+      h.health = 55;
+      h.touchedWeek = s.week - 1;
+    }
+    s = endWeek(s, ['mech', 'fin']);
+    const untouched = s.assets.filter((a) => a.kind === 'house' && a.touchedWeek < s.week - 1);
+    expect(untouched.length).toBeGreaterThan(0);
+    for (const h of untouched) expect(h.health, h.id).toBe(55 - ECON.decay);
   });
 
   it('(d, tested and not kept) an asset under 50 still raises its alert a tier at every island tier; the knob would stop it from tier 4', () => {
@@ -216,6 +224,8 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
       const s = at(tier);
       grid(s).health = 50;
       asset(s, 'h1').health = 40;
+      // the house's certificate is current (its prep doesn't reopen it at this resolve)
+      asset(s, 'h1').inspectionUntil = s.week + 1;
       const feeder = job(s, { kind: 'feeder', assetId: grid(s).id, title: 'Find and re-splice the cottage feeder', puzzle: 'trace', tier: 2, gain: 16 });
       const prep = job(s, { kind: 'codeprep', assetId: 'h1', deferrals: 2 });
       expect(gridFirst(s), `tier ${tier}`).toBe(tier >= 4);
@@ -226,6 +236,61 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
     const s = at(4);
     grid(s).health = 55;
     expect(gridFirst(s)).toBe(false);
+  });
+
+  it('(e, review round 1) grid first only at real risk: a grid at 53 the generator carries is ordinary work; with the generator under 50, or at 52, it goes first', () => {
+    const s = at(4);
+    const gen: Asset = { id: 'gen', kind: 'generator', model: 'gen', name: 'Generator house', health: 66, touchedWeek: s.week };
+    s.assets.push(gen);
+    grid(s).health = 53;
+    // 53 - 5 (decay) - 8 (a storm) = 40: not under 40 by the next resolve, and the generator carries every house anyway
+    expect(gridFirst(s)).toBe(false);
+    grid(s).health = 52;
+    expect(gridFirst(s)).toBe(true);
+    grid(s).health = 54;
+    gen.health = 45;
+    expect(gridFirst(s)).toBe(true);
+  });
+
+  it("(e, review round 1) grid first is the island feed: a fuel-dock alert on the grid gets no chip, no urgency bonus and no place ahead", () => {
+    const s = at(4);
+    s.orders = [];
+    s.alerts = [];
+    grid(s).health = 45;
+    const dock = raiseAlert(s, { role: 'elec', asset: grid(s), sym: 'E_DOCK_TRIP', due: s.week + 1 }, NOW);
+    const feed = raiseAlert(s, { role: 'elec', asset: grid(s), sym: 'E_FEEDER_DROP', due: s.week + 1 }, NOW);
+    expect(gridFirstAlert(s, feed)).toBe(true);
+    expect(gridFirstAlert(s, dock)).toBe(false);
+    expect(flagsOf(s, feed).some((f) => f.text === 'grid first')).toBe(true);
+    expect(flagsOf(s, dock).some((f) => f.text === 'grid first')).toBe(false);
+    const run = job(s, { kind: 'dockrun', assetId: grid(s).id, title: 'Conduit run to the fuel dock', puzzle: 'conduit', tier: 3, gain: 18 });
+    const splice = job(s, { kind: 'feeder', assetId: grid(s).id, title: 'Find and re-splice the cottage feeder', puzzle: 'trace', tier: 3, gain: 16 });
+    expect(gridFirstJob(s, run)).toBe(false);
+    expect(gridFirstJob(s, splice)).toBe(true);
+    expect(urgency(s, splice) - urgency(s, run)).toBe(LATE.gridFirstUrgency);
+  });
+
+  it('(e, review round 1) a code prep that reopens a lapsed house goes before grid first while the grid holds at 48+; under 48 the grid goes first', () => {
+    for (const [hp, want] of [
+      [50, 'codeprep'],
+      [45, 'feeder'],
+    ] as const) {
+      const s = at(4);
+      s.orders = [];
+      s.alerts = [];
+      grid(s).health = hp;
+      // the house's inspection lapsed last week: it's closed at this resolve without the prep
+      asset(s, 'h1').inspectionUntil = s.week - 1;
+      const feeder = job(s, { kind: 'feeder', assetId: grid(s).id, title: 'Find and re-splice the cottage feeder', puzzle: 'trace', tier: 3, gain: 16 });
+      const prep = job(s, { kind: 'codeprep', assetId: 'h1' });
+      expect(gridFirst(s), `grid ${hp}`).toBe(true);
+      expect([feeder, prep].sort((a, b) => urgency(s, b) - urgency(s, a))[0].kind, `grid ${hp}`).toBe(want);
+      // and on the Dock
+      const notice = raiseAlert(s, { role: 'elec', asset: asset(s, 'h1'), sym: 'E_CODE_DUE', due: s.week - 1 }, NOW);
+      const fa = raiseAlert(s, { role: 'elec', asset: grid(s), sym: 'E_FEEDER_DROP', due: s.week + 1 }, NOW);
+      s.orders = [];
+      expect(yourMoves(s, 'elec')[0].alert.id, `grid ${hp}`).toBe(want === 'codeprep' ? notice.id : fa.id);
+    }
   });
 
   it("(e) grid first: at tier 4 the grid under 55 gets a job even when the electrician's list is full; at tier 3 it waits", () => {
@@ -239,6 +304,8 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
       generateAlerts(s, rng(7), NOW, () => {});
       const onGrid = liveAlerts(s).filter((a) => a.assetId === grid(s).id);
       expect(onGrid.length, `tier ${tier}`).toBe(tier >= 4 ? 1 : 0);
+      // the island feed, not the fuel dock's run (review round 1)
+      for (const a of onGrid) expect(FEED_KINDS.has(a.kind), a.sym).toBe(true);
     }
   });
 
@@ -261,6 +328,8 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
       s.orders = [];
       s.alerts = [];
       grid(s).health = 50;
+      // due this week, the certificate still current (a lapsed one reopens a house and goes first: the test above)
+      asset(s, 'h1').inspectionUntil = s.week;
       const prep = raiseAlert(s, { role: 'elec', asset: asset(s, 'h1'), sym: 'E_CODE_DUE', due: s.week }, NOW);
       const feeder = raiseAlert(s, { role: 'elec', asset: grid(s), kind: 'feeder', due: s.week + 2 }, NOW);
       const first = yourMoves(s, 'elec')[0].alert.id;
@@ -269,15 +338,64 @@ describe('A0 levers, one at a time (from tier 4; tiers 1-3 as before)', () => {
     }
   });
 
-  it('(f) the credits streak: a full-crew A adds one; below A ends it; an autopilot A ends it before tier 4 and pauses it from tier 4', () => {
-    const st = (tier: number, aStreak: number) => ({ tier, stats: { aStreak } as IslandState['stats'] });
-    expect(aStreakAfter(st(5, 7), 'A', true)).toBe(8);
-    expect(aStreakAfter(st(5, 7), 'A', false)).toBe(7);
-    expect(aStreakAfter(st(4, 3), 'A', false)).toBe(3);
-    expect(aStreakAfter(st(5, 7), 'B', false)).toBe(0);
-    expect(aStreakAfter(st(5, 7), 'B', true)).toBe(0);
-    expect(aStreakAfter(st(3, 3), 'A', false)).toBe(0);
-    expect(aStreakAfter(st(3, 3), 'A', true)).toBe(4);
+  it('(f) the credits streak: only weeks played at the Resort count; a full-crew A adds one, an autopilot A holds it, below A ends it', () => {
+    // the Resort arrived in week 20: week 20 was played at the Harbor, week 21 on is the Resort
+    const st = (tier: number, aStreak: number, t5 = 20) => ({ tier, stats: { aStreak, tierReachedWeek: tier >= 5 ? { 5: t5 } : {} } as unknown as IslandState['stats'] });
+    expect(aStreakAfter(st(5, 7), 30, 'A', true)).toBe(8);
+    expect(aStreakAfter(st(5, 7), 30, 'A', false)).toBe(7);
+    expect(aStreakAfter(st(5, 7), 30, 'B', false)).toBe(0);
+    expect(aStreakAfter(st(5, 7), 30, 'B', true)).toBe(0);
+    // no streak before the Resort: a Harbor A doesn't count, full crew or not
+    expect(aStreakAfter(st(4, 3), 18, 'A', true)).toBe(0);
+    expect(aStreakAfter(st(4, 3), 18, 'A', false)).toBe(0);
+    expect(aStreakAfter(st(3, 3), 12, 'A', true)).toBe(0);
+    // the week the Resort arrives was played at the Harbor: it doesn't count either
+    expect(atResort(st(5, 0), 20)).toBe(false);
+    expect(aStreakAfter(st(5, 9), 20, 'A', true)).toBe(0);
+    expect(atResort(st(5, 0), 21)).toBe(true);
+    expect(aStreakAfter(st(5, 0), 21, 'A', true)).toBe(1);
+    // a live doc's streak from an older build (Harbor weeks in it) is read as the Resort weeks it can hold
+    expect(creditsStreak(st(5, 9), 23)).toBe(2);
+    expect(aStreakAfter(st(5, 9), 23, 'A', true)).toBe(3);
+  });
+
+  it('(f, review round 1) a 9-week Harbor streak, and the Resort arriving mid-week on an autopilot week graded A: no credits (seeds 1-12)', () => {
+    let graded = 0;
+    for (let seed = 1; seed <= 12; seed++) {
+      // an all-good island at the Harbor with the Resort's crew project just open
+      let open: IslandState | undefined;
+      simulate(TEAMS['all good'], 30, seed, (x) => {
+        if (!open && x.project?.tier === 5) open = structuredClone(x);
+      });
+      if (!open) continue;
+      let s = open;
+      const W = s.week;
+      const now = (s.deadline ?? NOW) - 3600_000;
+      s.stats.aStreak = 9;
+      // everyone's part done this week, the mechanic's last: the Resort arrives mid-week, before the resolve
+      for (const role of ['fin', 'elec', 'mech'] as const) {
+        const id = s.project!.orders[role]!;
+        const r = apply(s, { t: 'complete', role, orderId: id, score: 0.9, perfect: false, week: W, ...(role === 'fin' ? { data: { kits: 1, spent: 4800 } } : {}) }, now);
+        expect(r.error, `seed ${seed} ${role}`).toBeUndefined();
+        s = r.s;
+      }
+      expect(s.tier, `seed ${seed}`).toBe(5);
+      expect(s.stats.tierReachedWeek[5]).toBe(W);
+      // the mechanic and the analyst play the week; the electrician misses the evening (autopilot)
+      for (const role of ['mech', 'fin'] as const) {
+        s = botTurn(s, role, TEAMS['all good'][role], rng(hashSeed('arrive', seed, role)), now);
+        s = apply(s, { t: 'endTurn', role, week: W }, now).s;
+      }
+      s = apply(s, { t: 'resolve', week: W }, (s.deadline ?? NOW) + 1000).s;
+      const h = s.history[s.history.length - 1];
+      expect(h.autoRun).toContain('elec');
+      if (h.grade === 'A') graded++;
+      expect(s.creditsWeek, `seed ${seed}`).toBeUndefined();
+      expect(s.stats.aStreak, `seed ${seed}`).toBe(0);
+      expect(h.lines.some((l) => /You beat Island Company/.test(l.text))).toBe(false);
+    }
+    // the case the review found: arrival weeks graded A (on the old rule every one of them paid out)
+    expect(graded).toBeGreaterThan(0);
   });
 });
 
@@ -292,45 +410,70 @@ describe('A0 in whole seasons', () => {
     }
   }, 120_000);
 
-  it("the A streak's pause never lets an autopilot week count: the streak never grows on an autopilot week, and the credits never land on one", () => {
+  it("the credits come only after 8 full-crew A weeks played at the Resort, none below A between them, and never on an autopilot week (all good seed 4 was the review's repro)", () => {
     let paused = 0;
-    // (the crews with absences: all good never misses a week)
-    for (const team of ['three friends', 'all average']) {
-      for (const seed of [1, 2, 3]) {
+    let credits = 0;
+    for (const [team, seeds] of [
+      ['all good', [1, 2, 3, 4, 5]],
+      ['three friends', [1, 4]],
+      // (seeds 5 and 7: an A week with a seat on autopilot at the Resort while a streak runs, so the pause is seen)
+      ['all average', [2, 5, 7]],
+    ] as const) {
+      for (const seed of seeds) {
+        let run = 0;
         let prev = 0;
-        const auto = new Set<number>();
         const { final } = simulate(TEAMS[team], 52, seed, (s) => {
           const h = s.history[s.history.length - 1];
+          const t5 = s.stats.tierReachedWeek[5];
+          const resort = t5 !== undefined && h.week > t5;
           const streak = s.stats.aStreak ?? 0;
-          const covered = h.lines?.some((l) => / was covered by autopilot/.test(l.text));
-          if (covered) {
-            auto.add(h.week);
-            expect(streak, `${team} seed ${seed} week ${h.week}`).toBeLessThanOrEqual(prev);
-            if (streak > 0 && streak === prev) paused++;
-          } else expect(streak, `${team} seed ${seed} week ${h.week}`).toBeLessThanOrEqual(prev + 1);
-          if (h.grade !== 'A') expect(streak).toBe(0);
+          if (!resort) expect(streak, `${team} ${seed} wk ${h.week}`).toBe(0);
+          else if (h.grade !== 'A') run = 0;
+          else if (!h.autoRun.length) run++;
+          else if (streak > 0) {
+            // an autopilot A at the Resort holds the streak, and says so
+            expect(streak).toBe(prev);
+            expect(h.lines.some((l) => /doesn't count toward the eight: the streak holds/.test(l.text))).toBe(true);
+            paused++;
+          }
+          if (resort && !s.creditsWeek) expect(streak, `${team} ${seed} wk ${h.week}`).toBe(run);
           prev = streak;
         });
-        if (final.creditsWeek) expect(auto.has(final.creditsWeek), `${team} seed ${seed}`).toBe(false);
+        if (final.creditsWeek) {
+          credits++;
+          const t5 = final.stats.tierReachedWeek[5]!;
+          expect(final.creditsWeek - t5, `${team} seed ${seed}`).toBeGreaterThanOrEqual(8);
+        }
       }
     }
-    // the pause happens in these seasons (an A week with a seat on autopilot, late in the game)
+    // the all-good crew still beats the game, honestly (all 5 of these seasons on this build), and the pause is seen
+    expect(credits).toBeGreaterThan(0);
     expect(paused).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
-  it('the long-game guard (52 weeks, seeds 1-10, weeks 24-52): the Resort holds far better than before A0', () => {
-    // docs/EXPANSION.md 11.1 T1 asks for more (a median of 0 weeks below $0, at most 3 of 30 games ever below $0,
-    // median dead weeks ≤ 2, the credits in half of the three friends' games by week 45): A0 doesn't reach all of it
-    // (docs/DECISIONS.md 2026-09-29). This guards what it reached, with room for noise. Before A0, on these seeds:
-    // three friends 10 of 10 games below $0, 127 weeks below $0, 192 dead weeks; all average 10 of 10, 103, 180.
-    // A0: three friends 6 of 10, 24, 49; all average 2 of 10, 4, 21.
+  it('the long-game guard (52 weeks, seeds 1-10, weeks 24-52): the Resort holds, and the mechanism shows at week 52 before the cash does', () => {
+    // docs/EXPANSION.md 11.1 T1 asks for a median of 0 weeks below $0, at most 3 of 30 games ever below $0, median dead
+    // weeks ≤ 2 and the credits in half of the three friends' games by week 45. On these seeds, weeks 24-52:
+    //   before A0 (258d0d2): three friends 10 of 10 games below $0, 127 weeks, 192 dead weeks; all average 10, 103, 180
+    //   A0 (25afc96):        three friends 6 of 10, 24, 49; all average 2 of 10, 4, 21 (and the houses at 0-10 by week 52)
+    //   review round 1:      three friends 0 of 10, 0, 4; all average 0, 0, 0; median houses rentable at week 52 7 of 7
+    //                        and 7 of 7, median house health at week 52 about 48 and 70
+    // The guard keeps room for noise, and reads the houses at week 52 too (review round 1: a lever that regresses shows
+    // in the houses weeks before it shows in the cash).
     const run = (team: string) => {
       let games = 0;
       let neg = 0;
       let dead = 0;
       const cash: number[] = [];
+      const hp: number[] = [];
+      const rent: number[] = [];
       for (let seed = 1; seed <= 10; seed++) {
-        const { weeks } = simulate(TEAMS[team], 52, seed);
+        const { weeks } = simulate(TEAMS[team], 52, seed, (s) => {
+          if (s.week - 1 !== 52) return;
+          const hs = s.assets.filter((a) => a.kind === 'house');
+          hp.push(hs.reduce((t, h) => t + h.health, 0) / hs.length);
+          rent.push(s.history[s.history.length - 1].housesRentable);
+        });
         const late = weeks.filter((w) => w.week >= 24);
         const n = late.filter((w) => w.cash < 0).length;
         if (n) games++;
@@ -338,17 +481,23 @@ describe('A0 in whole seasons', () => {
         dead += late.filter((w) => w.revenue < 2000).length;
         cash.push(weeks[51].cash);
       }
-      return { games, neg, dead, cash52: [...cash].sort((a, b) => a - b)[5] };
+      const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[5];
+      return { games, neg, dead, cash52: median(cash), hp52: median(hp), rent52: median(rent) };
     };
     const tf = run('three friends');
-    expect(tf.neg).toBeLessThanOrEqual(45);
-    expect(tf.dead).toBeLessThanOrEqual(90);
-    expect(tf.games).toBeLessThanOrEqual(9);
+    expect(tf.games).toBeLessThanOrEqual(3);
+    expect(tf.neg).toBeLessThanOrEqual(12);
+    expect(tf.dead).toBeLessThanOrEqual(25);
+    // the hold line: the median game keeps at least 4 of its 7 houses rentable at week 52
+    expect(tf.rent52).toBeGreaterThanOrEqual(4);
+    expect(tf.hp52).toBeGreaterThanOrEqual(35);
     const av = run('all average');
-    expect(av.games).toBeLessThanOrEqual(3);
-    expect(av.neg).toBeLessThanOrEqual(8);
-    expect(av.dead).toBeLessThanOrEqual(30);
-    expect(av.cash52).toBeGreaterThan(100_000);
+    expect(av.games).toBeLessThanOrEqual(2);
+    expect(av.neg).toBeLessThanOrEqual(6);
+    expect(av.dead).toBeLessThanOrEqual(12);
+    expect(av.cash52).toBeGreaterThan(150_000);
+    expect(av.rent52).toBeGreaterThanOrEqual(6);
+    expect(av.hp52).toBeGreaterThanOrEqual(55);
   }, 120_000);
 
   it('a live tier-4 doc (bd1e1d2, engine 3) plays on under A0: its 8-week notices stand, its next renewal books 13 weeks, and it resolves 12 more weeks', () => {

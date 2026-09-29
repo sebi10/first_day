@@ -11,6 +11,7 @@
 // show (A's hintsFor and pickCheck). The UI keeps the draft in sessionStorage.
 import { alertFlags, alertTier, causeOf, lowerFirst, prefilledTask, protectionNeeded, siteOf } from '../../sim/alerts';
 import { ECON, ROLE_LABEL } from '../../sim/data';
+import { gridFirstAlert } from '../../sim/econ';
 import { acOf, judgeSlot, laborCost, planTask, repairLabor, stdPickFor } from '../../sim/flow';
 import { buyUnits, itemById, priceAt, unitWords } from '../../sim/items';
 import { hintsFor, ipcIndex, manualIndex, search, supplyIndex, type Doc } from '../../sim/search';
@@ -540,7 +541,7 @@ export function preview(s: IslandState, a: Alert, d: Draft): Preview {
   const bought = rows.reduce((n, r) => n + (r.buy > 0 ? r.value : 0), 0);
   const freight = buy + tools > 0 ? schedFreight(s, rows.filter((r) => r.buy > 0).map((r) => ({ item: r.item }))).cost : 0;
   const total = labour + bought + freight;
-  const lateWords = standingWords(s, total, safety, lateSafeAlert(s, a)) ?? undefined;
+  const lateWords = standingWords(s, total, safety, lateSafeAlert(s, a), gridFirstAlert(s, a)) ?? undefined;
   if (d.research) {
     const others = pull + buy ? ` The rest: pull ${pull}${buy ? ` · buy ${buy}` : ''}.` : '';
     return { ...base, outcome: 'research', text: `Not in the IPC: the job waits on the research branch (next, the airplane's logbooks).${others}` };

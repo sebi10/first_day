@@ -1,5 +1,6 @@
 // What the staff screens say (docs/JOBFLOW.md 15.11): pure reads of the island
 // for the analyst's Staff desk and the builders' line on Home. No engine writes.
+import { helperQueue } from '../../sim/engine';
 import { itemById, priceAt } from '../../sim/items';
 import { nextTierProgress } from '../../sim/progression';
 import { buildDef, buildSite, crewOf, nextUnit, openBuild, pilotSeats, STAFF, unitLines, working } from '../../sim/staff';
@@ -18,9 +19,9 @@ export const MATERIAL: Record<string, string> = {
 };
 export const materialName = (id: ItemId) => MATERIAL[id] ?? itemById(id)?.nomen.split(':')[0] ?? id;
 
-export const ROLE_ICON: Record<NpcRole, string> = { pilot: 'plane', housekeeper: 'house', builder: 'hardhat' };
-export const ROLE_WORD: Record<NpcRole, string> = { pilot: 'Pilot', housekeeper: 'Housekeeper', builder: 'Builder' };
-export const ROLE_PLURAL: Record<NpcRole, string> = { pilot: 'pilots', housekeeper: 'housekeepers', builder: 'builders' };
+export const ROLE_ICON: Record<NpcRole, string> = { pilot: 'plane', housekeeper: 'house', builder: 'hardhat', helper: 'bolt' };
+export const ROLE_WORD: Record<NpcRole, string> = { pilot: 'Pilot', housekeeper: 'Housekeeper', builder: 'Builder', helper: "Electrician's helper" };
+export const ROLE_PLURAL: Record<NpcRole, string> = { pilot: 'pilots', housekeeper: 'housekeepers', builder: 'builders', helper: "electrician's helpers" };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const units = (n: number) => (Math.abs(n - Math.round(n)) < 0.05 ? String(Math.round(n)) : n.toFixed(1));
@@ -41,6 +42,15 @@ export function doingNow(s: IslandState, n: Npc): string {
     return `flies ${total}: ${parts.join(' · ')}`;
   }
   if (n.role === 'housekeeper') return `turns over ${plural(STAFF.turnovers[n.skill - 1] ?? 0, 'house')} a week`;
+  if (n.role === 'helper') {
+    // the planned routine jobs they'd put in at the resolve if nobody else does them (review round 1)
+    const elec = s.players.elec?.name ?? 'the electrician';
+    const jobs = STAFF.helper.jobs[n.skill - 1] ?? 1;
+    const tonight = helperQueue(s);
+    return tonight.length
+      ? `${plural(jobs, 'job')} a week of ${elec}'s plans · tonight: ${tonight.map((o) => `${o.title}${s.assets.find((a) => a.id === o.assetId) ? ` (${s.assets.find((a) => a.id === o.assetId)!.name})` : ''}`).join(', ')}`
+      : `${plural(jobs, 'job')} a week of ${elec}'s plans · nothing planned for them tonight`;
+  }
   const b = openBuild(s);
   const out = STAFF.output[n.skill - 1] ?? 0;
   return b ? `on ${buildSite(b)} · ${units(out)} unit${out === 1 ? '' : 's'} a week` : 'no site work open';

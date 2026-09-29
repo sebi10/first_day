@@ -21,6 +21,7 @@ export function StaffDesk({ ctl }: { ctl: Ctl }) {
   const { s } = ctl;
   const [pick, setPick] = useState<Pick>(null);
   const crew = crewOf(s);
+  const helpers = crew.filter((n) => n.role === 'helper').length;
   const [more, setMore] = useState(false);
   // the board by what each hire does for the week's money (best first); the ones that would cost more than they
   // bring fold away behind "more", so the real choices are on top
@@ -37,7 +38,10 @@ export function StaffDesk({ ctl }: { ctl: Ctl }) {
 
       <div class="st-h">
         <h3>The crew</h3>
-        <span class="label">{crewCounts(s).map((c) => `${c.have}/${c.std} ${ROLE_PLURAL[c.role]}`).join(' · ')}</span>
+        <span class="label">
+          {crewCounts(s).map((c) => `${c.have}/${c.std} ${ROLE_PLURAL[c.role]}`).join(' · ')}
+          {helpers > 0 ? ` · ${helpers} ${helpers === 1 ? ROLE_WORD.helper.toLowerCase() : ROLE_PLURAL.helper}` : ''}
+        </span>
       </div>
       <div class="card st-list">
         {crew.length === 0 && <span class="muted">Nobody on the payroll: no flights, no turnovers, no site work.</span>}
@@ -110,7 +114,10 @@ function Payroll({ ctl }: { ctl: Ctl }) {
         <span class="chip num">Runway {rw.weeks} wk</span>
       </div>
       {later.length > 0 && <span class="label">From week {Math.min(...later.map((n) => n.start))}: +{usd(later.reduce((t, n) => t + n.wage, 0))} ({later.map((n) => n.name).join(', ')}, giving notice).</span>}
-      <span class="label">Weekly cost to the company. Pilots fly, housekeepers turn the houses over, builders do the site work. Nobody here does a trade's job.</span>
+      <span class="label">
+        Weekly cost to the company. Pilots fly, housekeepers turn the houses over, builders do the site work
+        {s.tier >= STAFF.helper.fromTier ? `, an electrician's helper puts in ${s.players.elec?.name ?? 'the electrician'}'s planned routine jobs` : ''}. Nobody here diagnoses, plans or signs for a trade.
+      </span>
     </div>
   );
 }
@@ -190,7 +197,7 @@ function HireSheet({ ctl, c, onDone }: { ctl: Ctl; c: Candidate; onDone(): void 
   return (
     <div class="col" style={{ gap: 12 }}>
       <h2>
-        Hire {c.name} as {c.role === 'housekeeper' ? 'a' : 'a'} {ROLE_WORD[c.role].toLowerCase()}?
+        Hire {c.name} as {/^[aeiou]/i.test(ROLE_WORD[c.role]) ? 'an' : 'a'} {ROLE_WORD[c.role].toLowerCase()}?
       </h2>
       <div class="row" style={{ gap: 8 }}>
         <Dots skill={c.skill} />
@@ -399,10 +406,14 @@ function CottageSheet({ ctl, onDone }: { ctl: Ctl; onDone(): void }) {
             ? `Rents about ${usd(plan.rent)} a week (a normal week's flights and bookings, averaged over the last 8 weeks)${plan.housekeeper ? `, once another housekeeper (${usd(STAFF.wage.housekeeper)}/wk) turns it over` : ''}`
             : `Rents nothing at this week’s bookings: ${projectWeek(s).booked} of ${projectWeek(s).rentable} houses are booked`}
         </span>
-        <b class={plan.payback ? 'st-good' : 'st-bad'}>{plan.payback ? `Pays back in about ${plan.payback} weeks` : 'No payback at this week’s bookings'}</b>
+        <span>
+          Upkeep about {usd(plan.upkeep)} a week in parts and labour, and one more house on {s.players.elec?.name ?? 'the electrician'}'s list ({plan.open} alert{plan.open === 1 ? '' : 's'} open now)
+        </span>
+        <b class={plan.payback ? 'st-good' : 'st-bad'}>{plan.payback ? `Pays back in about ${plan.payback} weeks, after the upkeep` : 'No payback at this week’s bookings'}</b>
       </div>
       <span class="label">
-        {b && !b.cottage ? `The builders finish ${buildSite(b)} first. ` : ''}Cash now {usd(s.cash)} → {usd(s.cash - COTTAGE_SHELL)}. It joins the island at health 80 and brings its own electrical work.
+        {b && !b.cottage ? `The builders finish ${buildSite(b)} first. ` : ''}Cash now {usd(s.cash)} → {usd(s.cash - COTTAGE_SHELL)}. It joins the island at health 80 and brings its own electrical work
+        {plan.open >= 6 ? `: with ${plan.open} alerts open already, a house nobody gets to closes, and then it pays back nothing` : ''}.
       </span>
       <div class="sheet-actions col" style={{ gap: 8 }}>
         <Btn

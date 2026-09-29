@@ -6,8 +6,8 @@
 // package D's hiring desk). Flow cards and requests stay approvable after End turn.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { needsFreight, openChain } from '../sim/chain';
-import { ECON, INSURANCE, ROLE_LABEL } from '../sim/data';
-import { chainCardCost } from '../sim/engine';
+import { ECON, INSURANCE, RECEIVER, ROLE_LABEL } from '../sim/data';
+import { chainCardCost, receiverLeft } from '../sim/engine';
 import { charterLoad, downtimeOf, expectedDeferralCost, fixedNow, isAog, isTagged, logistic, occupancy, openReports, projectWeek, rateBounds, season, SUB_FEE, subCharterOn } from '../sim/econ';
 import { alertShort } from '../sim/alerts';
 import { committed, spendable } from '../sim/ledger';
@@ -152,9 +152,22 @@ export function Desk({ ctl, onPlay }: { ctl: Ctl; onPlay(o: Order, cover?: boole
             <b>{o.title}:</b> <span style={{ whiteSpace: 'nowrap' }}>−{usd(o.report!.amount)}</span> every week until {o.role === 'fin' ? 'you fix it' : `${s.players[o.role]?.name ?? ROLE_LABEL[o.role]} fixes it`}.
           </span>
         ))}
-        {spend < ECON.freezeBelow && <span class="fault">Spendable under $2,000: only safety-critical work is approved, and stock orders are frozen.</span>}
-        {s.loan && <span class="label">Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week</span>}
-        {s.receivership > 0 && <span class="fault">Receivership · {s.receivership} wk: rates capped, spend over $800 blocked, grade capped at C.</span>}
+        {/* review round 1: honest about what can still be paid for (below $0 nothing is, unless the receiver funds it) */}
+        {spend < 0 && s.receivership > 0 ? (
+          <span class="fault">
+            Cash below $0: the receiver funds only safety-critical work, up to {usd(RECEIVER.allowance)} a week ({usd(receiverLeft(s))} left this week), added to the bridge loan. Stock orders are frozen.
+          </span>
+        ) : spend < 0 ? (
+          <span class="fault">Spendable below $0: nothing can be paid for until cash comes in. Two weeks below $0 puts the island in receivership.</span>
+        ) : (
+          spend < ECON.freezeBelow && <span class="fault">Spendable under $2,000: only safety-critical work is approved, up to the {usd(spend)} there is, and stock orders are frozen.</span>
+        )}
+        {s.loan && (
+          <span class="label">
+            Bridge loan: {usd(s.loan.left)} left · {usd(s.loan.weekly)}/week{s.receivership > 0 ? ', paid only out of cash above $0 while in receivership' : ''}
+          </span>
+        )}
+        {s.receivership > 0 && <span class="fault">Receivership · {s.receivership} wk{s.cash < 0 ? ' (until cash is back above $0)' : ''}: rates capped, spend over $800 blocked except safety work, grade capped at C. The way out is revenue: reopen the houses, get the grid and the planes back.</span>}
       </div>
 
       {s.pendingBonus && <Bonus ctl={ctl} />}
