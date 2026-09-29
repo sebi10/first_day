@@ -20,7 +20,8 @@ import { WhatsNew } from '../src/ui/whatsnew';
 vi.setConfig({ testTimeout: 30000 });
 
 const dir = resolve(import.meta.dirname, 'fixtures');
-const FIXTURES = readdirSync(dir).filter((f) => f.startsWith('v3-bd1e1d2-') && f.endsWith('.json'));
+// the live builds' docs: the job flow's (bd1e1d2, v3) and stage 1's (e810cc5, v4: the previous live build for stage 2)
+const FIXTURES = readdirSync(dir).filter((f) => (f.startsWith('v3-bd1e1d2-') || f.startsWith('v4-e810cc5-')) && f.endsWith('.json'));
 const load = (f: string): IslandState => migrate(JSON.parse(readFileSync(resolve(dir, f), 'utf8')) as IslandState);
 
 describe('the stage-2 contract (14.3)', () => {

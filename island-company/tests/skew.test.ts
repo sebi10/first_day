@@ -35,6 +35,28 @@
 // mainland sub-charter, the feeder scene, the builders' zoom) has to load,
 // render and resolve every one of them. The v3-bd1e1d2-restricted-* docs (the
 // twin flying restricted) are in tests/subcharter.test.ts.
+//
+// tests/fixtures/v4-e810cc5-*.json are docs the live stage 1 build wrote (e810cc5: ENGINE_VERSION 4, DOC_VERSION 4),
+// with its own engine and bots (scripts/fixtures-v4.ts, run in a worktree of e810cc5; the first doc that matched each
+// state). This build (stage 2: engine 5, doc v5) has to load, render and resolve every one of them: the last section.
+//
+//   v4-e810cc5-early         three friends, seed 1, week 4    tier 1, start of the week, alerts open, the starter crew
+//   v4-e810cc5-midweek       mistakes,      seed 1, week 5    tier 1, the mechanic ended, the analyst not started: an
+//                                                             open requisition, two of the electrician's cards waiting
+//   v4-e810cc5-chain         mistakes,      seed 1, week 28   tier 3, mid-week, an open part chain (at the fee)
+//   v4-e810cc5-feeder        three friends, seed 1, week 2    tier 1, the electrician ended, the feeder job approved
+//                                                             and waiting on its part
+//   v4-e810cc5-subcharter    three friends, seed 1, week 2    tier 1, the only guest plane grounded past due (the gear
+//                                                             write-up): the mainland sub-charter flies its guests
+//   v4-e810cc5-rcv           three friends, seed 2, week 37   tier 4, in receivership (3 weeks) with the receiver's
+//                                                             bridge loan ($36,110 left at $3,611 a week)
+//   v4-e810cc5-t4-carry      v3 t4-streak-high on e810cc5, week 18: tier 4, the carried streak (aCarry 8) held
+//   v4-e810cc5-t5-carry      v3 credits-next-t5 on e810cc5 (all average), week 26: tier 5, aStreak 7 carried (an
+//                            autopilot A paused it), one full-crew A from the credits
+//   v4-e810cc5-t5-carry-mid  the same mid-week (the mechanic ended)
+//   v4-e810cc5-credits       v3 credits-next-t5 on e810cc5 (all good), week 26: the credits rolled in week 25 on the
+//                            carried streak (creditsWeek 25, aCarry 7)
+//   v4-e810cc5-t2, -t4, -t4-mid, -t5, -t5-late: G0's (tests/g0.test.ts has what they are)
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -42,7 +64,7 @@ import { trace } from '../src/puzzles/trace';
 import { soleGuest } from '../src/sim/alerts';
 import { botTurn, TEAMS } from '../src/sim/bots';
 import { islandAircraft, openChain } from '../src/sim/chain';
-import { alertAog, downtimeOf, melOn, projectWeek, rentFactor, SUB_FEE, subCharterOn } from '../src/sim/econ';
+import { alertAog, aStreakAfter, creditsStreak, downtimeOf, melOn, projectWeek, rentFactor, SUB_FEE, subCharterOn } from '../src/sim/econ';
 import { ENGINE_VERSION, apply, healOpenChain } from '../src/sim/engine';
 import { cardOf, flowStage } from '../src/sim/flow';
 import { migrate } from '../src/sim/migrate';
@@ -57,8 +79,19 @@ import { cardVM, needsVM } from '../src/ui/purchasing/model';
 import { blocks, crossMoves, dockNext, endTurnChecks, flowMoves, launchFor, openOrders, pushes, teamNumbers, yourMoves } from '../src/ui/select';
 import { buildLine, buildRows, doingNow } from '../src/ui/staff/model';
 import { canCheck, checkView } from '../src/sim/checks';
-import { FIXTURE_KINDS, HOME } from '../src/ui/objects';
-import { assetPnl, fixtureFacts, flaggable, openAlertsOn } from '../src/ui/select';
+import { assetRef, FIXTURE_KINDS, HOME } from '../src/ui/objects';
+import { assetPnl, fixtureFacts, flaggable, inspectLabel, openAlertsOn } from '../src/ui/select';
+import { receiverLeft } from '../src/sim/engine';
+import { committed, spendable } from '../src/sim/ledger';
+import { families, moveClass, velocity } from '../src/sim/stock';
+import { G0_ENGINE } from '../src/sim/migrate';
+import { harborLines } from '../src/ui/harbor';
+import { facts, factsText } from '../src/ui/inspect/facts';
+import { whatsNewMapPanels } from '../src/ui/inspect/WhatsNewMap';
+import { hotspots, refKey } from '../src/ui/map/hotspots';
+import { LAYOUTS } from '../src/ui/map/layouts';
+import { deskCounts, deskTaskLine, flowQueue, legacyQueue, openingTab, reqQueue } from '../src/ui/purchasing/model';
+import { whatsNewUpkeepPanels } from '../src/ui/staff/WhatsNewUpkeep';
 
 // ten-week runs on each fixture: CI runners are about 1.5x slower
 vi.setConfig({ testTimeout: 30000 });
@@ -437,6 +470,269 @@ describe('island docs written by the live job-flow build (bd1e1d2, engine 3)', (
         expect(r.s).toBe(ahead);
       }
       expect(apply(ahead, { t: 'resolve', week: v4.week }, (v4.deadline ?? v4.updatedAt) + 1000).s).toBe(ahead);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The v5 gate (stage 2 + G0): docs the live stage 1 build (e810cc5, engine 4) wrote
+
+const V4 = ['early', 'midweek', 'chain', 'feeder', 'subcharter', 'rcv', 't4-carry', 't5-carry', 't5-carry-mid', 'credits', 't2', 't4', 't4-mid', 't5', 't5-late'].map((n) => `v4-e810cc5-${n}`);
+
+/** the analyst's desk: the tabs' counts, the queues, the money, the receiver, the Harbor sheet */
+function desk(s: IslandState) {
+  const c = deskCounts(s);
+  expect(Number.isFinite(c.approvals + c.staff + c.desk)).toBe(true);
+  openingTab(s);
+  for (const o of [...flowQueue(s), ...legacyQueue(s)]) deskTaskLine(s, o);
+  reqQueue(s);
+  expect(Number.isFinite(spendable(s) + committed(s) + receiverLeft(s))).toBe(true);
+  for (const f of families(s)) {
+    moveClass(s, f.fam);
+    velocity(s, f.fam);
+  }
+  for (const l of harborLines(s)) expect(l.body.length).toBeGreaterThan(0);
+}
+
+/** the map's hotspots (day and night) and, for each, the inspect sheet every seat opens from it */
+function mapAndSheets(s: IslandState) {
+  const day = hotspots(s, HOME, LAYOUTS.home, { phase: 'day' });
+  hotspots(s, HOME, LAYOUTS.home, { phase: 'night' });
+  const keys = new Set(day.map((h) => refKey(h.ref)));
+  for (const a of s.assets) expect(keys.has(refKey(assetRef(a))), a.id).toBe(true);
+  for (const h of day)
+    for (const role of ROLES) {
+      const f = facts(s, h.ref, role);
+      expect(f.name.length, `${refKey(h.ref)} as ${role}`).toBeGreaterThan(1);
+      expect(f.status.length).toBeGreaterThan(1);
+      expect(factsText(f)).not.toMatch(/undefined|NaN/);
+    }
+  for (const h of day) expect(inspectLabel(s, h.ref)).toBe(facts(s, h.ref, 'fin').name);
+  for (const role of ROLES) {
+    whatsNewMapPanels(s, role);
+    whatsNewUpkeepPanels(s, role);
+  }
+}
+
+/** everything a seat can open on the island: Home, the tech panels, the desk, the map and every object's sheet */
+function all(s: IslandState) {
+  screens(s);
+  desk(s);
+  mapAndSheets(s);
+}
+
+const streakOf = (s: IslandState) => ({ aStreak: s.stats.aStreak ?? 0, aCarry: s.stats.aCarry, v4From: s.stats.v4From, creditsWeek: s.creditsWeek });
+
+describe('island docs written by the live stage 1 build (e810cc5, engine 4)', () => {
+  for (const name of V4) {
+    it(`${name}: loads and renders (Home, the desk, the map, every sheet for every seat), keeps its cash, orders, streak and credits on this build's first move, and plays ten more weeks the same in memory and through JSON`, () => {
+      const doc = load(name);
+      expect(doc.engine).toBe(4);
+      // as written, and as the app shows it (useIsland: an engine below this build's → migrate a copy)
+      all(doc);
+      const shown = migrate(structuredClone(doc));
+      all(shown);
+      // what the migration does: at tier 4-5 G0's one-time upkeep migration, else nothing (tests/livedocs.ts)
+      expectLiveMigration(doc, shown, name);
+      expect(JSON.stringify(migrate(structuredClone(shown))), name).toBe(JSON.stringify(shown));
+      // the first move on this build: engine 5, the money, the work and the streak as they were
+      const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
+      expect(r.error).toBeUndefined();
+      const s = r.s;
+      expect(s.engine).toBe(ENGINE_VERSION);
+      expect(s.cash).toBe(doc.cash);
+      expect(s.openCash).toBe(doc.openCash);
+      expect(s.credit ?? 0).toBe(doc.credit ?? 0);
+      expect(s.loan).toEqual(doc.loan);
+      expect(s.receivership).toBe(doc.receivership);
+      expect(s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
+      expect(s.alerts).toEqual(doc.alerts);
+      expect(s.reqs).toEqual(doc.reqs);
+      expect(s.pos).toEqual(doc.pos);
+      expect(s.chain).toEqual(doc.chain);
+      expect(s.turns).toEqual(doc.turns);
+      expect(streakOf(s)).toEqual(streakOf(doc));
+      expect(s.stats.g0From).toBe(doc.tier >= 4 ? doc.week : undefined);
+      // stage 2's fields are written only when first used (docs/EXPANSION.md 0.2 rule 2)
+      expect(s.checked).toBeUndefined();
+      expect(s.flagged).toBeUndefined();
+      all(s);
+      // the seats still playing finish the week (the paper-sim crew) and it resolves here
+      let a = week(structuredClone(doc), name, false);
+      let b = week(JSON.parse(JSON.stringify(doc)) as IslandState, name, true);
+      const h = a.history[a.history.length - 1];
+      expect(h.week).toBe(doc.week);
+      expect(h.cashStart).toBe(doc.openCash);
+      expect(Number.isFinite(h.cashEnd)).toBe(true);
+      for (const o of doc.orders.filter(live)) expect(a.orders.some((x) => x.id === o.id), o.id).toBe(true);
+      all(a);
+      const g0From = a.stats.g0From;
+      expect(g0From).toBe(doc.tier >= 4 ? doc.week : undefined);
+      for (let w = 0; w < 10; w++) {
+        const before = a;
+        a = week(a, name, false);
+        b = week(b, name, true);
+        all(a);
+        expect(Number.isFinite(a.cash)).toBe(true);
+        expect(a.engine).toBe(ENGINE_VERSION);
+        const [prev, last] = a.history.slice(-2);
+        expect(last.cashStart).toBe(prev.cashEnd);
+        // G0 ran once, on the first read: never again on a doc this build wrote (a Harbor reached here gets it with the tier)
+        expect(a.stats.g0From).toBe(g0From);
+        expect(JSON.stringify(migrate(structuredClone(a)))).toBe(JSON.stringify(a));
+        // the credits stay rolled; a carried streak ends only on a week below A, and takes the carry with it
+        if (before.creditsWeek) expect(a.creditsWeek).toBe(before.creditsWeek);
+        if (last.grade !== 'A') expect(a.stats.aStreak ?? 0).toBe(0);
+        if (a.stats.aCarry !== undefined) {
+          expect(a.stats.aCarry).toBe(doc.stats.aCarry);
+          expect(a.stats.aStreak ?? 0).toBeGreaterThan(0);
+        }
+        if (before.stats.aCarry !== undefined && last.grade === 'A') expect(a.stats.aStreak ?? 0).toBeGreaterThanOrEqual(before.stats.aStreak ?? 0);
+        expect(a.stats.v4From).toBe(doc.stats.v4From);
+      }
+      expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+      expect(JSON.stringify(a).length).toBeLessThan(200_000);
+    });
+  }
+
+  it('the carried streaks as e810cc5 left them: held at the Harbor, one full-crew A from the credits at the Resort, the credits already rolled', () => {
+    const t4 = load('v4-e810cc5-t4-carry');
+    expect([t4.tier, t4.stats.aStreak, t4.stats.aCarry, t4.stats.v4From, t4.week]).toEqual([4, 8, 8, 17, 18]);
+    const t5 = load('v4-e810cc5-t5-carry');
+    expect([t5.tier, t5.stats.aStreak, t5.stats.aCarry, t5.stats.v4From, t5.week, t5.creditsWeek]).toEqual([5, 7, 7, 25, 26, undefined]);
+    // e810cc5 held it on an autopilot A in week 25 (the pause), and said so
+    const w25 = t5.history.find((r) => r.week === 25)!;
+    expect(w25.grade).toBe('A');
+    expect(w25.autoRun?.length).toBeGreaterThan(0);
+    const cr = load('v4-e810cc5-credits');
+    expect([cr.creditsWeek, cr.stats.aCarry, cr.stats.v4From]).toEqual([25, 7, 25]);
+    // this build reads them the same: the Board's count, the Harbor sheet's words
+    for (const doc of [t4, t5]) {
+      const m = migrate(structuredClone(doc));
+      expect(creditsStreak(m, m.week)).toBe(doc.stats.aStreak);
+      expect(harborLines(m).find((l) => l.title === 'The credits')!.body).toMatch(new RegExp(`Your streak from before this update counts: ${doc.stats.aStreak}/8`));
+    }
+    // and resolves the same: at the Harbor an A holds the 8 (a lower grade ends it); at the Resort the next full-crew A is the credits
+    const m4 = migrate(structuredClone(t4));
+    expect([aStreakAfter(m4, 18, 'A', true), aStreakAfter(m4, 18, 'A', false), aStreakAfter(m4, 18, 'B', true)]).toEqual([8, 8, 0]);
+    const m5 = migrate(structuredClone(t5));
+    expect([aStreakAfter(m5, 26, 'A', true), aStreakAfter(m5, 26, 'A', false), aStreakAfter(m5, 26, 'B', true)]).toEqual([8, 7, 0]);
+  });
+
+  it('the Resort doc one A from the credits: its next full-crew A week, resolved on this build, rolls them on the carried streak', () => {
+    const doc = load('v4-e810cc5-t5-carry');
+    const s = week(structuredClone(doc), 'carry-credits', false);
+    const h = s.history[s.history.length - 1];
+    expect([h.week, h.grade, h.autoRun]).toEqual([26, 'A', []]);
+    expect([s.creditsWeek, s.stats.aStreak, s.stats.aCarry]).toEqual([26, 8, 7]);
+    expect(h.lines.some((l) => /Eight full-crew A weeks at the Resort/.test(l.text))).toBe(true);
+    // and the credits stay rolled whatever comes after (the week below A ends the streak and the carry, not the credits)
+    let x = s;
+    for (let i = 0; i < 3; i++) x = week(x, `after-credits-${i}`, false);
+    expect(x.creditsWeek).toBe(26);
+  });
+
+  it('the mid-week doc: the analyst approves the open requisition and both waiting cards on this build, then the week resolves', () => {
+    const doc = load('v4-e810cc5-midweek');
+    expect(doc.turns.mech?.ended).toBe(true);
+    const q = doc.reqs!.find((x) => x.status === 'open')!;
+    const cards = doc.orders.filter((o) => o.status === 'pending' && o.role !== 'fin' && o.flow);
+    expect(cards.length).toBeGreaterThan(0);
+    let t = doc.updatedAt + 1000;
+    let r = apply(doc, { t: 'approveReq', reqs: [q.id], week: doc.week }, ++t);
+    expect(r.error).toBeUndefined();
+    expect(r.s.reqs!.find((x) => x.id === q.id)!.status).not.toBe('open');
+    let s = r.s;
+    for (const card of cards) {
+      r = apply(s, { t: 'approve', orderId: card.id, week: doc.week }, ++t);
+      expect(r.error, card.id).toBeUndefined();
+      expect(['ready', 'waiting_part']).toContain(r.s.orders.find((o) => o.id === card.id)!.status);
+      s = r.s;
+    }
+    for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: doc.week }, ++t).s;
+    expect(s.week).toBe(doc.week + 1);
+    expect(s.history.at(-1)!.cashStart).toBe(doc.openCash);
+    all(s);
+  });
+
+  it('the chain doc: the open part chain runs to the end on this build', () => {
+    const doc = load('v4-e810cc5-chain');
+    expect(openChain(doc)?.step).toBe('fee');
+    let s = structuredClone(doc);
+    for (let w = 0; w < 8 && openChain(s); w++) s = week(s, 'chain', false);
+    expect(openChain(s)).toBeFalsy();
+    expect(s.orders.find((o) => o.id === doc.chain!.orderId)!.status).not.toBe('cancelled');
+  });
+
+  it('the feeder doc: the approved feeder job gets its part and plays the underground feeder scene on this build', () => {
+    const doc = load('v4-e810cc5-feeder');
+    const job = doc.orders.find((o) => o.role === 'elec' && o.job === 'feeder' && o.status === 'waiting_part')!;
+    let s = doc;
+    for (let w = 0; w < 3 && s.orders.find((o) => o.id === job.id)!.status !== 'ready'; w++) {
+      const W = s.week;
+      for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: W }, (s.deadline ?? s.updatedAt) - 1000).s;
+    }
+    const o = s.orders.find((x) => x.id === job.id)!;
+    expect(o.status).toBe('ready');
+    const L = launchFor(s, o, 'elec');
+    expect(L.context?.job).toBe('feeder');
+    expect(trace.titleFor?.(L.context)).toBe('Underground feeder');
+  });
+
+  it("the sub-charter doc: the only guest plane is grounded past due, and this build's resolve flies its guests on the sub-charter and books it", () => {
+    const doc = load('v4-e810cc5-subcharter');
+    const sub = subCharterOn(doc)!;
+    expect(sub).not.toBeNull();
+    expect(soleGuest(doc, sub.plane.id)).toBe(true);
+    expect(alertAog(doc, sub.plane.id)?.id).toBe(sub.alert!.id);
+    let s = doc;
+    const t = doc.updatedAt + 1000;
+    for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: doc.week }, t).s;
+    expect(s.week).toBe(doc.week + 1);
+    const h = s.history[s.history.length - 1];
+    expect(h.week).toBe(doc.week);
+    expect(h.costs.subCharter).toBe(sub.flights * SUB_FEE);
+    expect(h.lines.some((l) => /mainland sub-charter flew the guests/.test(l.text))).toBe(sub.flights > 0);
+  });
+
+  it("the receivership doc: the receiver's loan and the count carry over, and this build's resolve takes the week's payment off it", () => {
+    const doc = load('v4-e810cc5-rcv');
+    expect(doc.receivership).toBe(3);
+    const loan = doc.loan!;
+    expect(loan.left).toBeGreaterThan(0);
+    let s = doc;
+    const t = doc.updatedAt + 1000;
+    for (const role of ROLES) if (!s.turns[role]?.ended) s = apply(s, { t: 'endTurn', role, week: doc.week }, t).s;
+    const h = s.history[s.history.length - 1];
+    expect(h.week).toBe(doc.week);
+    const paid = h.costs.loan ?? 0;
+    expect(paid).toBeGreaterThan(0);
+    expect(paid).toBeLessThanOrEqual(loan.weekly);
+    expect(s.loan!.left).toBe(loan.left - paid);
+    expect(s.receivership).toBe(s.cash < 0 ? Math.max(1, doc.receivership - 1) : doc.receivership - 1);
+    all(s);
+  });
+
+  it('reverse skew: every doc this build writes from them is engine 5, and an engine older than the doc (the live v4 one) refuses to write it', () => {
+    expect(G0_ENGINE).toBe(ENGINE_VERSION);
+    // e810cc5's apply() opens with the same guard as this one, `(prev.engine ?? 0) > ENGINE_VERSION`, at 4
+    // (scripts/reverse-skew.ts runs e810cc5's own reducer on these: every move refused, the doc untouched)
+    const src = readFileSync(resolve(import.meta.dirname, '..', 'src', 'sim', 'engine.ts'), 'utf8');
+    expect(src).toMatch(/if \(\(prev\.engine \?\? 0\) > ENGINE_VERSION\) return fail\('This island was saved by a newer version of Island Company\. Reload the app to keep playing\.'\);/);
+    for (const name of V4) {
+      const doc = load(name);
+      const r5 = apply(doc, { t: 'rename', role: 'elec', name: doc.players.elec!.name }, doc.updatedAt + 1000);
+      expect(r5.error, name).toBeUndefined();
+      const v5 = r5.s;
+      expect(v5.engine, name).toBe(5);
+      expect(v5.engine! > 4).toBe(true);
+      const ahead = { ...v5, engine: ENGINE_VERSION + 1 };
+      for (const role of ROLES) {
+        const r = apply(ahead, { t: 'endTurn', role, week: v5.week }, v5.updatedAt + 1000);
+        expect(r.error, `${name} ${role}`).toMatch(/saved by a newer version of Island Company\. Reload/);
+        expect(r.s).toBe(ahead);
+      }
+      expect(apply(ahead, { t: 'resolve', week: v5.week }, (v5.deadline ?? v5.updatedAt) + 1000).s).toBe(ahead);
     }
   });
 });

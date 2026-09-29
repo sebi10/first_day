@@ -340,8 +340,9 @@ function played(): IslandState {
 }
 
 const dir = resolve(import.meta.dirname, 'fixtures');
+// the live builds' docs as the app shows them (migrated): the job flow's (bd1e1d2, v3) and stage 1's (e810cc5, v4)
 const LIVE = readdirSync(dir)
-  .filter((f) => f.startsWith('v3-bd1e1d2-') && f.endsWith('.json'))
+  .filter((f) => (f.startsWith('v3-bd1e1d2-') || f.startsWith('v4-e810cc5-')) && f.endsWith('.json'))
   .map((f) => migrate(JSON.parse(readFileSync(resolve(dir, f), 'utf8')) as IslandState));
 
 /** every object on the island as the map would send it (the station and route refs are stage 3's) */

@@ -13,7 +13,7 @@
 //
 // The v3 docs the live job-flow build wrote (bd1e1d2, scripts/fixtures-v3.ts) need no migration on the v4
 // build: see the last describe here, and tests/skew.test.ts for how they play.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { botTurn, TEAMS } from '../src/sim/bots';
@@ -261,5 +261,85 @@ describe('the v3 docs the live job-flow build wrote (bd1e1d2): the v4 build read
     expect(r.s.engine).toBe(ENGINE_VERSION);
     expect(ENGINE_VERSION).toBe(5);
     expect(JSON.stringify(migrate(clone(r.s)))).toBe(JSON.stringify(r.s));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The v5 gate (stage 2 + G0): a live island opened on this build straight from v3 (not opened since the v4 release), or
+// from v4 (the live stage 1 build, e810cc5, scripts/fixtures-v4.ts)
+
+const all = (prefix: string) =>
+  readdirSync(resolve(import.meta.dirname, 'fixtures'))
+    .filter((f) => f.startsWith(prefix) && f.endsWith('.json'))
+    .map((f) => f.replace(/\.json$/, ''));
+const G0_LINE = /^This update brings the Harbor’s new pad-mount transformer and feeder/;
+
+describe('v3 → v5 in one read: a doc the job-flow build wrote (bd1e1d2), not opened since the v4 release', () => {
+  const V3_ALL = all('v3-bd1e1d2-');
+  it('there are the job flow’s docs and the late ones (a streak at the Harbor and the Resort, the credits one A away, an autopilot A, receivership)', () => {
+    expect(V3_ALL.length).toBeGreaterThanOrEqual(16);
+    for (const n of ['t4-streak-high', 't5-harbor-streak', 'credits-next-t5', 't5-auto-a', 'rcv-neg']) expect(V3_ALL).toContain(`v3-bd1e1d2-${n}`);
+  });
+
+  for (const name of V3_ALL)
+    it(`${name}: one read stamps v4's carry and G0's upkeep together, the first write is engine 5, nothing is lost, and neither runs again`, () => {
+      const doc = load(name);
+      expect(doc.engine).toBe(3);
+      const m = migrate(clone(doc));
+      expectLiveMigration(doc, m, name);
+      // v4's one-time stamp: the week v4 takes over, the streak the old rule earned carried in full
+      expect(m.stats.v4From).toBe(doc.week);
+      expect(m.stats.aCarry).toBe((doc.stats.aStreak ?? 0) > 0 ? doc.stats.aStreak : undefined);
+      // G0's, at the Harbor or the Resort: the stamp and one feed line
+      expect(m.stats.g0From).toBe(doc.tier >= 4 ? doc.week : undefined);
+      expect(m.feed.filter((e) => G0_LINE.test(e.text))).toHaveLength(doc.tier >= 4 ? 1 : 0);
+      // the first write on this build: engine 5 (never a v4 doc on the way), the money, the work, the streak as they were
+      const r = apply(doc, { t: 'rename', role: 'fin', name: doc.players.fin!.name }, doc.updatedAt + 1000);
+      expect(r.error).toBeUndefined();
+      const s = r.s;
+      expect(s.engine).toBe(5);
+      expect(s.cash).toBe(doc.cash);
+      expect(s.credit ?? 0).toBe(doc.credit ?? 0);
+      expect(s.loan).toEqual(doc.loan);
+      expect(s.creditsWeek).toBe(doc.creditsWeek);
+      expect(s.stats.aStreak ?? 0).toBe(doc.stats.aStreak ?? 0);
+      expect([s.stats.v4From, s.stats.aCarry, s.stats.g0From]).toEqual([m.stats.v4From, m.stats.aCarry, m.stats.g0From]);
+      expect(s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
+      expect(s.feed.filter((e) => G0_LINE.test(e.text))).toHaveLength(doc.tier >= 4 ? 1 : 0);
+      // stamped once: reads and writes after it change nothing more
+      expect(JSON.stringify(migrate(clone(s)))).toBe(JSON.stringify(s));
+      let a = s;
+      for (let w = 0; w < 3; w++) {
+        a = week(a, name, false);
+        expect(a.stats.v4From).toBe(doc.week);
+        expect(a.stats.g0From).toBe(m.stats.g0From);
+        expect(JSON.stringify(migrate(clone(a)))).toBe(JSON.stringify(a));
+        // a carried streak holds until a week below A ends it (and the carry with it)
+        if (a.stats.aCarry !== undefined) expect([a.stats.aCarry, (a.stats.aStreak ?? 0) > 0]).toEqual([doc.stats.aStreak, true]);
+      }
+    });
+});
+
+describe('v4 → v5: the docs the live stage 1 build wrote (e810cc5)', () => {
+  const V4_ALL = all('v4-e810cc5-');
+  it('this build reads them with G0’s one-time migration only (at tier 4-5), and keeps what v4 stamped (the carried streak, the credits)', () => {
+    expect(V4_ALL.length).toBeGreaterThanOrEqual(15);
+    for (const name of V4_ALL) {
+      const doc = load(name);
+      expect(doc.engine, name).toBe(4);
+      const m = migrate(clone(doc));
+      expectLiveMigration(doc, m, name);
+      expect(JSON.stringify(migrate(clone(m))), name).toBe(JSON.stringify(m));
+      expect(m.stats.v4From, name).toBe(doc.stats.v4From);
+      expect(m.stats.aCarry, name).toBe(doc.stats.aCarry);
+      expect(m.stats.aStreak, name).toBe(doc.stats.aStreak);
+      expect(m.creditsWeek, name).toBe(doc.creditsWeek);
+      expect(m.stats.g0From, name).toBe(doc.tier >= 4 ? doc.week : undefined);
+      selectors(m);
+    }
+    // the carried ones are there: a v3 island opened on v4 and played on (the Harbor, the Resort, past the credits)
+    const carried = V4_ALL.map(load).filter((d) => d.stats.aCarry !== undefined);
+    expect(carried.map((d) => d.tier).sort()).toEqual([4, 5, 5, 5]);
+    expect(carried.some((d) => d.creditsWeek !== undefined)).toBe(true);
   });
 });
