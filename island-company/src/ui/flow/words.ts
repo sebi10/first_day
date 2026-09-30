@@ -1,0 +1,179 @@
+// Small shared reads for the job-flow screens: the source icon, the flags a
+// row shows beside its stage, the whose-move chip, an asset's name with its
+// registration. Pure (no DOM).
+import { alertFlags, alertShort, soleGuest } from '../../sim/alerts';
+import { islandAircraft } from '../../sim/chain';
+import { RENO, ROLE_LABEL } from '../../sim/data';
+import { alertAog, gridFirstAlert, hazardOn, renoAwaitingFinal, safeAfterTurn } from '../../sim/econ';
+import { helperQueues } from '../../sim/engine';
+import { flowStage, type FlowStage } from '../../sim/flow';
+import type { Alert, AlertSrc, Asset, IslandState, Role } from '../../sim/types';
+import { flowMove } from '../select';
+
+/** the icon (kit.tsx) for where an alert came from */
+export const SRC_ICON: Record<AlertSrc, string> = {
+  squawk: 'squawk',
+  trend: 'trend',
+  wear: 'wear',
+  due: 'calendar',
+  ad: 'calendar',
+  finding: 'wrench',
+  again: 'alert',
+  landing: 'plane',
+  guest: 'guest',
+  utility: 'meter',
+  code: 'board',
+  takeoff: 'takeoff',
+  // stage 2 (docs/EXPANSION.md 6.4, 6.5): a quick check's write-up (right or wrong call look alike), a crewmate's flag
+  check: 'wrench',
+  flag: 'alert',
+};
+
+/** "Pilot squawk", "Guest complaint": the source in words (the row's aria label and the sheet's header) */
+export const SRC_WORDS: Record<AlertSrc, string> = {
+  squawk: 'Pilot squawk',
+  trend: 'Trend',
+  wear: 'Wear limit',
+  due: 'Due item',
+  ad: 'Airworthiness directive',
+  finding: 'Finding',
+  again: 'Written up again',
+  landing: 'Hard landing',
+  guest: 'Guest complaint',
+  utility: 'Utility reading',
+  code: 'Code notice',
+  takeoff: 'Install take-off',
+  check: 'Quick check',
+  flag: 'Reported by a crewmate',
+};
+
+/** a flag beside an alert's stage; `why` is said on the open job (the release gate: a chip that explains itself on tap) */
+export type Flag = { text: string; tone?: 'rust' | 'sea' | 'palm' | 'ink'; why?: string };
+
+/** an alert's source in words (a renovation's permit final is a code notice the county books on the permit: G0) */
+export const srcWord = (a: Pick<Alert, 'src' | 'sym'>) => (a.sym === 'E_RENO_FINAL' ? 'Permit final' : SRC_WORDS[a.src]);
+
+/** the flags beside an alert's stage: due, MEL, made safe, AOG (the only guest plane's guests on the sub-charter), the house shut */
+export function flagsOf(s: IslandState, a: Alert): Flag[] {
+  const out: Flag[] = [];
+  if (a.status === 'closed') return out;
+  const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
+  const done = o?.status === 'done';
+  if (!done) out.push(a.due <= s.week ? { text: 'due now', tone: 'rust' } : { text: `due wk ${a.due}` });
+  if (a.mel && a.mel.until >= s.week) out.push({ text: `MEL C to wk ${a.mel.until}`, tone: 'sea' });
+  else if (a.mel) out.push({ text: 'MEL ran out', tone: 'rust' });
+  if (a.safe) out.push({ text: 'SAFE', tone: 'palm' });
+  // the analyst's nudge this week (the Stock tab's Needs): plan it so the parts come in time
+  if (a.status === 'open' && a.nudged === s.week) out.push({ text: `${nameOf(s, 'fin')} nudged`, tone: 'sea' });
+  const asset = s.assets.find((x) => x.id === a.assetId);
+  if (asset?.kind === 'plane') {
+    if (alertAog(s, asset.id)?.id === a.id) {
+      out.push({ text: 'AOG', tone: 'rust' });
+      if (soleGuest(s, asset.id)) out.push({ text: 'sub-charter', tone: 'rust' });
+    }
+  }
+  if (asset?.kind === 'house') {
+    const hz = hazardOn(s, asset.id);
+    // a hazard closes its house at once, a crewmate's flag too (review round 2): passed on after your turn, you can
+    // still make it safe tonight
+    if (hz?.id === a.id && !hz.safe) out.push(safeAfterTurn(s, a) && s.turns.elec?.ended ? { text: 'SHUT', tone: 'rust', why: `Passed on after your turn: ${asset.name} is closed until it's made safe or fixed. You can still make it safe tonight.` } : { text: 'SHUT', tone: 'rust' });
+  }
+  // A0 (e): from tier 4 the grid's feed at real risk goes before code prep (every house hangs off it): the chip says
+  // why it's first (the feed only: a fuel-dock trip isn't the island feed)
+  if (gridFirstAlert(s, a)) out.push({ text: 'grid first', tone: 'rust' });
+  // G0: the renovated house waits on this code job's sign-off (the permit final, or a code notice doubling as it)
+  if (asset?.kind === 'house' && a.src === 'code' && renoAwaitingFinal(s, asset.id))
+    out.push({ text: 'house closed', tone: 'rust', why: `The builders finished ${asset.name}'s renovation: no guests until it passes the county's final (your final prep, then the inspector). Then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.` });
+  // the electrician's helper takes this ready job at the resolve if you don't (review round 1), and says who and how
+  const helper = o ? [...helperQueues(s)].find(([, q]) => q.some((x) => x.id === o.id))?.[0] : undefined;
+  if (helper) {
+    const n = (s.staff ?? []).find((x) => x.id === helper)?.name ?? 'The helper';
+    const elec = nameOf(s, 'elec');
+    out.push({
+      text: 'helper tonight',
+      tone: 'sea',
+      why: `${n} (electrician's helper) puts this in at tonight's resolve as ${elec} planned it, unless ${elec} does it first. It goes in under ${elec}'s licence: a wrong plan surfaces later, traced to ${elec} and naming ${n}.`,
+    });
+  }
+  const f = alertFlags(s, a);
+  if (f.hazard && !a.safe && !out.some((x) => x.text === 'SHUT')) out.push({ text: 'hazard', tone: 'rust' });
+  return out;
+}
+
+/** the whose-move chip on a row: the tech's own move reads dark, a crewmate's in their colour */
+export function moveChip(s: IslandState, a: Alert, me: Role): { chip: string; who: Role | null; mine: boolean; stage: FlowStage; text: string } {
+  const m = flowMove(s, a);
+  const stage = flowStage(s, a);
+  // the viewer's own move never reads as waiting on themselves ("Seb: logbooks" on Seb's row: "Your move: logbooks")
+  const own = `${nameOf(s, me)}: `;
+  const chip = m.who === me && m.chip.startsWith(own) ? `Your move: ${m.chip.slice(own.length)}` : m.chip;
+  return { chip, who: m.who, mine: m.who === me, stage, text: m.text };
+}
+
+/** "Twin N-12 · N412IC" for a plane, the house's or the grid's name otherwise */
+export function assetTitle(s: IslandState, asset: Asset | undefined): string {
+  if (!asset) return 'Unknown asset';
+  if (asset.kind !== 'plane') return asset.name;
+  const ac = islandAircraft(s.seed, asset);
+  return `${asset.name} · ${ac.registration}`;
+}
+
+export const nameOf = (s: IslandState, r: Role) => s.players[r]?.name ?? ROLE_LABEL[r];
+/** a phrase as a sentence's start: "the water heater's …" → "The water heater's …" */
+export const upperFirst = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** the alert in a few words, capitalised: "Brake pedal soft" */
+export const shortOf = (s: IslandState, a: Alert) => {
+  const t = alertShort(s, a);
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+/** sessionStorage, every access guarded (private windows, blocked storage) */
+export const session = {
+  get<T>(key: string): T | null {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, v: unknown) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(v));
+    } catch {
+      /* no storage: the draft lives in memory until the sheet closes */
+    }
+  },
+  del(key: string) {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
+/** localStorage for per-viewer conveniences (a folded list, a sheet seen once), every access guarded */
+export const local = {
+  get(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, v: string) {
+    try {
+      localStorage.setItem(key, v);
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
+/** when a bought line lands, as a tech reads it (a PO's eta is the week whose resolve delivers it) */
+export const landsWords = (week: number, eta: number) => (eta <= week ? 'lands tonight' : eta === week + 1 ? 'lands next week' : `lands wk ${eta}`);
+
+/** the draft's key: per island and alert */
+export const draftKey = (islandId: string, alertId: string) => `jf:${islandId}:${alertId}`;

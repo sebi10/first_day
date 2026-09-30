@@ -1,0 +1,512 @@
+// Aircraft paperwork: the records the mechanic researches (identity, logbooks,
+// IPC, AMM task cards) are deterministic, internally consistent, follow real
+// conventions, and can carry exactly one planted "part not in the IPC because
+// of a logbook-recorded STC" case.
+import { describe, expect, it } from 'vitest';
+import {
+  AMM_TASKS,
+  IPC_ATAS,
+  aircraftOf,
+  ammTaskFor,
+  approvalBasis,
+  bookFor,
+  bookSerial,
+  fmtDate,
+  findPart,
+  ipcFor,
+  ipcLines,
+  orderFor,
+  reviewRequest,
+  rowFor,
+  searchLog,
+  specOf,
+  taskKeyFor,
+  torqueFor,
+  type Aircraft,
+  type PlaneModel,
+} from '../src/sim/aircraft';
+
+const PLANES: [string, PlaneModel][] = [
+  ['p1', 'twin'],
+  ['p2', 'cargo'],
+  ['p3', 'float'],
+];
+const SEEDS = [1, 2, 3, 7, 42, 99, 1234, 777777];
+const isoBefore = (iso: string) => new Date(Date.parse(iso + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+const each = (f: (ac: Aircraft, seed: number) => void) => {
+  for (const seed of SEEDS) for (const [id, model] of PLANES) f(aircraftOf(seed, id, model), seed);
+};
+
+describe('aircraft identity', () => {
+  it('is the same airplane every time, and a different one on another island', () => {
+    expect(aircraftOf(7, 'p1', 'twin')).toEqual(aircraftOf(7, 'p1', 'twin'));
+    expect(aircraftOf(7, 'p3', 'float', { plant: '61-10' })).toEqual(aircraftOf(7, 'p3', 'float', { plant: '61-10' }));
+    const a = aircraftOf(7, 'p1', 'twin');
+    const b = aircraftOf(8, 'p1', 'twin');
+    expect(a.serial === b.serial && a.registration === b.registration).toBe(false);
+  });
+
+  it('has a valid N-number, a serial in the type range and a plausible year', () => {
+    each((ac) => {
+      expect(ac.registration).toMatch(/^N[1-9][0-9]{0,4}[A-HJ-NP-Z]{0,2}$/);
+      expect(ac.registration.length).toBeLessThanOrEqual(6);
+      const want = { twin: ['IC-310R', '310R'], cargo: ['IC-208C', '208C'], float: ['IC-185F', '185F'] }[ac.model];
+      expect(ac.designation).toBe(want[0]);
+      expect(ac.serial.startsWith(want[1])).toBe(true);
+      expect(ac.year).toBeGreaterThanOrEqual(1978);
+      expect(ac.year).toBeLessThanOrEqual(2016);
+      expect(ac.engines.length).toBe(ac.model === 'twin' ? 2 : 1);
+      expect(ac.tach).toBeCloseTo(ac.tt - ac.tachOffset, 1);
+    });
+    expect(aircraftOf(5, 'p1', 'twin').registration.startsWith('N12')).toBe(true);
+  });
+});
+
+describe('logbooks', () => {
+  it('are in date order, time only goes up, and tach = TT - offset', () => {
+    each((ac) => {
+      for (let i = 1; i < ac.log.length; i++) {
+        expect(ac.log[i].date >= ac.log[i - 1].date).toBe(true);
+        expect(ac.log[i].tt).toBeGreaterThanOrEqual(ac.log[i - 1].tt);
+      }
+      for (const e of ac.log) {
+        expect(e.tach).toBeCloseTo(e.tt - ac.tachOffset, 1);
+        expect(e.date >= ac.logStart && e.date <= ac.asOf).toBe(true);
+      }
+      expect(new Set(ac.log.map((e) => e.id)).size).toBe(ac.log.length);
+    });
+  });
+
+  it('every entry is signed with a certificate number; annuals by an IA', () => {
+    each((ac) => {
+      for (const e of ac.log) {
+        expect(e.signature).toMatch(/^\/s\/ .+(A&P \d{7}|CRS [A-Z]{3}R\d{3}[A-Z])/);
+        expect(e.ref.length).toBeGreaterThan(5);
+        if (e.kind === 'annual') {
+          expect(e.signer.kind).toBe('A&P/IA');
+          expect(e.signature.endsWith(' IA')).toBe(true);
+        }
+        if (e.kind === 'annual' || e.kind === '100hr' || e.kind === 'phase') expect(e.cert).toMatch(new RegExp(`^I certify that this ${e.book === 'airframe' ? 'aircraft' : e.book} has been inspected`));
+      }
+    });
+  });
+
+  it('100-hour inspections are never more than 110 hr apart; the turbine flies 200-hr phases', () => {
+    each((ac) => {
+      const insp = ac.log.filter((e) => e.kind === 'annual' || e.kind === '100hr' || e.kind === 'phase');
+      expect(insp.length).toBeGreaterThan(5);
+      for (let i = 1; i < insp.length; i++) expect(insp[i].tt - insp[i - 1].tt).toBeLessThanOrEqual(ac.model === 'cargo' ? 212 : 110);
+      if (ac.model !== 'cargo') {
+        const years = new Set(insp.filter((e) => e.kind === 'annual').map((e) => e.date.slice(0, 4)));
+        expect(years.size).toBeGreaterThanOrEqual(3);
+      } else expect(insp.every((e) => e.kind === 'phase')).toBe(true);
+    });
+  });
+
+  it('carries plenty of ordinary noise to read through', () => {
+    each((ac) => {
+      expect(ac.log.length).toBeGreaterThanOrEqual(40);
+      const kinds = new Set(ac.log.map((e) => e.kind));
+      for (const k of ['tire', 'brake', 'check', 'elt', 'repair'] as const) expect(kinds.has(k)).toBe(true);
+      if (ac.model !== 'cargo') expect(kinds.has('oil')).toBe(true);
+      expect(ac.log.some((e) => /AD \d{4}-\d{2}-\d{2}/.test(e.text))).toBe(true);
+    });
+  });
+
+  it('names the part numbers the IPC had in force on that date', () => {
+    each((ac) => {
+      for (const e of ac.log) {
+        if (!e.ata || !(IPC_ATAS as readonly string[]).includes(e.ata)) continue;
+        for (const p of e.pns ?? []) for (const pn of [p.on, p.off]) if (pn) expect(findPart(ac, pn).ipc.length, `${e.id} ${pn}`).toBeGreaterThan(0);
+      }
+      // the latest lining change used the lining the IPC lists for this S/N and SB status now
+      const sb = ac.sbs.find((x) => x.ipcAta === '32-40');
+      const last = [...ac.log].reverse().find((e) => e.kind === 'brake');
+      if (last && (!sb || sb.date <= last.date)) expect(last.text).toContain(rowFor(ipcFor(ac, '32-40'), 'lining')!.pn);
+    });
+  });
+});
+
+describe('logbooks as the shop keeps them', () => {
+  it('a twin has a book per engine and per propeller; singles have one of each', () => {
+    each((ac) => {
+      for (const e of ac.log) {
+        if (ac.model === 'twin' && e.book !== 'airframe') expect(e.pos, e.id).toMatch(/^(LH|RH)$/);
+        else expect(e.pos, e.id).toBeUndefined();
+      }
+      // each book is headed with its own unit's serial: never a hub model
+      for (const e of ac.log) {
+        const sn = bookSerial(ac, e.book, e.pos, e.date);
+        if (e.book === 'engine') expect(ac.engines.map((x) => x.serial)).toContain(sn);
+        if (e.book === 'propeller') expect(sn).toMatch(/^(FN|SP)\d{5}$/);
+      }
+      if (ac.model === 'twin') expect(bookSerial(ac, 'propeller', 'LH', ac.asOf)).not.toBe(bookSerial(ac, 'propeller', 'RH', ac.asOf));
+    });
+  });
+
+  it('every inspection is recorded in the airframe, engine and propeller books, signed by the same mechanic', () => {
+    each((ac) => {
+      const insp = (b: string) => ac.log.filter((e) => e.book === b && (e.kind === 'annual' || e.kind === '100hr' || e.kind === 'phase'));
+      const af = insp('airframe');
+      const units = ac.model === 'twin' ? 2 : 1;
+      expect(insp('engine').length).toBe(af.length * units);
+      expect(insp('propeller').length).toBe(af.length * units);
+      for (const a of af)
+        for (const e of ac.log.filter((x) => x.date === a.date && x.kind === a.kind && x.book !== 'airframe')) expect(e.signature, e.id).toBe(a.signature);
+      // the turbine's engine book is not empty any more: the engine items of each phase are in it
+      if (ac.model === 'cargo') expect(ac.log.filter((e) => e.book === 'engine').length).toBeGreaterThanOrEqual(8);
+      // the airframe entry points to the other books instead of listing compressions
+      for (const a of af) expect(a.text).not.toMatch(/Compression|Oil and filter changed/);
+    });
+  });
+
+  it('alternator / starter-generator work is in the engine book; propeller books carry their routine work', () => {
+    each((ac) => {
+      for (const e of ac.log) if (e.ata === '24-30') expect(e.book, e.id).toBe('engine');
+      for (const pos of ac.model === 'twin' ? ['LH', 'RH'] : [undefined]) {
+        const prop = ac.log.filter((e) => e.book === 'propeller' && e.pos === pos);
+        expect(prop.length).toBeGreaterThanOrEqual(10);
+      }
+    });
+    expect(bookFor('24-30')).toBe('engine');
+    expect(bookFor('24-60')).toBe('airframe');
+    expect(bookFor('61-10')).toBe('propeller');
+  });
+
+  it('a propeller STC starts a new propeller (and its S/N); on the twin, both propellers', () => {
+    for (const [id, model] of PLANES) {
+      const ac = aircraftOf(5, id, model, { plant: '61-10' });
+      const p = ac.plant!;
+      const installs = [p.entryId, ...p.alsoEntryIds].map((x) => ac.log.find((e) => e.id === x)!);
+      expect(installs.map((e) => e.pos)).toEqual(model === 'twin' ? ['LH', 'RH'] : [undefined]);
+      for (const e of installs) {
+        const before = bookSerial(ac, 'propeller', e.pos, isoBefore(e.date));
+        const after = bookSerial(ac, 'propeller', e.pos, e.date);
+        expect(before).toMatch(/^FN/);
+        expect(after).toMatch(/^SP/);
+        expect(e.text).toContain(`Removed ${e.pos ? `${e.pos} ` : ''}propeller P/N`);
+        expect(e.text).toContain(`S/N ${before}`);
+        expect(e.text).toContain(`New propeller S/N ${after}`);
+      }
+    }
+  });
+
+  it('after a kit goes on, its parts are replaced only by engineering authorization, and the job part not at all', () => {
+    for (const seed of SEEDS.slice(0, 6))
+      for (const [id, model] of PLANES)
+        for (const ata of IPC_ATAS)
+          for (const via of ['stc', 'field'] as const) {
+            const ac = aircraftOf(seed, id, model, { plant: ata, via });
+            const p = ac.plant!;
+            const inst = ac.log.find((e) => e.id === p.entryId)!;
+            const ica = ac.alterations.find((a) => a.displaces)!.parts!;
+            const eaFor = new Map<string, string>();
+            for (const e of ac.log.filter((x) => x.date > inst.date)) {
+              expect(e.pns?.some((x) => x.on === p.neededPn), `${seed} ${model} ${ata} ${e.id}`).toBeFalsy();
+              for (const x of e.pns ?? []) {
+                if (!x.on || !ica.some((r) => r.pn === x.on) || x.on.startsWith('MS')) continue;
+                const ea = /P\/N eligibility per (EA \d\d-\d{3}) \(Engineering\)/.exec(e.text)?.[1];
+                expect(ea, e.id).toBeDefined();
+                // one EA per P/N: every later replacement cites the same one
+                if (eaFor.has(x.on)) expect(ea).toBe(eaFor.get(x.on));
+                eaFor.set(x.on, ea!);
+              }
+            }
+          }
+  });
+});
+
+describe('Illustrated Parts Catalog', () => {
+  it('has all five assemblies for every type, in the ATA column layout', () => {
+    each((ac) => {
+      for (const ata of IPC_ATAS) {
+        const fig = ipcFor(ac, ata);
+        expect(fig.chapter).toBe(`${ata}-00`);
+        expect(fig.rows[0].upa).toBe('RF');
+        expect(new Set(fig.rows.map((r) => r.item)).size).toBe(fig.rows.length);
+        for (const r of fig.rows) {
+          expect(r.text.startsWith('. '.repeat(r.indent) + r.nomen)).toBe(true);
+          expect(r.item).toMatch(/^-?\d+A?$/);
+          if (r.vendor) expect(r.text).toContain(`(${r.vendor})`);
+        }
+        expect(fig.effCodes.map((c) => c.code)).toEqual(['A', 'B', 'C', 'D']);
+        expect(fig.effCodes.filter((c) => c.applies).length).toBe(2);
+        expect(fig.art.length).toBeGreaterThan(4);
+        for (const a of fig.art) expect(a.x >= 0 && a.x <= 1 && a.y >= 0 && a.y <= 1).toBe(true);
+      }
+    });
+  });
+
+  it('exactly one effectivity variant of each split part applies to this aircraft', () => {
+    each((ac) => {
+      for (const ata of IPC_ATAS) {
+        const fig = ipcFor(ac, ata);
+        const tags = new Set(fig.rows.filter((r) => r.eff && r.tag).map((r) => r.tag!));
+        for (const t of tags) expect(fig.rows.filter((r) => r.tag === t && r.eff && r.applies).length, `${ata} ${t}`).toBe(1);
+      }
+    });
+  });
+
+  it('effectivity follows S/N and the SB record', () => {
+    each((ac) => {
+      const fig = ipcFor(ac, '32-40');
+      const post = ac.sbs.some((s) => s.id === fig.effCodes[2].text.replace('POST ', ''));
+      expect(rowFor(fig, 'lining')!.eff).toBe(post ? 'C' : 'D');
+      const b = fig.effCodes[1];
+      expect(rowFor(fig, 'wheel')!.eff).toBe(b.applies ? 'B' : 'A');
+      expect(b.text).toBe(`S/N ${ac.serial.slice(0, 4)}${String(specOf(ac.model).brk['32-40']).padStart(ac.serial.length - 4, '0')} AND ON`);
+      expect(ac.snNum >= specOf(ac.model).brk['32-40']).toBe(b.applies);
+    });
+  });
+
+  it('supersession, interchangeability codes, NP and ALT resolve to something you can order', () => {
+    each((ac) => {
+      for (const ata of IPC_ATAS) {
+        const fig = ipcFor(ac, ata);
+        for (const r of fig.rows) {
+          if (r.supsdBy) {
+            expect([1, 2, 3]).toContain(r.supsdBy.code);
+            expect(fig.rows.find((x) => x.pn === r.supsdBy!.pn)?.supsds).toBe(r.pn);
+            expect(r.notes).toContain(`SUPSD BY ${r.supsdBy.pn} (INTCHG CODE ${r.supsdBy.code})`);
+          }
+          if (r.np) {
+            const o = orderFor(fig, r.pn)!;
+            expect(o.pn).not.toBe(r.pn);
+            expect(fig.rows.find((x) => x.pn === o.pn)!.np).toBeUndefined();
+          }
+          if (r.alt) expect(fig.rows.some((x) => x.pn === r.alt)).toBe(true);
+        }
+      }
+    });
+    // a pre-SB lining is code 3: ordering it means the SB set
+    const ac = aircraftOf(1, 'p1', 'twin');
+    const fig = ipcFor(ac, '32-40');
+    const old = fig.rows.find((r) => r.tag === 'lining' && r.eff === 'D')!;
+    expect(orderFor(fig, old.pn)).toMatchObject({ asSet: true, path: [old.pn, old.supsdBy!.pn] });
+  });
+
+  it('prints ATTACHING PARTS blocks, closed with the star line', () => {
+    each((ac) => {
+      for (const ata of IPC_ATAS) {
+        const lines = ipcLines(ipcFor(ac, ata));
+        const open = lines.filter((l) => l === 'ATTACHING PARTS').length;
+        expect(open).toBeGreaterThan(0);
+        expect(lines.filter((l) => l === '- - - * - - -').length).toBe(open);
+      }
+    });
+  });
+});
+
+describe('maintenance manual task cards', () => {
+  it('ATA task numbers, and every torque step has exactly one value for this aircraft', () => {
+    each((ac) => {
+      for (const key of AMM_TASKS) {
+        const t = ammTaskFor(ac, key);
+        expect(t.taskNo).toMatch(/^\d\d-\d\d-\d\d$/);
+        expect(t.taskNo.startsWith(t.ata)).toBe(true);
+        expect(t.ref).toBe(`IAW ${ac.designation.slice(0, 6)} MM ${t.taskNo}`);
+        expect(t.steps.length).toBeGreaterThan(5);
+        for (const s of t.steps) if (s.torque) expect(t.torques.filter((q) => q.key === s.torque && q.applies).length, `${key} ${s.torque}`).toBe(1);
+        for (const q of t.torques) expect(q.lo).toBeLessThan(q.hi);
+        expect(t.notes.some((n) => n.includes('STC'))).toBe(true);
+      }
+    });
+  });
+
+  it('torques and consumables change with SB status and S/N', () => {
+    const pre = SEEDS.map((s) => aircraftOf(s, 'p1', 'twin')).find((a) => !a.sbs.some((x) => x.ipcAta === '61-10'))!;
+    const post = SEEDS.map((s) => aircraftOf(s, 'p1', 'twin')).find((a) => a.sbs.some((x) => x.ipcAta === '61-10'))!;
+    const a = ammTaskFor(pre, 'prop');
+    const b = ammTaskFor(post, 'prop');
+    expect(torqueFor(a, 'propBolt')!.lo).toBeLessThan(torqueFor(b, 'propBolt')!.lo);
+    expect(a.consumables.filter((c) => c.applies).length).toBeLessThan(b.consumables.filter((c) => c.applies).length);
+    const early = SEEDS.flatMap((s) => [aircraftOf(s, 'p1', 'twin'), aircraftOf(s, 'p3', 'float')]);
+    const tie = new Set(early.map((ac) => torqueFor(ammTaskFor(ac, 'tires'), 'tieNut')!.eff));
+    expect(tie.size).toBe(2);
+  });
+
+  it('catalog job kinds and ATA codes find their task', () => {
+    expect(taskKeyFor('tires')).toBe('wheel');
+    expect(taskKeyFor('prop')).toBe('prop');
+    expect(taskKeyFor('wire')).toBe('prop');
+    expect(taskKeyFor('avionics')).toBe('radio');
+    expect(taskKeyFor('alternator')).toBe('alternator');
+    expect(taskKeyFor('32-40-02')).toBe('brake');
+    expect(taskKeyFor('29-10')).toBe('powerpack');
+    expect(taskKeyFor('cylinder')).toBeUndefined();
+    expect(ammTaskFor(aircraftOf(1, 'p2', 'cargo'), 'alternator').title).toMatch(/Starter-Generator/);
+  });
+
+  it('logged torques are the manual value for this configuration', () => {
+    each((ac) => {
+      const sb = ac.sbs.find((x) => x.ipcAta === '32-40');
+      const last = [...ac.log].reverse().find((e) => e.kind === 'brake');
+      if (!last || (sb && sb.date > last.date)) return;
+      const q = torqueFor(ammTaskFor(ac, 'brake'), 'backPlateBolt')!;
+      expect(last.text).toContain(`${q.lo}-${q.hi} ${q.unit}`);
+    });
+  });
+});
+
+describe('planted alteration: the part is not in the IPC', () => {
+  it('a plain aircraft has no alteration that replaced an IPC assembly', () => {
+    each((ac) => {
+      expect(ac.plant).toBeUndefined();
+      expect(ac.alterations.some((a) => a.displaces)).toBe(false);
+      expect(ac.alterations.length).toBeGreaterThanOrEqual(2);
+      for (const a of ac.alterations) {
+        expect(a.form337 <= ac.asOf).toBe(true);
+        if (a.kind === 'stc') expect(a.stc).toMatch(/^SA0\d{4}[A-Z]{2}$/);
+      }
+    });
+  });
+
+  it('planting adds exactly one, recorded in the logbook with its STC and 337, and nothing else changes', () => {
+    for (const seed of SEEDS.slice(0, 5)) {
+      for (const [id, model] of PLANES) {
+        const base = aircraftOf(seed, id, model);
+        for (const ata of IPC_ATAS) {
+          const ac = aircraftOf(seed, id, model, { plant: ata });
+          const p = ac.plant!;
+          const why = `${seed} ${model} ${ata}`;
+          expect(ac.alterations.filter((a) => a.displaces).length, why).toBe(1);
+          const alt = ac.alterations.find((a) => a.displaces)!;
+          expect(alt.displaces).toBe(ata);
+          // the IPC lists the OEM part for this aircraft, never the one on it
+          const fig = ipcFor(ac, ata);
+          expect(fig.rows.some((r) => r.pn === p.neededPn), why).toBe(false);
+          expect(fig.rows.find((r) => r.pn === p.ipcPn)?.applies, why).toBe(true);
+          expect(alt.parts!.some((r) => r.pn === p.neededPn)).toBe(true);
+          // the trail: the logbook entry names the STC and the 337 date
+          const entry = ac.log.find((e) => e.id === p.entryId)!;
+          expect(entry.kind).toBe('stc');
+          expect(entry.text).toContain(`STC ${p.stc}`);
+          expect(entry.text).toContain(fmtDate(p.form337));
+          expect(entry.text).toContain(p.ica);
+          expect(entry.pns!.some((x) => x.on === p.neededPn)).toBe(true);
+          expect(searchLog(ac, p.stc)[0].id).toBe(p.entryId);
+          // after the alteration nobody logs the OEM part for that item again
+          for (const e of ac.log) if (e.date > entry.date && e.ata === ata) expect(e.text.includes(p.ipcPn), `${why} ${e.id}`).toBe(false);
+          for (const lid of p.laterEntryIds) expect(ac.log.find((e) => e.id === lid)!.date > entry.date).toBe(true);
+          // the rest of the airplane is the same airplane
+          expect({ ...ac, log: 0, alterations: 0, ads: 0, plant: 0, props: 0 }).toEqual({ ...base, log: 0, alterations: 0, ads: 0, plant: 0, props: 0 });
+          const planted = new Map(ac.log.map((e) => [e.id, e]));
+          for (const e of base.log) {
+            if (e.date < entry.date) expect(planted.get(e.id), `${why} ${e.id}`).toEqual(e);
+            else if (!(e.kind === 'ad' && e.ata === ata)) expect(planted.get(e.id)?.tt, `${why} ${e.id}`).toBe(e.tt);
+          }
+          expect(ac.log.length).toBeGreaterThan(base.log.length - 8);
+        }
+      }
+    }
+  });
+
+  it("the mechanic's path: IPC says no, the logbook says STC, engineering approves on that data", () => {
+    for (const [id, model] of PLANES) {
+      for (const ata of IPC_ATAS) {
+        const base = aircraftOf(11, id, model);
+        const ac = aircraftOf(11, id, model, { plant: ata });
+        const p = ac.plant!;
+        expect(approvalBasis(ac, ata, p.ipcPn).basis).toBe('ipc');
+        expect(approvalBasis(ac, ata, p.neededPn)).toMatchObject({ basis: 'alteration', entry: { id: p.entryId } });
+        expect(approvalBasis(base, ata, p.neededPn).basis).toBe('none');
+        const req = { ata, pn: p.neededPn, stc: p.stc, form337: fmtDate(p.form337), entryId: p.entryId };
+        expect(reviewRequest(ac, req)).toEqual({ approved: true, problems: [] });
+        expect(reviewRequest(ac, { ...req, form337: '01/01/2001' }).approved).toBe(false);
+        expect(reviewRequest(ac, { ...req, entryId: ac.log[0].id }).approved).toBe(false);
+        expect(reviewRequest(ac, { ...req, pn: p.ipcPn }).approved).toBe(false);
+        expect(reviewRequest(base, req).approved).toBe(false);
+      }
+    }
+  });
+
+  it('an STC number with "337" in it is still an STC cite, not a field 337', () => {
+    let n = 0;
+    for (let seed = 1; seed <= 400 && n < 3; seed++) {
+      const ac = aircraftOf(seed, 'p3', 'float', { plant: '61-10' });
+      const p = ac.plant!;
+      if (!p.stc.includes('337')) continue;
+      n++;
+      expect(reviewRequest(ac, { ata: '61-10', pn: p.neededPn, stc: p.stc, form337: fmtDate(p.form337), entryId: p.entryId })).toEqual({ approved: true, problems: [] });
+    }
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it('a field approval: the same kit on a field-approved 337, and the 337 (not the STC) is the approval', () => {
+    for (const seed of SEEDS.slice(0, 4)) {
+      for (const [id, model] of PLANES) {
+        const base = aircraftOf(seed, id, model);
+        for (const ata of IPC_ATAS) {
+          const stc = aircraftOf(seed, id, model, { plant: ata });
+          const ac = aircraftOf(seed, id, model, { plant: ata, via: 'field' });
+          const p = ac.plant!;
+          const why = `${seed} ${model} ${ata}`;
+          expect(p.via).toBe('field');
+          expect(p.stc).toBe('');
+          expect(p.basisStc).toBe(stc.plant!.stc);
+          expect(p.entryId.slice(1)).toBe(stc.plant!.entryId.slice(1));
+          const alt = ac.alterations.find((a) => a.displaces)!;
+          expect(alt.kind).toBe('field');
+          expect(alt.stc).toBeUndefined();
+          const entry = ac.log.find((e) => e.id === p.entryId)!;
+          expect(entry.text).toContain(`Form 337 dated ${fmtDate(p.form337)}, field approved`);
+          // one approval path: the FSDO field-approved the 337; the STC holder's data is only what it approved
+          expect(entry.text).toContain(`STC ${p.basisStc} data used as acceptable data`);
+          expect(entry.text).not.toMatch(/8110-3|approved model list/);
+          expect(entry.book).toBe(bookFor(ata));
+          expect(ipcFor(ac, ata).rows.some((r) => r.pn === p.neededPn), why).toBe(false);
+          for (const lid of p.laterEntryIds) expect(ac.log.find((e) => e.id === lid)!.text + ac.log.find((e) => e.id === lid)!.ref).toContain(`Form 337 dated ${fmtDate(p.form337)}`);
+          for (const e of base.log) if (e.date < entry.date) expect(ac.log.find((x) => x.id === e.id), `${why} ${e.id}`).toEqual(e);
+          expect(approvalBasis(ac, ata, p.neededPn)).toMatchObject({ basis: 'alteration', entry: { id: p.entryId } });
+          const req = { ata, pn: p.neededPn, stc: '', form337: fmtDate(p.form337), entryId: p.entryId };
+          expect(reviewRequest(ac, req)).toEqual({ approved: true, problems: [] });
+          const viaStc = reviewRequest(ac, { ...req, stc: p.basisStc! });
+          expect(viaStc.approved).toBe(false);
+          expect(viaStc.problems[0]).toMatch(/approved model list/);
+          expect(reviewRequest(ac, { ...req, form337: '01/01/2001' }).approved).toBe(false);
+          expect(ac.ads.filter((a) => a.ata === ata).every((a) => !a.note.includes('STC '))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('a PMA part: the last replacement used an FAA-PMA part, and nothing else changed', () => {
+    for (const seed of SEEDS) {
+      for (const [id, model] of PLANES) {
+        const base = aircraftOf(seed, id, model);
+        for (const ata of ['32-40', '29-10'] as const) {
+          const ac = aircraftOf(seed, id, model, { plant: ata, via: 'pma' });
+          const p = ac.plant!;
+          const why = `${seed} ${model} ${ata}`;
+          expect(p.via, why).toBe('pma');
+          expect(ac.alterations).toEqual(base.alterations);
+          const entry = ac.log.find((e) => e.id === p.entryId)!;
+          expect(entry.text).toContain(`FAA-PMA P/N ${p.neededPn}`);
+          expect(entry.text).toContain(`replaces ${p.ipcPn}`);
+          expect(entry.text).toContain(`includes ${ac.designation}`);
+          // it is the last replacement of that part, and the IPC part it replaces is the one in force
+          const key = ata === '32-40' ? 'brake' : 'component';
+          const same = ac.log.filter((e) => e.kind === key && e.ata === ata);
+          expect(same[same.length - 1].id).toBe(entry.id);
+          expect(rowFor(ipcFor(ac, ata), ata === '32-40' ? 'lining' : 'filter')!.pn).toBe(p.ipcPn);
+          expect(approvalBasis(ac, ata, p.neededPn).basis).toBe('pma');
+          expect(approvalBasis(base, ata, p.neededPn).basis).toBe('none');
+          // only that one entry differs
+          const diff = ac.log.filter((e, i) => JSON.stringify(e) !== JSON.stringify(base.log[i]));
+          expect(ac.log.length).toBe(base.log.length);
+          expect(diff.map((e) => e.id)).toEqual([entry.id]);
+        }
+        expect(aircraftOf(seed, id, model, { plant: '61-10', via: 'pma' }).plant).toBeUndefined();
+      }
+    }
+  });
+
+  it('ADs against the removed assembly are marked not applicable', () => {
+    const ac = aircraftOf(3, 'p3', 'float', { plant: '61-10' });
+    const hub = ac.ads.find((a) => a.ata === '61-10')!;
+    expect(hub.note).toMatch(/^N\/A since/);
+    expect(hub.nextDue).toBeUndefined();
+    const plain = aircraftOf(3, 'p3', 'float').ads.find((a) => a.ata === '61-10')!;
+    expect(plain.nextDue).toBeGreaterThan(plain.last.tt);
+  });
+});

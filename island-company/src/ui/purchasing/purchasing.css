@@ -1,0 +1,878 @@
+/* The analyst's desk (docs/JOBFLOW.md 17.3): purchasing, the stock planner and money.
+   Phone first (390 px, 44 px targets); the desk sits in Home's right column on a desktop.
+   Chart colours: one blue for single series (near the brand sea), amber for the second
+   series or capex, violet for the third, a warm gray for context (the fixed costs).
+   Validated as a categorical set on the paper surface (blue/amber/violet: CVD ΔE 19.6);
+   amber sits under 3:1 on paper, so every chart carries visible labels and a table view.
+   Rust stays the alert hue only. */
+.pdesk {
+  --viz-1: #1b7fa3;
+  --viz-2: #d9862b;
+  --viz-3: #6d5bc4;
+  --viz-ctx: #a89f90;
+  --viz-grid: rgba(31, 42, 48, 0.1);
+  --hair: rgba(31, 42, 48, 0.08);
+}
+
+/* ---- the desk's tabs ---- */
+/* the tab bar sticks under the top of the screen; its strip of page color hides what scrolls under it */
+.pd-tabs-wrap {
+  position: sticky;
+  top: var(--safe-t);
+  z-index: 5;
+  margin-top: -8px;
+  padding-top: 8px;
+  background: var(--sand);
+}
+.pd-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  background: var(--sand-deep);
+  border-radius: 14px;
+  padding: 4px;
+  box-shadow: 0 6px 14px -10px rgba(31, 42, 48, 0.35);
+}
+/* where the tab bar sits in the page (zero height; it cancels the column gap it adds) */
+.pd-anchor {
+  height: 0;
+  margin-bottom: -12px;
+  scroll-margin-top: 12px;
+}
+.pd-tabs button {
+  appearance: none;
+  border: 0;
+  background: none;
+  min-height: 44px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--ink-soft);
+  position: relative;
+  padding: 0 2px;
+}
+.pd-tabs button.on {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.pd-tabs .n {
+  position: absolute;
+  top: -7px;
+  right: -3px;
+  box-shadow: 0 0 0 2px var(--sand);
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  padding: 0 5px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  display: grid;
+  place-items: center;
+}
+.pd-tabs .n.alert,
+.pd-tabs .dot {
+  background: var(--rust);
+  color: #fff;
+}
+.pd-tabs .dot {
+  position: absolute;
+  top: -4px;
+  right: 2px;
+  box-shadow: 0 0 0 2px var(--sand);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+/* ---- common pieces ---- */
+.pd-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pd-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pd-h h2 {
+  font-size: 19px;
+}
+.pd-lines {
+  display: flex;
+  flex-direction: column;
+}
+.pd-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--hair);
+  font-size: 15px;
+}
+.pd-line:first-child {
+  border-top: 0;
+}
+.pd-line .v {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  /* a long value wraps in its column instead of running over the label */
+  max-width: 15em;
+}
+.pd-line .sub {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.pd-line.total {
+  border-top: 2px solid var(--ink);
+  font-weight: 800;
+}
+.pd-muted {
+  color: var(--ink-soft);
+}
+.pd-ell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pd-wrap {
+  overflow-wrap: anywhere;
+}
+/* a chip longer than the card wraps inside it rather than widening the page */
+.pd-chips .chip {
+  white-space: normal;
+  max-width: 100%;
+}
+.pd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip.outline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px rgba(31, 42, 48, 0.25);
+}
+.chip.amber {
+  background: rgba(217, 134, 43, 0.18);
+  color: #7a4610;
+}
+.pd-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  min-height: 44px;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--sea-deep);
+  cursor: pointer;
+}
+.pd-note {
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.pd-late {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sea-deep);
+  background: rgba(46, 124, 147, 0.1);
+  border-radius: 10px;
+  padding: 8px 10px;
+  line-height: 1.35;
+}
+.pd-empty {
+  color: var(--ink-soft);
+}
+.pd-actions {
+  display: flex;
+  gap: 8px;
+}
+.pd-actions > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* ---- the approval card (a swipe card whose height follows its lines) ---- */
+.pc-stack {
+  position: relative;
+  /* the card flies 440 px out on approve or defer: clipped here, or a phone's layout viewport grows to fit it and the
+     whole page (the dock, the toasts) goes wider than the screen (review round 1); the margin keeps the shadow */
+  overflow-x: clip;
+  overflow-clip-margin: 24px;
+}
+.pc {
+  position: relative;
+  background: var(--paper);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 6px solid var(--tint);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: transform;
+  z-index: 1;
+}
+.pc-behind {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  transform: translateY(9px) scale(0.965);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.pc h3 {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.pc-sym {
+  font-size: 14px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pc-task {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.pc-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pc-total b {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+.pc-hint {
+  position: absolute;
+  top: 12px;
+  font-weight: 900;
+  padding: 2px 10px;
+  border-radius: 8px;
+  border: 3px solid currentColor;
+  rotate: -8deg;
+  pointer-events: none;
+}
+.pc-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pc-queue button {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 2px;
+  border-top: 1px solid var(--hair);
+  cursor: pointer;
+  font-size: 15px;
+}
+.pc-queue button:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 2px;
+}
+.pd-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--sand);
+  border-radius: 12px;
+  padding: 10px;
+}
+.pd-choice .seg {
+  background: var(--sand-deep);
+}
+.pd-choice .seg button {
+  font-size: 13px;
+  line-height: 1.15;
+  padding: 4px 6px;
+}
+
+/* ---- requisitions ---- */
+.rq-group {
+  display: flex;
+  flex-direction: column;
+}
+.rq-group-h {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  text-transform: none;
+  padding-bottom: 4px;
+}
+.rq-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: start;
+  padding: 6px 0;
+  border-top: 1px solid var(--hair);
+}
+.rq-tick {
+  appearance: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.rq-tick i {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 2px rgba(31, 42, 48, 0.3);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-style: normal;
+  font-weight: 900;
+  font-size: 15px;
+}
+.rq-tick[aria-checked='true'] i {
+  background: var(--sea);
+  box-shadow: none;
+}
+.rq-row .v {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding-top: 11px;
+  white-space: nowrap;
+}
+.rq-main {
+  padding-top: 10px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rq-main .pd-link {
+  min-height: 36px;
+  align-self: flex-start;
+  padding: 0;
+}
+
+/* ---- the stock planner ---- */
+.pd-stores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.pd-flag {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--hair);
+}
+.pd-flag:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.pd-flag .pip {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: var(--ink-soft);
+}
+.pd-flag.urgent .pip {
+  background: var(--rust);
+}
+.pd-flag .btn {
+  grid-column: 2;
+  justify-self: start;
+}
+.fchips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 16px 4px;
+  margin: 0 -16px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.fchips::-webkit-scrollbar {
+  display: none;
+}
+.fchip {
+  appearance: none;
+  border: 0;
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 14px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.fchip[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.pd-search {
+  min-height: 48px;
+  width: 100%;
+  border-radius: 14px;
+  border: 2px solid var(--sand-deep);
+  background: var(--white);
+  padding: 10px 14px;
+  font-size: 16px;
+  outline: none;
+}
+.pd-search:focus {
+  border-color: var(--sea);
+}
+.fam {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 10px 0;
+  min-height: 56px;
+  border-top: 1px solid var(--hair);
+  cursor: pointer;
+}
+div:first-child > .fam {
+  border-top: 0;
+}
+.nw {
+  white-space: nowrap;
+}
+.fam:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 2px;
+}
+.fam .name {
+  font-weight: 800;
+  font-size: 16px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.fam .name > span:first-child {
+  /* two lines, so "Duplex receptacles 15 A" never loses its rating to an ellipsis */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+  line-height: 1.2;
+}
+.fam .nums .chip {
+  font-size: 12px;
+  padding: 1px 7px;
+  margin-right: 2px;
+}
+.fam .nums {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fam .meta {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.fam .side {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.cls {
+  font-size: 11.5px;
+  font-weight: 800;
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.cls.fast {
+  background: rgba(78, 138, 90, 0.18);
+  color: #2f5e3a;
+}
+.cls.steady {
+  background: rgba(46, 124, 147, 0.14);
+  color: var(--sea-deep);
+}
+.cls.slow {
+  background: var(--sand-deep);
+  color: var(--ink);
+}
+.cls.dead {
+  background: var(--ink);
+  color: var(--paper);
+}
+.cls.new {
+  box-shadow: inset 0 0 0 1.5px rgba(31, 42, 48, 0.3);
+  color: var(--ink);
+}
+.abc {
+  font-size: 11.5px;
+  font-weight: 900;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: inline-grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 1.5px rgba(31, 42, 48, 0.3);
+}
+.items {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 6px 10px;
+  border-left: 3px solid var(--sand-deep);
+  margin: 0 0 6px 2px;
+}
+.item {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 8px;
+  min-height: 48px;
+  padding: 6px 0;
+  cursor: pointer;
+  align-items: center;
+}
+.item + .item {
+  border-top: 1px dashed var(--hair);
+}
+.item:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 2px;
+}
+.item b {
+  font-size: 14px;
+}
+.item .d {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.chev {
+  color: var(--ink-soft);
+  font-weight: 900;
+}
+.pd-fold {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  cursor: pointer;
+}
+.pd-fold:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 2px;
+}
+.need {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--hair);
+  font-size: 14.5px;
+}
+.need .d {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.need.aw .d b {
+  color: var(--rust);
+}
+
+/* ---- steppers (min/max, a buy, a return) ---- */
+.stepper {
+  display: inline-grid;
+  grid-template-columns: 44px minmax(52px, auto) 44px;
+  align-items: center;
+  background: var(--sand);
+  border-radius: 12px;
+}
+.stepper button {
+  appearance: none;
+  border: 0;
+  background: none;
+  height: 44px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--sea-deep);
+  cursor: pointer;
+}
+.stepper button[disabled] {
+  opacity: 0.35;
+}
+.stepper output {
+  text-align: center;
+  font-weight: 900;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.pd-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pd-field > span {
+  font-weight: 700;
+}
+.pd-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.pd-kv > div {
+  background: var(--sand);
+  border-radius: 12px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.pd-kv .k {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.pd-kv .val {
+  font-size: 18px;
+  font-weight: 800;
+}
+.pd-kv .s {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* ---- charts ---- */
+.chart {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.chart text {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--ink-soft);
+}
+.chart .hit {
+  fill: transparent;
+  cursor: pointer;
+}
+.chart .hit:focus {
+  outline: none;
+}
+.chart .sel {
+  fill: rgba(31, 42, 48, 0.06);
+}
+.chart-read {
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-read b {
+  font-weight: 900;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+.legend i.line {
+  height: 3px;
+  border-radius: 2px;
+  vertical-align: 3px;
+  width: 14px;
+}
+.spark {
+  display: block;
+  width: 104px;
+  height: 22px;
+}
+.barrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 14px;
+}
+button.barrow.tap {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.barrow.tap:focus-visible {
+  outline: 3px solid var(--sea);
+  outline-offset: 2px;
+}
+.barrow .v {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.barrow .track {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--viz-grid);
+  overflow: hidden;
+}
+.barrow .track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--viz-1);
+}
+.pd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.pd-table th,
+.pd-table td {
+  text-align: right;
+  padding: 4px 4px;
+  border-top: 1px solid var(--hair);
+  white-space: nowrap;
+}
+.pd-table th:first-child,
+.pd-table td:first-child {
+  text-align: left;
+}
+.pd-table th {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.pd-tablewrap {
+  overflow-x: auto;
+  margin: 0 -4px;
+}
+.hero-num {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.money-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.money-line span {
+  white-space: nowrap;
+}
+
+/* ---- the What's new sheet ---- */
+.wn-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+.wn-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(31, 42, 48, 0.18);
+}
+.wn-dots i.on {
+  background: var(--ink);
+}
+.wn-panel ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.35;
+}
+
+@media (min-width: 900px) {
+  .pd-tabs {
+    top: 12px;
+  }
+  .fchips {
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: 0;
+    padding: 2px 0 4px;
+  }
+}
