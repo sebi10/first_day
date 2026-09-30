@@ -1,7 +1,7 @@
 // The mechanic's walkaround (docs/EXPANSION.md 6.4): the plane in plan view (or
 // the generator side on, its door open) with every zone's observation in one view,
 // as a real walkaround circles the whole aircraft. He taps the zone he'd write up,
-// then Write it up; or All serviceable. At most 3 taps from the sheet: Walkaround,
+// then Write up: <the zone>; or All serviceable. At most 3 taps from the sheet: Walkaround,
 // a zone, the call.
 //
 // The skill is reading the signs: brake dust vs fretting dust, a breather's mist vs
@@ -27,7 +27,7 @@ const MARKS: Record<Art, Record<string, Mark>> = {
     nose: { at: [204, 30], spot: [162, 33] },
     lmain: { at: [52, 146], spot: [98, 124] },
     lnac: { at: [50, 50], spot: [98, 74] },
-    root: { at: [160, 146], spot: [160, 118] },
+    root: { at: [160, 146], spot: [146, 100] },
     rnac: { at: [270, 50], spot: [222, 74] },
     rmain: { at: [268, 146], spot: [222, 124] },
   },
@@ -244,7 +244,7 @@ export function Walkaround({ a, view, busy, onCall }: { a: Pick<Asset, 'kind' | 
         ))}
       </div>
       <Help lines={view.help} />
-      <CheckFoot none="All serviceable" call="Write it up" pick={pick} pickLabel={picked?.label} busy={busy} onCall={onCall} />
+      <CheckFoot none="All serviceable" call="Write up" pick={pick} pickLabel={picked?.label} busy={busy} onCall={onCall} />
     </div>
   );
 }

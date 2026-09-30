@@ -19,11 +19,12 @@ import { Island, phaseOf, type IslandProbe, type Phase } from '../island';
 import { focusBox, siteBox, type Pt } from '../island/geo';
 import { assetRef, fixtureRef, HOME, OBJECT_LABEL, type ObjectRef } from '../objects';
 import { settings } from '../settings';
-import { allCam, camForBox, frameOf, HOME_SCENE, limitsFor, nearCam, panCam, pxPerUnit, toScene, touchActionFor, viewRect, zoomAt, type Cam, type MapMode, type Size } from './camera';
+import { allCam, camForBox, coverCam, frameOf, HOME_SCENE, limitsFor, nearCam, panCam, pxPerUnit, toScene, touchActionFor, viewRect, zoomAt, type Cam, type MapMode, type Size } from './camera';
 import { MapController } from './controller';
 import { TAP, type PointerKind } from './gestures';
 import { bubbleSpot, hitTest, hotspots, inView, type Hotspot } from './hotspots';
 import { LAYOUTS } from './layouts';
+import { armClickSwallow } from './swallow';
 import './map.css';
 
 export type Preset = 'zone' | 'site' | 'all';
@@ -63,17 +64,6 @@ const lsSet = (k: string, v: string) => {
 };
 const isPreset = (v: unknown): v is Preset => v === 'zone' || v === 'site' || v === 'all';
 const pointerKind = (t: string): PointerKind => (t === 'mouse' ? 'mouse' : t === 'pen' ? 'pen' : 'touch');
-/** eat the one click that follows a pointer sequence the map handled (a cart's SVG button keeps its keyboard path) */
-function swallowNextClick() {
-  const off = () => window.removeEventListener('click', eat, true);
-  const eat = (e: MouseEvent) => {
-    off();
-    e.stopPropagation();
-    e.preventDefault();
-  };
-  window.addEventListener('click', eat, true);
-  setTimeout(off, 450);
-}
 const fine = () => typeof matchMedia !== 'undefined' && matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 /**
@@ -163,6 +153,9 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
           settled: (how, c, kind) => {
             if (how === 'gesture' && kind !== 'mouse' && cur.current.mode === 'inline' && c.k > 1.01) hintOnce('touch', 'Two fingers to move the map · ⤢ to explore');
           },
+          // the click the browser sends after a tap (or a mouse sequence) is ours: the map handled it. Swallowed wherever
+          // it lands (a sheet the tap opened is under the finger by then); a pinch or a touch drag sends none
+          swallow: () => armClickSwallow(),
           raf: (f) => requestAnimationFrame(f),
           caf: (id) => cancelAnimationFrame(id),
           later: (f, ms) => window.setTimeout(f, ms),
@@ -172,7 +165,15 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
       ),
     [],
   );
-  useEffect(() => () => ctl.dispose(), []);
+  // unmount: the controller, and the single-tap and hint timers (they'd act on a map that's gone)
+  useEffect(
+    () => () => {
+      ctl.dispose();
+      clearTimeout(single.current);
+      clearTimeout(hintT.current);
+    },
+    [],
+  );
 
   // ---- the viewport's size: measured before the first paint, then followed
   useLayoutEffect(() => {
@@ -195,7 +196,15 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
       const c = presetCam(first === 'site' && !siteBox(s) ? 'all' : first, vp);
       ctl.init(c);
       setCam(c);
-    } else ctl.resized();
+    } else {
+      ctl.resized();
+      // Explore just opened on a portrait phone at the whole island: fill the screen (review round 1)
+      if (coverOnOpen.current && cur.current.mode === 'explore') {
+        coverOnOpen.current = false;
+        const c = ctl.cam.k <= 1.001 ? coverCam(vp, HOME_SCENE, lim()) : null;
+        if (c) ctl.go(c, false);
+      }
+    }
   }, [vp?.w, vp?.h]);
   // the camera was committed: the drawing shows it now, so put the stage back (same frame, before paint)
   useLayoutEffect(() => {
@@ -209,10 +218,12 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
 
   // ---- Explore: lift the host over the page (the slot keeps its height), and put it back
   const wasExplore = useRef(false);
+  const coverOnOpen = useRef(false);
   useLayoutEffect(() => {
     const { host, slot } = p;
     const root = document.documentElement;
     if (explore) {
+      coverOnOpen.current = true;
       slot.style.minHeight = `${slot.offsetHeight}px`;
       document.body.appendChild(host);
       root.classList.add('map-exploring');
@@ -226,6 +237,29 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
     wasExplore.current = explore;
   }, [explore]);
   useEffect(() => () => document.documentElement.classList.remove('map-exploring'), []);
+  // a move that leaves the map (a sheet's alert or job, the desk, Stores, a message) closes Explore, so what it opens is
+  // on top (review round 1: the job sheet opened under Explore, the screen only dimmed, and the desk's links did
+  // nothing). An object's own sheet (openTarget({ object })) opens over Explore as before
+  useEffect(() => {
+    if (!explore) return;
+    const leave = () => setExplore(false);
+    const onOpen = (e: Event) => {
+      const t = (e as CustomEvent<Record<string, unknown> | null>).detail;
+      if (t && !('object' in t)) leave();
+    };
+    const onFlow = (e: Event) => {
+      const t = (e as CustomEvent<{ stores?: boolean; start?: boolean } | null>).detail;
+      if (t?.stores || t?.start) leave();
+    };
+    window.addEventListener('ic:open', onOpen);
+    window.addEventListener('ic:dm', leave);
+    window.addEventListener('ic:flow', onFlow);
+    return () => {
+      window.removeEventListener('ic:open', onOpen);
+      window.removeEventListener('ic:dm', leave);
+      window.removeEventListener('ic:flow', onFlow);
+    };
+  }, [explore]);
 
   // ---- listeners the map needs non-passive: the wheel, two-finger touches, the click after a tap or a drag
   useEffect(() => {
@@ -245,13 +279,14 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
       ctl.wheel([e.clientX - r.left, e.clientY - r.top], dy, e.ctrlKey && Math.abs(dy) < 50);
     };
     // inline, two fingers belong to the map (the page mustn't scroll or zoom under them); one finger scrolls
+    // (the fingers on the map: a thumb resting elsewhere on the screen doesn't make one finger here a pinch)
     const onTouch = (e: TouchEvent) => {
-      if (e.touches.length >= 2) multiSeen.current = true;
+      if (e.targetTouches.length >= 2) multiSeen.current = true;
       // (the finger left from a pinch keeps panning the map until it lifts)
       if (e.cancelable && multiSeen.current) e.preventDefault();
     };
     const onEnd = (e: TouchEvent) => {
-      if (e.touches.length === 0) multiSeen.current = false;
+      if (e.targetTouches.length === 0) multiSeen.current = false;
     };
     const onGesture = (e: Event) => e.preventDefault(); // iOS Safari's page pinch-zoom
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -389,9 +424,7 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
   };
   const onUp = (e: PointerEvent) => {
     if (!ctl.g.active) return;
-    // the click the browser sends after this is ours: the map handled the tap (or the drag) itself. Swallowed
-    // wherever it lands: a sheet the tap opened is under the finger by then
-    swallowNextClick();
+    // (the controller arms the click swallower when a click will follow: deps.swallow)
     ctl.up(pin(e));
   };
   const onCancel = (e: PointerEvent) => ctl.g.active && ctl.cancel(pin(e));

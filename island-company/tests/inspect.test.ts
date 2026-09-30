@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 import { h, render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { findingOf, liveAlerts, raiseAlert, SYMPTOMS } from '../src/sim/alerts';
+import { alertShort, findingOf, liveAlerts, raiseAlert, SYMPTOMS } from '../src/sim/alerts';
 import { botTurn, TEAMS, type Team } from '../src/sim/bots';
 import { CHECK_ROWS, checkRowKey } from '../src/sim/checkdata';
 import { checkView, type CheckView } from '../src/sim/checks';
@@ -29,7 +29,7 @@ import { gseCarts } from '../src/sim/econ';
 import { fixTaskFor, stdPickFor } from '../src/sim/flow';
 import { migrate } from '../src/sim/migrate';
 import { hashSeed, rng } from '../src/sim/rng';
-import { crewOf } from '../src/sim/staff';
+import { crewOf, staffEffect } from '../src/sim/staff';
 import { addStarter } from '../src/sim/stock';
 import { ROLES, type Action, type Alert, type IslandState, type OpsRole, type Role } from '../src/sim/types';
 import { facts, factsText, type Facts } from '../src/ui/inspect/facts';
@@ -454,7 +454,9 @@ describe('facts: every object kind x every seat (6.3, 13.3)', () => {
   it('checks from tier 2, flags from week 3: the sheet says why not before then', () => {
     const s = island(2, 1);
     const p = facts(s, assetRef(s.assets.find((a) => a.id === 'p1')!), 'mech');
-    expect(p.primary).toMatchObject({ t: 'check', ok: false, why: 'Quick checks open at tier 2.' });
+    // (review round 1) no disabled footer at tier 1: one line says when the check comes
+    expect(p.primary).toBeNull();
+    expect(p.lines.map((l) => l.text)).toContain('The walkaround (one quick check a week) opens at tier 2.');
     const h = facts(s, assetRef(s.assets.find((a) => a.id === 'h1')!), 'fin');
     expect(h.report).toMatchObject({ t: 'flag', ok: false, why: 'Report a problem opens in week 3.' });
   });
@@ -508,10 +510,21 @@ describe('the sheets render and their moves dispatch (6.2, 9.2)', () => {
       { t: 'setRates', nightly: n, charter: s.rates.charter },
     ]);
     m.unmount();
-    // hire: this week's candidate for the figure's role, then one confirm
+    // hire: this week's candidate for the figure's role, then one confirm; a spare that brings no new income is no
+    // solid Hire (review round 1), only the Hiring board
     const pilot = crewOf(s).find((x) => x.role === 'pilot')!;
     s.hiring = { week: s.week, cands: [{ id: 'cx1', name: 'Kai L.', role: 'pilot', skill: 4, ask: 380, start: s.week + 1 }] };
     m = await mount(s, 'fin', { kind: 'staff', id: pilot.id, st: HOME });
+    expect(staffEffect(s, s.hiring.cands[0], 'hire').net).toBeLessThanOrEqual(0);
+    expect(hasButton(m.root, 'Hire Kai L.')).toBe(false);
+    expect(textOf(m.root)).toMatch(/Another pilot wouldn't pay for their wage this week \(\$380 a week · net about −\$\d+ a week\)/);
+    expect(hasButton(m.root, 'Hiring board')).toBe(true);
+    m.unmount();
+    // a hire that pays (a cheap housekeeper: the reviews' lift covers her) is the sheet's Hire
+    const hk = crewOf(s).find((x) => x.role === 'housekeeper')!;
+    s.hiring = { week: s.week, cands: [{ id: 'cx1', name: 'Kai L.', role: 'housekeeper', skill: 4, ask: 40, start: s.week + 1 }] };
+    expect(staffEffect(s, s.hiring.cands[0], 'hire').net).toBeGreaterThan(0);
+    m = await mount(s, 'fin', { kind: 'staff', id: hk.id, st: HOME });
     await click(button(m.root, 'Hire Kai L.'));
     expect(m.calls).toEqual([]);
     await click(button(m.root, 'Confirm the hire'));
@@ -588,12 +601,14 @@ describe('the walkaround (6.4): every zone in one view, the call in 3 taps', () 
       const marks = walk(m.root).filter((e) => e.getAttribute('class')?.startsWith('mk'));
       expect(marks).toHaveLength(view.items.length);
       // the call waits for a zone
-      expect(button(m.root, 'Write it up').disabled).toBe(true);
+      expect(button(m.root, 'Write up').disabled).toBe(true);
       // 2: a zone (on the drawing), 3: the call
       const zone = view.items[view.items.length - 1];
       await click(marks[marks.length - 1]);
       expect(items[items.length - 1].getAttribute('aria-pressed')).toBe('true');
-      await click(button(m.root, 'Write it up'));
+      // (review round 1: the call names what it writes up, apart from the sheet's squawk card)
+      expect(textOf(button(m.root, 'Write up'))).toBe(`Write up: ${zone.label}`);
+      await click(button(m.root, 'Write up'));
       expect(m.calls).toEqual([{ t: 'check', role: 'mech', assetId: id, item: zone.id, week: s.week }]);
       // blind: the words say it's on the list, never whether it was right
       const t = textOf(m.root);
@@ -614,6 +629,20 @@ describe('the walkaround (6.4): every zone in one view, the call in 3 taps', () 
     m.unmount();
   });
 
+  it('the week closes under an open check: it goes back to the sheet with a word, nothing written up (review round 1)', async () => {
+    const s = checkIsland(4);
+    const a = s.assets.find((x) => x.id === 'p1')!;
+    const m = await mount(s, 'mech', assetRef(a));
+    await click(button(m.root, 'Walkaround'));
+    expect(hasButton(m.root, 'All serviceable')).toBe(true);
+    await m.rerender({ ...s, week: s.week + 1 });
+    await m.rerender();
+    expect(hasButton(m.root, 'All serviceable')).toBe(false);
+    expect(textOf(m.root)).toContain("The week closed before your call: nothing was written up. This week's check is open.");
+    expect(m.calls).toEqual([]);
+    m.unmount();
+  });
+
   it('the component alone: a tap on a list item picks it; the call carries it', async () => {
     const s = checkIsland();
     const view = checkView(s, 'mech', 'p1')!;
@@ -621,7 +650,7 @@ describe('the walkaround (6.4): every zone in one view, the call in 3 taps', () 
     const got: (string | null)[] = [];
     await act(() => render(h(Walkaround, { a: s.assets.find((x) => x.id === 'p1')!, view, onCall: (i: string | null) => void got.push(i) }), root as unknown as Element));
     await click(button(root, view.items[1].label));
-    await click(button(root, 'Write it up'));
+    await click(button(root, 'Write up'));
     expect(got).toEqual([view.items[1].id]);
     render(null, root as unknown as Element);
   });
@@ -657,7 +686,7 @@ describe('the IR scan (6.4)', () => {
     // the thermal image paints by temperature: ambient + rise at each lug
     expect(t).toMatch(/ambient \d\d °C/);
     await click(button(root, view.items[2].label));
-    await click(button(root, 'Open it up'));
+    await click(button(root, 'Write up'));
     await click(button(root, 'All normal'));
     expect(got).toEqual([view.items[2].id, null]);
     render(null, root as unknown as Element);
@@ -690,7 +719,7 @@ describe('the meter check (6.4)', () => {
       expect(t).toMatch(/GFCI: /);
       expect(t).toMatch(/L1 \d{3}\.\d/);
       await click(button(root, view.items[0].label));
-      await click(button(root, 'Write it up'));
+      await click(button(root, 'Write up'));
       expect(got).toEqual([view.items[0].id]);
       render(null, root as unknown as Element);
     }
@@ -702,19 +731,25 @@ describe('Report a problem (6.5)', () => {
     const s = island(6, 3);
     const m = await mount(s, 'fin', assetRef(s.assets.find((a) => a.id === 'h1')!));
     await click(button(m.root, 'Report a problem to Ben'));
-    expect(textOf(m.root)).toContain("Adds one alert for Ben now, in your name. It's on Ben's list until Ben closes it.");
+    expect(textOf(m.root)).toContain("Passes on what a guest reported about Cottage 1: one alert on Ben's list, from you, until Ben closes it. You'll see what it said.");
     expect(m.calls).toEqual([]);
     await click(button(m.root, 'Report it'));
     expect(m.calls).toEqual([{ t: 'flag', role: 'fin', assetId: 'h1', week: s.week }]);
     m.unmount();
+    // (review round 1) then the sheet says what went on the list in your name, in its source's words
+    const after = apply(s, { t: 'flag', role: 'fin', assetId: 'h1', week: s.week }, NOW).s;
+    const al = after.alerts!.find((a) => a.src === 'flag')!;
+    const m2 = await mount(after, 'fin', assetRef(after.assets.find((a) => a.id === 'h2')!));
+    expect(textOf(m2.root)).toContain(`This week you passed on a guest's complaint at Cottage 1 to Ben: ${alertShort(after, al)}.`);
+    m2.unmount();
   });
 
-  it("the one-received cap's words, and the DM with its message started", async () => {
+  it("the one-a-week cap's words, and the DM with its message started", async () => {
     let s = island(6, 3);
-    s = apply(s, { t: 'flag', role: 'fin', assetId: 'h1', week: s.week }, NOW).s;
+    s = apply(s, { t: 'flag', role: 'mech', assetId: 'h1', week: s.week }, NOW).s;
     const ev = listen();
     const m = await mount(s, 'mech', assetRef(s.assets.find((a) => a.id === 'h2')!));
-    expect(textOf(m.root)).toContain('Ben already has a flag this week: message Ben instead.');
+    expect(textOf(m.root)).toContain('One report a week: yours is used. Message them instead.');
     expect(hasButton(m.root, 'Report a problem')).toBe(false);
     await click(button(m.root, 'Message Ben'));
     expect(ev.seen.at(-1)).toEqual({ type: 'ic:dm', detail: { role: 'elec', prefill: 'About Cottage 2: ' } });

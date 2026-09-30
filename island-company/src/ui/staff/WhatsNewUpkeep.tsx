@@ -2,6 +2,7 @@
 // with this update), and renovations, in each seat's words. It rides in the version-keyed shell (../whatsnew.tsx)
 // after stage 2's map panels, once per island and seat on this device. An island that hasn't played yet (week 1 or
 // earlier) doesn't see it: it meets these at the Harbor.
+import { GEN_UPGRADE } from '../../sim/checkdata';
 import { RENO, WARRANTY } from '../../sim/data';
 import type { IslandState, Role } from '../../sim/types';
 import type { WhatsNewPanel } from '../whatsnew';
@@ -28,12 +29,12 @@ export function whatsNewUpkeepPanels(s: IslandState, role: Role): WhatsNewPanel[
     mech: <>A house closed for its renovation takes no guests: fewer passengers on your flights for those weeks.</>,
     elec: (
       <>
-        When the builders finish a renovation, its <b>permit final</b> lands on your list: devices, GFCI and AFCI, labels, the panel directory. The house earns nothing until you sign it off (a code notice already open on it is the same visit).
+        When the builders finish a renovation, its <b>permit final</b> lands on your list: your trim-out (the panel directory, the labels, the clearances, the breakers against their wire), then the county inspector passes it. The house earns nothing until it passes (a code notice already open on it is the same visit), and a hazard open on it has to be made safe first.
       </>
     ),
     fin: (
       <>
-        <b>Renovate</b> a worn house from the Staff desk or its sheet: the case shows the package, the weeks closed, the rent lost and the payback.
+        <b>Renovate</b> a worn house from the Staff desk or its sheet: the case shows the package, the weeks closed, the rent lost, how long it stays open renovated against left as it is, and whether the rent pays it back. It's capex: your house sheets keep it apart from repairs.
       </>
     ),
   };
@@ -48,7 +49,7 @@ export function whatsNewUpkeepPanels(s: IslandState, role: Role): WhatsNewPanel[
           <UL
             items={[
               <>
-                <b>The service upgrade:</b> at the Harbor the utility sets a new pad-mount transformer and feeder, and at the Resort a bigger standby set and transfer switch goes in. Both start in the new buildings' condition, under the same warranty.
+                <b>The service upgrade:</b> at the Harbor a new feeder goes in and the utility sets a new pad-mount transformer, and at the Resort a bigger standby set with {GEN_UPGRADE.words}. Both start in the new buildings' condition, under warranty.
               </>,
               got ? (
                 <>
@@ -61,7 +62,7 @@ export function whatsNewUpkeepPanels(s: IslandState, role: Role): WhatsNewPanel[
                 <>Your island gets it when its Harbor goes up.</>
               ),
               <>
-                <b>Renovations</b> ({fin}'s, from tier {RENO.fromTier}): a house at {RENO.maxHealth} or below. The builders do the carpentry, roofing and finishes with it closed; {elec}'s permit final opens it again at {RENO.health} with a {RENO.warranty}-week warranty. One per house every {RENO.cooldown} weeks.
+                <b>Renovations</b> ({role === 'fin' ? 'yours' : `${fin}'s`}, from tier {RENO.fromTier}): a house at {RENO.maxHealth} or below. The builders do the carpentry, roofing and finishes with it closed; it opens again at {RENO.health} with a {RENO.warranty}-week warranty once it passes the county's final ({role === 'elec' ? 'your' : `${elec}'s`} trim-out). One per house every {RENO.cooldown} weeks.
               </>,
               seat[role],
             ]}

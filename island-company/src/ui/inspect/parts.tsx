@@ -29,8 +29,9 @@ export function CheckFoot({ none, call, pick, pickLabel, busy, onCall }: { none:
       <Btn kind="ghost" disabled={busy} onClick={() => onCall(null)}>
         {none}
       </Btn>
+      {/* (review round 1: named for what it writes up, apart from the sheet's squawk card) */}
       <Btn disabled={!pick || busy} onClick={() => pick && onCall(pick)} label={pick && pickLabel ? `${call}: ${pickLabel}` : undefined}>
-        {call}
+        <span class="qc-call">{pick && pickLabel ? `${call}: ${pickLabel}` : call}</span>
       </Btn>
     </div>
   );

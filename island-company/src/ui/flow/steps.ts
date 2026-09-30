@@ -689,6 +689,9 @@ export function siteWords(site: ElecSite | null, takeoff = false): string {
     if (site.room === 'dock') return `Fuel dock pump: 240 V, ${site.amps} A · ${site.feet ?? 80} ft underground from the panel`;
     if (site.room === 'gen') return `Transfer switch: ${site.amps} A today · the houses back up ${site.load ?? site.amps} A`;
   }
+  // (the generator house's switch is rated as installed on the generator's sheet: 60 A, or 200 A after the Resort's
+  // upgrade, review round 1; the site's own numbers are the old switch's)
+  if (site.room === 'gen') return 'Generator house · the transfer switch and the backed-up circuits (their ratings on the generator’s sheet)';
   const room = { bath: 'Bathroom', kitchen: 'Kitchen', bedroom: 'Bedroom', living: 'Living room', laundry: 'Laundry', outdoor: 'Porch (wet location)', hall: 'Hall', panel: 'Distribution panel', spa: 'Spa pad (outdoors)', dock: 'Fuel dock', gen: 'Generator house' }[site.deviceRoom ?? site.room];
   // a non-breaking hyphen: "NM-B" never splits at the end of a line
   const wire = site.run === 'buried' ? 'underground' : site.run === 'nm' ? 'NM\u2011B' : '';

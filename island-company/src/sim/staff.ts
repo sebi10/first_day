@@ -27,7 +27,7 @@
 import { raiseAlert, soleGuest } from './alerts';
 import type { Bot } from './bots';
 import { CATALOG_BY_KIND, ECON, MODELS, RENO, RENO_BOT, STOCK, WARRANTY } from './data';
-import { bookInspection, capFleet, capOf, clamp, decayOf, fixedNow, flightsPerPlane, houseRentable, houseWearOf, inspectionWeeks, isTagged, planes, projectWeek, round10, tierDef, underWarranty } from './econ';
+import { bookInspection, capFleet, capOf, clamp, closingHazard, decayOf, fixedNow, flightsPerPlane, houseBlocker, houseRentable, houseWearOf, inspectionWeeks, isTagged, planes, projectWeek, round10, tierDef, underWarranty } from './econ';
 import { apply, type ApplyResult } from './engine';
 import { itemById, priceAt } from './items';
 import { book, spendable } from './ledger';
@@ -191,15 +191,19 @@ export function renoCost(h: Pick<Asset, 'model'>): { pkg: number; materials: num
 
 /**
  * A renovation's final signed off (the electrician's code-prep job on a house whose builders are done, or autopilot's
- * by the book): the house opens again, under the renovation's warranty
+ * by the book): the house opens again at RENO.health (the final's own points land on top), under the renovation's
+ * warranty. Review round 1: the condition lands here, with the final's trim-out, not when the builders finish (a storm
+ * while it waited took it under the 85 every sheet promised, and the points were the electrician's work); and a longer
+ * builder's warranty the house still had is kept, not cut short
  */
 export function renoSignoff(s: IslandState, asset: Asset, W: number): void {
   const b = (s.builds ?? []).find((x) => x.reno === asset.id && x.finished !== undefined && x.signed === undefined);
   if (!b) return;
   b.signed = W;
-  asset.warrantyUntil = W + RENO.warranty;
+  asset.health = Math.max(asset.health, RENO.health);
+  asset.warrantyUntil = Math.max(asset.warrantyUntil ?? 0, W + RENO.warranty);
   asset.touchedWeek = Math.max(asset.touchedWeek, W);
-  feed(s, 'all', 'good', `${asset.name} passed its final: open again, the renovation's warranty runs to week ${W + RENO.warranty}.`);
+  feed(s, 'all', 'good', `${asset.name} passed its final: open again at ${RENO.health} or better, under warranty to week ${asset.warrantyUntil}.`);
 }
 
 /** what a build's site is called ("the villas and the seaplane dock", "Cottage 5") */
@@ -629,13 +633,11 @@ export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void
         s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + inspectionWeeks(s.tier)), ...(s.tier >= WARRANTY.fromTier ? { warrantyUntil: W + WARRANTY.weeks } : {}) });
       line('all', 'good', `${plot?.name ?? 'The new cottage'} is finished: it takes guests from next week.`);
     } else if (b.reno) {
-      // the builders are done: the house in their condition, closed until the electrician signs off the final
+      // the builders are done: the house closed until it passes the county's final (the electrician's trim-out and the
+      // inspector's visit), which brings it to RENO.health (renoSignoff)
       const h = s.assets.find((a) => a.id === b.reno);
-      if (h) {
-        h.health = Math.max(h.health, RENO.health);
-        h.touchedWeek = W;
-      }
-      line('all', 'good', `The builders finished ${site}: it opens when the electrician signs off the final.`);
+      if (h) h.touchedWeek = W;
+      line('all', 'good', `The builders finished ${site}: it opens when it passes the county's final (the electrician's).`);
     } else line('all', 'good', `The site work on ${site} is done: ${b.tier ? `they open with tier ${b.tier} in good shape` : 'finished'}.`);
     tidyBuilds(s, W, line);
   }
@@ -867,7 +869,9 @@ function renoAction(s: IslandState, prev: IslandState, id: string, now: number):
   if (why || !h) return fail(why ?? 'No such house.');
   const { pkg } = renoCost(h);
   s.cash -= pkg;
-  book(s, 'building', pkg, { trade: 'build', asset: h.id });
+  // capex: the builders' trade, never the house's repair spend (review round 1: booked on the house, the analyst's
+  // sheet read a $12,000 package as $12,000 of repair labour). The house sheet says it on a line of its own
+  book(s, 'building', pkg, { trade: 'build' });
   const b: Build = { id: renoId(h, W), what: `Renovate ${h.name}: roof flashing, trim and paint, deck and shutters`, reno: h.id, done: 0, drawn: 0, need: RENO.units.length, started: W };
   (s.builds ??= []).push(b);
   const ahead = openBuild(s);
@@ -875,7 +879,7 @@ function renoAction(s: IslandState, prev: IslandState, id: string, now: number):
     s,
     'fin',
     'good',
-    `${h.name}'s renovation ordered (${usd(pkg)} package): ${ahead?.id === b.id ? 'the builders start when its materials are in' : `the builders start after ${buildSite(ahead!, s)}`}; it closes while they work, then the electrician signs off the final.`,
+    `${h.name}'s renovation ordered (${usd(pkg)} package): ${!s.staff?.some((n) => n.role === 'builder') ? 'it waits for a builder (none on the payroll)' : ahead?.id === b.id ? 'the builders start when its materials are in' : `the builders start after ${buildSite(ahead!, s)}`}; it closes while they work, then it opens once it passes the county's final (the electrician's trim-out).`,
     now,
   );
   return { s };
@@ -1117,35 +1121,125 @@ export function cottagePlan(s: IslandState): { plot: { id: string; name: string 
   return { plot, cost, rent: Math.max(0, rent), housekeeper, payback: net > 0 ? Math.ceil(cost / net) : null, upkeep, open };
 }
 
+/** the average health a routine house job of the electrician's lands (the renovation's points in her jobs) */
+const perJob = () => HOUSE_JOBS.reduce((n, k) => n + (CATALOG_BY_KIND[k]?.gain ?? 0), 0) / HOUSE_JOBS.length;
+
 /**
- * A renovation's case, for the analyst's Renovate card and the house's sheet (G0): what it costs (the package now, the
- * materials at list as the builders go), what the house rents in a normal week, the weeks it's closed (the builders'
- * two work units at their output, then the electrician's final), the rent lost meanwhile (none while it's closed
- * anyway), how soon it closes if nobody touches it (under 40 at its wear a booked week), the condition it gets back
- * and what those points cost at the electrician's routine job prices, and the weeks until the rent it keeps pays for
- * it all. `blocker`: why it can't be ordered now (renoBlocker)
+ * the weeks a house stays at 40 or better from `health`, left alone and booked every week: its decay (the builder's
+ * warranty's while it runs) plus a booked week's wear, from `from` (capped at a year: the case's horizon)
  */
-export function renoPlan(
-  s: IslandState,
-  h: Asset,
-): { pkg: number; materials: number; total: number; rent: number; out: number; weeksClosed: number | null; rentLost: number; wear: number; closesIn: number; restore: number; restoreValue: number; payback: number | null; againFrom: number; blocker: string | null } {
+function weeksOpen(s: IslandState, h: Asset, health: number, warrantyUntil: number | undefined, from: number): number {
+  let x = health;
+  let n = 0;
+  const a = { ...h, health: x, warrantyUntil };
+  while (x >= 40 && n < 52) {
+    a.health = x;
+    x -= Math.max(0.5, decayOf({ tier: s.tier, week: from + n }, a) + houseWearOf(s));
+    n++;
+  }
+  return n;
+}
+
+export type RenoPlan = {
+  pkg: number;
+  materials: number;
+  total: number;
+  /** a normal week's rent with the house as the renovation leaves it (at RENO.health, its inspection current, no tag or hazard), less without it */
+  rent: number;
+  /** what it earns in a normal week as it is now (0: closed now, or the other houses take its guests) */
+  rentNow: number;
+  /** the builders' output a week on the payroll (0: none) */
+  out: number;
+  /** no builder on the payroll: the weeks are planned with one skill-3 builder, and count from when one starts */
+  planned: boolean;
+  /** the builders' two units at their output (or one skill-3 builder's), then the week of the final */
+  weeksClosed: number;
+  /** the rent it would have earned in the weeks it's closed for the work (none once it would have closed anyway) */
+  rentLost: number;
+  /** left as it is: what it loses a booked week now, and the weeks until it's under 40 (0: closed now) */
+  wear: number;
+  closesIn: number;
+  /** renovated: the weeks it stays at 40 or better after its final (its warranty, then its wear) */
+  life: number;
+  /** the open weeks it gains over leaving it as it is, and their rent */
+  gained: number;
+  gain: number;
+  /** the points back to RENO.health, and about how many of the electrician's routine jobs they are */
+  restore: number;
+  jobs: number;
+  /** the weeks until the rent it gains covers the package, the materials and the rent lost (null: it doesn't on rent alone) */
+  payback: number | null;
+  /** why it earns nothing now (houseBlocker), when it doesn't */
+  closedNow: string | null;
+  /** a hazard open on the house: the final waits until it's made safe */
+  hazard: boolean;
+  /** the builder's warranty it already has, when it runs past the renovation's own */
+  warrantyUntil: number | null;
+  againFrom: number;
+  blocker: string | null;
+};
+
+/**
+ * A renovation's case, for the analyst's Renovate card and the house's sheet (G0; review round 1). What it costs (the
+ * package now, the materials at list as the builders go); the weeks it's closed (the builders' two units at their
+ * output, then the final; with no builder, one skill-3 builder's, counted from when one starts); the rent lost
+ * meanwhile (only the weeks it would have been open); how soon it closes left alone; how long it stays open renovated
+ * (RENO.health under its warranty, then its wear, the same way); the open weeks that gains and their rent at the
+ * renovated house's normal week (a house closed now counts, at 85: those are the ones a renovation reopens); and the
+ * weeks until that rent covers it all, or that it doesn't on rent alone. The electrician's side is the points it
+ * restores, in her routine jobs; never capex set against card prices
+ */
+export function renoPlan(s: IslandState, h: Asset): RenoPlan {
   const { pkg, materials } = renoCost(h);
   const total = pkg + materials;
-  const rent = Math.max(0, Math.round(normalRevenue(s, s) - normalRevenue(s, { ...s, assets: s.assets.filter((a) => a.id !== h.id) })));
+  const without = normalRevenue(s, { ...s, assets: s.assets.filter((a) => a.id !== h.id) });
+  const open = houseRentable(s, h);
+  const rentNow = open ? Math.max(0, Math.round(normalRevenue(s, s) - without)) : 0;
+  // the house as the renovation leaves it: at RENO.health, its inspection current, not closed for the work
+  const done: Asset = { ...h, health: Math.max(h.health, RENO.health), inspectionUntil: Math.max(h.inspectionUntil ?? 0, s.week) };
+  const renovated: IslandState = { ...s, assets: s.assets.map((a) => (a.id === h.id ? done : a)), builds: (s.builds ?? []).filter((b) => b.reno !== h.id) };
+  const rent = Math.max(0, Math.round(normalRevenue(s, renovated) - without));
   const out = working(s)
     .filter((n) => n.role === 'builder')
     .reduce((t, n) => t + (STAFF.output[n.skill - 1] ?? 0), 0);
+  const planned = !(out > 0);
+  const rate = planned ? (STAFF.output[2] ?? 1) : out;
   // (the builders' units, then the week the electrician's final is due)
-  const weeksClosed = out > 0 ? Math.ceil(RENO.units.length / out - 1e-9) + 1 : null;
-  const open = houseRentable(s, h);
-  const rentLost = open && weeksClosed !== null ? rent * weeksClosed : 0;
+  const weeksClosed = Math.ceil(RENO.units.length / rate - 1e-9) + 1;
   const wear = Math.max(0.5, decayOf(s, h) + houseWearOf(s));
-  const closesIn = open ? Math.max(0, Math.ceil((h.health - 40) / wear)) : 0;
+  const closesIn = open ? weeksOpen(s, h, h.health, h.warrantyUntil, s.week) : 0;
+  const final = s.week + weeksClosed;
+  const warrantyTo = Math.max(h.warrantyUntil ?? 0, final + RENO.warranty);
+  const life = weeksOpen(s, h, RENO.health, warrantyTo, final);
+  const rentLost = rentNow * Math.min(closesIn, weeksClosed);
+  const gained = Math.max(0, weeksClosed + life - Math.max(closesIn, weeksClosed));
+  const gain = rent * gained;
   const restore = Math.max(0, Math.round(RENO.health - h.health));
-  const restoreValue = round10(restore * perHp());
-  // the rent it keeps: from the week it would have closed (or reopens, if later), until the package, the materials and the rent lost are back
-  const payback = rent > 0 ? Math.max(closesIn, weeksClosed ?? 0) + Math.ceil((total + rentLost) / rent) : null;
-  return { pkg, materials, total, rent, out, weeksClosed, rentLost, wear, closesIn, restore, restoreValue, payback, againFrom: renoAgainFrom(s, h.id), blocker: renoBlocker(s, h) };
+  const payback = rent > 0 && gain >= total + rentLost ? Math.max(closesIn, weeksClosed) + Math.ceil((total + rentLost) / rent) : null;
+  return {
+    pkg,
+    materials,
+    total,
+    rent,
+    rentNow,
+    out,
+    planned,
+    weeksClosed,
+    rentLost,
+    wear,
+    closesIn,
+    life,
+    gained,
+    gain,
+    restore,
+    jobs: Math.round(restore / perJob()),
+    payback,
+    closedNow: open ? null : houseBlocker(s, h),
+    hazard: !!closingHazard(s, h.id),
+    warrantyUntil: underWarranty(s, h) && (h.warrantyUntil ?? 0) > final + RENO.warranty ? h.warrantyUntil! : null,
+    againFrom: renoAgainFrom(s, h.id),
+    blocker: renoBlocker(s, h),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1355,9 +1449,11 @@ export function autoStaff(s: IslandState): void {
   }
   // the next tier's site work (a build further ahead, or a cottage, is a person's call)
   const b = openBuild(s);
-  // (a renovation the analyst ordered is committed: autopilot buys its materials too)
+  // (a renovation the analyst ordered is committed: autopilot buys its materials too, past its usual cap: a villa's
+  // second unit is $960 and a lodge's $1,110-1,440, over the $800 cap, and the house sat closed every week she was away:
+  // review round 1)
   if (!b || (b.tier === undefined && !b.reno) || (b.tier !== undefined && b.tier > s.tier + 1) || !s.staff.some((n) => n.role === 'builder')) return;
   const lines = buildShort(s, 1);
   const value = valueOf(lines);
-  if (lines.length && value <= STOCK.autopilotCap && spendable(s) - value >= ECON.freezeBelow) placePo(s, lines, {}, 'auto', s.updatedAt);
+  if (lines.length && (b.reno || value <= STOCK.autopilotCap) && spendable(s) - value >= ECON.freezeBelow) placePo(s, lines, {}, 'auto', s.updatedAt);
 }

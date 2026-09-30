@@ -10,7 +10,7 @@ import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
 import { CHECK_SYMPTOMS } from './checkdata';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
-import { FEED_KINDS, feedAlert, gridFirst, gridFirstJob, renovating } from './econ';
+import { FEED_KINDS, feedAlert, genUpgraded, gridFirst, gridFirstJob, renovating, underWarranty } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
 import { helperJobs, pilotOf, squawkNff, wearMult } from './staff';
 import { defaultTask, taskOn, type Task } from './tasks';
@@ -578,7 +578,7 @@ const ELEC: Symptom[] = [
     key: 'E_RENO_FINAL',
     role: 'elec',
     src: 'code',
-    text: 'Renovation at {house}: the builders are done. The county final on the permit: devices, GFCI and AFCI, labels, the panel directory. The house stays closed until it passes.',
+    text: "Renovation at {house}: the builders are done. The county's final on the permit: your trim-out (the panel directory, the labels, the clearances, the breakers against their wire), then the inspector's visit. The house stays closed until it passes.",
     short: 'Permit final: {house} stays closed until it passes',
     targets: HOUSES,
     rooms: ['panel'],
@@ -952,8 +952,10 @@ export function symptomText(s: IslandState, a: Alert): string {
   if (sym.alt && s.history.find((h) => h.week === a.week - 1)?.weather !== 'storm') raw = sym.alt;
   let text = fill(raw, v);
   if (sym.writeUp) text = `Written up by ${a.who ?? 'the crew'}: ${lowerFirst(text)}`;
-  // stage 2 (docs/EXPANSION.md 6.5): a crewmate's flag, in the flagger's name, on the asset (a guest's or a log's words without their "Guest at …:")
-  else if (a.src === 'flag') text = `Flagged by ${a.who ?? 'a crewmate'} on ${nameMid(asset)}: ${lowerFirst(text.replace(WHO_SAID, ''))}`;
+  // stage 2 (docs/EXPANSION.md 6.5): a crewmate's flag passes on what its source said (a guest's complaint, the pilot's
+  // squawk, a log), never in the flagger's own words (review round 1: "Flagged by Ana: the hall light works from one
+  // switch only" put words in her mouth, and a cockpit symptom on a crewmate who never flew the plane)
+  else if (a.src === 'flag') text = `${a.who ?? 'A crewmate'} passed on ${flagSource(s, a)}: ${lowerFirst(text.replace(WHO_SAID, ''))}`;
   else if (a.who && sym.src === 'squawk') text = `Written up by ${a.who}: ${lowerFirst(text)}`;
   if (a.again !== undefined) text = `Written up again: ${lowerFirst(text)}`;
   return text;
@@ -968,7 +970,7 @@ export function alertShort(s: IslandState, a: Alert): string {
   // stage 2: a quick check's write-up says it in its own few words
   const own = SYMPTOMS[a.sym]?.short;
   if (own) return lowerFirst(fill(own, vars(s, a)));
-  let t = symptomText(s, a).replace(/^(Written up (again|by [^:]+)|Flagged by [^:]+): /i, '');
+  let t = symptomText(s, a).replace(/^(Written up (again|by [^:]+)|Flagged by [^:]+|[^:]+ passed on [^:]+): /i, '');
   let eng = '';
   const m = /^(L\/H|R\/H) engine: /i.exec(t);
   if (m) {
@@ -978,6 +980,24 @@ export function alertShort(s: IslandState, a: Alert): string {
   t = t.replace(WHO_SAID, '');
   const first = t.split(/[;:]|\.(?=\s|$)/)[0].trim();
   return lowerFirst(first) + eng;
+}
+
+/**
+ * Where a flag's words come from, as the flagger passed them on (stage 2, review round 1): "a guest's complaint at
+ * Cottage 1", "a squawk from Hemi (the pilot) on Twin N-12", "the utility's log for the island grid", "the weekly
+ * test's log at the generator house"
+ */
+export function flagSource(s: IslandState, a: Pick<Alert, 'sym' | 'assetId' | 'via'>): string {
+  const sym = SYMPTOMS[a.sym];
+  const asset = s.assets.find((x) => x.id === a.assetId);
+  const at = nameMid(asset);
+  const raw = typeof sym?.text === 'string' ? sym.text : '';
+  if (sym?.src === 'guest') return `a guest's complaint at ${at}`;
+  if (sym?.src === 'squawk') return asset?.kind === 'plane' ? `a squawk from ${a.via ? `${a.via} (the pilot)` : 'the pilot'} on ${at}` : `the weekly run's log at ${at}`;
+  if (/^Utility log/i.test(raw)) return `the utility's log for ${at}`;
+  if (/^Meter data/i.test(raw)) return `the utility's meter data for ${at}`;
+  if (/weekly test/i.test(raw)) return `the weekly test's log at ${at}`;
+  return `a report on ${at}`;
 }
 
 /** who noticed it, at the start of a symptom's text ("Guest at Cottage 1:", "Utility log:") */
@@ -1153,11 +1173,13 @@ export function fits(sym: Symptom, asset: Asset): boolean {
  * weights: the com radio's dead transmit is the wiring 3 in 10, the alternator's no output 1 in 5, the
  * starter-generator's 1 in 4. The alert still fills the kind's slot (`slotKind`).
  */
-export function pairsFor(kind: string, asset: Asset, sole: boolean): { sym: Symptom; cause: number; w: number }[] {
+export function pairsFor(kind: string, asset: Asset, sole: boolean, s?: Pick<IslandState, 'tier'>): { sym: Symptom; cause: number; w: number }[] {
   const out: { sym: Symptom; cause: number; w: number }[] = [];
   const onModel = (c: Cause) => !(c.models && asset.kind === 'plane' && !c.models.includes(planeModel(asset.model)));
+  const upgraded = !!s && asset.kind === 'generator' && genUpgraded(s);
   for (const sym of Object.values(SYMPTOMS)) {
     if (sym.auto || !fits(sym, asset)) continue;
+    if (upgraded && UPGRADE_RETIRES.has(sym.key)) continue;
     if (sole && sym.sole === 'none') continue;
     if (!sym.causes.some((c) => c.kind === kind && onModel(c))) continue;
     sym.causes.forEach((c, i) => {
@@ -1197,7 +1219,7 @@ export function raiseAlert(s: IslandState, o: RaiseOpts, _now: number): Alert {
     }
     kind = cause >= 0 ? sym.causes[cause].kind : 'nff';
   } else {
-    const pairs = pairsFor(o.kind ?? '', asset, sole);
+    const pairs = pairsFor(o.kind ?? '', asset, sole, s);
     const pick = r.weighted(pairs, (x) => x.w) ?? pairs[0];
     if (!pick) {
       // nothing in the tables names this kind on this asset: a write-up of the kind itself
@@ -1259,6 +1281,20 @@ export function pruneAlerts(s: IslandState) {
   s.alerts = keep;
 }
 
+/**
+ * A catalog kind's weight on an asset this week, as the week's draw, the quick checks and the flags read it: the
+ * catalog's, less what the Resort's service upgrade retired (G0 review round 1). The upgrade installs a new 200 A
+ * transfer switch sized for the backed-up load, under its warranty: while that runs nothing replaces it. After, a worn
+ * switch's own faults come back (pitted contacts, hot lugs: like for like, the job's 200 A lot); the take-off to upsize
+ * the old 60 A one never does (UPGRADE_RETIRES)
+ */
+export function drawWeight(s: Pick<IslandState, 'tier'> & { week?: number }, c: { kind: string; weight: (a: Asset, W: number) => number }, a: Asset, W: number): number {
+  if (c.kind === 'transfer' && a.kind === 'generator' && genUpgraded(s) && underWarranty({ week: W }, a)) return 0;
+  return c.weight(a, W);
+}
+/** the rows the Resort's service upgrade retired for good: the take-off to upsize the 60 A transfer switch */
+export const UPGRADE_RETIRES = new Set(['E_TAKEOFF_XFER']);
+
 const OPS: OpsRole[] = ['mech', 'elec'];
 const openOrder = (o: IslandState['orders'][number]) => o.status !== 'done' && o.status !== 'cancelled';
 /** alerts not closed (open, or a job not signed off yet) */
@@ -1294,7 +1330,7 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
         if (c.role !== role || !c.targets.includes(asset.model)) continue;
         if (openOrders.some((o) => o.kind === c.kind && o.assetId === asset.id)) continue;
         if (live.some((a) => a.assetId === asset.id && slotKind(a) === c.kind)) continue;
-        let w = c.weight(asset, W);
+        let w = drawWeight(s, c, asset, W);
         // better pilots wear the brakes and tires less (D: wearMult)
         if (w > 0 && c.kind === 'tires' && asset.kind === 'plane') w *= wearMult(s, asset.id);
         if (w > 0) cands.push({ kind: c.kind, asset, w });
@@ -1352,7 +1388,8 @@ function nffExtras(s: IslandState, now: number) {
   for (const role of OPS) {
     const r = rng(hashSeed(s.seed, 'nff', role, s.week));
     if (!r.chance(ALERTS.nff[role])) continue;
-    const assets = s.assets.filter((a) => (role === 'mech' ? a.kind === 'plane' || a.kind === 'generator' : a.kind !== 'plane'));
+    // (a house closed for its renovation raises no guest complaint: nobody's in it; review round 1)
+    const assets = s.assets.filter((a) => (role === 'mech' ? a.kind === 'plane' || a.kind === 'generator' : a.kind !== 'plane') && !renovating(s, a.id));
     const asset = r.weighted(assets, (a) => 100 - a.health + 5);
     if (!asset) continue;
     const sole = asset.kind === 'plane' && soleGuest(s, asset.id);

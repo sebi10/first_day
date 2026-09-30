@@ -5,6 +5,7 @@
 // in this browser (a per-viewer convenience; every access guarded).
 import { useState } from 'preact/hooks';
 import { Btn, Sheet } from '../kit';
+import { whatsNewClosed } from '../whatsnew';
 import './purchasing.css';
 
 const KEY = (island: string) => `ic.whatsnew.jobflow.fin.${island}`;
@@ -55,6 +56,7 @@ export function WhatsNew({ island, since }: { island: string; since: number }) {
       /* private mode: it shows again next time */
     }
     setOpen(false);
+    whatsNewClosed();
   };
   const p = PANELS[i];
   return (

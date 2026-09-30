@@ -535,9 +535,25 @@ const closeInspect = async (pg) => {
 };
 
 await tab('Island');
+if (!desktop) {
+  // review round 1: a pinch sends no click, so the next real tap must land: pinch in, then tap ⌖ 200 ms later
+  await passTo('Mechanic');
+  await page.evaluate(() => window.scrollTo({ top: 0 }));
+  await page.waitForTimeout(200);
+  const m0 = await mapState(page);
+  await pinch(page, m0.r.x + m0.r.w / 2, m0.r.y + m0.r.h / 2, 80, 220);
+  await page.waitForTimeout(200);
+  const btn = await page.locator('.map-ctl button[aria-label="The whole island"]').first().boundingBox();
+  await tapAt(page, btn.x + btn.width / 2, btn.y + btn.height / 2);
+  await page.waitForTimeout(800);
+  const m1 = await mapState(page);
+  if (!(m1.k < 1.05)) fail(`the tap on ⌖ 200 ms after a pinch was swallowed (k ${m1.k.toFixed(2)})`);
+  console.log(`map: a pinch, then ⌖ 200 ms later: back to the whole island (k ${m1.k.toFixed(2)})`);
+}
 for (const [label, seat, kind, want] of [
-  ['Mechanic', 'mech', 'plane', /Walkaround/],
-  ['Electrician', 'elec', 'house', /Meter check/],
+  // (at tier 1 the check is a line saying when it opens, not a disabled footer: review round 1)
+  ['Mechanic', 'mech', 'plane', /[Ww]alkaround/],
+  ['Electrician', 'elec', 'house', /[Mm]eter check/],
   ['Analyst', 'fin', 'house', /Nightly rate|a night/],
 ]) {
   await passTo(label);
@@ -600,7 +616,7 @@ for (const [label, seat, kind, want] of [
   await sp.waitForTimeout(400);
   await sshot('mech-walkaround');
   await plane.sheet.locator('.qc-item', { hasText: tell.item }).first().click();
-  await plane.sheet.getByRole('button', { name: /^Write it up/ }).click();
+  await plane.sheet.getByRole('button', { name: /^Write up/ }).click();
   await sp.waitForTimeout(600);
   const done = (await plane.sheet.locator('.insp-done').innerText().catch(() => '')).trim();
   if (!/^Walkaround done: you wrote up the /.test(done)) fail(`the walkaround's write-up didn't land: "${done}"`);
@@ -635,7 +651,8 @@ for (const [label, seat, kind, want] of [
   await row.locator('.jf-arow-main').first().click();
   await sp.waitForTimeout(600);
   const flagged = await sp.locator('.jf-sheet').first().innerText();
-  if (!new RegExp(`Flagged by ${d2.players.mech.name} on ${house.label}`).test(flagged)) fail(`the flag's job sheet doesn't say who flagged it: ${flagged.slice(0, 200)}`);
+  // (review round 1: passed on in its source's words, never the flagger's own)
+  if (!new RegExp(`${d2.players.mech.name} passed on a guest's complaint at ${house.label}`).test(flagged)) fail(`the flag's job sheet doesn't say who passed it on, from whom: ${flagged.slice(0, 200)}`);
   await sshot('elec-flag-sheet');
   const x = sp.locator('.jf-sheet .jf-x[aria-label="Close"]').first();
   if (await x.count()) await x.click();
@@ -651,17 +668,54 @@ for (const [label, seat, kind, want] of [
   await sp.waitForTimeout(500);
   if (!/IR scan done: all normal/.test(await grid.sheet.innerText())) fail("the IR scan's call didn't land");
   await closeInspect(sp);
-  // the analyst: the electrician already has this week's flag (one received a week), and the house's Pricing link
+  // the analyst: a tech's flag doesn't lock her out (review round 1: one received a week from each side), and the
+  // house's Pricing link
   await passTo('Analyst', sp);
   const fh = await tapObject(sp, 'house');
   const cap = await fh.sheet.locator('.insp-report').innerText();
-  if (!new RegExp(`${d2.players.elec.name} already has a flag this week`).test(cap)) fail(`the analyst wasn't told the electrician has a flag: ${cap}`);
-  await sshot('fin-house-flag-cap');
+  if (!new RegExp(`Report a problem to ${d2.players.elec.name}`).test(cap)) fail(`the analyst can't report a house after the mechanic's flag: ${cap}`);
+  await sshot('fin-house-flag-open');
   await fh.sheet.locator('.insp-act', { hasText: 'Pricing' }).first().click();
   await sp.waitForTimeout(900);
   if ((await sp.locator('.pd-tabs button[aria-current="true"]').first().innerText()).trim() !== 'Money') fail("the Pricing link didn't open the Money tab");
   await sshot('fin-pricing');
-  console.log('save: the electrician read the flag on his list and scanned the grid; the analyst was told to message instead, and Pricing opened the Money tab');
+  console.log('save: the electrician read the flag on his list and scanned the grid; the analyst could still report, and Pricing opened the Money tab');
+  // Explore (review round 1): a move that leaves a sheet opened over Explore closes Explore, so what it opens is on top
+  const explore = async () => {
+    await sp.evaluate(() => window.scrollTo({ top: 0 }));
+    await sp.locator('.map-ctl button[aria-label="Explore full screen"]').first().click();
+    await sp.locator('.map-explore').waitFor({ state: 'visible', timeout: 4000 });
+    await sp.waitForTimeout(700);
+  };
+  const topmostIn = (sel) =>
+    sp.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 120));
+      return !!at && el.contains(at);
+    }, sel);
+  // the analyst: Explore → the office → Desk ▸: Explore closes and the desk is on screen
+  await explore();
+  const office = await tapObject(sp, 'office');
+  await office.sheet.locator('.sheet-actions button', { hasText: 'Desk' }).first().click();
+  await sp.waitForTimeout(900);
+  if (await sp.locator('.map-explore').count()) fail('Desk ▸ from the office sheet left Explore on top');
+  await sshot('fin-explore-desk');
+  // the mechanic: Explore → the plane → its alert row: the job sheet is on top
+  await passTo('Mechanic', sp);
+  await explore();
+  const pl = await tapObject(sp, 'plane', tell.id);
+  await sshot('mech-explore-plane');
+  await pl.sheet.locator('.insp-act').first().click();
+  await sp.waitForTimeout(900);
+  if (await sp.locator('.map-explore').count()) fail("the plane's alert row left Explore on top");
+  if (!(await sp.locator('.jf-sheet').first().isVisible()) || !(await topmostIn('.jf-sheet'))) fail("the plane's alert row opened no job sheet on top");
+  await sshot('mech-explore-alert-job');
+  const jx = sp.locator('.jf-sheet .jf-x[aria-label="Close"]').first();
+  if (await jx.count()) await jx.click();
+  await sp.waitForTimeout(300);
+  console.log("save: from Explore, the office's Desk ▸ and the plane's alert row closed Explore and opened on top");
   await sctx.close();
 }
 

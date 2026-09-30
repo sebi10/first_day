@@ -971,8 +971,12 @@ export interface Alert {
   task?: TaskId;
   /** the only guest plane's early-sign wording was raised (5.6) */
   sole?: boolean;
-  /** HIDDEN (stage 2, docs/EXPANSION.md 6.4): found early by a quick check's right call: its job plays one order tier easier (never under 1) */
+  /** HIDDEN (stage 2, docs/EXPANSION.md 6.4): found early by a quick check's right call: its job plays one order tier easier (never under 1, and a blind job stays blind) and costs a tier less */
   early?: true;
+  /** stage 2 (src 'flag'): the seat that passed it on */
+  by?: Role;
+  /** stage 2 (src 'flag' on a plane): the pilot whose squawk the flagger passed on */
+  via?: string;
 }
 
 /** the resolve's review-line writer, shared with the staff hooks */

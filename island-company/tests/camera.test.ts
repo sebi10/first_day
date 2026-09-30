@@ -227,7 +227,8 @@ describe('taps vs drags vs pinches', () => {
     // 9 px: a drag
     o = run(inline(), [['down', P(1, 100, 100, 0)], ['move', P(1, 109, 100, 50)], ['up', P(1, 109, 100, 100)]]);
     expect(kinds(o)).not.toContain('tap');
-    expect(o.at(-1)).toMatchObject({ t: 'end', swallow: true });
+    // (review round 1) a touch drag sends no click: nothing to swallow (it used to eat the next real tap)
+    expect(o.at(-1)).toMatchObject({ t: 'end', swallow: false });
     // a mouse drags from 5 px, and taps up to 4
     o = run(inline(), [['down', P(1, 100, 100, 0, 'mouse')], ['move', P(1, 105, 100, 50, 'mouse')], ['up', P(1, 105, 100, 100, 'mouse')]]);
     expect(kinds(o)).not.toContain('tap');
@@ -239,7 +240,7 @@ describe('taps vs drags vs pinches', () => {
     const drag = (c: Classifier, kind: PIn['kind'] = 'touch') => run(c, [['down', P(1, 100, 100, 0, kind)], ['move', P(1, 100, 140, 30, kind)], ['move', P(1, 60, 180, 60, kind)], ['up', P(1, 60, 180, 90, kind)]]);
     let o = drag(inline());
     expect(o.filter((x) => x.t === 'live')).toEqual([]);
-    expect(o.at(-1)).toMatchObject({ t: 'end', moved: false, swallow: true });
+    expect(o.at(-1)).toMatchObject({ t: 'end', moved: false, swallow: false });
     o = drag(explore());
     const lives = o.filter((x): x is Extract<GOut, { t: 'live' }> => x.t === 'live');
     expect(lives.length).toBeGreaterThan(0);
@@ -263,7 +264,8 @@ describe('taps vs drags vs pinches', () => {
     const lives = o.filter((x): x is Extract<GOut, { t: 'live' }> => x.t === 'live');
     expect(lives[0].live).toEqual({ kind: 'pinch', a0: [100, 100], b0: [200, 100], a: [100, 100], b: [260, 100] });
     expect(lives[2].live).toEqual({ kind: 'pan', from: [260, 100], to: [280, 120] });
-    expect(o.at(-1)).toMatchObject({ t: 'end', moved: true, swallow: true });
+    // (a pinch sends no click: nothing swallowed, review round 1)
+    expect(o.at(-1)).toMatchObject({ t: 'end', moved: true, swallow: false });
     expect(kinds(o)).not.toContain('tap');
   });
 
@@ -290,7 +292,7 @@ describe('taps vs drags vs pinches', () => {
   it('the browser taking the pointer (the page scrolled) ends the gesture with no tap', () => {
     const o = run(inline(), [['down', P(1, 100, 100, 0)], ['move', P(1, 100, 130, 20)], ['cancel', P(1, 100, 130, 30)]]);
     expect(kinds(o)).toEqual(['begin', 'end']);
-    expect(o.at(-1)).toMatchObject({ moved: false, swallow: true });
+    expect(o.at(-1)).toMatchObject({ moved: false, swallow: false });
   });
 });
 

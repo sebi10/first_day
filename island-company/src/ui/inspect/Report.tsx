@@ -62,7 +62,9 @@ export function Report({ s, ctl, role, report, onWriteUp }: { s: IslandState; ct
                 setConfirm(false);
                 if (ok) {
                   fx.good();
-                  toast(`Reported: it's on ${report.toName}'s alert list.`);
+                  // (the engine picks the receiver at the move: the generator's can differ from the name read here;
+                  // the sheet's line under it says who, from the new state: review round 1)
+                  toast('Passed on: it’s on the alert list.');
                 }
               }}
             >
@@ -76,6 +78,11 @@ export function Report({ s, ctl, role, report, onWriteUp }: { s: IslandState; ct
       )}
       {report.t === 'flag' && !report.ok && (
         <>
+          {report.said && (
+            <span class="insp-said" role="status">
+              {report.said}
+            </span>
+          )}
           <span class="label">{report.why}</span>
           {dms.length > 0 && (
             <div class="row" style={{ gap: 8 }}>

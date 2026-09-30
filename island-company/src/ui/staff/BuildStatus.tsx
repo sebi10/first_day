@@ -11,7 +11,7 @@ import './staff.css';
 
 export function BuildStatus({ ctl, onSee }: { ctl: Ctl; /** zoom the island to the builders' site */ onSee?: () => void }) {
   const { s, role } = ctl;
-  const l = buildLine(s);
+  const l = buildLine(s, role ?? undefined);
   if (!l || s.week < 1) return null;
   const buy = role === 'fin' && l.buy && l.buy.lines.length ? l.buy : null;
   const line = (

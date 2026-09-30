@@ -252,3 +252,12 @@
 .st-reno-num b {
   overflow-wrap: anywhere;
 }
+
+/* the Renovate case's "hire one first" link: a move, so a 44 px target (review round 1) */
+.st-hire-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 15px;
+}

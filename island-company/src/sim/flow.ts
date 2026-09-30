@@ -485,6 +485,17 @@ export const unitPrice = (id: ItemId) => {
  */
 export const earlyLess = (a?: Pick<Alert, 'early'> | null): number => (a?.early ? 1 : 0);
 
+/**
+ * The puzzle tier an early catch plays at (stage 2, review round 1): one order tier easier than `base`, but never out
+ * of the blind tiers. A job that would be blind (order tier DEFECT.blindFromTier or more) stays at blindFromTier at the
+ * least: at island tiers 2-3 a base-tier-1 kind (tires, oil, a trip, a GFCI) orders at tier 2, and one tier easier was
+ * puzzle tier 1, a verdict and a score in the middle of the blind game (pillar 3). The price still drops a tier.
+ */
+export function earlyTier(base: number, less: number): number {
+  const floor = base >= DEFECT.blindFromTier ? DEFECT.blindFromTier : 1;
+  return Math.max(floor, base - less);
+}
+
 /** today's card for this kind on this asset: orderCost x the model's factor, plus the kit it needed; `less`: tiers off (an early catch) */
 export function cardToday(s: Pick<IslandState, 'tier'>, kind: string, asset: Pick<Asset, 'model' | 'health'>, less = 0): number {
   const c = CATALOG_BY_KIND[kind];

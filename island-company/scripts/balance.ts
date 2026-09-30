@@ -365,14 +365,16 @@ if (arg === 'detail') {
         m((g) => g.dead) > 2 && 'median dead weeks',
         recv > 1 && `${recv}/30 receiverships`,
         hp.slice(1).some((h) => !(h >= 55)) && 'house health under 55',
-        name === 'three friends' && cr < SEEDS / 2 && `the credits by week ${BY} in ${cr}/30`,
       ].filter(Boolean);
-      verdict.push(`${name}: ${miss.length ? `misses ${miss.join(', ')}` : 'every G0 line met'}`);
+      // the credits' line is judged for both teams (review round 1: all average printed "every G0 line met" at 0/30);
+      // under the default goal it's the owner's call (GOAL.rule, EXPANSION 11.2), so it's said on its own line
+      const credits = cr < SEEDS / 2 ? `the credits by week ${BY} in ${cr}/30 (under GOAL.rule '${GOAL.rule}': the owner's call)` : `the credits by week ${BY} in ${cr}/30`;
+      verdict.push(`${name}: ${miss.length ? `misses ${miss.join(', ')}` : cr >= SEEDS / 2 ? 'every G0 line met' : 'every G0 line met but the credits'}; ${credits}`);
     } else if (/solo|absent|nobody/.test(name) && (top > 1 || gs.some((x) => x.g.credits < 99))) verdict.push(`${name}: CLIMBED (top tier ${top}) or won: nobody wins alone is broken`);
   }
   console.log(`\ngames<0: games ever below $0 in weeks ${LONG_FROM}-${END}; weeks<0 and dead wk (revenue < ${usd(DEAD_REV)}) summed over the games in weeks ${LONG_FROM}-${END} (the median game); recv: games that entered receivership by week ${END}.`);
   console.log(`house@N: the median game's mean house health after week N's resolve. credits≤${BY}: games with the credits by week ${BY}; cr wk: the median game's credits week (— = never).`);
-  console.log(`G0: three friends and all average at a median of 0 weeks below $0; at most 3 of 30 games ever below $0; median dead weeks ≤ 2; receiverships ≤ 1/30; house health ≥ 55 at weeks 39/52/64; the credits by week ${BY} in ≥ 50% of three-friends games. Solo, absent and nobody never climb or win.`);
+  console.log(`G0: three friends and all average at a median of 0 weeks below $0; at most 3 of 30 games ever below $0; median dead weeks ≤ 2; receiverships ≤ 1/30; house health ≥ 55 at weeks 39/52/64; the credits by week ${BY} in ≥ 50% of games (both teams: the owner's call under the goal's rule). Solo, absent and nobody never climb or win.`);
   for (const v of verdict) console.log(`  ${v}`);
 } else if (arg === 'flow') {
   // the first 40 alerts of one game, to tune the symptom weights: what it looked like, what it really was, what the bot did and what came of it

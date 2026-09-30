@@ -950,7 +950,7 @@ export function fixtureFacts(s: IslandState, kind: ObjectKind, st: StationId, ro
       if (role === 'fin') {
         const rw = runway(s);
         lines.push(`Cash $${Math.round(s.cash).toLocaleString('en-US')}; spendable covers ${rw.weeks} weeks of the fixed costs ($${rw.weekly.toLocaleString('en-US')} a week).`);
-      } else lines.push(`${nameOf(s, 'fin')}'s office.`);
+      } else lines.push(`Your cards and requests land on ${nameOf(s, 'fin')}'s desk here: the approvals, the stock and the payroll are run from it.`);
       break;
     }
     case 'runway': {

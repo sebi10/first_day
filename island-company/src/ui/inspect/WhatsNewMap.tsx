@@ -100,7 +100,7 @@ export function whatsNewMapPanels(s: IslandState, role: Role): WhatsNewPanel[] {
       <>
         {tech && (
           <P>
-            {checkWords} Catch wear early and the job is on your list sooner, and one tier easier. A wrong call is a write-up you close on site.
+            {checkWords} Catch wear early and the job is on your list sooner, and costs a tier less (a blind job stays blind). A wrong call is a write-up you close on site.
             {s.tier < CHECK.fromTier ? ` It opens at tier ${CHECK.fromTier}.` : ''}
           </P>
         )}

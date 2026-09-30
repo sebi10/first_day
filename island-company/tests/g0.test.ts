@@ -135,16 +135,27 @@ describe('renovations: the rules', () => {
     expect(p.total).toBe(6850);
     // one skill-3 builder: 1 unit a week, 2 units, then the final's week
     expect(p.out).toBe(1);
+    expect(p.planned).toBe(false);
     expect(p.weeksClosed).toBe(3);
     expect(p.rent).toBeGreaterThan(0);
-    expect(p.rentLost).toBe(houseRentable(s, house(s, 'h1')) ? p.rent * 3 : 0);
+    // (review round 1) the rent lost is only the weeks it would have been open: it closes left alone in closesIn
+    expect(p.rentLost).toBe(houseRentable(s, house(s, 'h1')) ? p.rentNow * Math.min(p.closesIn, 3) : 0);
     expect(p.restore).toBe(40);
-    expect(p.payback).toBe(Math.max(p.closesIn, 3) + Math.ceil((p.total + p.rentLost) / p.rent));
+    // it gains the renovated life's open weeks past when it would have closed; it pays back only if their rent covers it
+    expect(p.gained).toBe(Math.max(0, 3 + p.life - Math.max(p.closesIn, 3)));
+    expect(p.gain).toBe(p.rent * p.gained);
+    if (p.payback !== null) {
+      expect(p.gain).toBeGreaterThanOrEqual(p.total + p.rentLost);
+      expect(p.payback).toBe(Math.max(p.closesIn, 3) + Math.ceil((p.total + p.rentLost) / p.rent));
+    } else expect(p.gain).toBeLessThan(p.total + p.rentLost);
     expect(p.blocker).toBeNull();
-    // no builder: it can still be ordered (it waits for one), but nobody can say how long it's closed
+    // no builder: it can still be ordered (it waits for one); the case plans one skill-3 builder, counted from their start
     const none = resort();
     none.staff = none.staff!.filter((n) => n.role !== 'builder');
-    expect(renoPlan(none, house(none, 'h1')).weeksClosed).toBeNull();
+    const q = renoPlan(none, house(none, 'h1'));
+    expect(q.planned).toBe(true);
+    expect(q.out).toBe(0);
+    expect(q.weeksClosed).toBe(3);
   });
 });
 
@@ -186,7 +197,7 @@ describe('renovations in play', () => {
     expect(h.health).toBeGreaterThanOrEqual(RENO.health - 8);
     expect(renovating(s, 'h1')).toBe(false);
     expect(h.inspectionUntil!).toBeGreaterThanOrEqual(s.week);
-    expect(s.feed.some((f) => /Cottage 1 passed its final: open again, the renovation's warranty runs to week/.test(f.text))).toBe(true);
+    expect(s.feed.some((f) => /Cottage 1 passed its final: open again at 85 or better, under warranty to week/.test(f.text))).toBe(true);
   });
 
   it("a code notice already open on the house is the final (the county does both on one visit): no second alert, and its sign-off opens the house", () => {
@@ -494,8 +505,9 @@ describe('what every seat reads', () => {
     b.drawn = 1;
     expect(renoStatus(s, house(s, 'h1'), 'fin')!.text).toMatch(/^Closed for its renovation: the builders are on it/);
     Object.assign(b, { drawn: 2, done: 2, finished: s.week });
-    expect(renoStatus(s, house(s, 'h1'), 'elec')!.text).toMatch(/until you sign off the permit final/);
-    expect(renoStatus(s, house(s, 'h1'), 'mech')!.text).toMatch(/until E signs off the permit final/);
+    // (review round 1: the county's inspector passes the final; the electrician does the trim-out and meets him)
+    expect(renoStatus(s, house(s, 'h1'), 'elec')!.text).toMatch(/until it passes the county's final: you do the trim-out .* and meet the inspector/);
+    expect(renoStatus(s, house(s, 'h1'), 'mech')!.text).toMatch(/until it passes the county's final: E does the trim-out .* and meets the inspector/);
     // the grid's service upgrade, on the electrician's and the analyst's grid sheets
     const g = s.assets.find((a) => a.kind === 'grid')! as Asset;
     g.warrantyUntil = s.week + 4;

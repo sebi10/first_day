@@ -54,6 +54,16 @@ export function melOn(s: Pick<IslandState, 'alerts'>, planeId: string, week = (s
 export function hazardOn(s: Pick<IslandState, 'alerts'>, houseId: string): Alert | undefined {
   return (s.alerts ?? []).find((a) => a.assetId === houseId && a.status !== 'closed' && !!symptomOf(a)?.hazard);
 }
+/**
+ * the hazard that closes the house in `week`: an open or planned hazard not made safe. A hazard a crewmate flagged
+ * (src 'flag') gives the electrician until its due week (checks.ts raiseFlag: the week after), as a flagged
+ * airworthiness squawk gives the mechanic: a flag made after his turn ended used to close the house at that night's
+ * resolve with no chance to make it safe (stage 2 review round 1)
+ */
+export function closingHazard(s: Pick<IslandState, 'alerts'>, houseId: string, week = (s as IslandState).week): Alert | undefined {
+  const hz = (s.alerts ?? []).find((a) => a.assetId === houseId && a.status !== 'closed' && !!symptomOf(a)?.hazard && !(a.src === 'flag' && a.due > week));
+  return hz && !hz.safe ? hz : undefined;
+}
 /** 0.75 while a made-safe hazard is open on the house, else 1 */
 export const rentFactor = (s: Pick<IslandState, 'alerts'>, h: Pick<Asset, 'id'>) => (hazardOn(s, h.id)?.safe ? 0.75 : 1);
 
@@ -252,6 +262,13 @@ export function decayOf(s: Pick<IslandState, 'tier'> & { week?: number }, a: Pic
   return underWarranty(s, a) ? Math.min(base, WARRANTY.decay) : base;
 }
 
+/**
+ * G0: the generator house has had the Resort's service upgrade (WARRANTY.service.gen): the tier-5 standby set and its
+ * 200 A automatic transfer switch (checkdata.ts GEN_UPGRADE), installed with the tier or by the migration of a live
+ * tier-5 island. Derived, never stored
+ */
+export const genUpgraded = (s: Pick<IslandState, 'tier'>) => WARRANTY.service.gen && s.tier >= 5;
+
 /** the builder's warranty still covers this building this week */
 export const underWarranty = (s: { week?: number }, a: { warrantyUntil?: number }) => a.warrantyUntil !== undefined && s.week !== undefined && a.warrantyUntil >= s.week;
 
@@ -426,16 +443,14 @@ export function projectCoverWeek(s: Pick<IslandState, 'project' | 'orders' | 'pl
 }
 
 export function houseRentable(s: IslandState, h: Asset, week = s.week) {
-  const hz = hazardOn(s, h.id);
-  return !isTagged(s, h.id) && !renovating(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week && !(hz && !hz.safe);
+  return !isTagged(s, h.id) && !renovating(s, h.id) && powered(s).on && h.health >= 40 && (h.inspectionUntil ?? 0) >= week && !closingHazard(s, h.id, week);
 }
 
 export function houseBlocker(s: IslandState, h: Asset, week = s.week): string | null {
   if (isTagged(s, h.id)) return 'red-tagged';
   if (renovating(s, h.id)) return renoAwaitingFinal(s, h.id) ? "renovation: the electrician's final" : 'renovation: the builders are on it';
   if (!powered(s).on) return 'no power';
-  const hz = hazardOn(s, h.id);
-  if (hz && !hz.safe) return 'hazard';
+  if (closingHazard(s, h.id, week)) return 'hazard';
   if (h.health < 40) return `reliability ${Math.round(h.health)}`;
   if ((h.inspectionUntil ?? 0) < week) return 'inspection lapsed';
   return null;

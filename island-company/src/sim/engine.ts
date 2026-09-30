@@ -45,9 +45,9 @@ import {
   causeOf,
   findingOf,
   fixesOf,
+  flagSource,
   generateAlerts,
   liveAlerts,
-  nameMid,
   needsOf,
   pruneAlerts,
   raiseAlert,
@@ -55,12 +55,12 @@ import {
   symptomOf,
   symptomText,
 } from './alerts';
-import { acOf, assignSlots, bomValue, cardOf, earlyLess, fillOf, fixTaskFor, installCheck, judgeElecPick, judgeSlot, laborCost, planTask, realFault, repairLabor, stdPick } from './flow';
+import { acOf, assignSlots, bomValue, cardOf, earlyLess, earlyTier, fillOf, fixTaskFor, installCheck, judgeElecPick, judgeSlot, laborCost, planTask, realFault, repairLabor, stdPick } from './flow';
 import { canCheck, checkDid, checkReviewLines, checkView, flagCheck, flagPick, raiseCheckWriteUp, raiseFlag } from './checks';
 import { CHECK_ROWS } from './checkdata';
 import { itemById, priceAt } from './items';
 import { book, bookAog, bookFill, bookWait, closeLedger, spendable } from './ledger';
-import { migrate } from './migrate';
+import { migrate, retireOldSwitch } from './migrate';
 import {
   addStarter,
   allOnHand,
@@ -125,6 +125,8 @@ import {
   isTagged,
   outOfService,
   renovating,
+  renoAwaitingFinal,
+  closingHazard,
   isBlind,
   isRework,
   SIGNOFF,
@@ -414,6 +416,7 @@ function finishProjectIfDone(s: IslandState, now: number) {
     svc.health = Math.max(svc.health, built);
     svc.touchedWeek = Math.max(svc.touchedWeek, s.week);
     svc.warrantyUntil = s.week + WARRANTY.weeks;
+    if (up === 'generator') retireOldSwitch(s, svc);
   }
   // the new tier's spares come with it (19.3)
   addStarter(s, p.tier);
@@ -871,8 +874,11 @@ function flagMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'fl
   const pick = flagPick(s, a.role, asset, f.to);
   if (!pick) return fail('Nothing there anyone could report.');
   s.flagged = { ...(s.flagged ?? {}), [a.role]: s.week };
-  raiseFlag(s, a.role, asset, f.to, pick, now);
-  feed(s, f.to, 'info', `${nameOf(s, a.role)} flagged ${nameMid(asset)} for ${nameOf(s, f.to)}: it's on the alert list.`, now);
+  const al = raiseFlag(s, a.role, asset, f.to, pick, now);
+  // both seats read what went on the list in the flagger's name, and whose words it passes on (review round 1)
+  const said = `${nameOf(s, a.role)} passed on ${flagSource(s, al)} to ${nameOf(s, f.to)}: ${alertShort(s, al)}.`;
+  feed(s, f.to, 'info', said, now);
+  feed(s, a.role, 'info', said, now);
   return { s };
 }
 
@@ -1113,6 +1119,9 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
   gainXp(s, a.role, blind ? blindXpFloor(o.tier) : Math.round(orderXp(o.tier, cr, a.perfect) * (covered ? 0.5 : 1)));
 
   const asset = assetOf(s, o);
+  // a renovation's final (G0): the house back to RENO.health with it, then the final's own work on top (renoSignoff)
+  const signedNow = blind || a.score >= SIGNOFF;
+  if (asset && o.kind === 'codeprep' && signedNow) renoSignoff(s, asset, s.week);
   if (asset && o.gain > 0) {
     asset.health = clamp(asset.health + o.gain * landed, 0, 100);
     // a perfect job holds: that asset skips next week's decay too (blind: settled at resolve)
@@ -1122,8 +1131,6 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     const signed = blind || a.score >= SIGNOFF;
     if (o.kind === 'inspect100' && signed) asset.sinceInspection = 0;
     if (o.kind === 'codeprep' && signed) asset.inspectionUntil = renewedInspection(s, asset, s.week);
-    // a renovation's final: the house opens again, under the renovation's warranty (G0)
-    if (o.kind === 'codeprep' && signed) renoSignoff(s, asset, s.week);
   }
 
   if (o.kind === 'report') {
@@ -1566,6 +1573,8 @@ function planAlert(s: IslandState, al: Alert, taskId: string, rawPick: PickLine[
     if (!task || !tasksFor(s, asset, al.role).some((t) => t.id === task.id)) return `That task isn't in the manual set for ${asset.name}.`;
     if (!plannable(task)) return "That's reference only: pick the task that does the work.";
   }
+  // G0 (review round 1): the county won't pass a renovation's final with a hazard open on the house: make it safe first
+  if (task.kind === 'codeprep' && renoAwaitingFinal(s, asset.id) && closingHazard(s, asset.id)) return `The final won't pass with a hazard open on ${asset.name}: make it safe or fix it first.`;
   const picked = checkPick(s, asset, task, rawPick);
   if (typeof picked === 'string') return picked;
   const rs = research ? researchSlotOf(s, al, task) : null;
@@ -1590,8 +1599,9 @@ function planAlert(s: IslandState, al: Alert, taskId: string, rawPick: PickLine[
       assetId: asset.id,
       title: task.short,
       puzzle: c.puzzle,
-      // stage 2 (docs/EXPANSION.md 6.4): found early by a quick check, the job plays one order tier easier (never under 1)
-      tier: Math.max(1, orderTier(kind, asset, s.tier) - earlyLess(al)),
+      // stage 2 (docs/EXPANSION.md 6.4): found early by a quick check, the job plays one order tier easier (never under
+      // 1), and a blind job stays blind (review round 1: flow.ts earlyTier)
+      tier: earlyTier(orderTier(kind, asset, s.tier), earlyLess(al)),
       // (and prices one tier lower: caught early, it's less work)
       cost: laborCost(s, kind, task, asset, site, needsOf(s, al), earlyLess(al)),
       parts: 0,
@@ -3486,6 +3496,15 @@ function autoRun(s: IslandState, role: Role) {
   for (const al of liveAlerts(s).filter((x) => x.role === ops && x.status !== 'closed')) {
     const asset = s.assets.find((x) => x.id === al.assetId);
     if (!asset) continue;
+    // stage 2 (review round 1): a quick-check write-up or a crewmate's flag with nothing wrong, come due: a closer look by
+    // the book closes it as no fault found. Before, autopilot left every no-fault alert open, so a wrong walkaround call
+    // or a flag grounded the plane from its due week until the mechanic was back (pillar 2: nobody waits helplessly).
+    // Only at the resolve before it's due (as autopilot plans what comes due, below): until then it's the seat's to close
+    if (al.status === 'open' && (al.src === 'check' || al.src === 'flag') && al.cause < 0 && !al.repair && al.due <= s.week + 1) {
+      closeAlert(s, al, 'nff');
+      feed(s, ops, 'info', `${auto} closed ${shortText(s, al)} on ${asset.name}: no fault found.`, now);
+      continue;
+    }
     const f = alertFlags(s, al);
     const task = al.repair ? planTask(s, al, `repair:${al.id}`) : fixTaskFor(s, al);
     const needsBuy = !!task && stdPick(s, asset, task, siteOf(s, al), needsOf(s, al)).some((l) => available(s, l.item) < l.qty);
@@ -3593,13 +3612,14 @@ function autoRun(s: IslandState, role: Role) {
       cart.charging = true;
     }
     if (asset) {
+      // (a renovation's final: back to RENO.health, then the job's own points on top, as a person's sign-off)
+      if (o.kind === 'codeprep') renoSignoff(s, asset, s.week);
       asset.health = clamp(asset.health + o.gain * sc, 0, 100);
       // (a perfect blind sign-off settled at this resolve keeps its no-decay week, as complete() keeps it: the max)
       asset.touchedWeek = Math.max(asset.touchedWeek, s.week);
       // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
       // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
       if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
-      if (o.kind === 'codeprep') renoSignoff(s, asset, s.week);
       if (o.kind === 'inspect100') asset.sinceInspection = 0;
     }
     // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
@@ -4177,7 +4197,9 @@ export function resolveWeek(s: IslandState, now: number) {
     h.health -= houseWearOf(s);
   }
   for (const h of hs) {
-    if (isTagged(s, h.id)) continue; // red-tagged = de-energised: no fire
+    // red-tagged = de-energised: no fire; a house closed for its renovation has nobody in it and nothing in service
+    // (review round 1: a worn house the analyst had just paid to renovate caught fire under the builders)
+    if (isTagged(s, h.id) || renovating(s, h.id)) continue;
     if (W >= 3 && h.health < 30 && r.chance(ECON.fireChance)) {
       const cost = 1500 + 500 * s.tier;
       incidents.push({ kind: 'fire', role: 'elec', assetId: h.id, title: `Electrical fire at ${h.name}`, cost });

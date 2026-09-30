@@ -17,22 +17,24 @@
 // `checkTruth` is for the sim only (the engine, the bots). UI code never imports
 // it: tests/check.test.ts guards that.
 import { planeModel } from './aircraft';
-import { fits, liveAlerts, nameMid, pairsFor, raiseAlert, slotKind, soleGuest, SYMPTOMS, type Symptom } from './alerts';
+import { drawWeight, fits, flagSource, liveAlerts, nameMid, pairsFor, raiseAlert, slotKind, soleGuest, SYMPTOMS, type Symptom } from './alerts';
 import {
   CHECK_ROWS,
   checkRowKey,
-  GEN_PANEL,
+  genPanel,
   GEN_TELL_ZONE,
   GFCI_OK,
   GFCI_TELL,
   HOME_PANEL,
   HOUSE_CIRCUITS,
   IR,
+  IR_DAY_OFF,
   IR_SCOPE,
   METER,
   METER_SCOPE,
   SERVICE_ID,
   WALK_BENIGN,
+  WALK_BENIGN_TURBINE,
   WALK_SCOPE,
   WALK_ZONES,
   type CheckKind,
@@ -40,7 +42,9 @@ import {
   type WalkZone,
 } from './checkdata';
 import { CATALOG, CATALOG_BY_KIND, DEFECT, MODELS, REPORT, ROLE_LABEL, type CatalogEntry } from './data';
+import { genUpgraded, renovating } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
+import { pilotOf } from './staff';
 import type { Alert, Asset, IslandState, OpsRole, ReportLine, Role } from './types';
 
 export type { CheckKind };
@@ -88,6 +92,8 @@ export function canCheck(s: IslandState, role: OpsRole, assetId: string): { ok: 
   const a = s.assets.find((x) => x.id === assetId);
   if (!a) return { ok: false, why: 'No such asset.' };
   if (!checkKindFor(s, role, a)) return { ok: false, why: role === 'mech' ? 'The walkaround is for the planes and the generator.' : 'The IR scan is for the grid and the generator; the meter check for the houses.' };
+  // (a house closed for its renovation has nothing in service to read: its final covers the electrical side)
+  if (a.kind === 'house' && renovating(s, a.id)) return { ok: false, why: `${a.name} is closed for its renovation: nothing in service to meter until its final.` };
   return { ok: true };
 }
 
@@ -121,7 +127,7 @@ function candidates(s: IslandState, a: Asset, ck: CheckKind, W: number): { c: Ca
   const out: { c: CatalogEntry; w: number; from: number }[] = [];
   for (const c of CATALOG) {
     if (!(c.kind in scope) || !c.targets.includes(a.model)) continue;
-    const w = c.weight(a, W);
+    const w = drawWeight(s, c, a, W);
     const from = wearFromOf(c.kind);
     if (!(w > 0) || from === null) continue;
     // a late tell (the engine's oil and cylinders) shows only once it's well under way
@@ -156,13 +162,13 @@ function walkTells(a: Asset, kind: string): { zone: WalkZone; v: number }[] {
   return out;
 }
 
-const panelOf = (s: IslandState, a: Asset): IrBreaker[] => (a.kind === 'generator' ? GEN_PANEL : HOME_PANEL).filter((b) => b.from <= Math.max(1, s.tier));
+const panelOf = (s: IslandState, a: Asset): IrBreaker[] => (a.kind === 'generator' ? genPanel(genUpgraded(s)) : HOME_PANEL).filter((b) => b.from <= Math.max(1, s.tier));
 function irTargets(s: IslandState, a: Asset, kind: string): IrBreaker[] {
   const on = IR_SCOPE[kind]?.on;
   const panel = panelOf(s, a);
   if (a.kind === 'generator') return on === 'xfer' ? panel.filter((b) => b.id === 'xferG' || b.id === 'xferL') : [];
   if (on === 'main') return panel.filter((b) => b.id === 'main');
-  if (on === 'branch') return panel.filter((b) => b.id !== 'main');
+  if (on === 'branch') return panel.filter((b) => b.id !== 'main' && !IR_DAY_OFF.includes(b.id));
   return [];
 }
 const circuitsOf = (a: Asset) => HOUSE_CIRCUITS.filter((c) => !c.models || c.models.includes(a.model));
@@ -229,21 +235,22 @@ const WALK_HELP = [
 ];
 const GEN_WALK_HELP = ['Walk round the set with it shut down and locked out: the mounts, the belt, the exhaust, the enclosure.', "Write up what you'd service now. Its transfer switch and weekly test are the electrician's."];
 const IR_HELP = [
-  "NFPA 70B: scan at 40% of the rated load or more. Under 30% it's too light to judge.",
-  "Read heat against load: a healthy termination's rise over ambient grows with the square of its load, about +5 °C at half load and +20 °C at full. A loose lug runs hot for its load (I²R).",
+  `NFPA 70B: scan at 40% of the rated load or more. A reading under ${IR.tooLight}% is marked too light to judge.`,
+  "Read heat against load: a healthy termination's rise over ambient grows with the square of its load, about +5 °C at half load, +11 °C at three quarters and +20 °C at full. A loose lug runs hot for its load (I²R).",
   'NETA: ΔT against similar components under similar load, 4–15 °C probable, over 15 °C a major deficiency.',
-  "The main is read for its load, not its heat: over 80% of its rating continuous (three hours or more) means plan the upgrade (NEC 215.3).",
+  "A branch's reading is its load at the moment of the scan: judge it by its heat for that load. The main is read for its load over the afternoon: over 80% of its rating continuous (three hours or more) means plan the upgrade (NEC 230.42(A): service conductors at 125% of the continuous load).",
+  'The runway edge lights are a night load: off in an afternoon scan.',
 ];
 const GEN_IR_HELP = [
-  'Scanned during the weekly test run, the set carrying the backed-up load: the generator-side and load-side lugs carry the same current, so compare them.',
+  'Scanned during the weekly test run, the set carrying the backed-up load: the generator-side lugs, the load-side lugs and the generator main carry the same current, so compare them: healthy, they read within a degree or two.',
   "Read heat against load: a healthy termination's rise over ambient grows with the square of its load, about +5 °C at half load and +20 °C at full.",
   'NETA: ΔT against similar components under similar load, 4–15 °C probable, over 15 °C a major deficiency.',
 ];
 const METER_HELP = [
   'Each receptacle read with a 12 A load plugged in.',
   'Expected drop: 2 × run × 12 A × ohms per 1,000 ft (12 AWG about 1.6, 14 AWG about 2.5): about 3.8 V on 100 ft of 12 AWG.',
-  'The 3% guideline is 3.6 V at 120 V (NEC 210.19(A) informational note).',
-  'Both service legs should read about the same under load. One sagging while the other rises is a loose neutral.',
+  'The 3% guideline is 3.6 V at 120 V (NEC 210.19(A) informational note). It is a design guide: a long run that reads what its length predicts is as built, not a fault.',
+  'Both service legs should read about the same under load. One sagging while the other rises is a loose neutral, and then every receptacle under its load sags by the same extra volts, whatever its run.',
   'A GFCI must open on its test button (210.8).',
 ];
 export const IR_PPE = 'Dead front off: arc-rated PPE per NFPA 70E.';
@@ -264,7 +271,7 @@ function walkView(s: IslandState, a: Asset, W: number, tell: Tell | null): Check
   const items = zones.map((z) => ({
     id: z.id,
     label: z.label,
-    text: tell && tell.item === z.id && tell.text ? tell.text : pickSeeded(s, a, z.id, W, WALK_BENIGN[z.id]),
+    text: tell && tell.item === z.id && tell.text ? tell.text : pickSeeded(s, a, z.id, W, (a.kind === 'plane' && planeModel(a.model) === 'cargo' ? WALK_BENIGN_TURBINE[z.id] : undefined) ?? WALK_BENIGN[z.id]),
   }));
   return { kind: 'walkaround', assetId: a.id, items, help: a.kind === 'plane' ? WALK_HELP : GEN_WALK_HELP };
 }
@@ -278,19 +285,27 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
     // the weekly test run: the set carries the backed-up load through the generator-side and load-side lugs alike
     const r = rng(hashSeed(s.seed, 'ir', a.id, 'test', W));
     const loadPct = Math.round(tell ? r.range(IR.tellLoad[0], IR.tellLoad[1]) : r.range(30, 70));
-    const amps = Math.round((loadPct / 100) * 60);
+    // the switch's rating as installed (60 A, or 200 A after the Resort's upgrade: G0)
+    const rating = panel.find((b) => b.id === 'xferG')?.amps ?? 60;
+    const amps = Math.round((loadPct / 100) * rating);
+    // one current through every loaded termination: one shared offset (the room, the camera), then a little each
+    const shared = r.range(-IR.genShared, IR.genShared);
     for (const b of panel) {
       const rb = rng(hashSeed(s.seed, 'ir', a.id, b.id, W));
       const open = b.id === 'xferU';
       const bAmps = open ? 0 : amps;
       const pct = Math.round((100 * bAmps) / b.amps);
-      const rise = open ? r1(rb.range(0, 1)) : tell?.item === b.id ? r1(expRise(pct) + rb.range(IR.tell[0], IR.tell[1])) : r1(Math.max(0.5, expRise(pct) + rb.range(-IR.normal, IR.normal)));
+      const rise = open
+        ? r1(rb.range(0, 1))
+        : tell?.item === b.id
+          ? r1(expRise(pct) + shared + rb.range(IR.tell[0], IR.tell[1]))
+          : r1(Math.max(0.5, expRise(pct) + shared + rb.range(-IR.genEach, IR.genEach)));
       items.push(irItem(b, bAmps, pct, rise));
     }
     return { kind: 'ir', assetId: a.id, items, help: GEN_IR_HELP, ppe: IR_PPE };
   }
-  // one distractor a scan: a branch at 85-95% load, reading 14-18 °C, normal for its load
-  const branches = panel.filter((b) => b.id !== 'main' && b.id !== tell?.item);
+  // one look-alike a scan: a branch at 70-79% load, reading 10-13 °C: warm, and right for its load
+  const branches = panel.filter((b) => b.id !== 'main' && b.id !== tell?.item && !IR_DAY_OFF.includes(b.id));
   const distractor = branches.length ? rng(hashSeed(s.seed, 'irx', a.id, W)).pick(branches).id : null;
   for (const b of panel) {
     const rb = rng(hashSeed(s.seed, 'ir', a.id, b.id, W));
@@ -310,14 +325,18 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
     }
     let pct: number;
     let rise: number;
-    if (tell?.item === b.id) {
+    if (IR_DAY_OFF.includes(b.id)) {
+      // a night load in an afternoon scan: off, or a trickle (the photocell's own draw)
+      pct = Math.round(rb.range(0, 3));
+      rise = r1(rb.range(0, 0.6));
+    } else if (tell?.item === b.id) {
       pct = Math.round(rb.range(IR.tellLoad[0], IR.tellLoad[1]));
       rise = r1(expRise(pct) + rb.range(IR.tell[0], IR.tell[1]));
     } else if (b.id === distractor) {
       pct = Math.round(rb.range(IR.distractorLoad[0], IR.distractorLoad[1]));
       rise = r1(clamp(expRise(pct) + rb.range(-1, 1), IR.distractorRise[0], IR.distractorRise[1]));
     } else {
-      pct = Math.round(rb.range(12, 80));
+      pct = Math.round(rb.range(12, 76));
       rise = r1(Math.max(0.5, expRise(pct) + rb.range(-IR.normal, IR.normal)));
     }
     items.push(irItem(b, Math.round((pct / 100) * b.amps), pct, rise));
@@ -339,11 +358,17 @@ function meterView(s: IslandState, a: Asset, W: number, tell: Tell | null): Chec
   const r = rng(hashSeed(s.seed, 'meter', a.id, W));
   const source = r.range(121, 123.5);
   const items: CheckItem[] = [];
+  const loose = tell?.item === SERVICE_ID;
+  const l1 = r1(loose ? r.range(METER.flickerLow[0], METER.flickerLow[1]) : source - r.range(0.3, 2.2));
+  const l2 = r1(loose ? r.range(METER.flickerHigh[0], METER.flickerHigh[1]) : source - r.range(0, 1.6));
+  // a loose service neutral (review round 1): every receptacle read under its own 12 A load carries that current back
+  // through the loose neutral too, so each sags by the same extra volts the loaded leg does at the panel
+  const neutral = loose ? Math.max(0, source - l1) : 0;
   for (const c of circuitsOf(a)) {
     const rc = rng(hashSeed(s.seed, 'meter', a.id, c.id, W));
     const run = runOf(s, a, c.id, c.run);
     const expected = (2 * run * METER.load * METER.ohms[c.awg]) / 1000;
-    const drop = tell?.item === c.id && tell.kind === 'trip' ? rc.range(METER.tripDrop[0], METER.tripDrop[1]) : expected + rc.range(-0.2, 0.2);
+    const drop = (tell?.item === c.id && tell.kind === 'trip' ? rc.range(METER.tripDrop[0], METER.tripDrop[1]) : expected + rc.range(-0.2, 0.2)) + (neutral ? neutral + rc.range(-0.4, 0.4) : 0);
     const volts = r1(source - drop);
     const gfci = c.gfci ? ` · ${pickSeeded(s, a, c.id, W, tell?.item === c.id && tell.kind === 'gfci' ? GFCI_TELL : GFCI_OK)}` : '';
     items.push({
@@ -353,9 +378,6 @@ function meterView(s: IslandState, a: Asset, W: number, tell: Tell | null): Chec
       reading: { volts, runFt: run, amps: METER.load },
     });
   }
-  const loose = tell?.item === SERVICE_ID;
-  const l1 = r1(loose ? r.range(METER.flickerLow[0], METER.flickerLow[1]) : source - r.range(0.3, 2.2));
-  const l2 = r1(loose ? r.range(METER.flickerHigh[0], METER.flickerHigh[1]) : source - r.range(0, 1.6));
   items.push({ id: SERVICE_ID, label: 'Service at the panel (L1 / L2)', text: `L1 ${l1.toFixed(1)} V · L2 ${l2.toFixed(1)} V with the 12 A load on L1`, reading: { volts: l1, amps: METER.load } });
   return { kind: 'meter', assetId: a.id, items, help: METER_HELP };
 }
@@ -391,8 +413,18 @@ export { checkRowKey };
 // ---------------------------------------------------------------------------
 // Report a problem (6.5)
 
-/** the sources a layperson's report can come from, and the kinds it never names */
-export const FLAG = { srcs: ['guest', 'squawk', 'utility'] as string[], never: ['wb', 'inspect100', 'codeprep', 'gpustart'], /** weeks before a flagged airworthiness squawk grounds its plane */ awLead: 1 };
+/**
+ * the sources a layperson's report can come from (a guest's complaint, a pilot's squawk, a utility or test log: the
+ * flagger passes it on, in its own source's name), the kinds it never names, and the rows nobody but a tech could have
+ * read (a dead circuit's "breaker on, no voltage at the load" is a meter reading: review round 1)
+ */
+export const FLAG = {
+  srcs: ['guest', 'squawk', 'utility'] as string[],
+  never: ['wb', 'inspect100', 'codeprep', 'gpustart'],
+  neverSym: ['E_DEAD_CIRCUIT'] as string[],
+  /** weeks before a flagged airworthiness squawk grounds its plane, or a flagged hazard closes its house */
+  awLead: 1,
+};
 
 /** the trade whose work the asset is (the generator: both techs'; stage 2's twin of objects.ts ownerOf) */
 const ownerKind = (a: Asset): OpsRole | 'both' => (a.kind === 'plane' ? 'mech' : a.kind === 'generator' ? 'both' : 'elec');
@@ -404,11 +436,11 @@ function flagKinds(s: IslandState, to: OpsRole, a: Asset, W: number) {
   const out: { kind: string; w: number; pairs: { sym: Symptom; cause: number; w: number }[] }[] = [];
   for (const c of CATALOG) {
     if (c.role !== to || !c.targets.includes(a.model) || FLAG.never.includes(c.kind)) continue;
-    const w = c.weight(a, W);
+    const w = drawWeight(s, c, a, W);
     if (!(w > 0)) continue;
     if (s.orders.some((o) => openOrder(o) && o.kind === c.kind && o.assetId === a.id)) continue;
     if (live.some((x) => x.assetId === a.id && slotKind(x) === c.kind)) continue;
-    const pairs = pairsFor(c.kind, a, sole).filter((p) => p.sym.role === to && FLAG.srcs.includes(p.sym.src));
+    const pairs = pairsFor(c.kind, a, sole, s).filter((p) => p.sym.role === to && FLAG.srcs.includes(p.sym.src) && !FLAG.neverSym.includes(p.sym.key));
     if (pairs.length) out.push({ kind: c.kind, w: w * (1 + (100 - a.health) / 40), pairs });
   }
   return out;
@@ -426,6 +458,13 @@ export function openWork(s: IslandState, role: OpsRole): { open: number; target:
 }
 
 const flaggedThisWeek = (s: IslandState, to: OpsRole) => (s.alerts ?? []).some((x) => x.src === 'flag' && x.role === to && x.week === s.week);
+/** a flag's flagger was the analyst (its seat, or on a doc without it, its name) */
+const byFin = (s: IslandState, x: Alert) => (x.by ? x.by === 'fin' : x.who === nameOf(s, 'fin'));
+/**
+ * a trade already has this week's flag from this side: one from a tech and one from the analyst (review round 1: a
+ * tech-to-tech flag used to lock the analyst out, and once each tech had flagged the other she could report nothing)
+ */
+const flaggedFrom = (s: IslandState, to: OpsRole, fin: boolean) => (s.alerts ?? []).some((x) => x.src === 'flag' && x.role === to && x.week === s.week && byFin(s, x) === fin);
 
 /**
  * who receives a flag on this asset: its trade. The generator is both techs' (only the analyst flags it): the tech
@@ -444,7 +483,7 @@ export function flagTo(s: IslandState, a: Asset): OpsRole {
   return flaggedThisWeek(s, 'mech') && !flaggedThisWeek(s, 'elec') ? 'elec' : 'mech';
 }
 
-/** whether the seat can flag the asset now (from week 3, one a week, one received per trade, never its own trade's), and to whom */
+/** whether the seat can flag the asset now (from week 3, one a week, one received per trade from each side, never its own trade's, never a house closed for its renovation), and to whom */
 export function flagCheck(s: IslandState, role: Role, assetId: string): { ok: true; to: OpsRole } | { ok: false; why: string } {
   if (s.week < REPORT.fromWeek) return { ok: false, why: `Report a problem opens in week ${REPORT.fromWeek}.` };
   if (s.turns[role]?.ended) return { ok: false, why: 'Your turn is over for this week.' };
@@ -454,15 +493,19 @@ export function flagCheck(s: IslandState, role: Role, assetId: string): { ok: tr
   const own = ownerKind(a);
   if (role !== 'fin' && own === 'both') return { ok: false, why: "The generator is both techs': write it up instead." };
   if (role === own) return { ok: false, why: "It's your trade's: write it up instead." };
+  if (a.kind === 'house' && renovating(s, a.id)) return { ok: false, why: `${a.name} is closed for its renovation: nobody's in it to report anything.` };
   const to = flagTo(s, a);
-  if (flaggedThisWeek(s, to)) return { ok: false, why: `${nameOf(s, to)} already has a flag this week: message ${nameOf(s, to)} instead.` };
+  if (flaggedFrom(s, to, role === 'fin')) return { ok: false, why: `${nameOf(s, to)} already has a flag from ${role === 'fin' ? 'you' : 'a crewmate'} this week: message ${nameOf(s, to)} instead.` };
   return { ok: true, to };
 }
 
 /**
- * What a flag raises (6.5): a symptom a layperson could see (a guest's, a pilot's squawk, a utility log) of a kind
- * with weight on the asset, weighted as the week's draw; nothing coming (a healthy asset): a no-fault write-up of
- * such a symptom, which takes no slot but costs the owner a close. A flag never names a load sheet, a 100-hr or code prep.
+ * What a flag raises (6.5): a symptom a layperson could see or be told (a guest's, a pilot's squawk, a utility log) of
+ * a kind with weight on the asset, weighted as the week's draw; nothing coming (a healthy asset): a no-fault write-up of
+ * such a symptom, which takes no slot but costs the owner a close. A flag never names a load sheet, a 100-hr or code
+ * prep. The no-fault pool never holds a hazard (review round 1: a flagged hazard on a sound house read as a real one
+ * and closed it that night). Rows with no no-fault finding of their own stay in it (the generator's are all such, and
+ * an empty pool would tell the analyst nothing's coming): they read "could not duplicate" at Investigate.
  */
 export function flagPick(s: IslandState, role: Role, a: Asset, to: OpsRole, W = s.week): { sym: string; cause: number } | null {
   const r = rng(hashSeed(s.seed, 'flag', role, a.id, W));
@@ -475,7 +518,16 @@ export function flagPick(s: IslandState, role: Role, a: Asset, to: OpsRole, W = 
   const sole = a.kind === 'plane' && soleGuest(s, a.id);
   const live = liveAlerts(s);
   const pool = Object.values(SYMPTOMS).filter(
-    (x) => x.role === to && !x.auto && !x.prefilled && FLAG.srcs.includes(x.src) && fits(x, a) && !(sole && x.sole === 'none') && !live.some((y) => y.assetId === a.id && y.sym === x.key),
+    (x) =>
+      x.role === to &&
+      !x.auto &&
+      !x.prefilled &&
+      !x.hazard &&
+      FLAG.srcs.includes(x.src) &&
+      !FLAG.neverSym.includes(x.key) &&
+      fits(x, a) &&
+      !(sole && x.sole === 'none') &&
+      !live.some((y) => y.assetId === a.id && y.sym === x.key),
   );
   const sym = r.weighted(pool, (x) => 1 + (x.nff ?? []).reduce((n, e) => n + e.w, 0));
   return sym ? { sym: sym.key, cause: -1 } : null;
@@ -484,11 +536,17 @@ export function flagPick(s: IslandState, role: Role, a: Asset, to: OpsRole, W = 
 /**
  * the flag's alert for the owner trade (the engine's `flag` move). An airworthiness squawk a crewmate flags gives the
  * mechanic a week to act: raised mid-week with its row's lead of 0 it grounded the plane at once, maybe after his turn
- * had ended (a crewmate's report is a heads-up, not a grounding)
+ * had ended (a crewmate's report is a heads-up, not a grounding). A flagged hazard gives the electrician the same week
+ * before it closes its house (econ.ts closingHazard, review round 1). The flagger passes on what its source said: the
+ * alert keeps the flagger's seat (`by`) and a plane's pilot whose squawk it was (`via`), and reads as relayed
  */
 export function raiseFlag(s: IslandState, role: Role, a: Asset, to: OpsRole, pick: { sym: string; cause: number }, now: number): Alert {
   const al = raiseAlert(s, { role: to, asset: a, sym: pick.sym, cause: pick.cause, src: 'flag', who: nameOf(s, role) }, now);
-  if (SYMPTOMS[al.sym]?.aw && al.due < s.week + FLAG.awLead) al.due = s.week + FLAG.awLead;
+  const sym = SYMPTOMS[al.sym];
+  if ((sym?.aw || sym?.hazard) && al.due < s.week + FLAG.awLead) al.due = s.week + FLAG.awLead;
+  al.by = role;
+  const pilot = a.kind === 'plane' && sym?.src === 'squawk' ? pilotOf(s, a.id)?.name : undefined;
+  if (pilot) al.via = pilot;
   return al;
 }
 
@@ -504,7 +562,7 @@ export function checkReviewLines(s: IslandState, W: number): ReportLine[] {
     if (al.src === 'check') {
       const row = CHECK_ROWS[al.sym];
       if (row) out.push({ role: al.role, tone: 'info', text: `${al.who ?? nameOf(s, al.role)} ${checkDid(row.kind, a)} and wrote up the ${row.word}.` });
-    } else out.push({ role: al.role, tone: 'info', text: `${al.who ?? 'A crewmate'} flagged ${nameMid(a)} for ${nameOf(s, al.role)}.` });
+    } else out.push({ role: al.by ?? al.role, tone: 'info', text: `${al.who ?? 'A crewmate'} passed on ${flagSource(s, al)} to ${nameOf(s, al.role)}.` });
   }
   return out;
 }

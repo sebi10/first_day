@@ -6,13 +6,14 @@
 // field is absent. It runs at the top of apply() and in the UI's read path.
 import { SYMPTOMS } from './alerts';
 import { islandAircraft } from './chain';
+import { GEN_UPGRADE } from './checkdata';
 import { kitValue, STOCK, TIERS, WARRANTY } from './data';
 import { bomValue, laborCost, repairLabor, repairTask, stdPick } from './flow';
 import { hashSeed } from './rng';
 import { migrateStaff } from './staff';
 import { addStarter, allOnHand, jobLines, placePo, reserve, toolsToBuy } from './stock';
 import { benchFor, defaultTask } from './tasks';
-import type { Alert, IslandState, Order, WeekLedger } from './types';
+import type { Alert, Asset, IslandState, Order, WeekLedger } from './types';
 import { needsOf, siteOf } from './alerts';
 
 const open = (o: Order) => o.status !== 'done' && o.status !== 'cancelled';
@@ -97,7 +98,11 @@ function upkeepMigrate(s: IslandState, W: number): void {
     lines.push(what);
   };
   if (WARRANTY.service.grid) upgrade('grid', 'the Harbor’s new pad-mount transformer and feeder');
-  if (s.tier >= 5 && WARRANTY.service.gen) upgrade('generator', 'the Resort’s bigger standby set and transfer switch');
+  if (s.tier >= 5 && WARRANTY.service.gen) {
+    upgrade('generator', `the Resort’s bigger standby set with ${GEN_UPGRADE.words}`);
+    const gen = s.assets.find((x) => x.kind === 'generator');
+    if (gen) retireOldSwitch(s, gen);
+  }
   if (lines.length) {
     const id = (s.feed[s.feed.length - 1]?.id ?? 0) + 1;
     s.feed.push({
@@ -105,11 +110,33 @@ function upkeepMigrate(s: IslandState, W: number): void {
       week: s.week,
       role: 'all',
       tone: 'good',
-      text: `This update brings ${lines.join(' and ')}: in at ${UPGRADE_HEALTH} or better, under the builder’s warranty to week ${W + WARRANTY.weeks}.`,
+      text: `This update brings ${lines.join(', and ')}: in at ${UPGRADE_HEALTH} or better, under warranty to week ${W + WARRANTY.weeks}.`,
       at: s.updatedAt,
     });
     if (s.feed.length > 60) s.feed.splice(0, s.feed.length - 60);
   }
+}
+
+/**
+ * G0 review round 1: the Resort's new 200 A transfer switch is in (with the tier, or by this migration), so the open
+ * (not yet planned) alerts to upsize or replace the old 60 A one are moot: they close as dropped, said once in the feed
+ */
+export function retireOldSwitch(s: IslandState, gen: Asset): void {
+  const old = (s.alerts ?? []).filter((a) => a.assetId === gen.id && a.status === 'open' && a.kind === 'transfer');
+  for (const a of old) {
+    a.status = 'closed';
+    a.closed = { week: s.week, how: 'dropped' };
+  }
+  if (!old.length) return;
+  s.feed.push({
+    id: (s.feed[s.feed.length - 1]?.id ?? 0) + 1,
+    week: s.week,
+    role: 'elec',
+    tone: 'info',
+    text: `${GEN_UPGRADE.words.replace(/^a /, 'The new ')} is in: the open ${old.length === 1 ? 'alert' : 'alerts'} about the old 60 A switch closed.`,
+    at: s.updatedAt,
+  });
+  if (s.feed.length > 60) s.feed.splice(0, s.feed.length - 60);
 }
 
 /** the service upgrade's condition on a live island (the synthesis's release grant: a new transformer and feeder, a new standby set) */

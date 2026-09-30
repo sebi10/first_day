@@ -35,6 +35,8 @@ export type MapDeps = {
   begin?(kind: PointerKind): void;
   /** a gesture ended (after its commit, or with nothing to commit) */
   settled?(how: 'gesture' | 'wheel', cam: Cam, kind: PointerKind): void;
+  /** the browser will send a click after this sequence (a tap, a mouse): it's the map's, eat it */
+  swallow?(): void;
   raf(f: () => void): number;
   caf(id: number): void;
   later(f: () => void, ms: number): number;
@@ -191,6 +193,7 @@ export class MapController {
         this.schedule();
       } else if (o.t === 'tap') this.d.tap(o.at, o.double, o.kind);
       else if (o.t === 'end') {
+        if (o.swallow) this.d.swallow?.();
         if (this.frame) {
           this.d.caf(this.frame);
           this.frame = 0;

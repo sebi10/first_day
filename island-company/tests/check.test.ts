@@ -11,7 +11,7 @@ import { CHECK_ROWS, GEN_PANEL, GFCI_OK, GFCI_TELL, HOME_PANEL, IR, METER, WALK_
 import { CHECK, canCheck, checkKindFor, checkTruth, checkView, openWork, wearFromOf, type CheckKind } from '../src/sim/checks';
 import { CATALOG_BY_KIND, DEFECT } from '../src/sim/data';
 import { apply, createIsland } from '../src/sim/engine';
-import { fixTaskFor, laborCost, stdPickFor } from '../src/sim/flow';
+import { earlyTier, fixTaskFor, laborCost, stdPickFor } from '../src/sim/flow';
 import { hashSeed, rng } from '../src/sim/rng';
 import { addStarter } from '../src/sim/stock';
 import { ROLES, type Asset, type Defect, type IslandState, type OpsRole } from '../src/sim/types';
@@ -256,42 +256,77 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
     expect(WALK_SCOPE[kind].tells.flatMap((t) => t.texts)).toContain(text);
   });
 
-  it('the IR scan reads heat against load: the tell 10-20 °C over at 40-70% load, the distractor normal at 85-95%, too light under 30%, raw temperatures that overlap', () => {
+  it('the IR scan reads heat against load: the tell 10-20 °C over at 40-70% load, the look-alike warm but right for its load at 70-79% (under the 80% line), too light under 40%, the edge lights off by day, raw temperatures that overlap', () => {
     const tells: number[] = [];
     const distractors: number[] = [];
     const exp = (pct: number) => IR.riseFull * (pct / 100) ** 2;
     for (let seed = 1; seed <= 400; seed++) {
-      const s = island(seed, 80, 4);
+      const s = island(seed, 80, seed % 2 ? 4 : 5);
       const v = checkView(s, 'elec', 'g1')!;
       expect(v.ppe).toBe('Dead front off: arc-rated PPE per NFPA 70E.');
-      expect(v.help.join(' ')).toMatch(/NFPA 70B/);
+      expect(v.help.join(' ')).toMatch(/NFPA 70B: scan at 40% of the rated load or more\. A reading under 40% is marked too light to judge\./);
       expect(v.help.join(' ')).toMatch(/NETA/);
+      // (review round 1: 215.3 is the feeder rule; the main is read against the service's)
+      expect(v.help.join(' ')).toMatch(/NEC 230\.42\(A\)/);
+      expect(v.help.join(' ')).not.toMatch(/215\.3/);
       const t = checkTruth(s, 'elec', 'g1', 5);
       for (const i of v.items) {
         const r = i.reading!;
         if (i.id === 'main') continue;
+        // no branch reads over the 80% line: a pro applying the help's own rule has nothing to write up but heat
+        expect(r.loadPct!, i.label).toBeLessThan(80);
+        if (i.id === 'edge') {
+          // a night load in an afternoon scan: off, too light to judge, never the tell
+          expect(r.loadPct).toBeLessThanOrEqual(3);
+          expect(r.tooLight).toBe(true);
+          expect(t?.item).not.toBe('edge');
+          continue;
+        }
         if (r.loadPct! < IR.tooLight) {
           expect(r.tooLight).toBe(true);
           expect(i.text).toMatch(/too light to judge/);
           expect(t?.item).not.toBe(i.id);
-        }
+        } else expect(r.tooLight).toBeUndefined();
         if (t?.item === i.id) {
           expect(r.loadPct).toBeGreaterThanOrEqual(40);
           expect(r.loadPct).toBeLessThanOrEqual(70);
           expect(r.riseC! - exp(r.loadPct!)).toBeGreaterThanOrEqual(9.9);
           expect(r.riseC! - exp(r.loadPct!)).toBeLessThanOrEqual(20.1);
           tells.push(r.riseC!);
-        } else if (r.loadPct! >= 85) {
-          expect(r.riseC).toBeGreaterThanOrEqual(14);
-          expect(r.riseC).toBeLessThanOrEqual(18);
-          distractors.push(r.riseC!);
-        } else expect(Math.abs(r.riseC! - exp(r.loadPct!))).toBeLessThanOrEqual(3.1);
+        } else {
+          // every other branch reads what its load predicts, the look-alike too (warm: 10-13 °C at 70-79%)
+          expect(Math.abs(r.riseC! - exp(r.loadPct!))).toBeLessThanOrEqual(3.1);
+          if (r.loadPct! >= 70 && r.riseC! >= 10) distractors.push(r.riseC!);
+        }
       }
     }
     expect(tells.length).toBeGreaterThan(20);
     expect(distractors.length).toBeGreaterThan(100);
-    // the raw temperatures overlap: some tells read cooler than some distractors
+    // the raw temperatures overlap: some tells read cooler than some look-alikes
     expect(Math.min(...tells)).toBeLessThan(Math.max(...distractors));
+  });
+
+  it("the generator house's three loaded terminations carry one current: healthy, they read within about 2 °C; the tell stands 10-20 °C over (review round 1)", () => {
+    let healthy = 0;
+    let told = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const s = island(seed, 60, 3);
+      for (const W of [5, 6, 7]) {
+        const v = checkView(s, 'elec', 'gen', W)!;
+        const loaded = v.items.filter((i) => i.id !== 'xferU');
+        const t = checkTruth(s, 'elec', 'gen', W);
+        const ok = loaded.filter((i) => i.id !== t?.item).map((i) => i.reading!.riseC!);
+        expect(Math.max(...ok) - Math.min(...ok), `seed ${seed} week ${W}`).toBeLessThanOrEqual(2 * (IR.genEach + 0.05));
+        healthy++;
+        if (t) {
+          const hot = loaded.find((i) => i.id === t.item)!.reading!.riseC!;
+          expect(hot - Math.max(...ok)).toBeGreaterThanOrEqual(10 - 2 * IR.genEach - 0.1);
+          told++;
+        }
+      }
+    }
+    expect(healthy).toBe(900);
+    expect(told).toBeGreaterThan(20);
   });
 
   it("the panel's main is read for its load: 82-95% continuous is the upgrade's tell", () => {
@@ -340,7 +375,7 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
 });
 
 describe('the call (6.4)', () => {
-  it('a right call raises that kind’s alert now: early, one order tier easier and a tier cheaper, due its lead + 1', () => {
+  it('a right call raises that kind’s alert now: early, one order tier easier (a blind job stays blind) and a tier cheaper, due its lead + 1', () => {
     const { s: s0, item, kind } = withTell('p1', 'mech');
     const s = ok(s0, { t: 'check', role: 'mech', assetId: 'p1', item, week: s0.week });
     const al = s.alerts!.at(-1)!;
@@ -348,12 +383,13 @@ describe('the call (6.4)', () => {
     expect(al.cause).toBeGreaterThanOrEqual(0);
     expect(al.due).toBeGreaterThanOrEqual(s.week + 2);
     expect(al.due).toBeLessThanOrEqual(s.week + 3);
-    // its job: one tier easier than the same job not found early, and priced a tier lower
+    // its job: one tier easier than the same job not found early (never out of the blind tiers: review round 1), and
+    // priced a tier lower
     const task = fixTaskFor(s, al)!;
     const planned = ok(s, { t: 'plan', role: 'mech', alert: al.id, task: task.id, pick: stdPickFor(s, al, task), week: s.week });
     const o = planned.orders.find((x) => x.flow?.alert === al.id)!;
     const normalTier = Math.max(1, CATALOG_BY_KIND[kind].tier + Math.floor(s.tier / 2) + (s.assets[0].health < 50 ? 1 : 0));
-    expect(o.tier).toBe(Math.max(1, normalTier - 1));
+    expect(o.tier).toBe(earlyTier(normalTier, 1));
     expect(o.cost).toBeLessThanOrEqual(laborCost(s, kind, task, s.assets.find((a) => a.id === 'p1')!, null, null));
     // the review line at the resolve: blind
     expect(s.feed.at(-1)!.text).toMatch(/^Ana walked around Twin N-12 and wrote up the .+: it's on the alert list\.$/);

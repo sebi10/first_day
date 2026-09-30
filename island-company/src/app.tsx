@@ -40,7 +40,8 @@ export function App() {
   // Esc closes the top sheet/overlay on desktop
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      // (a sheet that closed itself on this Esc marks it handled: one Esc closes the top layer only, review round 1)
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
       const scrim = document.querySelector<HTMLElement>('.scrim');
       if (scrim) return scrim.click();
       // overlays (puzzle, review) mark their close/back button

@@ -3,11 +3,11 @@
 // rating, its conductor, its load (amps and % of rating) and its temperature rise
 // over ambient; the camera paints the lugs by their temperature, the way a real
 // one does, never by whether they're wrong. He taps the breaker he'd open, then
-// Open it up; or All normal. At most 3 taps from the sheet.
+// Write up: <the breaker>; or All normal. At most 3 taps from the sheet.
 //
 // Reading it is the skill: a healthy termination's rise grows with the square of
 // its load, so a lug at half load running as hot as a neighbour at 90% is the one
-// (I²R at a loose lug). Under 30% it's too light to judge. The generator is scanned
+// (I²R at a loose lug). Under 40% it's too light to judge. The generator is scanned
 // during its weekly test run: its generator-side and load-side lugs carry the same
 // current, so they're compared with each other (NETA's ΔT between similar parts).
 import { useState } from 'preact/hooks';
@@ -209,7 +209,7 @@ export function IrScan({ s, a, view, busy, onCall }: { s: IslandState; a: Pick<A
         ))}
       </div>
       <Help lines={view.help} />
-      <CheckFoot none="All normal" call="Open it up" pick={pick} pickLabel={picked?.label} busy={busy} onCall={onCall} />
+      <CheckFoot none="All normal" call="Write up" pick={pick} pickLabel={picked?.label} busy={busy} onCall={onCall} />
     </div>
   );
 }

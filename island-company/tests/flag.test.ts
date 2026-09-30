@@ -5,7 +5,7 @@
 // layperson could see; a healthy asset gives a no-fault write-up that takes no slot
 // but costs a close. A flag never gives a load sheet, a 100-hr or code prep.
 import { describe, expect, it, vi } from 'vitest';
-import { SYMPTOMS, symptomText } from '../src/sim/alerts';
+import { alertShort, SYMPTOMS, symptomText } from '../src/sim/alerts';
 import { FLAG, flagCheck, flagPick, openWork } from '../src/sim/checks';
 import { REPORT } from '../src/sim/data';
 import { alertAog } from '../src/sim/econ';
@@ -102,15 +102,22 @@ describe('who can flag what (6.5)', () => {
     expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'elec' });
   });
 
-  it('each trade receives one flag a week: the second flagger is told to message instead', () => {
+  it("each trade receives one flag a week from the techs and one from the analyst: a tech-to-tech flag never locks the analyst out (review round 1)", () => {
     let s = island();
-    s = ok(s, { t: 'flag', role: 'fin', assetId: 'h1', week: s.week });
-    expect(flaggable(s, 'mech', 'h2')).toEqual({ ok: false, why: 'Ben already has a flag this week: message Ben instead.' });
-    // the other trade can still receive one
-    expect(flaggable(s, 'elec', 'p1')).toEqual({ ok: true, to: 'mech' });
+    s = ok(s, { t: 'flag', role: 'mech', assetId: 'h1', week: s.week });
+    s = ok(s, { t: 'flag', role: 'elec', assetId: 'p1', week: s.week });
+    // each tech has flagged the other: the analyst can still report on a house and on a plane
+    expect(flaggable(s, 'fin', 'h2')).toEqual({ ok: true, to: 'elec' });
+    expect(flaggable(s, 'fin', 'p1')).toEqual({ ok: true, to: 'mech' });
+    // the analyst's flag first: the mechanic can still report a house to the electrician
+    let t = island();
+    t = ok(t, { t: 'flag', role: 'fin', assetId: 'h1', week: t.week });
+    expect(flaggable(t, 'mech', 'h2')).toEqual({ ok: true, to: 'elec' });
+    // one a week each: the analyst's is used
+    expect(flaggable(t, 'fin', 'p1')).toEqual({ ok: false, why: 'One report a week: yours is used. Message them instead.' });
     // next week it's open again
-    s.week = 7;
-    expect(flaggable(s, 'mech', 'h2')).toEqual({ ok: true, to: 'elec' });
+    t.week = 7;
+    expect(flaggable(t, 'fin', 'p1')).toEqual({ ok: true, to: 'mech' });
   });
 });
 
@@ -123,9 +130,15 @@ describe('what a flag raises (6.5)', () => {
     expect(a).toMatchObject({ role: 'mech', assetId: 'p1', src: 'flag', who: 'Cy', status: 'open' });
     expect(a.cause).toBeGreaterThanOrEqual(0);
     expect(SYMPTOMS[a.sym].src).toBe('squawk');
-    expect(symptomText(s, a)).toMatch(/^Flagged by Cy on Twin N-12: /);
+    // (review round 1) the flagger passes on the pilot's squawk, in the pilot's name: never their own words
+    const pilot = a.via!;
+    expect(pilot).toBeTruthy();
+    expect(a.by).toBe('fin');
+    expect(symptomText(s, a)).toMatch(new RegExp(`^Cy passed on a squawk from ${pilot} \\(the pilot\\) on Twin N-12: `));
     expect(openWork(s, 'mech').open).toBe(before + 1);
-    expect(s.feed.at(-1)!.text).toBe("Cy flagged Twin N-12 for Ana: it's on the alert list.");
+    // both seats read what went on the list
+    const said = `Cy passed on a squawk from ${pilot} (the pilot) on Twin N-12 to Ana: ${alertShort(s, a)}.`;
+    expect(s.feed.filter((f) => f.text === said).map((f) => f.role).sort()).toEqual(['fin', 'mech']);
   });
 
   it('a flagged airworthiness squawk gives the mechanic a week: it never grounds the plane the week it is flagged', () => {
@@ -159,7 +172,7 @@ describe('what a flag raises (6.5)', () => {
     let s = island(8, 70);
     s = ok(s, { t: 'flag', role: 'fin', assetId: 'h2', week: s.week });
     const a = s.alerts!.at(-1)!;
-    expect(symptomText(s, a)).toMatch(/^Flagged by Cy on Cottage 2: /);
+    expect(symptomText(s, a)).toMatch(/^Cy passed on a guest's complaint at Cottage 2: /);
     expect(symptomText(s, a)).not.toMatch(/Guest at/);
   });
 
@@ -188,6 +201,9 @@ describe('what a flag raises (6.5)', () => {
     let s = island(5, 70);
     s = ok(s, { t: 'flag', role: 'fin', assetId: 'p1', week: s.week });
     for (const r of ROLES) if (!s.turns[r]?.ended) s = ok(s, { t: 'endTurn', role: r, week: 6 });
-    expect(s.history.at(-1)!.lines.map((l) => l.text)).toContain('Cy flagged Twin N-12 for Ana.');
+    const pilot = s.alerts!.find((a) => a.src === 'flag')!.via;
+    const line = s.history.at(-1)!.lines.find((l) => l.text === `Cy passed on a squawk from ${pilot} (the pilot) on Twin N-12 to Ana.`);
+    // (review round 1: tagged by the flagger's seat, not the receiver's)
+    expect(line?.role).toBe('fin');
   });
 });

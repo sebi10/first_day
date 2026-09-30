@@ -70,6 +70,18 @@ export function clampCam(c: Cam, vp: Size, sc: Size = HOME_SCENE, lim: Limits = 
 export const allCam = (vp: Size, sc: Size = HOME_SCENE, lim: Limits = INLINE): Cam => clampCam({ x: sc.w / 2, y: sc.h / 2, k: 1 }, vp, sc, lim);
 
 /**
+ * The scene filling the viewport ("cover" fit), centred: Explore opens here on a portrait phone (review round 1: at the
+ * contain fit the island filled about 40% of the screen between flat bands, and a one-finger drag did nothing until a
+ * zoom). null: a landscape viewport (a computer, a phone on its side) keeps the contain fit, the whole island in view
+ */
+export function coverCam(vp: Size, sc: Size = HOME_SCENE, lim: Limits = INLINE): Cam | null {
+  if (vp.w >= vp.h) return null;
+  const k = Math.max(vp.w / sc.w, vp.h / sc.h) / base(vp, sc);
+  if (k < 1.05) return null;
+  return clampCam({ x: sc.w / 2, y: sc.h / 2, k: Math.min(k, lim.kMax) }, vp, sc, lim);
+}
+
+/**
  * The camera that frames a box (a preset: the seat's zone, the build site): the most zoom that shows all of it,
  * capped, centred on it and clamped. In the inline 4:3 map it is exactly geo.tsx zoomOf's view (5.5).
  */

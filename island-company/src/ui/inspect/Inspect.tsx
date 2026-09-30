@@ -46,7 +46,7 @@ import { Walkaround } from './Walkaround';
 import { RenoCard } from '../staff/Reno';
 import './inspect.css';
 
-type Mode = { t: 'info' } | { t: 'check' } | { t: 'writeUp'; assetId: string } | { t: 'gse'; cart: string | null };
+type Mode = { t: 'info' } | { t: 'check'; week: number } | { t: 'writeUp'; assetId: string } | { t: 'gse'; cart: string | null };
 
 const CHECK_WORD = { walkaround: 'Walkaround', ir: 'IR scan', meter: 'Meter check' } as const;
 /** the records (a data plate, the logbook, a schedule) come after the seat's moves */
@@ -69,7 +69,10 @@ function Inspect({ s, ctl, role, target, onClose }: { s: IslandState; ctl: Ctl; 
   // Esc closes the sheet (the Sheet itself only closes on its scrim)
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // handled: the app's Esc (app.tsx) must not close Explore under it too (review round 1)
+      e.preventDefault();
+      onClose();
     };
     document.addEventListener('keydown', k);
     return () => document.removeEventListener('keydown', k);
@@ -82,6 +85,14 @@ function Inspect({ s, ctl, role, target, onClose }: { s: IslandState; ctl: Ctl; 
   useEffect(() => {
     (box.current?.closest?.('.sheet') as HTMLElement | null | undefined)?.scrollTo?.({ top: 0 });
   }, [mode.t]);
+  // the week closed under an open check: its readings were last week's, so it closes with a word (review round 1: it
+  // re-rendered with the next week's readings, the pick still set)
+  useEffect(() => {
+    if (mode.t === 'check' && mode.week !== s.week) {
+      setMode({ t: 'info' });
+      setDid(`The week closed before your call: nothing was written up. This week's check is open.`);
+    }
+  }, [s.week]);
 
   // a cart's ref is the ground power sheet, unchanged; the other seats get the cart's report job and a word to the mechanic
   if (target.kind === 'cart') {
@@ -120,7 +131,7 @@ function Inspect({ s, ctl, role, target, onClose }: { s: IslandState; ctl: Ctl; 
       </div>
     );
 
-  if (mode.t === 'check' && asset && role !== 'fin') {
+  if (mode.t === 'check' && mode.week === s.week && asset && role !== 'fin') {
     const view = checkView(s, role as OpsRole, asset.id);
     if (view) {
       const call = async (item: string | null) => {
@@ -194,7 +205,7 @@ function Inspect({ s, ctl, role, target, onClose }: { s: IslandState; ctl: Ctl; 
         <BlockView key={`r${b.t}${i}`} b={b} />
       ))}
       <Report s={s} ctl={ctl} role={role} report={f.report} onWriteUp={(id) => setMode({ t: 'writeUp', assetId: id })} />
-      <Primary f={f} ctl={ctl} run={run} onCheck={() => setMode({ t: 'check' })} />
+      <Primary f={f} ctl={ctl} run={run} onCheck={() => setMode({ t: 'check', week: s.week })} />
     </div>
   );
 }
@@ -325,7 +336,7 @@ function ActView({ a, ctl, role, run }: { a: Act; ctl: Ctl; role: Role; run: Run
     case 'rates':
       return <RatesStepper ctl={ctl} a={a} />;
     case 'reno':
-      return <RenoCard ctl={ctl} id={a.assetId} />;
+      return <RenoCard ctl={ctl} id={a.assetId} onHire={() => run({ t: 'desk', desk: 'staff', label: 'Hiring board', at: 'hiring' })} />;
     case 'check':
       return null;
     default: {

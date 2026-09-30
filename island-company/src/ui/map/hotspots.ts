@@ -7,7 +7,7 @@ import { TIERS } from '../../sim/data';
 import { openBuild } from '../../sim/staff';
 import type { IslandState } from '../../sim/types';
 import { DOCK, H, POS, SITE_EXTENT, W, siteKindOf, workSites, type Box, type Pt } from '../island/geo';
-import { assetRef, fixtureRef, HOME, type ObjectRef, type StationId } from '../objects';
+import { assetRef, FIXTURE_NAME, fixtureRef, HOME, type ObjectRef, type StationId } from '../objects';
 import { LAYOUTS, type FixtureKind, type SceneLayout } from './layouts';
 import { at, cartHitCentre, cartPlaces, figurePlaces, FOOT, footAt, modelOf, planePlaces, type Phase } from './place';
 
@@ -30,14 +30,15 @@ export const REACH_PX = 22;
 const clip = (b: Box): Box => [Math.max(0, b[0]), Math.max(0, b[1]), Math.min(W, b[2]), Math.min(H, b[3])];
 export const refKey = (r: ObjectRef) => `${r.st}:${r.kind}:${r.id}`;
 
+/** the names its sheet uses (objects.ts FIXTURE_NAME): one name per fixture on the map, the hover tag, the list and the sheet (review round 1) */
 const FIXTURE_LABEL: Record<FixtureKind, string> = {
   hangar: 'Hangar',
   office: 'Office',
-  fuel: 'Fuel bowser',
+  fuel: FIXTURE_NAME.fuel ?? 'Fuel dock',
   windsock: 'Windsock',
-  dock: 'Seaplane dock',
+  dock: FIXTURE_NAME.dock ?? 'Dock and boats',
   terminal: 'Terminal',
-  estop: 'Emergency stop',
+  estop: FIXTURE_NAME.estop ?? 'Fuel E-stop',
 };
 
 /**

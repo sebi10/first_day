@@ -156,9 +156,10 @@ export const WARRANTY = {
 /**
  * G0, the upkeep structure: a renovation, the analyst's capex from tier 4. The builders (carpentry, roofing, finishes: no
  * licensed work) renovate a worn house in two builder-weeks, drawing building materials; the mainland package (roofing
- * membrane, flooring, fixtures, paint, the permit) is paid when it's ordered. The house closes from the week the
- * builders start until the electrician signs off its final (the county's inspection on the permit: devices, GFCI and
- * AFCI, labels): then it opens in the builders' condition, inspected, under a shorter warranty.
+ * membrane, flooring, plumbing fixtures, paint, the permit) is paid when it's ordered. The house closes from the week the
+ * builders start until it passes the county's final on the permit (the electrician's trim-out: the panel directory, the
+ * labels, the clearances, the breakers against their wire; the inspector passes it): then it opens at `health`,
+ * inspected, under a shorter warranty (or the builder's warranty it still has, if that runs longer).
  */
 export const RENO = {
   fromTier: 4,

@@ -68,7 +68,7 @@ Three stages:
 2. **Stage 2 is the map and the objects.**
    - The map becomes a free camera.
    - Every object on the island is tappable, and what a tap shows and offers depends on your seat.
-   - Each tech gets **one quick check a week** that reads wear that is coming, the way the GPU cart sheet reads a cable. Catch it early and the job is on your list sooner and one tier easier.
+   - Each tech gets **one quick check a week** that reads wear that is coming, the way the GPU cart sheet reads a cable. Catch it early and the job is on your list sooner and a tier cheaper (and easier, but a blind job stays blind: review round 1).
    - **Report a problem** sends a crewmate a write-up.
 3. **Stage 3 is the airline, after the Resort.** The analyst can open two stations, each a crew project (a job from every seat) plus a capex call:
    - **Tern Cay:** an outstation airstrip on a neighbouring island. Two guest cottages, a 200 A service panel, and a fuel dispenser the station agent runs.
@@ -1489,7 +1489,7 @@ Every row also has **Report a problem** (6.5).
 
 **The walkaround** (≤ 3 taps; X7's cap):
 - A plan-view outline of the plane (or the generator) with every zone's observation **in one view**, as a real walkaround circles the whole aircraft.
-- He taps the zone he'd write up, then **Write it up**; or **All serviceable**.
+- He taps the zone he'd write up, then **Write up: <zone>**; or **All serviceable**. (Review round 1: the call names what it writes up, apart from the sheet's squawk card; the wheels' benign signs read like their tells, a lining measured or a shoulder worn, so a line not seen before can't be called unread; the Caravan's cowl has a turbine's signs.)
 - The skill is reading the signs: brake dust vs fretting dust, a breather's mist vs a weeping seal, oil-can paint vs working rivets.
 
 **The IR scan** (≤ 3 taps):
@@ -1498,12 +1498,13 @@ Every row also has **Report a problem** (6.5).
 - **Load-normalized:** a breaker's expected rise is about `20 °C × (load %)²`.
   - Normal: its expected rise ± 3 °C.
   - **The tell:** 10–20 °C over its expected, **at 40–70% load**.
-  - **The distractor** (one a scan, seeded): a breaker at 85–95% load reading 14–18 °C, which is normal for its load.
-  - **Under 30% load:** "too light to judge", never the tell.
-  - So the raw temperatures overlap (a tell reads about 13–30 °C, the distractor 14–18 °C), and only reading heat against load finds it. Physically, a loose lug heats with I²R: it shows under real load, not at a trickle.
-- The help panel cites NFPA 70B (scan at 40% load or more) and NETA's ΔT criteria (over 15 °C against similar components: a major deficiency; 4–15 °C: probable).
+  - **The distractor** (one a scan, seeded): a breaker at 70–79% load reading 10–13 °C, which is normal for its load. (Review round 1: at 85–95% and 14–18 °C it sat over the 80% line the help quotes and inside NETA's probable band, so a licensed electrician applying the screen's own rules wrote it up every week.)
+  - **Under 40% load:** "too light to judge", never the tell (NFPA 70B's line; it was 30%). The runway edge lights are a night load: off in an afternoon scan, never the tell or the distractor.
+  - So the raw temperatures overlap (a tell reads about 13–30 °C, the distractor 10–13 °C), and only reading heat against load finds it. Physically, a loose lug heats with I²R: it shows under real load, not at a trickle.
+  - The generator house (one current through its three loaded terminations): one shared offset of ±1 °C and ±0.8 °C each, so a healthy set reads within about 2 °C across them. Its ratings follow the Resort's upgrade: 60 A on #6 Cu before it, a 200 A automatic transfer switch on 3/0 Cu after (review round 1: the take-off to upsize the 60 A switch never comes up again, and nothing replaces the new one while its warranty runs).
+- The help panel cites NFPA 70B (scan at 40% load or more) and NETA's ΔT criteria (over 15 °C against similar components: a major deficiency; 4–15 °C: probable), and says a branch's reading is its load at that moment while the main is read for its continuous load (NEC 230.42(A)).
 - `panelUp`'s tell is the main at 82–95% continuous. Calling it means "plan the upgrade".
-- He taps the breaker he'd open, then **Open it up**; or **All normal**.
+- He taps the breaker he'd open, then **Write up: <breaker>**; or **All normal**.
 
 **The meter check on a house** (≤ 3 taps):
 - Every circuit of the house in one view.
@@ -1511,10 +1512,10 @@ Every row also has **Report a problem** (6.5).
 - **Expected drop:** `2 × run × 12 A × 1.6 Ω/1000 ft` (12 AWG): a 100 ft run drops about 3.8 V, a 30 ft run about 1.2 V.
   - **The `trip` tell:** a 5–9 V drop on a run under 50 ft (a loose backstab).
   - **The distractor:** a 120–150 ft run at 4.5–6 V, normal for its length.
-  - **The `flicker` tell:** one leg at 104–110 V while the other reads 130–136 V (a loose neutral).
+  - **The `flicker` tell:** one leg at 104–110 V while the other reads 130–136 V (a loose neutral); and then every receptacle under its own 12 A load sags by the same extra volts (review round 1: they read normal).
   - **The `gfci` tell:** "Test button: it clicks, the receptacle stays live."
-- The help panel cites the 3% guideline (3.6 V at 120 V; 210.19(A) informational note).
-- He taps a circuit, then **Write it up**; or **All normal**.
+- The help panel cites the 3% guideline (3.6 V at 120 V; 210.19(A) informational note) as a design guide: a long run that reads what its length predicts is as built.
+- He taps a circuit, then **Write up: <circuit>**; or **All normal**.
 
 **Bots and balance:**
 - The bots use checks (12.1), so the paper sim prices them.
@@ -1524,12 +1525,12 @@ Every row also has **Report a problem** (6.5).
 
 - **On an asset another trade owns** (the generator is owned by both techs: neither flags it, and both can write it up), any seat can flag it: `flag` (**new**).
   - **From week 3** (`REPORT.fromWeek`).
-  - One a week per seat. **Each trade receives at most one flag a week**; the second flagger sees "Mia already has a flag this week: message her instead".
-  - **What it raises:** a write-up alert for the owner trade on that asset, `who` = the flagger, "Flagged by Seb: …".
-    - It's drawn only from symptom-bearing kinds a layperson could see: `SYMPTOMS` rows with source `guest`, `squawk` or `utility` whose cause kind has weight above 0 on the asset, excluding `wb`, `inspect100`, `codeprep` and `gpustart`.
+  - One a week per seat. **Each trade receives at most one flag a week from the other tech and one from the analyst** (review round 1: one a week in all let a tech-to-tech flag lock the analyst out); a second from the same side sees "Mia already has a flag from a crewmate this week: message Mia instead".
+  - **What it raises:** a write-up alert for the owner trade on that asset, `who` = the flagger, `by` = the flagger's seat, **passed on in its source's words** (review round 1): "Seb passed on a guest's complaint at Cottage 1: …", "Ben passed on a squawk from Hemi (the pilot) on Twin N-12: …" (`via` = the pilot), "Seb passed on the utility's log for the island grid: …". Both seats' feeds and the flagger's sheet say what went on the list. A flagged hazard gives the electrician a week (its due week) before it closes the house, as a flagged airworthiness squawk gives the mechanic.
+    - It's drawn only from symptom-bearing kinds a layperson could see or be told: `SYMPTOMS` rows with source `guest`, `squawk` or `utility` whose cause kind has weight above 0 on the asset, excluding `wb`, `inspect100`, `codeprep` and `gpustart`, and never a meter reading (`E_DEAD_CIRCUIT`). Never on a house closed for its renovation.
     - They're weighted by `weight × (1 + (100 − health)/40)`, as the generator does, and raised through `pairsFor`.
-  - **If nothing qualifies** (a healthy asset), it's a no-fault write-up (`src: 'flag'`, cause −1). It takes no slot, like today's NFFs, and costs the owner a no-fault close.
-  - **The words say what it does:** "Adds one alert for Mia now. It counts in her open work, so next week's draw is one smaller."
+  - **If nothing qualifies** (a healthy asset), it's a no-fault write-up (`src: 'flag'`, cause −1), never a hazard. It takes no slot, like today's NFFs, and costs the owner a no-fault close; with the owner away, autopilot closes it as no fault found at the resolve before it's due.
+  - **The words say what it does:** "Passes on what a guest reported about Cottage 1: one alert on Mia's list, from you, until Mia closes it. You'll see what it said."
   - The sheet shows the fixer's name: "Tell Mia about Cottage 3".
 - **On a fixture** (hangar, office, runway, fuel, dock, windsock):
   - the open reports about it, with the fixer and the effect

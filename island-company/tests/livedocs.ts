@@ -40,6 +40,14 @@ export function liveMigrated(doc: IslandState): IslandState {
         a.health = Math.max(a.health, 80);
         a.warrantyUntil = W + WEEKS;
       }
+    // (review round 1: at the Resort the new 200 A switch retires the open alerts about the old 60 A one)
+    const gen = want.assets.find((a) => a.kind === 'generator');
+    if (gen && doc.tier >= 5)
+      for (const al of want.alerts ?? [])
+        if (al.assetId === gen.id && al.status === 'open' && al.kind === 'transfer') {
+          al.status = 'closed';
+          al.closed = { week: W, how: 'dropped' };
+        }
   }
   return want;
 }
@@ -49,9 +57,13 @@ export function expectLiveMigration(doc: IslandState, got: IslandState, name = d
   const want = liveMigrated(doc);
   if (want.stats.g0From !== undefined) {
     const added = got.feed.filter((e) => !doc.feed.some((d) => d.id === e.id));
-    expect(added, name).toHaveLength(1);
-    expect(added[0].text, name).toMatch(new RegExp(`^This update brings the Harbor’s new pad-mount transformer and feeder${doc.tier >= 5 ? ' and the Resort’s bigger standby set and transfer switch' : ''}: in at 80 or better, under the builder’s warranty to week ${doc.week + WEEKS}\\.$`));
-    want.feed = [...doc.feed, added[0]].slice(-60);
+    const retired = doc.tier >= 5 && (doc.alerts ?? []).some((a) => a.status === 'open' && a.kind === 'transfer' && doc.assets.some((g) => g.kind === 'generator' && g.id === a.assetId));
+    expect(added, name).toHaveLength(retired ? 2 : 1);
+    // (review round 1: "under warranty": the utility's transformer isn't the builder's; the Resort's switch is named)
+    expect(added.at(-1)!.text, name).toMatch(
+      new RegExp(`^This update brings the Harbor’s new pad-mount transformer and feeder${doc.tier >= 5 ? ', and the Resort’s bigger standby set with a 200 A automatic transfer switch' : ''}: in at 80 or better, under warranty to week ${doc.week + WEEKS}\\.$`),
+    );
+    want.feed = [...doc.feed, ...added].slice(-60);
   }
   expect(JSON.stringify(got), name).toBe(JSON.stringify(want));
 }

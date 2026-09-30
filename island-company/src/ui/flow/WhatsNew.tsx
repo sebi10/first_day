@@ -6,6 +6,7 @@ import { useState } from 'preact/hooks';
 import type { OpsRole } from '../../sim/types';
 import { Btn, Icon, Sheet } from '../kit';
 import type { Ctl } from '../useIsland';
+import { whatsNewClosed } from '../whatsnew';
 import { local, nameOf } from './words';
 
 export const whatsNewKey = (island: string, role: string) => `ic.jf.new.${island}.${role}`;
@@ -20,6 +21,7 @@ export function WhatsNew({ ctl, role }: { ctl: Ctl; role: OpsRole }) {
   const done = () => {
     local.set(key, '1');
     setOpen(false);
+    whatsNewClosed();
   };
   const pages = [
     {

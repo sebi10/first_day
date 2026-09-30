@@ -20,7 +20,7 @@ export const WALK_ZONES: Record<PlaneModel | 'gen', { id: WalkZone; label: strin
     { id: 'nose', label: 'Nose gear' },
     { id: 'lmain', label: 'L main' },
     { id: 'lnac', label: 'L nacelle' },
-    { id: 'root', label: 'Wing root / tail' },
+    { id: 'root', label: 'Wing root' },
     { id: 'rnac', label: 'R nacelle' },
     { id: 'rmain', label: 'R main' },
   ],
@@ -78,11 +78,12 @@ export const WALK_SCOPE: Record<string, { zones: WalkZone[]; late?: boolean; tel
     tells: [
       {
         cause: { fix: '32-40-01', needs: ['tire', 'tube'], finding: 'Tread at 2/32 in on the outboard shoulder, no cords showing; the sidewall sound. Change the tire and tube.' },
-        texts: ['Tread at the wear bars on the outboard shoulder.', 'The outboard shoulder is worn smooth; the grooves just show.', 'Shoulder tread flush with the wear bar on one side.'],
+        texts: ['The outboard shoulder is worn to the bottom of the groove.', 'The outboard shoulder is worn smooth; the grooves just show.', 'Shoulder tread flush with the wear bar on one side.'],
       },
       {
         cause: { fix: '32-40-02', needs: ['lining'], finding: 'Linings 0.06 in (limit 0.10); the disc within limits. Replace the linings.' },
-        texts: ['The lining wear pin is almost flush with the housing.', 'Wear pin barely proud of the brake housing.', 'About a sixteenth of the wear pin left.'],
+        // (review round 1: these airframes' brakes are Cleveland-type: the lining is measured, there's no wear pin)
+        texts: ['Linings about 1/16 in at the caliper.', 'The linings look thin at the caliper: about a sixteenth left.', 'Lining thickness at the caliper about 0.06 in, both pucks.'],
       },
     ],
   },
@@ -151,23 +152,50 @@ export const WALK_SCOPE: Record<string, { zones: WalkZone[]; late?: boolean; tel
     ],
   },
 };
+/**
+ * the turbine Caravan's cowl (review round 1): a PT6 has no cowl flaps and no sump drain on the engine; its benign
+ * signs are its own (the stack, the accessory-gearbox breather, the fuel purge)
+ */
+export const WALK_BENIGN_TURBINE: Partial<Record<WalkZone, string[]>> = {
+  cowl: ['Soot on the exhaust stacks; the stack welds sound.', 'A light oil film at the accessory gearbox breather.', 'A drop of fuel at the fuel nozzle drain after shutdown.', 'Oil streak along the lower cowl from the last start, dry.'],
+};
+
 /** a generator tell's variant is its zone's (the mount isolators, the belt, the exhaust) */
 export const GEN_TELL_ZONE: WalkZone[] = ['mounts', 'belt', 'exhaust'];
 
-/** what a zone shows when nothing is coming: three or more phrasings each, some of them alarming-sounding (all within limits) */
+/**
+ * what a zone shows when nothing is coming: three or more phrasings each, some of them alarming-sounding (all within
+ * limits). Review round 1: the wheels' lines read like the tells, a measurement or a look to judge against the limit
+ * (the linings at 1/8 in against 1/16, a dry old dye stain against a wet film, a shoulder worn but its groove clear),
+ * so a line a player hasn't seen yet can't be called a tell unread
+ */
 export const WALK_BENIGN: Record<WalkZone, string[]> = {
   nose: ['Oleo extension within the placard; a film of oil on the chrome.', 'Nose tire tread even; two small cuts under the limit.', 'Torque links: a little play at the bushing, within limits.', 'Shimmy damper rod wet with a thin film, no drip.'],
-  lmain: ['Brake dust on the wheel face; the disc bright where the linings ride.', "A shallow cut in the tire's sidewall, not into the cords.", 'Fine heat-check lines on the brake disc face.', 'Tread even across the crown, 4/32 in at the shoulder.', 'Old red dye stain on the strut, dry to the touch.'],
-  rmain: ['Brake dust on the wheel face; the disc bright where the linings ride.', "A shallow cut in the tire's sidewall, not into the cords.", 'Fine heat-check lines on the brake disc face.', 'Tread even across the crown, 4/32 in at the shoulder.', 'Old red dye stain on the strut, dry to the touch.'],
-  lfloat: ['Pump-out cups dry; a cupful of water in one compartment.', 'Keel strip scuffed from the ramp.', 'Brake dust on the retractable wheel.', "A shallow cut in the tire's sidewall, not into the cords."],
-  rfloat: ['Pump-out cups dry; a cupful of water in one compartment.', 'Keel strip scuffed from the ramp.', 'Brake dust on the retractable wheel.', "A shallow cut in the tire's sidewall, not into the cords."],
+  lmain: [
+    'Brake dust on the wheel face; the disc bright where the linings ride.',
+    "A shallow cut in the tire's sidewall, not into the cords.",
+    'Fine heat-check lines on the brake disc face.',
+    'Linings about 1/8 in at the caliper.',
+    'The outboard shoulder is worn more than the inboard; its groove still clear.',
+    'An old film of red dye on the caliper housing, dry to the touch.',
+  ],
+  rmain: [
+    'Brake dust on the wheel face; the disc bright where the linings ride.',
+    "A shallow cut in the tire's sidewall, not into the cords.",
+    'Fine heat-check lines on the brake disc face.',
+    'Linings about 3/16 in at the caliper, both pucks.',
+    'Tread even across the crown; the grooves clear at the shoulder.',
+    'Old red dye stain on the strut, dry to the touch.',
+  ],
+  lfloat: ['Pump-out cups dry; a cupful of water in one compartment.', 'Keel strip scuffed from the ramp.', 'Brake dust on the retractable wheel.', "A shallow cut in the tire's sidewall, not into the cords.", 'Linings about 1/8 in at the caliper.'],
+  rfloat: ['Pump-out cups dry; a cupful of water in one compartment.', 'Keel strip scuffed from the ramp.', 'Brake dust on the retractable wheel.', "A shallow cut in the tire's sidewall, not into the cords.", 'An old film of red dye on the caliper housing, dry to the touch.'],
   lnac: ['A light oil mist at the breather tube outlet.', 'Exhaust soot streaks along the lower cowl.', 'A drop of fuel at the sump drain after sumping.', 'An oil smudge on the cowl flap hinge from the last oil change.'],
   rnac: ['A light oil mist at the breather tube outlet.', 'Exhaust soot streaks along the lower cowl.', 'A drop of fuel at the sump drain after sumping.', 'An oil smudge on the cowl flap hinge from the last oil change.'],
   cowl: ['A light oil mist at the breather tube outlet.', 'Exhaust soot streaks along the lower cowl.', 'A drop of fuel at the sump drain after sumping.', 'An oil smudge on the cowl flap hinge from the last oil change.'],
   root: ["Paint chipped along the fairing's leading edge.", 'The skin panel near the root oil-cans and pops back.', 'A hairline crack in the paint along a fairing seam; the rivets tight.', 'Fairing screws all present; one a little loose in its dimple.'],
   tail: ['Elevator hinge play within limits.', 'One static wick frayed, still attached.', 'Light surface rust on the tail tie-down ring.', 'Bird droppings on the stabilizer; the skin sound underneath.'],
   mounts: ['The isolators weathered on the surface, firm under a bar.', "A mount bolt's paint cracked at the washer; the bolt tight.", 'Rust bloom on the base frame.'],
-  belt: ['Belt tension right; a little dust on the guard.', "A few frayed threads at the belt's edge.", 'The belt squeals for a second at start, then quiet.'],
+  belt: ['Belt tension right; a little dust on the guard.', "A few frayed threads at the belt's edge.", "The test log: the belt squealed for a second at last week's start, then went quiet."],
   exhaust: ['A light soot film at the rain cap.', 'Heat discoloration on the muffler shell.', 'Surface rust on the flex section.'],
   enclosure: ['Louvres clear; a wasp nest in one corner.', 'Door seal worn; the enclosure dry inside.', 'A puddle of rainwater by the door; the floor dry under the set.'],
 };
@@ -208,6 +236,15 @@ export const GEN_PANEL: IrBreaker[] = [
   { id: 'xferU', label: 'Transfer switch, utility-side lugs (open)', amps: 60, awg: '#6 Cu', from: 3 },
 ];
 
+/**
+ * the Resort's service upgrade (G0, WARRANTY.service.gen): a bigger standby set and a 200 A automatic transfer switch on
+ * 3/0 Cu (200 A at 75 °C, Table 310.16), the set's main breaker to match. Review round 1: the upgrade changed nothing the
+ * electrician read; the IR scan and the generator sheet still showed the 60 A switch
+ */
+export const GEN_UPGRADE = { amps: 200, awg: '3/0 Cu', words: 'a 200 A automatic transfer switch' };
+/** the generator house's schedule as installed: before the Resort's upgrade, or after it */
+export const genPanel = (upgraded: boolean): IrBreaker[] => (upgraded ? GEN_PANEL.map((b) => ({ ...b, amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg })) : GEN_PANEL);
+
 /** the IR scan's scope: which breakers a kind's tell can show on */
 export const IR_SCOPE: Record<string, { on: 'branch' | 'main' | 'xfer' }> = {
   xfmr: { on: 'branch' },
@@ -215,8 +252,28 @@ export const IR_SCOPE: Record<string, { on: 'branch' | 'main' | 'xfer' }> = {
   transfer: { on: 'xfer' },
 };
 
-/** the bands (6.4, tune): a healthy breaker's rise over ambient is about riseFull x (load share)^2 */
-export const IR = { riseFull: 20, normal: 3, tell: [10, 20] as [number, number], tellLoad: [40, 70] as [number, number], distractorLoad: [85, 95] as [number, number], distractorRise: [14, 18] as [number, number], tooLight: 30, panelUp: [82, 95] as [number, number] };
+/**
+ * the bands (6.4, tune): a healthy breaker's rise over ambient is about riseFull x (load share)^2. Review round 1: the
+ * look-alike stays under the 80% line the help quotes (70-79%, 10-13 °C: warm, and right for its load; at 85-95% and
+ * 14-18 °C a licensed electrician applying the screen's own rules wrote it up every week); a reading under NFPA 70B's
+ * 40% is marked too light to judge (it said 40 and marked 30); the generator's three terminations carry one current, so
+ * a healthy set reads within about 2 °C across them (one shared offset, then ±genEach each; ±3 each read 4 °C apart in
+ * one scan in ten)
+ */
+export const IR = {
+  riseFull: 20,
+  normal: 3,
+  tell: [10, 20] as [number, number],
+  tellLoad: [40, 70] as [number, number],
+  distractorLoad: [70, 79] as [number, number],
+  distractorRise: [10, 13] as [number, number],
+  tooLight: 40,
+  panelUp: [82, 95] as [number, number],
+  genShared: 1,
+  genEach: 0.8,
+};
+/** the branches no tell or look-alike shows on in an afternoon scan: the runway edge lights are a night load, off by day */
+export const IR_DAY_OFF = ['edge'];
 
 // ---------------------------------------------------------------------------
 // The meter check (the electrician): a house's circuits, with a 12 A load on
@@ -331,7 +388,7 @@ function irRows(): Symptom[] {
       lead: [1, 2],
       auto: true,
       causes,
-      nff: [{ w: 1, finding: `Re-scanned at the same load: the ${word} runs as its neighbours do. Nothing to open up.` }],
+      nff: [{ w: 1, finding: `Re-scanned at the same load: the ${word} runs as its load predicts. Nothing to open up.` }],
     });
   }
   for (const b of GEN_PANEL) {

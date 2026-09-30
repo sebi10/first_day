@@ -73,6 +73,14 @@ function run(team: string, seed: number, weeks: number): { d: string; leaks: num
 const digest = (team: string, seed: number, weeks: number) => run(team, seed, weeks).d;
 
 /**
+ * Re-recorded for stage 2 review round 1 (2026-09-30; DECISIONS "stage 2 review round 1"): G0's play at tier 4+ on
+ * purpose, the seven runs that reach the Harbor's renovations or the Resort (the three 26-week three-friends runs and
+ * the nobody crew are unchanged): the Resort's 200 A transfer switch retires the take-off to upsize the old one for good,
+ * and a replacement while its warranty runs (and closes the open alerts about the old one), a renovation's package is capex off the house's repair ledger, a house closed for its
+ * renovation never catches fire or draws a guest's no-fault complaint, its 85 lands at the final (then the final's own
+ * points), a longer builder's warranty is kept, the final waits on an open hazard, and autopilot buys an ordered
+ * renovation's materials past its cap. The checks' and flags' fixes don't move a digest (these crews play with both off).
+ *
  * Re-recorded for G0 (stage 2, v5, 2026-09-30; DECISIONS "G0: the Resort holds"), which changes tier 4+ play on
  * purpose: new construction from the Harbor under the builder's warranty, the service upgrade with tiers 4 and 5, the
  * fin bot's renovations (and the builder it keeps at the Resort for them), and every week's report saying whether it was
@@ -84,13 +92,13 @@ const GOLDEN: Record<string, string> = {
   'three friends/1': '8f63ff42b971ca26',
   'three friends/2': '89915df4b0115c07',
   'three friends/3': 'e35e5f7f3ab16e0b',
-  'all average/1': '57fece003abac49c',
-  'three friends/1/52': 'def1977a6c1d222e',
-  'all average/1/52': '3e522f56eaed200e',
-  'mistakes/1/52': '7948c6ea16ff9c39',
-  'mistakes/6/52': '6eeeabfc3d12f089',
-  'all average/4/52': 'e0e060ccbf63cf20',
-  'mistakes/10/52': '19d0140775a83aa1',
+  'all average/1': '02655e30c9d3407c',
+  'three friends/1/52': '7be12048ba73966f',
+  'all average/1/52': 'e27c76dee416386e',
+  'mistakes/1/52': 'd41e14bf93e99240',
+  'mistakes/6/52': '49b2669f9f3f839a',
+  'all average/4/52': '76b1298f0f8c71c5',
+  'mistakes/10/52': '495059603f1ef2f5',
   'nobody/1': '43b388773fd8e29d',
 };
 

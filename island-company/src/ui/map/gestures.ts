@@ -5,7 +5,8 @@
 // - two pointers are a pinch
 // - up within 500 ms without a drag is a tap
 // - two taps within 300 ms and 24 px are a double tap
-// - a drag, a pinch or a tap swallows the click that follows (the map handles its own taps)
+// - a tap (and any mouse sequence) swallows the click the browser sends after it (the map handles its own taps); a touch
+//   drag or a pinch gets no click, so nothing is swallowed (review round 1: the next real tap anywhere was eaten)
 // - inline, a one-finger touch drag is left to the page: it never pans the map (the page scrolls)
 //
 // It says what the camera should do relative to a base: `base` means "take the
@@ -40,7 +41,7 @@ export type GOut =
   /** move the camera: the gesture since the last base */
   | { t: 'live'; live: Live }
   | { t: 'tap'; at: Pt; double: boolean; kind: PointerKind }
-  /** every pointer is up (or the browser took them): commit if the camera moved; swallow the click that follows */
+  /** every pointer is up (or the browser took them): commit if the camera moved; `swallow`: the browser sends a click after this sequence (a tap, or a mouse), and it's the map's */
   | { t: 'end'; moved: boolean; swallow: boolean };
 
 type Track = { kind: PointerKind; down: Pt; t0: number; at: Pt; anchor: Pt };
@@ -146,7 +147,9 @@ export class Classifier {
       this.lastTap = double ? null : { at: tr.down, t: p.t, kind: tr.kind };
       tapped = true;
     } else this.lastTap = null;
-    out.push({ t: 'end', moved: this.moved, swallow: tapped || this.dragged || this.multi || p.t - tr.t0 > TAP.maxMs });
+    // a click follows a single-pointer tap, and every mouse sequence (a mouse click fires after a drag too); a touch drag,
+    // a pinch or a long press sends none
+    out.push({ t: 'end', moved: this.moved, swallow: tapped || tr.kind === 'mouse' });
     return out;
   }
 
@@ -160,6 +163,7 @@ export class Classifier {
       return [{ t: 'base' }];
     }
     if (this.pts.size > 0) return [];
-    return [{ t: 'end', moved: this.moved, swallow: true }];
+    // (the browser took it: no click comes)
+    return [{ t: 'end', moved: this.moved, swallow: false }];
   }
 }
