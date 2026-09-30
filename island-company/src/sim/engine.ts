@@ -3441,27 +3441,162 @@ function autoApprove(s: IslandState, now: number) {
   }
 }
 
-/** Missed turn: the role runs itself at 50% (never a punishment screen). */
 /**
- * Stage 2 review round 3: a hazard a crewmate passed on after the electrician had ended the turn, not made safe by the
- * resolve, is made safe by the book as autopilot does for an away seat (a branch breaker off and tagged; a service-neutral
- * fault stays closed, a breaker doesn't isolate it). The house closes at once on the report (review round 2) and the
- * electrician can make it safe that night, but nothing forces them to come back: without this an electrician who had
- * played and ended the turn lost the house's week, while an away one's autopilot made it safe and kept it (the reviewers:
- * week-4 revenue $3,170 → $1,479 on the live early doc)
+ * Stage 2 review round 3 and its verification: a hazard a crewmate passed on after the electrician had ended the turn,
+ * still open at the resolve, gets the job flow an away seat's autopilot gives it: made safe by the book (a branch breaker
+ * off and tagged; a service-neutral fault stays closed, a breaker doesn't isolate it), planned by the book, and with its
+ * parts on the shelf signed off at 50% before rent is booked. The house closes at once on the report (review round 2)
+ * and the electrician can make it safe that night, but nothing forces them to come back. Round 3 only made it safe: the
+ * house rented at 75% where an away electrician's autopilot fixed it and rented it in full, so an electrician who had
+ * played and ended the turn was still worse off than one who never showed up (the live early doc's week 4: $2,747
+ * against $3,170)
  */
 function lateFlagSafe(s: IslandState, line: Liner) {
   const W = s.week;
-  const by = `Autopilot (${nameOf(s, 'elec')})`;
-  for (const al of s.alerts ?? []) {
-    if (!al.late || al.src !== 'flag' || al.week !== W || al.status === 'closed' || al.safe || !symptomOf(al)?.hazard) continue;
-    if (causeOf(al)?.neutral) continue;
-    al.safe = { how: 'breaker', week: W, by };
+  const now = s.updatedAt;
+  const elec = nameOf(s, 'elec');
+  const by = `Autopilot (${elec})`;
+  for (const al of [...(s.alerts ?? [])]) {
+    if (!al.late || al.src !== 'flag' || al.week !== W || al.status === 'closed' || !symptomOf(al)?.hazard) continue;
+    const wasSafe = !!al.safe;
+    autoAlert(s, al, 'elec', by, now);
+    const o = al.order ? s.orders.find((x) => x.id === al.order) : undefined;
+    if (o?.status === 'ready') autoWork(s, o, 'elec', by, now);
     const h = s.assets.find((x) => x.id === al.assetId);
-    line('elec', 'info', `${by} made ${h?.name ?? 'the house'} safe by the book (${breakerOf(siteOf(s, al))} off and tagged): ${al.who ?? 'a crewmate'}'s report came after ${nameOf(s, 'elec')}'s turn. ${h && h.health < 40 ? "It stays closed under 40 until it's brought back up." : 'It rents at 75% until the fix.'}`);
+    const house = h?.name ?? 'the house';
+    const why = `${al.who ?? 'a crewmate'}'s report came after ${elec}'s turn`;
+    const planned = o && o.status !== 'done' ? ` ${o.title} is planned (${o.status === 'pending' ? `on ${nameOf(s, 'fin')}'s approvals` : o.status === 'ready' ? 'ready' : 'waiting on its parts'}).` : '';
+    if ((al.status as Alert['status']) === 'closed') line('elec', 'info', `${by} fixed ${house} by the book (${o?.title ?? 'the fix'}, at 50%): ${why}.${h && h.health < 40 ? " It stays closed under 40 until it's brought back up." : ''}`);
+    else if (al.safe && !wasSafe) line('elec', 'info', `${by} made ${house} safe by the book (${breakerOf(siteOf(s, al))} off and tagged): ${why}. ${h && h.health < 40 ? "It stays closed under 40 until it's brought back up." : 'It rents at 75% until the fix.'}${planned}`);
+    else if (!al.safe) line('elec', 'info', `${house} stays closed: ${why}, and a service-neutral fault isn't isolated by a breaker.${planned}`);
+    else if (planned) line('elec', 'info', `${by} planned the fix on ${house}: ${why}.${planned}`);
   }
 }
 
+/**
+ * Autopilot's job flow for one of a tech's live alerts (18.3): a no-fault check write-up or flag come due closed on site,
+ * a hazard made safe, an MEL item placarded, and what grounds a plane or closes a house (or comes due now or next week,
+ * or sits on an asset in critical shape) planned by the book. autoRun runs it on every live alert of an away seat;
+ * lateFlagSafe on a hazard passed on after the electrician's turn
+ */
+function autoAlert(s: IslandState, al: Alert, ops: OpsRole, auto: string, now: number) {
+  const asset = s.assets.find((x) => x.id === al.assetId);
+  if (!asset) return;
+  // stage 2 (review round 1): a quick-check write-up or a crewmate's flag with nothing wrong, come due: a closer look by
+  // the book closes it as no fault found. Before, autopilot left every no-fault alert open, so a wrong walkaround call
+  // or a flag grounded the plane from its due week until the mechanic was back (pillar 2: nobody waits helplessly).
+  // Only at the resolve before it's due (as autopilot plans what comes due, below): until then it's the seat's to close
+  if (al.status === 'open' && (al.src === 'check' || al.src === 'flag') && al.cause < 0 && !al.repair && al.due <= s.week + 1) {
+    closeAlert(s, al, 'nff');
+    feed(s, ops, 'info', `${auto} closed ${shortText(s, al)} on ${asset.name}: no fault found.`, now);
+    return;
+  }
+  const f = alertFlags(s, al);
+  const task = al.repair ? planTask(s, al, `repair:${al.id}`) : fixTaskFor(s, al);
+  const needsBuy = !!task && stdPick(s, asset, task, siteOf(s, al), needsOf(s, al)).some((l) => available(s, l.item) < l.qty);
+  if (ops === 'elec' && f.hazard && !al.safe && al.status !== 'closed') {
+    // autopilot keeps to the manual: a service-neutral fault stays closed (a branch breaker doesn't isolate it)
+    if (!causeOf(al)?.neutral) al.safe = { how: 'breaker', week: s.week, by: auto };
+  }
+  // placarded when it can't be fixed this week: a part to buy, or the electrician's check still to come
+  if (ops === 'mech' && f.mel === 'C' && !al.mel && (needsBuy || (f.bench && !al.bench?.call))) al.mel = { until: Math.max(s.week, al.due), by: auto };
+  // a placard running out with the fix not ready: the one extension, asked of the analyst
+  if (ops === 'mech' && al.mel && !al.mel.ext && !al.mel.ask && al.mel.until <= s.week && al.mel.until >= s.week - 1) {
+    const job = al.order ? s.orders.find((x) => x.id === al.order) : undefined;
+    if (!job || job.status !== 'ready') al.mel.ask = { week: s.week, by: auto };
+  }
+  if (ops === 'mech' && f.bench && !al.bench?.call && !(al.bench?.order && open(s.orders.find((x) => x.id === al.bench!.order)!))) {
+    const b = flowBenchOrder(s, al, false);
+    al.bench = { ...(al.bench ?? {}), order: b.id };
+    return;
+  }
+  if (al.status !== 'open' || !task) return;
+  // autopilot keeps to the manual: what grounds a plane or closes a house, and whatever else comes due now or next
+  // week (the seat's work doesn't pile up past due while it's away), and an asset in critical shape
+  const grounds = asset.kind === 'plane' ? f.aw && al.due <= s.week + 1 : f.hazard;
+  // (A0 e: the grid's feed at real risk at tier 4+ is must-do work, for autopilot too)
+  const critical = asset.health < 45 || gridFirstAlert(s, al);
+  const dueSoon = al.due <= s.week + 1;
+  if (!(grounds || critical || dueSoon) || (!realFault(al) && !al.repair)) return;
+  const pick = task.fixed ? [] : stdPick(s, asset, task, siteOf(s, al), needsOf(s, al));
+  planAlert(s, al, task.id, pick, now, false, auto);
+}
+
+/**
+ * Autopilot works one ready job at 50% (18.3; an inspection at the pass mark): a ground power start on a charged cart it
+ * tows over, the box opened (a wrong pick stops it), a unit on a wiring fault making no difference, else signed off by
+ * the book (no hidden defect). true: it took one of the week's two jobs (a crewmate's report is on top of them)
+ */
+function autoWork(s: IslandState, o: Order, role: Role, auto: string, now: number): boolean {
+  const cart = needsCart(o.kind) ? autoCart(s, o) : null;
+  if (needsCart(o.kind) && !cart) return false;
+  // a job the part chain holds: the new unit made no difference (the fault is the wiring), and the electrician looks again
+  const held = o.chain?.step === 'job' ? chainOf(s, o) : null;
+  if (held && held.bench?.fault === 'wiring' && held.bench.call === 'unit' && !held.wired) {
+    missedWiring(s, held, o, auto, s.turns[role] ?? { ended: false, endedAt: null, done: 0 }, s.updatedAt);
+    return true;
+  }
+  // the job flow: the box is opened (a wrong pick stops it), and a unit on a wiring fault makes no difference
+  if (o.flow && !o.flow.wired) {
+    const stop = installCheck(s, o);
+    if (stop) {
+      o.flow.stop = stop.stop;
+      if (stop.research) o.flow.stopResearch = true;
+      o.status = 'waiting_part';
+      return false;
+    }
+    const al = alertOf(s, o);
+    if (al && benchFault(al) === 'wiring' && al.bench?.call !== 'wiring' && unitJob(s, al, o)) {
+      missedWiringFlow(s, o, al, auto, s.turns[role] ?? { ended: false, endedAt: null, done: 0 }, now);
+      return true;
+    }
+  }
+  const wear = cart && o.kind === 'gpustart' ? useCart(s, cart, o) : 0;
+  if (cart && o.kind !== 'gpustart') {
+    cart.charge = Math.max(0, cart.charge - GSE.avionicsDrain);
+    cart.wear = Math.min(100, cart.wear + GSE.busWear);
+  }
+  o.status = 'done';
+  // an inspection autopilot covers is signed at the pass mark (SIGNOFF): by the book, a bare pass, which renews it at
+  // any tier as a human's pass would (fix round 1: at a teaching tier a human's 50% fails the sign-off, and autopilot's
+  // 50% passing it made being away better than a poor attempt). Its other jobs stay at 50%
+  const sc = o.kind === 'codeprep' || o.kind === 'inspect100' ? SIGNOFF : 0.5;
+  o.result = { score: sc, perfect: false, credit: sc, by: role, week: s.week, auto: true };
+  const asset = assetOf(s, o);
+  if (cart && asset) {
+    // the manual is kept, but a worn cable is a worn cable
+    if (o.kind === 'gpustart') cableArc(s, o, asset, role, auto, wear);
+    cart.hookedTo = null;
+    cart.charging = true;
+  }
+  if (asset) {
+    // (a renovation's final: back to RENO.health, then the job's own points on top, as a person's sign-off)
+    if (o.kind === 'codeprep') renoSignoff(s, asset, s.week);
+    asset.health = clamp(asset.health + o.gain * sc, 0, 100);
+    // (a perfect blind sign-off settled at this resolve keeps its no-decay week, as complete() keeps it: the max)
+    asset.touchedWeek = Math.max(asset.touchedWeek, s.week);
+    // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
+    // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
+    if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
+    if (o.kind === 'inspect100') asset.sinceInspection = 0;
+    equipIn(s, asset, o);
+  }
+  // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
+  if (o.flow) {
+    if (!o.flow.wired) consume(s, o.id, asset?.id ?? null);
+    const al = alertOf(s, o);
+    if (al && al.status !== 'closed') closeAlert(s, al, o.flow.wired ? 'wired' : 'fixed');
+  }
+  // autopilot keeps to the manual (no hidden defects), but a 50% patch on a crewmate's report won't hold
+  if (o.kind === 'report') closeReport(s, o, role, auto, 0.5, s.updatedAt);
+  // a repair still needs its redo
+  if (o.repair) spawnRedo(s, o, s.updatedAt);
+  // the part is here: autopilot puts it on and finishes the job
+  if (o.chain) closeChain(s, o, auto, s.updatedAt);
+  return o.kind !== 'report';
+}
+
+/** Missed turn: the role runs itself at 50% (never a punishment screen). */
 function autoRun(s: IslandState, role: Role) {
   const now = s.updatedAt;
   const auto = `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`;
@@ -3553,48 +3688,7 @@ function autoRun(s: IslandState, role: Role) {
   }
   const ops = role as OpsRole;
   // the job flow (18.3): hazards made safe, MEL items placarded, the alerts that ground or close planned by the book
-  for (const al of liveAlerts(s).filter((x) => x.role === ops && x.status !== 'closed')) {
-    const asset = s.assets.find((x) => x.id === al.assetId);
-    if (!asset) continue;
-    // stage 2 (review round 1): a quick-check write-up or a crewmate's flag with nothing wrong, come due: a closer look by
-    // the book closes it as no fault found. Before, autopilot left every no-fault alert open, so a wrong walkaround call
-    // or a flag grounded the plane from its due week until the mechanic was back (pillar 2: nobody waits helplessly).
-    // Only at the resolve before it's due (as autopilot plans what comes due, below): until then it's the seat's to close
-    if (al.status === 'open' && (al.src === 'check' || al.src === 'flag') && al.cause < 0 && !al.repair && al.due <= s.week + 1) {
-      closeAlert(s, al, 'nff');
-      feed(s, ops, 'info', `${auto} closed ${shortText(s, al)} on ${asset.name}: no fault found.`, now);
-      continue;
-    }
-    const f = alertFlags(s, al);
-    const task = al.repair ? planTask(s, al, `repair:${al.id}`) : fixTaskFor(s, al);
-    const needsBuy = !!task && stdPick(s, asset, task, siteOf(s, al), needsOf(s, al)).some((l) => available(s, l.item) < l.qty);
-    if (ops === 'elec' && f.hazard && !al.safe && al.status !== 'closed') {
-      // autopilot keeps to the manual: a service-neutral fault stays closed (a branch breaker doesn't isolate it)
-      if (!causeOf(al)?.neutral) al.safe = { how: 'breaker', week: s.week, by: auto };
-    }
-    // placarded when it can't be fixed this week: a part to buy, or the electrician's check still to come
-    if (ops === 'mech' && f.mel === 'C' && !al.mel && (needsBuy || (f.bench && !al.bench?.call))) al.mel = { until: Math.max(s.week, al.due), by: auto };
-    // a placard running out with the fix not ready: the one extension, asked of the analyst
-    if (ops === 'mech' && al.mel && !al.mel.ext && !al.mel.ask && al.mel.until <= s.week && al.mel.until >= s.week - 1) {
-      const job = al.order ? s.orders.find((x) => x.id === al.order) : undefined;
-      if (!job || job.status !== 'ready') al.mel.ask = { week: s.week, by: auto };
-    }
-    if (ops === 'mech' && f.bench && !al.bench?.call && !(al.bench?.order && open(s.orders.find((x) => x.id === al.bench!.order)!))) {
-      const b = flowBenchOrder(s, al, false);
-      al.bench = { ...(al.bench ?? {}), order: b.id };
-      continue;
-    }
-    if (al.status !== 'open' || !task) continue;
-    // autopilot keeps to the manual: what grounds a plane or closes a house, and whatever else comes due now or next
-    // week (the seat's work doesn't pile up past due while it's away), and an asset in critical shape
-    const grounds = asset.kind === 'plane' ? f.aw && al.due <= s.week + 1 : f.hazard;
-    // (A0 e: the grid's feed at real risk at tier 4+ is must-do work, for autopilot too)
-    const critical = asset.health < 45 || gridFirstAlert(s, al);
-    const dueSoon = al.due <= s.week + 1;
-    if (!(grounds || critical || dueSoon) || (!realFault(al) && !al.repair)) continue;
-    const pick = task.fixed ? [] : stdPick(s, asset, task, siteOf(s, al), needsOf(s, al));
-    planAlert(s, al, task.id, pick, now, false, auto);
-  }
+  for (const al of liveAlerts(s).filter((x) => x.role === ops && x.status !== 'closed')) autoAlert(s, al, ops, auto, now);
   const ready = s.orders
     // crew projects wait for the crew; a part chain's IPC lookup and logbook research wait for a person
     .filter((o) => o.role === role && o.status === 'ready' && o.kind !== 'project' && !(o.chain && o.chain.step !== 'job'))
@@ -3627,74 +3721,7 @@ function autoRun(s: IslandState, role: Role) {
   for (const o of [...ready.filter((x) => x.kind !== 'report' && !x.bench), ...(report ? [report] : [])]) {
     if (o.kind !== 'report' && jobs >= 2) continue;
     if (o.status !== 'ready') continue;
-    const cart = needsCart(o.kind) ? autoCart(s, o) : null;
-    if (needsCart(o.kind) && !cart) continue;
-    // a job the part chain holds: the new unit made no difference (the fault is the wiring), and the electrician looks again
-    const held = o.chain?.step === 'job' ? chainOf(s, o) : null;
-    if (held && held.bench?.fault === 'wiring' && held.bench.call === 'unit' && !held.wired) {
-      jobs++;
-      missedWiring(s, held, o, auto, s.turns[role] ?? { ended: false, endedAt: null, done: 0 }, s.updatedAt);
-      continue;
-    }
-    // the job flow: the box is opened (a wrong pick stops it), and a unit on a wiring fault makes no difference
-    if (o.flow && !o.flow.wired) {
-      const stop = installCheck(s, o);
-      if (stop) {
-        o.flow.stop = stop.stop;
-        if (stop.research) o.flow.stopResearch = true;
-        o.status = 'waiting_part';
-        continue;
-      }
-      const al = alertOf(s, o);
-      if (al && benchFault(al) === 'wiring' && al.bench?.call !== 'wiring' && unitJob(s, al, o)) {
-        jobs++;
-        missedWiringFlow(s, o, al, auto, s.turns[role] ?? { ended: false, endedAt: null, done: 0 }, now);
-        continue;
-      }
-    }
-    if (o.kind !== 'report') jobs++;
-    const wear = cart && o.kind === 'gpustart' ? useCart(s, cart, o) : 0;
-    if (cart && o.kind !== 'gpustart') {
-      cart.charge = Math.max(0, cart.charge - GSE.avionicsDrain);
-      cart.wear = Math.min(100, cart.wear + GSE.busWear);
-    }
-    o.status = 'done';
-    // an inspection autopilot covers is signed at the pass mark (SIGNOFF): by the book, a bare pass, which renews it at
-    // any tier as a human's pass would (fix round 1: at a teaching tier a human's 50% fails the sign-off, and autopilot's
-    // 50% passing it made being away better than a poor attempt). Its other jobs stay at 50%
-    const sc = o.kind === 'codeprep' || o.kind === 'inspect100' ? SIGNOFF : 0.5;
-    o.result = { score: sc, perfect: false, credit: sc, by: role, week: s.week, auto: true };
-    const asset = assetOf(s, o);
-    if (cart && asset) {
-      // the manual is kept, but a worn cable is a worn cable
-      if (o.kind === 'gpustart') cableArc(s, o, asset, role, auto, wear);
-      cart.hookedTo = null;
-      cart.charging = true;
-    }
-    if (asset) {
-      // (a renovation's final: back to RENO.health, then the job's own points on top, as a person's sign-off)
-      if (o.kind === 'codeprep') renoSignoff(s, asset, s.week);
-      asset.health = clamp(asset.health + o.gain * sc, 0, 100);
-      // (a perfect blind sign-off settled at this resolve keeps its no-decay week, as complete() keeps it: the max)
-      asset.touchedWeek = Math.max(asset.touchedWeek, s.week);
-      // by the book: the inspection it prepared passes and the 100-hour is in the logbook, as a blind sign-off's is.
-      // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
-      if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
-      if (o.kind === 'inspect100') asset.sinceInspection = 0;
-      equipIn(s, asset, o);
-    }
-    // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
-    if (o.flow) {
-      if (!o.flow.wired) consume(s, o.id, asset?.id ?? null);
-      const al = alertOf(s, o);
-      if (al && al.status !== 'closed') closeAlert(s, al, o.flow.wired ? 'wired' : 'fixed');
-    }
-    // autopilot keeps to the manual (no hidden defects), but a 50% patch on a crewmate's report won't hold
-    if (o.kind === 'report') closeReport(s, o, role, auto, 0.5, s.updatedAt);
-    // a repair still needs its redo
-    if (o.repair) spawnRedo(s, o, s.updatedAt);
-    // the part is here: autopilot puts it on and finishes the job
-    if (o.chain) closeChain(s, o, auto, s.updatedAt);
+    if (autoWork(s, o, role, auto, now)) jobs++;
   }
   // a weak battery on the flight line: autopilot hooks a charged cart up to that plane for its first start
   if (role === 'mech') hookForFlightDay(s);

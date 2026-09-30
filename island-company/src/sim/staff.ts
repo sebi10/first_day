@@ -1167,7 +1167,13 @@ export type RenoPlan = {
    * ceil(units / output) - 1 weeks, one more if the final slips (round 2 said +2: a week per unit and one for the final)
    */
   weeksClosed: number;
-  /** the weeks from now to the final's week (ceil(units / output)): the renovated house's life and warranty start there */
+  /**
+   * the builders' output covers both units in their first week, but not both units' materials are on the shelf now: the
+   * case counts a week closed (round-3 verification: it said "not closed a full week" with two builders, and the resolves
+   * found it closed once when the analyst bought one unit at a time). None if both are in when they start
+   */
+  waitsOnMaterials: boolean;
+  /** the weeks from now to the final's week (weeksClosed + 1): the renovated house's life and warranty start there */
   toFinal: number;
   /** closed this week for a reason that clears (a red tag, a hazard, a lapsed inspection, no power): the case counts it open at its health (review round 3) */
   closedFor: string | null;
@@ -1206,6 +1212,21 @@ export type RenoPlan = {
  * weeks until that rent covers it all, or that it doesn't on rent alone. The electrician's side is the points it
  * restores, in her routine jobs; never capex set against card prices
  */
+/**
+ * every unit's materials for a renovation of this house on the shelf now, after what the renovations under way still
+ * draw. The builders draw a unit's materials all at once or wait at the unit boundary, so two builders do both units in
+ * their first week only when both units' are in when they start; whether they are depends on how the analyst buys them
+ * (one unit at a time, or both), so the case counts the week unless they're on the shelf already
+ */
+function renoOnShelf(s: IslandState, h: Asset): boolean {
+  const need = new Map<ItemId, number>();
+  const add = (item: ItemId, q: number) => need.set(item, (need.get(item) ?? 0) + q);
+  for (const b of (s.builds ?? []).filter((x) => x.reno && x.reno !== h.id && x.finished === undefined)) for (let k = b.drawn ?? 0; k < b.need; k++) for (const l of unitLines(b, k)) add(l.item, l.qty);
+  const mine = renoDef(h.model).units.flatMap((u) => Object.entries(u).map(([item, q]) => ({ item, qty: q ?? 0 })));
+  for (const l of mine) add(l.item, l.qty);
+  return mine.every((l) => available(s, l.item) >= (need.get(l.item) ?? 0));
+}
+
 export function renoPlan(s: IslandState, h: Asset): RenoPlan {
   const { pkg, materials } = renoCost(h);
   const total = pkg + materials;
@@ -1229,8 +1250,12 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
   const rate = planned ? (STAFF.output[2] ?? 1) : out;
   // (the engine's timeline, review round 3: this week open, the builders' weeks after the first draw closed, the final's
   // week open when it's passed that week)
-  const toFinal = Math.max(1, Math.ceil(RENO.units.length / rate - 1e-9));
-  const weeksClosed = toFinal - 1;
+  const byOutput = Math.max(1, Math.ceil(RENO.units.length / rate - 1e-9)) - 1;
+  // (the builders draw a unit's materials all at once or stop at the unit boundary: one week closed unless both units' are
+  // in when they start, counted unless they're on the shelf now)
+  const waitsOnMaterials = byOutput === 0 && !renoOnShelf(s, h);
+  const weeksClosed = waitsOnMaterials ? 1 : byOutput;
+  const toFinal = weeksClosed + 1;
   const wear = Math.max(0.5, decayOf(s, h) + houseWearOf(s));
   const closesIn = open ? weeksOpen(s, h, h.health, h.warrantyUntil, s.week) : 0;
   const final = s.week + toFinal;
@@ -1251,6 +1276,7 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
     out,
     planned,
     weeksClosed,
+    waitsOnMaterials,
     toFinal,
     closedFor: blocked && open ? blocked : null,
     rentLost,

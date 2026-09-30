@@ -191,11 +191,13 @@ describe("Report a problem: a hazard passed on after the electrician's turn (sys
     const ended = play(true);
     const away = play(false);
     expect(ended.week).toBe(s0.week + 1);
-    const hz = hazardOn(ended, id)!;
-    expect(hz.safe).toMatchObject({ how: 'breaker', by: 'Autopilot (Ben)' });
-    expect(ended.history.at(-1)!.lines.map((l) => l.text).join('\n')).toMatch(/Autopilot \(Ben\) made Cottage 1 safe by the book \(.+ off and tagged\): Cy's report came after Ben's turn\. It rents at 75% until the fix\./);
+    // (round-3 verification: autopilot's own job flow for it, so with its parts on the shelf it's fixed at 50% before
+    // rent is booked, as an away seat's would be; only made safe it rented at 75% against the away seat's 100%)
+    expect(hazardOn(ended, id)).toBeUndefined();
+    expect(ended.history.at(-1)!.lines.map((l) => l.text).join('\n')).toMatch(/Autopilot \(Ben\) fixed Cottage 1 by the book \(.+, at 50%\): Cy's report came after Ben's turn\./);
     const h = (x: IslandState) => x.history.at(-1)!;
     expect(h(ended).housesRentable).toBe(h(away).housesRentable);
+    expect(h(ended).revenue).toBe(h(away).revenue);
     // a hazard flagged BEFORE the electrician ended the turn is theirs: never made safe for them
     let s = ok(s0, { t: 'flag', role: 'fin', assetId: id, week: s0.week });
     expect(s.alerts!.at(-1)!.late).toBeUndefined();
@@ -474,10 +476,12 @@ describe('the renovation case against the engine (code major, trades major)', ()
         s.orders = s.orders.filter((o) => o.status === 'done');
         s.staff = [...(s.staff ?? []).filter((n) => n.role !== 'builder'), ...skills.map((skill, i) => ({ id: `nb${i}`, name: `B${i}`, role: 'builder' as const, skill: skill as Npc['skill'], wage: 260, hired: s.week - 5, start: s.week - 5 }))];
         s.builds = (s.builds ?? []).filter((b) => b.finished !== undefined);
-        const p = renoPlan(s, house(s, 'h1'));
         s = ok(s, { t: 'build', what: 'reno', asset: 'h1', week: s.week } as Action);
         const b = s.builds!.find((x) => x.reno === 'h1')!;
         for (let k = 0; k < b.need; k++) for (const l of unitLines(b, k)) ((s.inv ??= {})[l.item] ??= { on: 0 }).on += l.qty;
+        // (the case as it reads with both units' materials on the shelf: round-3 verification, with two builders it says
+        // 0 only then; tests/stage2r3v.test.ts has the case without them)
+        const p = renoPlan(s, house(s, 'h1'));
         let closed = 0;
         for (let w = 0; w < 6; w++) {
           const week = s.week;
@@ -734,6 +738,7 @@ describe("What's new: the words that drifted (play-fun minor)", () => {
       expect(text(r)).toContain("It takes a slot the week's draw would have filled");
     }
     expect(text('fin')).toContain("A guest's reported shock or burning smell closes the house at once");
-    expect(text('elec')).toContain("if you don't, it's made safe by the book at the resolve");
+    // (round-3 verification: autopilot's whole job flow for it, and End turn's make-safe line for one passed on during the turn)
+    expect(text('elec')).toContain("make it safe or fix it before you end your turn. One passed on after your turn you can still make safe that night; if you don't, autopilot takes it at the resolve as it would if you were away (made safe, and fixed at 50% if its parts are on the shelf).");
   });
 });

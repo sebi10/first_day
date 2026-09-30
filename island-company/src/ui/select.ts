@@ -285,6 +285,8 @@ export function dueNow(s: IslandState, role: OpsRole): Alert[] {
     })
     .sort((a, b) => a.due - b.due || rank(s, a) - rank(s, b));
 }
+/** the hazard that has its house shut now, not made safe (a crewmate's report closes it at once, due the week after) */
+const closesNow = (s: IslandState, a: Alert) => !a.safe && closingHazard(s, a.assetId)?.id === a.id;
 /** A0 (e) grid first: the alert is on the island grid's feed while the grid is at real risk at tier 4+ (every house hangs off it) */
 const onGridFirst = (s: IslandState, a: Alert) => gridFirstAlert(s, a);
 /** (e, review round 1) a code notice on a house whose inspection has lapsed, while the grid holds at 48+: it reopens the house at this resolve, so it goes before grid first */
@@ -295,8 +297,8 @@ const rank = (s: IslandState, a: Alert) => {
 };
 
 /**
- * the tech's "Your move" rows: new alerts, ready jobs, stopped jobs; due now first, then hazards and airworthiness, then
- * by due week. From tier 4 the grid's feed at real risk counts as due now and ranks after hazards and airworthiness, so
+ * the tech's "Your move" rows: new alerts, ready jobs, stopped jobs; due now first (a hazard that has its house shut now
+ * counts as due now, whatever its due week: the Dock's Next points at it), then hazards and airworthiness, then by due week. From tier 4 the grid's feed at real risk counts as due now and ranks after hazards and airworthiness, so
  * it goes before a code prep (A0 e: grid first; the Dock's button is the first row), unless the prep reopens a closed
  * house at this resolve and the grid holds at 48 or more
  */
@@ -309,7 +311,7 @@ export function yourMoves(s: IslandState, role: OpsRole): { alert: Alert; order?
     const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
     rows.push({ alert: a, order: o && o.status !== 'cancelled' ? o : undefined });
   }
-  const now = (a: Alert) => a.due <= s.week || onGridFirst(s, a);
+  const now = (a: Alert) => a.due <= s.week || onGridFirst(s, a) || closesNow(s, a);
   return rows.sort((x, y) => Number(now(y.alert)) - Number(now(x.alert)) || rank(s, x.alert) - rank(s, y.alert) || x.alert.due - y.alert.due || (x.alert.id < y.alert.id ? -1 : 1));
 }
 
@@ -445,6 +447,9 @@ export function endTurnChecks(s: IslandState, role: Role): EndCheck[] {
     return out;
   }
   const trade = role as OpsRole;
+  // what shuts a house or grounds a plane at this resolve leads the sheet (round-3 verification: the make-safe line came
+  // fourth, under three "plan it now" lines)
+  const lead = new Set<EndCheck>();
   for (const a of liveAlerts(s)) {
     if (a.role !== trade || a.status === 'closed') continue;
     const asset = s.assets.find((x) => x.id === a.assetId);
@@ -452,6 +457,14 @@ export function endTurnChecks(s: IslandState, role: Role): EndCheck[] {
     const f = alertFlags(s, a);
     const o = a.order ? s.orders.find((x) => x.id === a.order) : undefined;
     const signed = o?.status === 'done';
+    // a hazard that has the house shut now, whatever its due week (round-3 verification: a crewmate's report is due next
+    // week but closes the house at once, and the sheet only said "plan it now" while the house lost its week)
+    if (f.hazard && !a.safe && !signed && closesNow(s, a)) {
+      const c = { text: `Make it safe or fix it, or ${name} stays closed: ${alertShort(s, a)}.`, urgent: true };
+      out.push(c);
+      lead.add(c);
+      continue;
+    }
     if (a.due <= s.week && !signed && (f.aw || f.hazard)) {
       if (f.hazard && !a.safe) out.push({ text: `Make it safe or fix it, or ${name} stays closed: ${alertShort(s, a)}.`, urgent: true });
       else if (f.aw && asset?.kind === 'plane' && !(a.mel && a.mel.until >= s.week)) {
@@ -482,7 +495,7 @@ export function endTurnChecks(s: IslandState, role: Role): EndCheck[] {
   // the week's quick check, still open (review round 3)
   const qc = quickCheckMove(s, role);
   if (qc) out.push({ text: qc.end, urgent: false });
-  return out.sort((x, y) => Number(y.urgent) - Number(x.urgent));
+  return out.sort((x, y) => Number(lead.has(y)) - Number(lead.has(x)) || Number(y.urgent) - Number(x.urgent));
 }
 
 /** the standing limit a week: late cards and requisitions approved at the resolve (8.5); absent, the work budgets' sum */
@@ -733,6 +746,10 @@ export function puzzleSite(s: IslandState, o: Order): PuzzleSite | undefined {
   const al = s.alerts?.find((x) => x.id === o.flow!.alert);
   const site = al ? siteOf(s, al) : null;
   if (!al || !site) return undefined;
+  // an island-panel breaker an IR scan wrote up (a feeder, the hangar's 60 A, the transfer feed: `cond`) is no branch
+  // circuit: the meter's run is receptacles, and forwarded its 100 A it drew 15/20 A outlets on a 100 A breaker
+  // (210.21(B)(3); round-3 verification). The job plays the meter's own circuit, as the live build's panel jobs do
+  if (site.cond) return undefined;
   const room = PUZZLE_ROOM[site.deviceRoom ?? site.room];
   const warm = al.sym === 'E_WARM_OUTLET' || al.sym === 'E_SWITCH_WARM' || al.sym === 'E_APPLIANCE';
   const neutral = !!causeOf(al)?.neutral || al.sym === 'E_FLICKER';

@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { alertShort, findingOf, generateAlerts, raiseAlert, symptomText, SYMPTOMS } from '../src/sim/alerts';
 import { CHECK_ROWS, GEN_PANEL, GFCI_OK, GFCI_TELL, HOME_PANEL, IR, METER, WALK_BENIGN, WALK_SCOPE, WALK_ZONES } from '../src/sim/checkdata';
 import { CHECK, canCheck, checkKindFor, checkTruth, checkView, openWork, wearFromOf, type CheckKind } from '../src/sim/checks';
-import { CATALOG_BY_KIND, DEFECT } from '../src/sim/data';
+import { CATALOG_BY_KIND, DEFECT, TIERS } from '../src/sim/data';
 import { apply, createIsland } from '../src/sim/engine';
 import { earlyTier, fixTaskFor, laborCost, stdPickFor } from '../src/sim/flow';
 import { hashSeed, rng } from '../src/sim/rng';
@@ -337,6 +337,9 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
     let found = 0;
     for (let seed = 1; seed <= 300; seed++) {
       const s = island(seed, 60, 4);
+      // (the tier's own houses on the feeders: round-3 verification, the main's tell reads what this week's branches can
+      // carry, and a feeder with no houses built carries nothing)
+      for (const td of TIERS.slice(1, 4)) for (const a of td.adds) if (!s.assets.some((x) => x.id === a.id)) s.assets.push({ id: a.id, kind: a.model === 'gen' ? 'generator' : ['twin', 'cargo', 'float'].includes(a.model) ? 'plane' : a.model === 'panel' ? 'grid' : 'house', model: a.model, name: a.name, health: 60, touchedWeek: 0, ...(['cottage', 'villa', 'lodge'].includes(a.model) ? { inspectionUntil: 40 } : {}) });
       const t = checkTruth(s, 'elec', 'g1', 5);
       const main = checkView(s, 'elec', 'g1')!.items.find((i) => i.id === 'main')!;
       if (t?.item === 'main') {

@@ -57,7 +57,7 @@ export function YourMove({ ctl, role }: { ctl: Ctl; role: OpsRole }) {
             {checks.map((o) => {
               const al = s.alerts?.find((x) => x.id === o.bench);
               return (
-                <div key={o.id} class="jf-arow mine" role="listitem">
+                <div key={o.id} class="jf-arow mine bench" role="listitem">
                   <button class="jf-arow-main" onClick={() => openTarget({ order: o.id })}>
                     <span class="jf-src utility">
                       <Icon name="meter" size={20} />

@@ -30,7 +30,12 @@ export const closedShort = (p: RenoPlan) => (p.weeksClosed > 0 ? `closed about $
  */
 const closedWords = (p: RenoPlan) => {
   const units = p.planned ? 'With one skill-3 builder, 2 units at 1 a week' : `The builders' 2 units at ${p.out % 1 ? p.out.toFixed(2).replace(/0$/, '') : p.out} a week`;
-  const closed = p.weeksClosed > 0 ? `closed ${plural(p.weeksClosed, 'week')}` : 'not closed a full week';
+  // (round-3 verification: with two builders "not closed a full week" held only when both units' materials were in)
+  const closed = p.waitsOnMaterials
+    ? "closed up to 1 week (none if both units' materials are in when they start: they draw a unit's all at once, so buy both together)"
+    : p.weeksClosed > 0
+      ? `closed ${plural(p.weeksClosed, 'week')}`
+      : "not closed a full week: both units' materials are on the shelf";
   return `${units}: ${closed}; it opens when the county's final passes, the week after the last unit (+1 week if it isn't passed that week)${p.planned ? ', counted from when they start' : ''}`;
 };
 
@@ -90,7 +95,7 @@ export function RenoNumbers({ s, h, onHire }: { s: IslandState; h: Asset; onHire
         {/* (review round 3: the net figure; the gross one counted the weeks it's closed for the work as gained) */}
         Renovated: open about {plural(p.life, 'week')} after its final before it's under 40 again
         {p.rent > 0
-          ? `, open about ${plural(Math.max(0, p.gained - Math.min(p.weeksClosed, Math.max(0, p.closesIn - 1))), 'more week')} in all than left as it is${p.weeksClosed > 0 ? ` (it's closed ${p.weeksClosed} for the work)` : ''}: about ${usd(p.gain)} of rent at ${usd(p.rent)} a normal week in the weeks it would otherwise have been closed`
+          ? `, open about ${plural(Math.max(0, p.gained - Math.min(p.weeksClosed, Math.max(0, p.closesIn - 1))), 'more week')} in all than left as it is${p.weeksClosed > 0 ? ` (it's closed ${p.weeksClosed} for the work)` : ''}: about ${usd(p.gain)} of rent (${plural(p.gained, 'week')} at ${usd(p.rent)}) in the weeks it would otherwise have been closed`
           : ': at these bookings the other houses take its guests either way'}
         .
       </span>

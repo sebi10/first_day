@@ -995,7 +995,7 @@ export interface Alert {
   by?: Role;
   /** stage 2 (src 'flag' on a plane): the pilot whose squawk the flagger passed on */
   via?: string;
-  /** stage 2 review round 3 (src 'flag'): passed on after the receiving tech had ended the turn (a hazard's made safe by the book at the resolve if they didn't come back to it) */
+  /** stage 2 review round 3 (src 'flag'): passed on after the receiving tech had ended the turn (a hazard they didn't come back to gets autopilot's job flow at the resolve: made safe, planned, fixed at 50% with its parts on the shelf) */
   late?: true;
 }
 

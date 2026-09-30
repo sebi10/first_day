@@ -2218,3 +2218,84 @@ What was tested: the tip of `s2rel`, `fd3d125` (stage 2 on the live stage 1, G0,
 ### Found, not fixed
 
 - **The push isn't a fast-forward yet.** The deploy branch has `08dd89f` ("Handoff: stage 1 (v4) is live", `HANDOFF.md` only) on top of `e810cc5`, and `s2rel` doesn't. Merge it `--no-ff` before the push (HANDOFF §6.4 item 8); `git merge-tree` shows it merges cleanly. The merge commit needs this session's trailer.
+
+## 2026-09-30: stage 2 round-3 verification (fixes on `s2rel`, still v5)
+
+**Goal:** round 3's fix (`30d8b19..fd3d125`) was QA'd but never reviewed. Its review found 5 majors and 4 minors; this round reproduces each on `99134f6` and fixes it, with a test each (`tests/stage2r3v.test.ts`, on the reviewers' repros). No version bump and no new stored field: everything is inside the v5 gate, which isn't live yet (`RenoPlan.waitsOnMaterials` is derived). The live docs' guarantees are unchanged (the skew and migrate suites on the 15 `e810cc5` docs and the 16 `bd1e1d2` ones).
+
+**The generator's IR scan after a transfer job (fixes major).** Round 3's transfer job puts in a 100 A switch but leaves the set's 60 A main. On the test run all three carry one current, so a healthy main at 82–93% of its rating reads 9–11 °C over the switch's lugs at about 56%, and it is the thermal image's one hot spot. The help said "compare them: healthy, they read within a degree or two". An electrician who followed it wrote up a no-fault, which held a slot and cost a close, and the game gave no sign (blind). Now the first help line says the three carry one current, each read against its own rating, and within a degree or two only where the ratings match. When they don't, a second line appears (`checks.ts genRatingsHelp`): "After the transfer job the switch is 100 A and the set's main still 60 A: … Compare the switch's generator side with its load side; judge the main by its own load, never against the lugs." It fits at 360 px. The test runs the reviewers' three friends seed 1 to week 17 and then 60 seeds × 6 weeks after a transfer job. On every no-tell scan, each loaded row is within 1.8 °C of what its own load predicts, and the two sides of the switch are within 1.6 °C of each other.
+
+**A hazard passed on after the electrician's turn (fixes major).** Round 3's `lateFlagSafe` only made the hazard safe, so the house rented at 75%. An away electrician's autopilot does the whole job flow: it makes the hazard safe, plans the fix by the book and, with the parts on the shelf, signs it off at 50% before rent is booked, so the house rents in full. A present electrician was therefore still worse off than an absent one (on the live early doc, week 4: $2,747 against $3,170). Now `engine.ts lateFlagSafe` runs autopilot's own flow for that one alert. The flow is extracted from `autoRun` unchanged as `autoAlert` (the per-alert flow) and `autoWork` (one job at 50%), and `autoRun` calls them as before (golden digests unchanged). It also covers a late hazard the electrician made safe after the turn (the fix is planned and, with the parts on the shelf, signed off). The review line says what happened: "Autopilot (Ana) fixed Cottage 2 by the book (…, at 50%): Cy's report came after Ana's turn." On the reviewers' early-doc repro, ended, away and no flag all give $3,170. Over 40 real hazard flags on fresh tier-3 islands at health 45, ended plus a late flag never earns less than away plus the flag. The reviewers counted 8 of 40 that did on `fd3d125`, and 28 of 40 on `30d8b19`.
+
+**A hazard passed on while the electrician's turn is open (phone major).** A crewmate's report shuts the house at once but is due the week after, and `endTurnChecks` only warned for a hazard due now. The electrician's End turn sheet said "Plan it now … (due wk 16)" while the house lost its week, and the Dock pointed at another alert. Now (`ui/select.ts`):
+- a hazard that has its house shut, whatever its due week, gets "Make it safe or fix it, or Cottage 1 stays closed: …", urgent, and it leads the sheet (it was fourth, under three "plan it now" lines);
+- *Your move* counts it as due now, so it leads the list and the Dock's **Next** points at it.
+
+Checked at 390 and 360 px on the reviewers' save (seed 132, week 15; the mechanic's report on Cottage 1). **Not done:** extending `lateFlagSafe` to a hazard reported during the turn that the electrician then leaves (the reviewers' option). It's the rule a drawn hazard has always had: warned on the End turn sheet, the choice is theirs. Autopilot covers only a seat that couldn't see it.
+
+**A flag and a right call on one kind: two real jobs (code major).** Round 3 held the week's tell against a crewmate's flag, but nothing merged the two alerts. A flag of kind K, then the tech's right call on K's tell, raised a second real alert of K on the asset. Both jobs got planned, approved and signed off, and the asset took the gain twice. Examples: two "Oil and filter change" cards on Twin N-12 from `v4-e810cc5-t5-carry-mid`; the `flag weekly` crew hit it in 7 of 30 games. Now:
+- a flag never draws the kind the receiver's own quick check shows on that asset that week (`checks.ts flagKinds`). This holds whatever the receiver's turn or check: a first cut excluded the kind only while the receiver could still check, and then the same flag read differently depending on whether the electrician had ended the turn. The flag draws another kind or the no-fault pool;
+- nor a kind open on the asset or closed on it that week. After this change, one pair was left in 30 flag-weekly games: a meter call fixed in the morning, then a guest's report of the same kind that afternoon;
+- a safety net in `raiseCheckWriteUp`. A sign-off mid-week can still move the tell onto a kind a flag raised earlier (round 3's accepted limit). A right call that finds its kind already live on the asset marks that alert early (a tier cheaper, if it isn't planned yet) and lands as a no-fault write-up, as it did before round 3.
+
+The reviewers' count is now 0 of 30 games for both the flag-weekly crew and three friends. Nothing on screen says which call was right (pillar 3): the flag's words never name the tell.
+
+**An IR write-up of an island-panel branch plays a receptacle run (code major), partly done.** `puzzleSite` forwarded the breaker the scan read (100 A for a feeder) into the meter puzzle, which drew 15/20 A outlets on a 100 A breaker ("100 A branch circuit · Panel · 100 A breaker", then Sofa, Bar, Fridge, Dining outlets): a 210.21(B)(3) violation. Now `puzzleSite` returns nothing for an island-panel breaker's site (`ElecSite.cond`), and the job plays the meter's own 20 A branch circuit. Every panel job on the live build (a utility sag, a feeder's lug) plays that same kind of circuit, at 15 or 20 A. The test runs every branch on the tier-2 and tier-5 schedules at meter tiers 1–5: no receptacle on a breaker over 20 A.
+
+**Not done: a hands-on step that is the hot lug's own.** A "lug mode" meter trace was prototyped and dropped. The meter only finds a fault that pulls a reading out of its 110–132 V band, a 16–32 V sag under load. A feeder lug that an IR scan shows 10–20 °C warm drops a fraction of a volt, and a 100 A lug dropping 20 V would be burning. A licensed electrician would reject both the stock trace and a fake one. The right step is a millivolt drop across the termination, or a torque-to-listing step and a rescan: a new puzzle mode, which is content work. The job's Investigate, its materials and its teaching answer already read the breaker (round 3).
+
+**The IR main tell (code major).** Round 3 drew the main's continuous (82–95%) first and scaled the free branches towards it with one factor, each capped at 79%. The surplus a capped row lost was never passed on, and fixed rows (the transfer feed, off rows) don't scale, so the main read far over its branches: 356 A over 191 A on `v4-e810cc5-chain` after a transfer job, and every tier-3 main tell with a transfer job was more than 10% over. `mainCanRun` also counted the transfer feed at 79% of its (now 100 A) rating, so the tell came back at tier 3. Now (`checks.ts`):
+- `panelRows` builds the week's branches once, for the scan and for the tell's gate;
+- `fitRows` water-fills: one factor, each row in its band, a row at a bound handing its share to the rest, in whole amps with the rounding's residue placed;
+- on the tell's scan the branches run up to carry the drawn load, and the continuous is read back from what they carry (97–100% of their sum, `IR.contOfSum`), its peak at or over the sum;
+- `mainCanRun` counts each row at what it can carry: the transfer feed at the week's backed-up load, the edge lights off, a feeder's open houses at 79% and its closed ones at their trickle (a feeder whose houses are all closed stays at its trickle; it used to scale up to 79%). The tell needs 97% of that to reach 82%.
+
+On the sweep (tiers 3–5; plain, a transfer job, its load on record, two houses closed; 100 seeds × 2 healths × 6 weeks), every main tell reads 82–95% continuous, at or under its branches' sum and at least 97% of it, with its peak at or over the sum. None happens at tier 3, no other scan reads 80% on its main, and no branch other than the tell's reaches 80%. The live `t4` doc at grid 60, week 19 reads "355 A continuous (89%), peak 93%" over 361 A of branches. The existing check test's tier-4 island had no villas or Lodge (a feeder with no houses carries nothing), so it was given its tier's houses.
+
+**Minors:**
+- **The renovation case with two builders.** The builders draw a unit's materials all at once or wait at the unit boundary. Two builders do both units in their first week only if both units' materials are in when they start, which depends on how the analyst buys them (one unit at a time, as the Home line's one-tap buy does, or both). So the case now counts a week closed unless both units' materials are on the shelf (`RenoPlan.waitsOnMaterials`), and says "closed up to 1 week (none if both units' materials are in when they start: they draw a unit's all at once, so buy both together)". With both on the shelf: "not closed a full week: both units' materials are on the shelf". On the reviewers' `v4-e810cc5-t5` with two skill-3 builders, Villa East and Villa West read 1 and close once. Cottage 2 and the Lodge read 1 and close 0 times: the case never says fewer weeks than the resolves find. An exact prediction was tried ("the first unit's materials on the shelf and not the second's") and got the villas wrong.
+- **The net weeks next to the gross rent.** It now reads "… open about 7 more weeks in all than left as it is (it's closed 1 for the work): about $21,632 of rent (8 weeks at $2,704) in the weeks it would otherwise have been closed".
+- **The generator report's receiver.** When both techs have the generator on their list, the analyst's report goes to the one with room: a list under its target and no flag from her yet this week (`flagTo`). Before, the tie went to the mechanic, whose full list refused it while the electrician had room. On the reviewers' save (mechanic 5 of 5, electrician 3 of 5), the card reads "Report a problem to Ben".
+
+**Words:** the electrician's What's new, ONBOARDING's Report a problem and EXPANSION's flag line now describe the late hazard's autopilot flow, the End turn line and the generator report's receiver.
+
+**The e2e harness:** one desktop run failed with "elec: the alert row opened no job sheet". That island's seed had given the mechanic a wiring fault in week 1, so a part chain's bench check ("Meter com 1 on Twin N-12 again") sat above the electrician's alert rows, and `planFirst` clicked it: it opens its puzzle, not a job sheet. It depends on the random island, not on this round. The check rows now carry a `bench` class (`YourMove.tsx`), and `planFirst` skips them.
+
+**Golden digests:** unchanged, not re-recorded. The crews play with checks and flags off, and `autoRun`'s extraction keeps its behaviour byte for byte.
+
+**Numbers** (the paper sim; `99134f6` → this round):
+
+| Run | | `99134f6` | now |
+|---|---|---|---|
+| standard T2/T3/T4/T5, weeks < $0 | three friends | 8/11/16/22, 0 | 8/11/16/22, 0 |
+| | all average | 7/12/16/22, 0 | 7/12/16/22, 0 |
+| robust misses of 360, weeks < $0; long < $0 wk 24–52 | three friends | 58, 0; 8 | 58, 0; 7 |
+| | all average | 47, 0; 0 | 47, 0; 0 |
+| | flag weekly | 114, 0; 13 | 106, 0; 6 |
+| long64 games < $0; receiverships; houses @39/52/64 | three friends | 1/30 (12 weeks); 1; 74/62/59 | 1/30 (12 weeks); 1; 71/64/60 |
+| | all average | 0/30; 0; 79/75/72 | 0/30; 0; 79/75/71 |
+
+Solo, absent and nobody stay at tier 1 in the standard run and over 64 weeks. The one three-friends long64 game below $0 is the same seed 28 as round 3's. Credits by week 52 under 'streak': 0/30 and 1/30 (the owner's call).
+
+**Tests:** 1,200 → 1,215 in 63 files.
+- New `tests/stage2r3v.test.ts` (15), mostly on the reviewers' repros:
+  - the generator scan: its help after a transfer job, and a no-tell sweep;
+  - the late hazard: the early doc's $3,170, the 40-flag sweep, and the neutral and made-safe cases;
+  - the End turn line and *Your move*;
+  - one alert of a kind: R1, the safety net, and the 30-game in-play count;
+  - the panel breaker's puzzle across two schedules;
+  - the main tell: R3 and the sweep;
+  - the renovation case with two builders, and its words;
+  - the generator report's receiver.
+- Updated `stage2r3` (the late hazard is fixed and compared on revenue too; the two-builder timeline read with its materials in; What's new), `stage2r1` (fixed or made safe), `stage2r2` (What's new), `check` (the tier-4 island's houses) and `releasegate` (a filler hazard that shuts a house leads *Your move*, so the grid-first test makes its fillers safe).
+
+**Checks:** tsc; vitest 1,215/1,215; `npm run build`; standard, robust and long64 (above); the pass-and-play e2e on a 390 × 844 phone and at 1280 × 820, both passing with only the Manrope 403s. Screens:
+- the electrician's Home and End turn with a reported hazard (390 and 360 px);
+- the generator's IR scan and its help after a transfer job (390 and 360);
+- the grid's IR scan with the main's tell on `t4` (390);
+- the renovation case with one builder (390) and with two (360);
+- the electrician's What's new (360);
+- the analyst's generator report (390);
+- the meter lab for the panel job (390).
+
+No horizontal overflow and no console errors.

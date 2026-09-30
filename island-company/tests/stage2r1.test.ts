@@ -225,7 +225,8 @@ describe('Report a problem: relayed, never in the flagger’s words', () => {
       const t = resolveWeek(structuredClone(s));
       const rep = t.history.find((r) => r.week === W)!;
       expect(rep.lines.some((l) => new RegExp(`${h.name} closed: .*make it safe`).test(l.text))).toBe(false);
-      expect(rep.lines.some((l) => new RegExp(`made ${h.name} safe by the book`).test(l.text))).toBe(true);
+      // (round-3 verification: autopilot's own flow, so with the parts on the shelf it's fixed at 50%, not only made safe)
+      expect(rep.lines.some((l) => new RegExp(`(made ${h.name} safe|fixed ${h.name}) by the book`).test(l.text))).toBe(true);
       // made safe after the turn: it rents at 75% that night
       s = ok(s, { t: 'makeSafe', role: 'elec', alert: al.id, how: 'breaker' });
       expect(houseRentable(s, house(s, h.id))).toBe(true);

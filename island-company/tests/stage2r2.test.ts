@@ -502,7 +502,7 @@ describe('the sheets (play-fun minors)', () => {
       expect(text).toContain('a trade takes one a week from the other tech and one from the analyst');
       expect(text).not.toMatch(/in your name|receives at most one a week/);
       if (role === 'mech') expect(text).toContain('its condition, the next 100-hr');
-      if (role === 'elec') expect(text).toContain('you can still make it safe after your turn');
+      if (role === 'elec') expect(text).toContain('One passed on after your turn you can still make safe that night');
     }
   });
 });

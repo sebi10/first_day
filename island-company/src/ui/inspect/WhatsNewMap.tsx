@@ -109,7 +109,7 @@ export function whatsNewMapPanels(s: IslandState, role: Role): WhatsNewPanel[] {
           {role === 'mech' ? "a guest's complaint, the utility's log" : role === 'elec' ? "the pilot's squawk" : "a guest's complaint, the pilot's squawk, the utility's log"}), passed on by you. It takes a slot the week's draw would have filled, so a trade whose list is full takes none: save it for what you're worried about. At most one a week each, and a trade takes one a week from the other tech and one from the analyst.
           {s.week < REPORT.fromWeek ? ` It opens in week ${REPORT.fromWeek}.` : ''} For the hangar, the office or anything else, message them from its sheet.
           {role === 'elec'
-            ? " A hazard passed on to you closes the house at once, like any hazard: you can still make it safe after your turn, and if you don't, it's made safe by the book at the resolve."
+            ? " A hazard passed on to you closes the house at once, like any hazard: make it safe or fix it before you end your turn. One passed on after your turn you can still make safe that night; if you don't, autopilot takes it at the resolve as it would if you were away (made safe, and fixed at 50% if its parts are on the shelf)."
             : ` A guest's reported shock or burning smell closes the house at once, until ${s.players.elec?.name ?? 'the electrician'} makes it safe.`}
         </P>
       </>

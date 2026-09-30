@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generateAlerts, liveAlerts, raiseAlert } from '../src/sim/alerts';
 import { botTurn, simulate, TEAMS } from '../src/sim/bots';
 import { RECEIVER } from '../src/sim/data';
-import { aStreakAfter, atResort, carriedStreak, creditsStreak, FEED_KINDS, gridFirst, gridFirstAlert, houseWeekRevenue, onV4, pausedWeek } from '../src/sim/econ';
+import { aStreakAfter, atResort, carriedStreak, closingHazard, creditsStreak, FEED_KINDS, gridFirst, gridFirstAlert, houseWeekRevenue, onV4, pausedWeek } from '../src/sim/econ';
 import { apply, createIsland, helperQueues, receiverLeft, receiverWords, tracedTo } from '../src/sim/engine';
 import { planTask, stdPickFor } from '../src/sim/flow';
 import { migrate } from '../src/sim/migrate';
@@ -233,6 +233,9 @@ describe('grid first at real risk (the correctness review: an open dock job mask
       for (let i = 0; i < 5; i++) raiseAlert(s, { role: 'elec', asset: asset(s, i % 2 ? 'h1' : 'h2'), kind: i % 2 ? 'trip' : 'flicker', due: s.week + 3 }, NOW);
       if (dock) raiseAlert(s, { role: 'elec', asset: g, sym: 'E_TAKEOFF_DOCK', due: s.week + 3 }, NOW);
       generateAlerts(s, rng(7), NOW, () => {});
+      // (a filler that is a hazard shutting its house now goes first: round-3 verification, the Dock points at it. Made
+      // safe here, the grid's feed is what comes first among the rest)
+      for (const a of liveAlerts(s)) if (a.assetId !== g.id && closingHazard(s, a.assetId)?.id === a.id) a.safe = { how: 'breaker', week: s.week, by: 'Ben' };
       const onGrid = liveAlerts(s).filter((a) => a.assetId === g.id);
       return { feed: onGrid.filter((a) => FEED_KINDS.has(a.kind)).length, chip: onGrid.some((a) => gridFirstAlert(s, a)), top: s.assets.find((a) => a.id === yourMoves(s, 'elec')[0]?.alert.assetId)?.kind };
     };

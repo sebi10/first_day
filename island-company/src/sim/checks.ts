@@ -158,7 +158,7 @@ function candidates(s: IslandState, a: Asset, ck: CheckKind, W: number): { c: Ca
     if (live.some((x) => x.assetId === a.id && slotKind(x) === c.kind)) continue;
     // a tell needs somewhere to show on this asset
     if (ck === 'walkaround' && !walkTells(a, c.kind).length) continue;
-    if (ck === 'ir' && !irTargets(s, a, c.kind).length) continue;
+    if (ck === 'ir' && !irTargets(s, a, c.kind, W).length) continue;
     out.push({ c, w, from });
   }
   return out;
@@ -237,22 +237,108 @@ export function backedUp(s: IslandState, W = s.week): { amps: number; rating: nu
   const amps = Math.round((pct / 100) * set);
   return { amps, rating, test: amps, over: false };
 }
-function irTargets(s: IslandState, a: Asset, kind: string): IrBreaker[] {
+function irTargets(s: IslandState, a: Asset, kind: string, W: number): IrBreaker[] {
   const on = IR_SCOPE[kind]?.on;
   const panel = panelOf(s, a);
   if (a.kind === 'generator') return on === 'xfer' ? panel.filter((b) => b.id === 'xferG' || b.id === 'xferL') : [];
-  // the main's tell (over 80% continuous) only where the feeders under it can carry that much (review round 3: at tiers
+  // the main's tell (over 80% continuous) only where this week's branches can carry that much (review round 3: at tiers
   // 1-2 the feeder breakers total less than a 400 A main's 80%)
-  if (on === 'main') return mainCanRun(panel) ? panel.filter((b) => b.id === 'main') : [];
+  if (on === 'main') return mainCanRun(s, a, W) ? panel.filter((b) => b.id === 'main') : [];
   if (on === 'branch') return panel.filter((b) => b.id !== 'main' && !IR_DAY_OFF.includes(b.id));
   return [];
 }
-/** the feeders under the main (the day loads, each under its 80% line) can carry the main's tell: from tier 4 on the 400 A main */
-const mainCanRun = (panel: IrBreaker[]) => {
-  const main = panel.find((b) => b.id === 'main');
-  const feeders = panel.filter((b) => b.id !== 'main' && !IR_DAY_OFF.includes(b.id)).reduce((n, b) => n + b.amps, 0);
-  return !!main && 0.79 * feeders >= (IR.panelUp[0] / 100) * main.amps;
-};
+
+/**
+ * one row of the island panel's scan under the main: its load at the moment of the scan (amps), and for a free row the
+ * band it can be scaled in (lo..hi); a fixed row carries what it carries
+ */
+type PanelRow = { b: IrBreaker; rb: Rng; amps: number; lo: number; hi: number; fixed: boolean; kind: 'off' | 'tell' | 'look' | 'xfer' | 'free' };
+
+/**
+ * The island panel's branches this week (the scan's rows under the main): the runway edge lights off by day, the
+ * transfer-switch feed at the week's backed-up load, the tell's branch in its band, one look-alike at 70-79% (never the
+ * transfer feed, never a feeder whose houses are all closed), and the rest free: a house feeder's open houses a share of
+ * its rating, its closed ones a trickle (fridges, standby). A free row scales between a floor and its 79% line, its
+ * closed houses' trickle kept either way (round-3 verification: scaled up for the main's tell, a feeder whose houses
+ * were closed ran to 79%); a feeder whose houses are all closed stays at its trickle
+ */
+function panelRows(s: IslandState, a: Asset, W: number, tellItem: string | undefined): PanelRow[] {
+  const panel = panelOf(s, a);
+  const bu = backedUp(s, W);
+  const branches = panel.filter((b) => b.id !== 'main' && b.id !== 'xfer' && b.id !== tellItem && !IR_DAY_OFF.includes(b.id) && feedShare(s, b.id) > 0);
+  const distractor = branches.length ? rng(hashSeed(s.seed, 'irx', a.id, W)).pick(branches).id : null;
+  const rows: PanelRow[] = [];
+  for (const b of panel) {
+    if (b.id === 'main') continue;
+    const rb = rng(hashSeed(s.seed, 'ir', a.id, b.id, W));
+    // a load drawn in a band of the rating, in whole amps that still read inside the band
+    const band = (lo: number, hi: number) => clamp(Math.round((rb.range(lo, hi) / 100) * b.amps), Math.ceil((lo / 100) * b.amps), Math.floor((hi / 100) * b.amps));
+    const fixed = (amps: number, kind: PanelRow['kind']) => rows.push({ b, rb, amps, lo: amps, hi: amps, fixed: true, kind });
+    if (IR_DAY_OFF.includes(b.id)) fixed(band(0, 3), 'off');
+    else if (b.id === 'xfer' && bu) fixed(bu.amps, tellItem === b.id ? 'tell' : 'xfer');
+    else if (tellItem === b.id) fixed(band(IR.tellLoad[0], IR.tellLoad[1]), 'tell');
+    else if (b.id === distractor) fixed(band(IR.distractorLoad[0], IR.distractorLoad[1]), 'look');
+    else {
+      const share = feedShare(s, b.id);
+      const trickle = rb.range(3, 8);
+      const amps = Math.round(((share * rb.range(12, 76) + (1 - share) * trickle) / 100) * b.amps);
+      const shut = ((1 - share) * trickle * b.amps) / 100;
+      const lo = Math.max(Math.round(0.02 * b.amps), Math.round(shut));
+      const hi = Math.max(lo, Math.floor(share * 0.79 * b.amps + shut));
+      if (share === 0) fixed(amps, 'free');
+      else rows.push({ b, rb, amps: clamp(amps, lo, hi), lo, hi, fixed: false, kind: 'free' });
+    }
+  }
+  return rows;
+}
+
+/**
+ * scale the free rows so the branches together carry `to` A: one factor, each row held in its band, a row at a bound
+ * handing its share to the others (water-filled: round-3 verification, the surplus a capped row lost was never passed
+ * on, so the branches fell far short of the main's tell), in whole amps
+ */
+function fitRows(rows: PanelRow[], to: number) {
+  const free = rows.filter((x) => !x.fixed);
+  if (!free.length) return;
+  const base = free.map((x) => x.amps);
+  const fixedSum = rows.filter((x) => x.fixed).reduce((n, x) => n + x.amps, 0);
+  const lo = free.reduce((n, x) => n + x.lo, 0);
+  const hi = free.reduce((n, x) => n + x.hi, 0);
+  const want = clamp(Math.round(to - fixedSum), lo, hi);
+  const at = (k: number) => free.reduce((n, x, i) => n + clamp(base[i] * k, x.lo, x.hi), 0);
+  let k0 = 0;
+  let k1 = 1;
+  while (at(k1) < want && k1 < 1e6) k1 *= 2;
+  for (let i = 0; i < 60; i++) {
+    const m = (k0 + k1) / 2;
+    if (at(m) < want) k0 = m;
+    else k1 = m;
+  }
+  free.forEach((x, i) => (x.amps = Math.round(clamp(base[i] * k1, x.lo, x.hi))));
+  // whole amps: the rounding's few amps to the rows with room, the biggest first
+  const order = [...free].sort((x, y) => y.b.amps - x.b.amps);
+  let left = want - free.reduce((n, x) => n + x.amps, 0);
+  for (let guard = 0; left !== 0 && guard < 1000; guard++) {
+    const x = order.find((r) => (left > 0 ? r.amps < r.hi : r.amps > r.lo));
+    if (!x) break;
+    x.amps += Math.sign(left);
+    left -= Math.sign(left);
+  }
+}
+
+/**
+ * the branches can carry the main's tell this week (over 80% continuous, its continuous a little under their sum): each
+ * row at what it can carry, the transfer feed at the backed-up load, the runway edge lights off, a feeder's closed houses
+ * at their trickle (round-3 verification: counted at 79% of every rating, the tell came back at tier 3 once a transfer
+ * job's 100 A feed was on record, and on scans with closed houses the main read far over its branches). From tier 4 on
+ * the 400 A main
+ */
+function mainCanRun(s: IslandState, a: Asset, W: number): boolean {
+  const main = panelOf(s, a).find((b) => b.id === 'main');
+  if (!main) return false;
+  const cap = panelRows(s, a, W, 'main').reduce((n, x) => n + (x.fixed ? x.amps : x.hi), 0);
+  return IR.contOfSum[0] * cap >= (IR.panelUp[0] / 100) * main.amps;
+}
 const circuitsOf = (a: Asset) => HOUSE_CIRCUITS.filter((c) => !c.models || c.models.includes(a.model));
 const runOf = (s: IslandState, a: Asset, id: string, run: [number, number]) => rng(hashSeed(s.seed, 'run', a.id, id)).int(run[0], run[1]);
 
@@ -282,7 +368,7 @@ function tellOf(s: IslandState, a: Asset, ck: CheckKind, W: number): Tell | null
     return { item: at.zone, kind, cause: causeIndex(key, kind, t.cause.fix), text: pickSeeded(s, a, at.zone, W, t.texts) };
   }
   if (ck === 'ir') {
-    const b = r.pick(irTargets(s, a, kind));
+    const b = r.pick(irTargets(s, a, kind, W));
     // a hot lug on a feeder whose houses are all closed carries nothing to show it (review round 3)
     if (a.kind === 'grid' && feedShare(s, b.id) === 0) return null;
     return { item: b.id, kind, cause: causeIndex(checkRowKey('ir', b.id), kind) };
@@ -328,12 +414,21 @@ const IR_HELP = [
   "The main carries what the branches carry together: its afternoon continuous a little under their sum, its peak at or over it. A feeder carries what its houses draw: light when they're closed.",
   'The runway edge lights are a night load: off in an afternoon scan.',
 ];
+/**
+ * the generator house's help. Round-3 verification: after a transfer job the switch is 100 A and the set's main still
+ * 60 A, so one current reads 82-93% on the main and about 56% on the lugs, 9-11 °C warmer; "compare them: within a
+ * degree or two" made a healthy main the scan's one hot spot, and an electrician who followed it wrote up a no-fault
+ * that held a slot and cost a close. Each reads against its own rating; the line that says so shows when they differ
+ */
 const GEN_IR_HELP = [
-  "Scanned during the weekly test run, the set carrying the backed-up load (what the island panel's transfer-switch feed carries on the utility, or less where load management holds the set to its rating): the generator-side lugs, the load-side lugs and the generator main carry the same current, so compare them: healthy, they read within a degree or two.",
+  "Scanned during the weekly test run, the set carrying the backed-up load (what the island panel's transfer-switch feed carries on the utility, or less where load management holds the set to its rating): the generator-side lugs, the load-side lugs and the generator main carry the same current, each read against its own rating. Where the ratings match, healthy, they read within a degree or two.",
   'Over 100% of the rating is an overload: the load outgrew the switch and the set. Hot for the rating, right for the load: the fix is the load, not a lug.',
   "Read heat against load: a healthy termination's rise over ambient grows with the square of its load, about +5 °C at half load and +20 °C at full.",
   'NETA: ΔT against similar components under similar load, 4–15 °C probable, over 15 °C a major deficiency.',
 ];
+/** a transfer job's switch against the set's own main (the generator house's ratings differ) */
+export const genRatingsHelp = (sw: number, brk: number) =>
+  `After the transfer job the switch is ${sw} A and the set's main still ${brk} A: the same current is a bigger share of the main's rating, so it runs warmer than the lugs, right for its load. Compare the switch's generator side with its load side; judge the main by its own load, never against the lugs.`;
 const METER_HELP = [
   'Each receptacle read with a 12 A load plugged in.',
   'Expected drop: 2 × run × 12 A × ohms per 1,000 ft (NEC Chapter 9 Table 8, solid copper at 75 °C: 12 AWG 1.93, 14 AWG 3.07): about 4.6 V on 100 ft of 12 AWG.',
@@ -391,68 +486,44 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
           : r1(Math.max(0.5, expRise(pct) + shared + rb.range(-IR.genEach, IR.genEach)));
       items.push(irItem(b, bAmps, pct, rise));
     }
-    return { kind: 'ir', assetId: a.id, items, help: GEN_IR_HELP, ppe: IR_PPE };
+    const sw = panel.find((b) => b.id === 'xferG');
+    const brk = panel.find((b) => b.id === 'genbrk');
+    const help = sw && brk && sw.amps !== brk.amps ? [GEN_IR_HELP[0], genRatingsHelp(sw.amps, brk.amps), ...GEN_IR_HELP.slice(1)] : GEN_IR_HELP;
+    return { kind: 'ir', assetId: a.id, items, help, ppe: IR_PPE };
   }
   // The island panel (review round 3: the feeders carried more than the main they hang off, 401 A under a 164 A main).
-  // Every branch's load at the moment of the scan first, a house feeder's following its open houses; the main is read
-  // from them: its afternoon continuous about their sum less a little diversity, its peak at or over that sum. When the
-  // main's tell (over 80% continuous) is drawn, the day's branches run up towards it; else they're scaled down to keep
-  // the main under its 70% line. The main's peak is never under what the branches carry together
-  // one look-alike a scan: a branch at 70-79% load, reading 10-13 °C: warm, and right for its load (never the
-  // transfer-switch feed: its load is the week's backed-up load; never a feeder whose houses are all closed)
-  const branches = panel.filter((b) => b.id !== 'main' && b.id !== 'xfer' && b.id !== tell?.item && !IR_DAY_OFF.includes(b.id) && feedShare(s, b.id) > 0);
-  const distractor = branches.length ? rng(hashSeed(s.seed, 'irx', a.id, W)).pick(branches).id : null;
+  // Every branch's load at the moment of the scan first, a house feeder's following its open houses (panelRows); the main
+  // is read from them: its afternoon continuous their sum less a little diversity, its peak at or over that sum. When the
+  // main's tell (over 80% continuous) is drawn, the day's branches run up to carry it (mainCanRun: they can) and the
+  // continuous is read back from what they carry (round-3 verification: drawn first and the branches scaled towards it,
+  // it read up to 165 A over them); else they're scaled down to keep the main under its 70% line. One look-alike a
+  // scan: a branch at 70-79% load, reading 10-13 °C: warm, and right for its load
   // one offset for the scan (the ambient, the camera), then a little each (review round 2: ±3 each read like breakers
   // at the same load 4 °C and more apart)
   const shared = rng(hashSeed(s.seed, 'ir', a.id, 'scan', W)).range(-IR.genShared, IR.genShared);
   const each = (rb: Rng) => shared + rb.range(-IR.genEach, IR.genEach);
-  type Row = { b: IrBreaker; rb: Rng; amps: number; fixed: boolean; kind: 'off' | 'tell' | 'look' | 'xfer' | 'free' };
-  const rows: Row[] = [];
-  for (const b of panel) {
-    if (b.id === 'main') continue;
-    const rb = rng(hashSeed(s.seed, 'ir', a.id, b.id, W));
-    // a load drawn in a band of the rating, in whole amps that still read inside the band
-    const band = (lo: number, hi: number) => clamp(Math.round((rb.range(lo, hi) / 100) * b.amps), Math.ceil((lo / 100) * b.amps), Math.floor((hi / 100) * b.amps));
-    if (IR_DAY_OFF.includes(b.id)) rows.push({ b, rb, amps: band(0, 3), fixed: true, kind: 'off' });
-    else if (b.id === 'xfer' && bu) rows.push({ b, rb, amps: bu.amps, fixed: true, kind: tell?.item === b.id ? 'tell' : 'xfer' });
-    else if (tell?.item === b.id) rows.push({ b, rb, amps: band(IR.tellLoad[0], IR.tellLoad[1]), fixed: true, kind: 'tell' });
-    else if (b.id === distractor) rows.push({ b, rb, amps: band(IR.distractorLoad[0], IR.distractorLoad[1]), fixed: true, kind: 'look' });
-    else {
-      // a house feeder carries its open houses' load, and a trickle for the closed ones (fridges, standby)
-      const share = feedShare(s, b.id);
-      const trickle = rb.range(3, 8);
-      rows.push({ b, rb, amps: Math.round(((share * rb.range(12, 76) + (1 - share) * trickle) / 100) * b.amps), fixed: false, kind: 'free' });
-    }
-  }
+  const rows = panelRows(s, a, W, tell?.item);
   const main = panel.find((b) => b.id === 'main')!;
   const rm = rng(hashSeed(s.seed, 'ir', a.id, 'main', W));
   const sum = () => rows.reduce((n, x) => n + x.amps, 0);
   const fixedSum = () => rows.filter((x) => x.fixed).reduce((n, x) => n + x.amps, 0);
-  /** scale the free branches so the branches together carry `to` A (each between a trickle and 79% of its rating: no branch reads over the 80% line, review round 1) */
-  const fit = (to: number) => {
-    const free = rows.filter((x) => !x.fixed);
-    const fs = free.reduce((n, x) => n + x.amps, 0);
-    if (!fs) return;
-    const k = Math.max(0, to - fixedSum()) / fs;
-    for (const x of free) x.amps = Math.max(Math.round(0.02 * x.b.amps), Math.min(Math.floor(0.79 * x.b.amps), Math.round(x.amps * k)));
-  };
-  let cont: number;
+  let contAmps: number;
   let peakA: number;
   if (tell?.item === 'main') {
-    cont = Math.round(rm.range(IR.panelUp[0], IR.panelUp[1]));
-    const contA = (cont / 100) * main.amps;
-    // the scan's afternoon sits near the logged continuous load: the day's branches run up towards it
-    fit(contA * rm.range(0.92, 1));
-    peakA = Math.max(sum(), contA * (1 + rm.range(0.02, 0.05)));
+    const target = rm.range(IR.panelUp[0], IR.panelUp[1]);
+    const d = rm.range(IR.contOfSum[0], IR.contOfSum[1]);
+    fitRows(rows, (target / 100) * main.amps / d);
+    contAmps = Math.min(Math.round((IR.panelUp[1] / 100) * main.amps), Math.round(sum() * d));
+    peakA = Math.max(sum(), contAmps * (1 + rm.range(0.02, 0.05)));
   } else {
     const d = rm.range(0.85, 0.97);
     // under the 80% line with room: scaled down to 70% continuous at most (a fixed load alone may take it to 79%)
     const cap = Math.max(0.7 * main.amps, Math.min(0.79 * main.amps, fixedSum() * d)) / d;
-    if (sum() > cap) fit(cap);
-    cont = Math.round((100 * sum() * d) / main.amps);
+    if (sum() > cap) fitRows(rows, cap);
+    contAmps = Math.round(sum() * d);
     peakA = sum() * rm.range(1.03, 1.15);
   }
-  const contAmps = Math.round((cont / 100) * main.amps);
+  const cont = Math.round((100 * contAmps) / main.amps);
   const peak = Math.min(99, Math.max(cont + 1, Math.ceil((100 * peakA) / main.amps)));
   const mainRise = r1(Math.max(0.5, expRise(cont) + each(rm)));
   // (a light island's main, a third of its rating, is too light to judge by the help's own NFPA 70B line)
@@ -531,7 +602,16 @@ export function raiseCheckWriteUp(s: IslandState, role: OpsRole, a: Asset, kind:
   const key = checkRowKey(kind, item);
   const sym = SYMPTOMS[key];
   const truth = tellOf(s, a, kind, s.week);
-  const right = !!truth && truth.item === item && truth.cause >= 0;
+  let right = !!truth && truth.item === item && truth.cause >= 0;
+  // never a second live alert of one kind on one asset ("never two copies of one job", spawnRedo). A flag never draws the
+  // week's tell's kind (flagKinds), but a sign-off mid-week can move the tell onto the kind a flag raised before it: the
+  // call then finds what that alert already has on the list. It's caught early all the same (a tier cheaper, if it isn't
+  // planned yet), and the write-up closes on site as no fault, as it did before round 3
+  const same = right ? liveAlerts(s).find((x) => x.assetId === a.id && slotKind(x) === truth!.kind) : undefined;
+  if (same) {
+    right = false;
+    if (same.status === 'open') same.early = true;
+  }
   const r = rng(hashSeed(s.seed, 'checkup', role, a.id, s.week));
   const due = s.week + r.int(sym.lead[0], sym.lead[1]) + 1;
   const al = raiseAlert(s, { role, asset: a, sym: key, cause: right ? truth!.cause : -1, src: 'check', due, who }, now);
@@ -565,13 +645,21 @@ const ownerKind = (a: Asset): OpsRole | 'both' => (a.kind === 'plane' ? 'mech' :
 function flagKinds(s: IslandState, to: OpsRole, a: Asset, W: number) {
   const sole = a.kind === 'plane' && soleGuest(s, a.id);
   const live = liveAlerts(s);
+  // never the kind the receiver's own quick check shows on this asset this week (round-3 verification: the tell holds all
+  // week, so a flag of its kind and the tech's right call raised two real alerts of one kind on one asset, two jobs
+  // signed off for one oil leak). The flag draws another kind or a no-fault. Whatever the receiver's turn or check: a
+  // flag reads the same whether they've played yet or not
+  const tell = checkTruth(s, to, a.id, W);
+  // nor a kind open on the asset, or closed on it this week: the fault a check found and a job fixed this morning isn't
+  // what a guest reports this afternoon (round-3 verification: a meter call fixed, then a flag of its kind the same week)
+  const mine = (s.alerts ?? []).filter((x) => x.assetId === a.id && (x.status !== 'closed' || x.closed?.week === W));
   const out: { kind: string; w: number; pairs: { sym: Symptom; cause: number; w: number }[] }[] = [];
   for (const c of CATALOG) {
-    if (c.role !== to || !c.targets.includes(a.model) || FLAG.never.includes(c.kind)) continue;
+    if (c.role !== to || !c.targets.includes(a.model) || FLAG.never.includes(c.kind) || c.kind === tell?.kind) continue;
     const w = drawWeight(s, c, a, W);
     if (!(w > 0)) continue;
-    if (s.orders.some((o) => openOrder(o) && o.kind === c.kind && o.assetId === a.id)) continue;
-    if (live.some((x) => x.assetId === a.id && slotKind(x) === c.kind)) continue;
+    if (s.orders.some((o) => o.kind === c.kind && o.assetId === a.id && (openOrder(o) || (o.status === 'done' && o.result?.week === W)))) continue;
+    if (mine.some((x) => slotKind(x) === c.kind)) continue;
     // (review round 3: never a symptom already live on the asset: E_FEEDER_DROP is both the feeder's and the xfmr's, and a
     // flag raised the utility's own open line a second time)
     const pairs = pairsFor(c.kind, a, sole, s).filter((p) => p.sym.role === to && FLAG.srcs.includes(p.sym.src) && !FLAG.neverSym.includes(p.sym.key) && !live.some((x) => x.assetId === a.id && x.sym === p.sym.key));
@@ -617,7 +705,13 @@ export function flagTo(s: IslandState, a: Asset): OpsRole {
   const e = on('elec');
   if (m !== e) return m ? 'mech' : 'elec';
   // only the analyst flags the generator: the tie-break reads her side's cap (review round 2: a tech-to-tech flag on a
-  // plane sent her generator report to the electrician though the mechanic had none from her)
+  // plane sent her generator report to the electrician though the mechanic had none from her) and each list's size, as
+  // every sheet shows it (round-3 verification: a full list took the tie, and she was refused while the other tech had room)
+  const room = (r: OpsRole) => {
+    const w = openWork(s, r);
+    return !flaggedFrom(s, r, true) && w.open < w.target;
+  };
+  if (room('mech') !== room('elec')) return room('mech') ? 'mech' : 'elec';
   return flaggedFrom(s, 'mech', true) && !flaggedFrom(s, 'elec', true) ? 'elec' : 'mech';
 }
 
@@ -692,7 +786,7 @@ export function raiseFlag(s: IslandState, role: Role, a: Asset, to: OpsRole, pic
   al.by = role;
   const pilot = a.kind === 'plane' && sym?.src === 'squawk' ? pilotOf(s, a.id)?.name : undefined;
   if (pilot) al.via = pilot;
-  // after the receiver's turn (review round 3): a hazard they don't come back to is made safe by the book at the resolve
+  // after the receiver's turn (review round 3): a hazard they don't come back to gets autopilot's job flow at the resolve
   if (s.turns[to]?.ended) al.late = true;
   return al;
 }

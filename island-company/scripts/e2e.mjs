@@ -150,8 +150,10 @@ const driveAlert = async () => {
  */
 const planFirst = async (tag) => {
   await page.evaluate(() => window.scrollTo({ top: 0 }));
-  // an alert's row (the week's revenue work, a load sheet or a ground power start, is a row of its own: not an alert)
-  const rows = page.locator('.jf-your .jf-arow:not(.rev):not(:has(.jf-start)) .jf-arow-main');
+  // an alert's row (the week's revenue work, a load sheet or a ground power start, is a row of its own: not an alert; nor
+  // is a part chain's bench check, which opens its puzzle: an island whose seed gives the mechanic a wiring fault in week
+  // 1 put one on top of the electrician's list and failed the run)
+  const rows = page.locator('.jf-your .jf-arow:not(.rev):not(.bench):not(:has(.jf-start)) .jf-arow-main');
   const count = await rows.count();
   let nff = -1;
   for (let i = 0; i < count; i++) {

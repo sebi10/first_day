@@ -307,6 +307,8 @@ export const IR = {
   distractorRise: [10, 13] as [number, number],
   tooLight: 40,
   panelUp: [82, 95] as [number, number],
+  /** the main's afternoon continuous against the branches' sum on its tell's scan (a little diversity: never over it; round-3 verification) */
+  contOfSum: [0.97, 1] as [number, number],
   genShared: 1,
   genEach: 0.8,
   backedUp: [40, 70] as [number, number],
