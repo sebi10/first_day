@@ -4,7 +4,7 @@
 import { alertFlags, alertShort, soleGuest } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
 import { RENO, ROLE_LABEL } from '../../sim/data';
-import { alertAog, closingHazard, gridFirstAlert, hazardOn, renoAwaitingFinal } from '../../sim/econ';
+import { alertAog, gridFirstAlert, hazardOn, renoAwaitingFinal, safeAfterTurn } from '../../sim/econ';
 import { helperQueues } from '../../sim/engine';
 import { flowStage, type FlowStage } from '../../sim/flow';
 import type { Alert, AlertSrc, Asset, IslandState, Role } from '../../sim/types';
@@ -74,18 +74,16 @@ export function flagsOf(s: IslandState, a: Alert): Flag[] {
   }
   if (asset?.kind === 'house') {
     const hz = hazardOn(s, asset.id);
-    if (hz?.id === a.id && !hz.safe) {
-      // a hazard a crewmate passed on gives a week before it shuts the house (review round 1)
-      if (closingHazard(s, asset.id)?.id === a.id) out.push({ text: 'SHUT', tone: 'rust' });
-      else out.push({ text: `shuts wk ${a.due}`, tone: 'rust', why: `A crewmate passed this hazard on: make it safe or fix it before week ${a.due}'s resolve, or ${asset.name} closes.` });
-    }
+    // a hazard closes its house at once, a crewmate's flag too (review round 2): passed on after your turn, you can
+    // still make it safe tonight
+    if (hz?.id === a.id && !hz.safe) out.push(safeAfterTurn(s, a) && s.turns.elec?.ended ? { text: 'SHUT', tone: 'rust', why: `Passed on after your turn: ${asset.name} is closed until it's made safe or fixed. You can still make it safe tonight.` } : { text: 'SHUT', tone: 'rust' });
   }
   // A0 (e): from tier 4 the grid's feed at real risk goes before code prep (every house hangs off it): the chip says
   // why it's first (the feed only: a fuel-dock trip isn't the island feed)
   if (gridFirstAlert(s, a)) out.push({ text: 'grid first', tone: 'rust' });
   // G0: the renovated house waits on this code job's sign-off (the permit final, or a code notice doubling as it)
   if (asset?.kind === 'house' && a.src === 'code' && renoAwaitingFinal(s, asset.id))
-    out.push({ text: 'house closed', tone: 'rust', why: `The builders finished ${asset.name}'s renovation: no guests until it passes the county's final (your trim-out, then the inspector). Then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.` });
+    out.push({ text: 'house closed', tone: 'rust', why: `The builders finished ${asset.name}'s renovation: no guests until it passes the county's final (your final prep, then the inspector). Then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.` });
   // the electrician's helper takes this ready job at the resolve if you don't (review round 1), and says who and how
   const helper = o ? [...helperQueues(s)].find(([, q]) => q.some((x) => x.id === o.id))?.[0] : undefined;
   if (helper) {

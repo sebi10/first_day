@@ -170,14 +170,14 @@ describe('autopilot closes a no-fault check or flag write-up once it is due (pil
 });
 
 describe('Report a problem: relayed, never in the flagger’s words', () => {
-  it("a house: a guest's complaint, passed on; both seats' feeds say what went on the list", () => {
+  it("a house: a guest's complaint, passed on; the feed says what went on the list (once: review round 2)", () => {
     let s = island(8, 70, 3);
     s = ok(s, { t: 'flag', role: 'mech', assetId: 'h2', week: s.week });
     const a = s.alerts!.find((x) => x.src === 'flag')!;
     expect(a).toMatchObject({ role: 'elec', by: 'mech', who: 'Ana' });
     expect(symptomText(s, a)).toMatch(/^Ana passed on a guest's complaint at Cottage 2: /);
     const said = `Ana passed on a guest's complaint at Cottage 2 to Ben: ${alertShort(s, a)}.`;
-    expect(s.feed.filter((f) => f.text === said).map((f) => f.role).sort()).toEqual(['elec', 'mech']);
+    expect(s.feed.filter((f) => f.text === said).map((f) => f.role)).toEqual(['mech']);
     // the reporter's sheet says it
     expect(factsText(facts(s, assetRef(house(s, 'h1')), 'mech'))).toContain(`This week you passed on a guest's complaint at Cottage 2 to Ben: ${alertShort(s, a)}.`);
   });
@@ -194,7 +194,7 @@ describe('Report a problem: relayed, never in the flagger’s words', () => {
     }
   });
 
-  it('a flag never raises a no-fault hazard, and a flagged real hazard gives the electrician a week before the house closes', () => {
+  it('a flag never raises a no-fault hazard, and a flagged real hazard closes the house at once; the electrician can make it safe after the turn (review round 2)', () => {
     // healthy houses: nothing coming, and no hazard in the no-fault pool
     for (let seed = 1; seed <= 200; seed++) {
       const s = island(seed, 100, 3);
@@ -202,7 +202,9 @@ describe('Report a problem: relayed, never in the flagger’s words', () => {
       const pick = flagPick(s, 'fin', h, 'elec');
       if (pick && pick.cause < 0) expect(SYMPTOMS[pick.sym].hazard, `seed ${seed} ${pick.sym}`).toBeFalsy();
     }
-    // a real hazard, flagged after the electrician's turn: the house rents this week; unmade safe, it closes next week
+    // a real hazard, flagged after the electrician's turn: the house closes at once, like any hazard (review round 2:
+    // round 1's week of grace kept a reported shock rented); its due week is the next, and the electrician can still
+    // make it safe that night
     let found = 0;
     for (let seed = 1; seed <= 300 && !found; seed++) {
       let s = island(seed, 45, 3);
@@ -214,15 +216,17 @@ describe('Report a problem: relayed, never in the flagger’s words', () => {
       s = ok(s, { t: 'flag', role: 'fin', assetId: h.id, week: s.week });
       const al = s.alerts!.find((a) => a.src === 'flag')!;
       expect(al.due).toBe(s.week + FLAG.awLead);
-      expect(closingHazard(s, h.id)).toBeUndefined();
-      expect(houseBlocker(s, house(s, h.id))).not.toBe('hazard');
-      const W = s.week;
-      s = resolveWeek(s);
-      const rep = s.history.find((r) => r.week === W)!;
-      expect(rep.lines.some((l) => new RegExp(`${h.name} closed: .*make it safe`).test(l.text))).toBe(false);
-      // next week, still open and not made safe: it closes the house
       expect(closingHazard(s, h.id)?.id).toBe(al.id);
+      expect(houseBlocker(s, house(s, h.id))).toBe('hazard');
       expect(houseRentable(s, house(s, h.id))).toBe(false);
+      // unmade safe, that night's review says it's closed
+      const W = s.week;
+      const t = resolveWeek(structuredClone(s));
+      const rep = t.history.find((r) => r.week === W)!;
+      expect(rep.lines.some((l) => new RegExp(`${h.name} closed: .*make it safe`).test(l.text))).toBe(true);
+      // made safe after the turn: it rents at 75% that night
+      s = ok(s, { t: 'makeSafe', role: 'elec', alert: al.id, how: 'breaker' });
+      expect(houseRentable(s, house(s, h.id))).toBe(true);
     }
     expect(found).toBe(1);
   });
@@ -443,7 +447,8 @@ describe("G0: the Resort's 200 A transfer switch", () => {
     doc.alerts = [...(doc.alerts ?? []), { id: 'a9990', role: 'elec', assetId: gen.id, sym: 'E_TAKEOFF_XFER', src: 'takeoff', week: doc.week, due: doc.week + 2, seed: 7, kind: 'transfer', cause: 0, status: 'open' }];
     const s = migrate(doc);
     expect(s.alerts!.find((a) => a.id === 'a9990')!.closed).toEqual({ week: doc.week, how: 'dropped' });
-    expect(s.feed.some((f) => f.text === 'The new 200 A automatic transfer switch is in: the open alert about the old 60 A switch closed.')).toBe(true);
+    // (review round 2: the old set's work retired, jobs and all; said once)
+    expect(s.feed.filter((f) => /^The Resort’s new standby set and its 200 A automatic transfer switch are in: the work on the old set is dropped \(/.test(f.text))).toHaveLength(1);
     // the grid's and the generator's warranty lines: storms and incidents, not guests; the switch named
     const g = s.assets.find((a) => a.kind === 'generator')!;
     expect(warrantyLine(s, g)!.text).toMatch(/^The standby set and its 200 A automatic transfer switch are under warranty to week \d+: .* Storms and incidents still hit it\.$/);
@@ -510,14 +515,14 @@ describe('the sheets’ words', () => {
     expect(facts(s, fixtureRef('fuel'), 'mech').name).toBe(FIXTURE_NAME.fuel);
   });
 
-  it("the office: one line for the techs; the analyst's one fixed-cost figure", () => {
+  it("the office: one line for the techs; the analyst's figures, 'fixed' as everywhere else (review round 2)", () => {
     const s = island(5, 70, 3);
     const mech = facts(s, fixtureRef('office'), 'mech');
     expect(mech.status).toBe("Cy's office");
     expect(mech.lines.map((l) => l.text)).not.toContain("Cy's office.");
     const fin = facts(s, fixtureRef('office'), 'fin');
-    expect(fin.status).toMatch(/^This week: about \$[\d,]+ in, \$[\d,]+ of fixed costs out$/);
-    expect(fin.lines[0].text).toMatch(/^Runway: spendable covers [\d.]+ weeks of the fixed costs \(\$[\d,]+ a week: overhead, payroll, insurance/);
+    expect(fin.status).toMatch(/^This week: about \$[\d,]+ in, \$[\d,]+ out$/);
+    expect(fin.lines[0].text).toMatch(/^Out a week: \$[\d,]+ fixed \(overhead and payroll\) \+ \$[\d,]+ insurance = \$[\d,]+\. Spendable covers [\d.]+ weeks of it\.$/);
   });
 
   it("the builders' line: the analyst's move is hers; a tech reads whose it is", () => {
@@ -534,7 +539,11 @@ describe('the sheets’ words', () => {
     raiseAlert(s, { role: 'elec', asset: h, sym: 'E_TAKEOFF_SPA' }, NOW);
     const spa = (f: ReturnType<typeof facts>) => (f.blocks.find((b) => b.t === 'schedule') as { rows: { label: string; note: string }[] }).rows.find((r) => r.label === 'Spa (hot tub)')!;
     expect(spa(facts(s, assetRef(h), 'elec')).note).toMatch(/not wired yet/);
-    expect(spa(facts(s, assetRef(house(s, 'h2')), 'elec')).note).toMatch(/GFCI \(680\.44\)/);
+    // (review round 2: no spa circuit on record, no spa row; once one is in, its own breaker and wire)
+    expect(spa(facts(s, assetRef(house(s, 'h2')), 'elec'))).toBeUndefined();
+    house(s, 'h2').spa = { amps: 50, awg: 8, week: 3 };
+    expect(spa(facts(s, assetRef(house(s, 'h2')), 'elec'))).toMatchObject({ label: 'Spa (hot tub)', note: expect.stringMatching(/GFCI \(680\.44\)/) });
+    expect((facts(s, assetRef(house(s, 'h2')), 'elec').blocks.find((b) => b.t === 'schedule') as { rows: { label: string; rating: string; wire: string }[] }).rows.find((r) => r.label === 'Spa (hot tub)')).toMatchObject({ rating: '50 A', wire: '8 AWG Cu' });
   });
 
   it("What's new's upkeep panel says 'yours' to the analyst", () => {

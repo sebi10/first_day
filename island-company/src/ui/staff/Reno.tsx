@@ -2,7 +2,7 @@
 // same case on a house's inspect sheet. A renovation is capex: the mainland package is paid when it's ordered, the
 // materials as the builders go; the builders (carpentry, roofing, finishes: never licensed work) close the house for
 // their two work units, and it opens again at 85 under a 13-week warranty when it passes the county's final (the
-// electrician's trim-out and the inspector's visit). Only a
+// electrician's final prep and the inspector's visit). Only a
 // house at 75 or below, one per house every 26 weeks. Renovate: Staff (1) → Renovate (2) → confirm (3); on the
 // house's sheet: Renovate (1) → confirm (2).
 import { useState } from 'preact/hooks';
@@ -18,18 +18,18 @@ import './staff.css';
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** the rule, in one line: the same words on the desk, the house's sheet and the confirm */
-export const RENO_RULE = `The builders renovate a house at ${RENO.maxHealth} or below: carpentry, roofing and finishes, with the house closed while they work. It opens again at ${RENO.health} with a ${RENO.warranty}-week warranty when it passes the county's final (the electrician's trim-out and the inspector's visit). One renovation per house every ${RENO.cooldown} weeks.`;
+export const RENO_RULE = `The builders renovate a house at ${RENO.maxHealth} or below: carpentry, roofing and finishes, with the house closed while they work. It opens again at ${RENO.health} with a ${RENO.warranty}-week warranty when it passes the county's final (the electrician's final prep and the inspector's visit). One renovation per house every ${RENO.cooldown} weeks.`;
 
 /** the case's weeks closed, in words: at the builders' output, or with one skill-3 builder once one is hired */
-const closedWords = (p: RenoPlan, elec: string) =>
+const closedWords = (p: RenoPlan) =>
   p.planned
-    ? `With one skill-3 builder it's closed about ${plural(p.weeksClosed, 'week')} (2 units at 1 a week, then ${elec}'s final), counted from when they start`
-    : `Closed about ${plural(p.weeksClosed, 'week')}: the builders' 2 units at ${p.out % 1 ? p.out.toFixed(2).replace(/0$/, '') : p.out} a week, then ${elec}'s final`;
+    ? `With one skill-3 builder it's closed about ${plural(p.weeksClosed, 'week')} (2 units at 1 a week, then the county's final), counted from when they start`
+    : `Closed about ${plural(p.weeksClosed, 'week')}: the builders' 2 units at ${p.out % 1 ? p.out.toFixed(2).replace(/0$/, '') : p.out} a week, then the county's final`;
 
 /** the verdict line: the payback, or that it doesn't pay back on rent alone */
 export const paybackWords = (p: RenoPlan) =>
   p.payback
-    ? `Pays back in about ${plural(p.payback, 'week')}${p.planned ? ' from when a builder starts' : ''}: the rent it gains covers the package, the materials and the rent lost`
+    ? `Pays back in about ${plural(p.payback, 'week')}${p.planned ? ', if a builder starts this week' : ''}: the rent it gains covers the package, the materials and the rent lost`
     : `Doesn't pay back on rent alone: about ${usd(p.gain)} of rent gained against ${usd(p.total + p.rentLost)}`;
 
 /** the no-builder lead: hire one first (the desk's Hiring board) */
@@ -55,17 +55,19 @@ export function RenoNumbers({ s, h, onHire }: { s: IslandState; h: Asset; onHire
     <div class="card st-confirm num st-reno-num">
       {p.planned && <NoBuilder onHire={onHire} />}
       <span>
-        Package <b>{usd(p.pkg)}</b> now (the mainland: roofing membrane, flooring, plumbing fixtures, paint, the permit)
+        Package <b>{usd(p.pkg)}</b> now (the mainland: roofing membrane, flooring, cabinetry, paint, the permit)
       </span>
       <span>
         Materials {usd(p.materials)} at list, bought as the builders go: 2 units ({size > 1 ? `${size} × ` : ''}roof flashing and trim, then {size > 1 ? `${size} × ` : ''}deck and shutters)
       </span>
-      <span>{closedWords(p, elec)}</span>
+      <span>{closedWords(p)}</span>
       {p.hazard && <span class="st-bad">A hazard is open on it: the final waits until {elec} makes it safe or fixes it.</span>}
       {p.warrantyUntil !== null && <span>Under its builder's warranty to week {p.warrantyUntil}: the renovation keeps it (its own {RENO.warranty} weeks end sooner).</span>}
       <span>
+        {/* review round 2: the case values a normal week at the margin (net of the guests the other houses take), and with
+            no builder yet it counts from this week, as if one started now */}
         {p.rentLost > 0
-          ? `Rent lost about ${usd(p.rentLost)} (${usd(p.rentNow)} a week while it's closed)`
+          ? `Rent lost about ${usd(p.rentLost)} (${usd(p.rentNow)} a week while it's closed: a normal week, net of the guests the other houses take${p.planned ? '; counted as if a builder started this week' : ''})`
           : p.closedNow
             ? `No rent lost: it earns nothing now (closed: ${p.closedNow})`
             : 'No rent lost: at these bookings the other houses take its guests'}
@@ -74,7 +76,7 @@ export function RenoNumbers({ s, h, onHire }: { s: IslandState; h: Asset; onHire
         Left as it is: {p.closesIn > 0 ? `under 40 and closed in about ${plural(p.closesIn, 'week')} (it loses about ${Math.round(p.wear)} a booked week)` : 'it earns nothing now'}.
       </span>
       <span>
-        Renovated: open about {plural(p.life, 'week')} after its final before it's under 40 again{p.rent > 0 ? `, about ${plural(p.gained, 'more open week')} than left as it is, about ${usd(p.gain)} of rent at ${usd(p.rent)} a week` : ': at these bookings the other houses take its guests either way'}.
+        Renovated: open about {plural(p.life, 'week')} after its final before it's under 40 again{p.rent > 0 ? `, about ${plural(p.gained, 'more open week')} than left as it is, about ${usd(p.gain)} of rent at ${usd(p.rent)} a normal week` : ': at these bookings the other houses take its guests either way'}.
       </span>
       <span>
         Back to {RENO.health}: {p.restore} points, about {plural(p.jobs, 'routine job')} of {elec}'s on it saved.

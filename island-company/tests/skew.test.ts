@@ -68,7 +68,7 @@ import { alertAog, aStreakAfter, creditsStreak, downtimeOf, melOn, projectWeek, 
 import { ENGINE_VERSION, apply, healOpenChain } from '../src/sim/engine';
 import { cardOf, flowStage } from '../src/sim/flow';
 import { migrate } from '../src/sim/migrate';
-import { expectLiveMigration } from './livedocs';
+import { expectLiveMigration, liveMigrated, oldSetWork } from './livedocs';
 import { rng, hashSeed } from '../src/sim/rng';
 import { stockFlags } from '../src/sim/stock';
 import { ROLES, type IslandState, type Order } from '../src/sim/types';
@@ -535,20 +535,23 @@ describe('island docs written by the live stage 1 build (e810cc5, engine 4)', ()
       // what the migration does: at tier 4-5 G0's one-time upkeep migration, else nothing (tests/livedocs.ts)
       expectLiveMigration(doc, shown, name);
       expect(JSON.stringify(migrate(structuredClone(shown))), name).toBe(JSON.stringify(shown));
-      // the first move on this build: engine 5, the money, the work and the streak as they were
+      // the first move on this build: engine 5, the money, the work and the streak as they were (review round 2: at the
+      // Resort, less the old standby set's retired work, as liveMigrated has it: tests/stage2r2.test.ts checks it)
       const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
       expect(r.error).toBeUndefined();
       const s = r.s;
+      const want = liveMigrated(doc);
+      if (!oldSetWork(doc)) expect(want.cash).toBe(doc.cash);
       expect(s.engine).toBe(ENGINE_VERSION);
-      expect(s.cash).toBe(doc.cash);
+      expect(s.cash).toBe(want.cash);
       expect(s.openCash).toBe(doc.openCash);
       expect(s.credit ?? 0).toBe(doc.credit ?? 0);
       expect(s.loan).toEqual(doc.loan);
       expect(s.receivership).toBe(doc.receivership);
-      expect(s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
-      expect(s.alerts).toEqual(doc.alerts);
-      expect(s.reqs).toEqual(doc.reqs);
-      expect(s.pos).toEqual(doc.pos);
+      expect(s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(want.orders.map((o) => `${o.id}:${o.status}`));
+      expect(s.alerts).toEqual(want.alerts);
+      expect(s.reqs).toEqual(want.reqs);
+      expect(s.pos).toEqual(want.pos);
       expect(s.chain).toEqual(doc.chain);
       expect(s.turns).toEqual(doc.turns);
       expect(streakOf(s)).toEqual(streakOf(doc));
@@ -564,7 +567,8 @@ describe('island docs written by the live stage 1 build (e810cc5, engine 4)', ()
       expect(h.week).toBe(doc.week);
       expect(h.cashStart).toBe(doc.openCash);
       expect(Number.isFinite(h.cashEnd)).toBe(true);
-      for (const o of doc.orders.filter(live)) expect(a.orders.some((x) => x.id === o.id), o.id).toBe(true);
+      // (every live order but the old standby set's, retired at the Resort: review round 2)
+      for (const o of want.orders.filter(live)) expect(a.orders.some((x) => x.id === o.id), o.id).toBe(true);
       all(a);
       const g0From = a.stats.g0From;
       expect(g0From).toBe(doc.tier >= 4 ? doc.week : undefined);

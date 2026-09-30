@@ -167,3 +167,14 @@ export class Classifier {
     return [{ t: 'end', moved: this.moved, swallow: false }];
   }
 }
+
+/**
+ * the fingers down on the map (review round 2): every touch that started on a node inside it. TouchEvent.targetTouches
+ * only counts the touches that started on the event's own target node, and two fingers on the island usually land on
+ * different SVG paths, so it read 1 through a whole pinch and the page could scroll under it
+ */
+export function fingersOn(touches: ArrayLike<{ target: EventTarget | null }>, on: { contains(n: Node | null): boolean }): number {
+  let n = 0;
+  for (let i = 0; i < touches.length; i++) if (on.contains(touches[i].target as Node | null)) n++;
+  return n;
+}

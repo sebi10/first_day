@@ -156,8 +156,8 @@ export const WARRANTY = {
 /**
  * G0, the upkeep structure: a renovation, the analyst's capex from tier 4. The builders (carpentry, roofing, finishes: no
  * licensed work) renovate a worn house in two builder-weeks, drawing building materials; the mainland package (roofing
- * membrane, flooring, plumbing fixtures, paint, the permit) is paid when it's ordered. The house closes from the week the
- * builders start until it passes the county's final on the permit (the electrician's trim-out: the panel directory, the
+ * membrane, flooring, cabinetry, paint, the permit) is paid when it's ordered. The house closes from the week the
+ * builders start until it passes the county's final on the permit (the electrician's final prep: the panel directory, the
  * labels, the clearances, the breakers against their wire; the inspector passes it): then it opens at `health`,
  * inspected, under a shorter warranty (or the builder's warranty it still has, if that runs longer).
  */
@@ -395,7 +395,7 @@ export const CATALOG: CatalogEntry[] = [
   { kind: 'panelUp', log: 'panel upgrade', role: 'elec', title: 'Panel upgrade', puzzle: 'panel', tier: 3, cost: 2100, parts: 1, gain: 30, targets: ['panel'], weight: below(66, 8) },
   { kind: 'genService', log: 'generator engine service', role: 'mech', title: 'Generator engine service', puzzle: 'torque', tier: 2, cost: 380, parts: 0, gain: 15, targets: ['gen'], weight: below(90, 3) },
   { kind: 'transfer', log: 'transfer panel install', role: 'elec', title: 'Generator transfer panel', puzzle: 'panel', tier: 3, cost: 1150, parts: 1, gain: 22, targets: ['gen'], weight: below(78, 4) },
-  { kind: 'xfmr', log: 'dead-circuit diagnosis', role: 'elec', title: 'Diagnose a dead circuit at the panel', puzzle: 'meter', tier: 2, cost: 200, parts: 0, gain: 14, targets: ['panel'], weight: below(88, 3) },
+  { kind: 'xfmr', log: 'panel breaker or lug repair', role: 'elec', title: 'Repair a breaker or a lug at the panel', puzzle: 'meter', tier: 2, cost: 200, parts: 0, gain: 14, targets: ['panel'], weight: below(88, 3) },
   { kind: 'dockrun', log: 'fuel-dock conduit run', role: 'elec', title: 'Conduit run to the fuel dock', puzzle: 'conduit', tier: 3, cost: 520, parts: 1, gain: 18, targets: ['panel'], weight: below(80, 2) },
   { kind: 'genTest', log: 'generator circuit test', role: 'elec', title: 'Test generator-backed circuits', puzzle: 'meter', tier: 2, cost: 160, parts: 0, gain: 12, targets: ['gen'], weight: below(94, 3) },
 ];

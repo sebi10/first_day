@@ -192,7 +192,7 @@ export function renoCost(h: Pick<Asset, 'model'>): { pkg: number; materials: num
 /**
  * A renovation's final signed off (the electrician's code-prep job on a house whose builders are done, or autopilot's
  * by the book): the house opens again at RENO.health (the final's own points land on top), under the renovation's
- * warranty. Review round 1: the condition lands here, with the final's trim-out, not when the builders finish (a storm
+ * warranty. Review round 1: the condition lands here, with the final's prep, not when the builders finish (a storm
  * while it waited took it under the 85 every sheet promised, and the points were the electrician's work); and a longer
  * builder's warranty the house still had is kept, not cut short
  */
@@ -633,11 +633,11 @@ export function buildWeek(s: IslandState, _r: Rng, W: number, line: Liner): void
         s.assets.push({ id: plot.id, kind: 'house', model: 'cottage', name: plot.name, health: 80, touchedWeek: W, inspectionUntil: bookInspection(s, plot.id, W + inspectionWeeks(s.tier)), ...(s.tier >= WARRANTY.fromTier ? { warrantyUntil: W + WARRANTY.weeks } : {}) });
       line('all', 'good', `${plot?.name ?? 'The new cottage'} is finished: it takes guests from next week.`);
     } else if (b.reno) {
-      // the builders are done: the house closed until it passes the county's final (the electrician's trim-out and the
-      // inspector's visit), which brings it to RENO.health (renoSignoff)
+      // the builders are done: the house closed until it passes the county's final (the electrician's final prep and
+      // the inspector's visit), which brings it to RENO.health (renoSignoff)
       const h = s.assets.find((a) => a.id === b.reno);
       if (h) h.touchedWeek = W;
-      line('all', 'good', `The builders finished ${site}: it opens when it passes the county's final (the electrician's).`);
+      line('all', 'good', `The builders finished ${site}: it opens when it passes the county's final (the electrician's final prep and the inspector).`);
     } else line('all', 'good', `The site work on ${site} is done: ${b.tier ? `they open with tier ${b.tier} in good shape` : 'finished'}.`);
     tidyBuilds(s, W, line);
   }
@@ -879,7 +879,7 @@ function renoAction(s: IslandState, prev: IslandState, id: string, now: number):
     s,
     'fin',
     'good',
-    `${h.name}'s renovation ordered (${usd(pkg)} package): ${!s.staff?.some((n) => n.role === 'builder') ? 'it waits for a builder (none on the payroll)' : ahead?.id === b.id ? 'the builders start when its materials are in' : `the builders start after ${buildSite(ahead!, s)}`}; it closes while they work, then it opens once it passes the county's final (the electrician's trim-out).`,
+    `${h.name}'s renovation ordered (${usd(pkg)} package): ${!s.staff?.some((n) => n.role === 'builder') ? 'it waits for a builder (none on the payroll)' : ahead?.id === b.id ? 'the builders start when its materials are in' : `the builders start after ${buildSite(ahead!, s)}`}; it closes while they work, then it opens once it passes the county's final (the electrician's final prep and the inspector).`,
     now,
   );
   return { s };
@@ -1025,6 +1025,13 @@ export function staffEffect(s: IslandState, who: Candidate | Npc, change: 'hire'
       }
     }
   }
+  // the last builder let go with a renovation under way (review round 2): its house stays closed, with no end, until a
+  // builder is hired
+  if (!hire && me.role === 'builder' && !base.some((n) => n.role === 'builder'))
+    for (const rb of (s.builds ?? []).filter((x) => x.reno && x.signed === undefined && x.finished === undefined && (x.drawn ?? 0) > 0)) {
+      const h = s.assets.find((a) => a.id === rb.reno);
+      if (h) need.push(`${h.name} stays closed until a builder is hired: its renovation is under way`);
+    }
   const sev = hire ? 0 : severanceOf(s, who as Npc);
   // the helper's money is the houses they keep open, which the week's projection can't see: a break-even against a
   // cottage's expected rent (the release gate: the same 8-week, occupancy-weighted figure as the extra cottage's plan,
@@ -1204,7 +1211,7 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
     .reduce((t, n) => t + (STAFF.output[n.skill - 1] ?? 0), 0);
   const planned = !(out > 0);
   const rate = planned ? (STAFF.output[2] ?? 1) : out;
-  // (the builders' units, then the week the electrician's final is due)
+  // (the builders' units, then the week the county's final is due)
   const weeksClosed = Math.ceil(RENO.units.length / rate - 1e-9) + 1;
   const wear = Math.max(0.5, decayOf(s, h) + houseWearOf(s));
   const closesIn = open ? weeksOpen(s, h, h.health, h.warrantyUntil, s.week) : 0;

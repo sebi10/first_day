@@ -632,7 +632,9 @@ describe('bots', () => {
     };
     const d = mean(false);
     expect(Math.abs(d - mean(true))).toBeLessThanOrEqual(1);
-  });
+    // (40 whole-season sims: the golden digests' 60 s, not the file's 30 s. Review round 2: it took 59.5 s once under a
+    // load average of 32 on a shared machine, 10 s unloaded; the CI runner is about 1.5x slower than a dev box)
+  }, 60000);
 });
 
 // keep the imports honest (asset type used by helpers)

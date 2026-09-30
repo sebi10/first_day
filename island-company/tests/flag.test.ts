@@ -96,10 +96,11 @@ describe('who can flag what (6.5)', () => {
       s.alerts.push({ ...s.alerts[0], id: 'a2', role: 'mech', kind: 'genService' });
       expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'mech' });
     }
-    // the mechanic already has this week's flag: the electrician
+    // a tech-to-tech flag on a plane leaves the mechanic's analyst side free: the generator still goes to him (review
+    // round 2: it read the any-flag cap and sent it to the electrician)
     let s = island(5, 60);
     s = ok(s, { t: 'flag', role: 'elec', assetId: 'p1', week: s.week });
-    expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'elec' });
+    expect(flaggable(s, 'fin', 'gen')).toEqual({ ok: true, to: 'mech' });
   });
 
   it("each trade receives one flag a week from the techs and one from the analyst: a tech-to-tech flag never locks the analyst out (review round 1)", () => {
@@ -136,9 +137,9 @@ describe('what a flag raises (6.5)', () => {
     expect(a.by).toBe('fin');
     expect(symptomText(s, a)).toMatch(new RegExp(`^Cy passed on a squawk from ${pilot} \\(the pilot\\) on Twin N-12: `));
     expect(openWork(s, 'mech').open).toBe(before + 1);
-    // both seats read what went on the list
+    // what went on the list, said once in the island's feed (review round 2: written for both seats it showed twice)
     const said = `Cy passed on a squawk from ${pilot} (the pilot) on Twin N-12 to Ana: ${alertShort(s, a)}.`;
-    expect(s.feed.filter((f) => f.text === said).map((f) => f.role).sort()).toEqual(['fin', 'mech']);
+    expect(s.feed.filter((f) => f.text === said).map((f) => f.role)).toEqual(['fin']);
   });
 
   it('a flagged airworthiness squawk gives the mechanic a week: it never grounds the plane the week it is flagged', () => {

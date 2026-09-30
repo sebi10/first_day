@@ -310,6 +310,10 @@ function act(a: Act, x: { ctl: Ctl; role: Role; onClose(): void; setMode(m: Mode
     case 'writeUp':
       x.setMode({ t: 'writeUp', assetId: a.assetId });
       return;
+    case 'object':
+      // (a new target starts the sheet fresh: InspectBody's key)
+      openTarget({ object: a.ref });
+      return;
     default:
       return;
   }

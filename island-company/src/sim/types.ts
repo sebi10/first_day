@@ -28,6 +28,12 @@ export interface Asset {
    * its builder's warranty year runs, when it decays WARRANTY.decay a week untouched (econ decayOf). Absent: none
    */
   warrantyUntil?: number;
+  /**
+   * houses (stage 2 review round 2): its hot-tub circuit, once the electrician's hot-tub job on it is signed off (its
+   * breaker and wire as run). The panel schedule shows the spa only then; a later hot-tub job is a re-run of that circuit.
+   * Absent: no spa circuit on record (live islands' houses before v5 too)
+   */
+  spa?: { amps: number; awg: number; week: number };
 }
 
 export type OrderStatus = 'pending' | 'countered' | 'approved' | 'waiting_part' | 'ready' | 'done' | 'cancelled';

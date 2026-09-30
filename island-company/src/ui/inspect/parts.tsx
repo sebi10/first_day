@@ -21,18 +21,30 @@ export function Help({ lines, title = 'How to read it' }: { lines: string[]; tit
 
 /**
  * The check's call, in the sheet's sticky footer: "All serviceable" / "All normal" (one tap: nothing raised), or the
- * picked item's write-up (enabled once an item is picked). Blind: neither says whether the call is right.
+ * picked item's write-up (enabled once an item is picked). Blind: neither says whether the call is right. Review round 2:
+ * the pick is said on its own line above the buttons ("Your call: Living room (42 ft)"), where it wraps: inside the
+ * button it was cut to "Write up: Living ro…" on a phone
  */
 export function CheckFoot({ none, call, pick, pickLabel, busy, onCall }: { none: string; call: string; pick: string | null; pickLabel?: string; busy?: boolean; onCall(item: string | null): void }) {
   return (
     <div class="sheet-actions qc-foot">
-      <Btn kind="ghost" disabled={busy} onClick={() => onCall(null)}>
-        {none}
-      </Btn>
-      {/* (review round 1: named for what it writes up, apart from the sheet's squawk card) */}
-      <Btn disabled={!pick || busy} onClick={() => pick && onCall(pick)} label={pick && pickLabel ? `${call}: ${pickLabel}` : undefined}>
-        <span class="qc-call">{pick && pickLabel ? `${call}: ${pickLabel}` : call}</span>
-      </Btn>
+      <span class={`qc-pick ${pick ? 'on' : ''}`} aria-live="polite">
+        {pick && pickLabel ? (
+          <>
+            Your call: <b>{pickLabel}</b>
+          </>
+        ) : (
+          `Tap the one you'd write up, or call it ${none.toLowerCase()}.`
+        )}
+      </span>
+      <div class="qc-btns">
+        <Btn kind="ghost" disabled={busy} onClick={() => onCall(null)}>
+          {none}
+        </Btn>
+        <Btn disabled={!pick || busy} onClick={() => pick && onCall(pick)} label={pick && pickLabel ? `${call}: ${pickLabel}` : undefined}>
+          {call}
+        </Btn>
+      </div>
     </div>
   );
 }

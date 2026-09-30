@@ -10,7 +10,7 @@
 // The scene is drawn once per committed camera (island.tsx), over a raster
 // region around the view (frameOf), and gestures move the drawing with a CSS
 // transform only (relTransform) until they end.
-import { H, W, type Box, type Pt } from '../island/geo';
+import { H, SEA_FAR, W, type Box, type Pt } from '../island/geo';
 
 export type Cam = { x: number; y: number; k: number };
 export type Size = { w: number; h: number };
@@ -181,8 +181,8 @@ export type Frame = {
  * real ground right up to its edges. The whole scene when it fits in the raster budget (the inline map on a phone,
  * at every zoom); else the view grown on every side as far as the budget allows (Explore, close up).
  */
-/** how far the scene's own sea is drawn past its edges (terrain.tsx: the sea rect overhangs by 60) */
-export const SEA_OVERHANG = 60;
+/** how far the scene's own sea is drawn past its edges (geo.tsx SEA_FAR: the sea and its light overhang that far) */
+export const SEA_OVERHANG = SEA_FAR;
 
 export function frameOf(c: Cam, vp: Size, sc: Size = HOME_SCENE, dpr = 1, budget = RASTER_BUDGET): Frame {
   const S = pxPerUnit(c, vp, sc);

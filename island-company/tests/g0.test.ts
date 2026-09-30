@@ -30,7 +30,7 @@ import { facts, factsText } from '../src/ui/inspect/facts';
 import { assetRef } from '../src/ui/objects';
 import { renoStatus, warrantyLine } from '../src/ui/staff/model';
 import { whatsNewUpkeepPanels } from '../src/ui/staff/WhatsNewUpkeep';
-import { expectLiveMigration } from './livedocs';
+import { expectLiveMigration, liveMigrated } from './livedocs';
 
 vi.setConfig({ testTimeout: 60000 });
 
@@ -445,8 +445,10 @@ describe('live islands: the one-time G0 migration (docs an older engine wrote, a
       const r = apply(doc, { t: 'rename', role: 'mech', name: doc.players.mech!.name }, doc.updatedAt + 1000);
       expect(r.error, name).toBeUndefined();
       expect(r.s.engine).toBe(5);
-      expect(r.s.cash, name).toBe(doc.cash);
-      expect(r.s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
+      // (review round 2: at the Resort, less the old standby set's retired work: tests/stage2r2.test.ts)
+      const want = liveMigrated(doc);
+      expect(r.s.cash, name).toBe(want.cash);
+      expect(r.s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(want.orders.map((o) => `${o.id}:${o.status}`));
       expect(r.s.stats.aStreak).toBe(doc.stats.aStreak);
       expect(r.s.stats.g0From).toBe(doc.tier >= 4 ? doc.week : undefined);
       // a doc engine 5 wrote, its grid worn again and the stamp gone: nothing runs
@@ -505,9 +507,9 @@ describe('what every seat reads', () => {
     b.drawn = 1;
     expect(renoStatus(s, house(s, 'h1'), 'fin')!.text).toMatch(/^Closed for its renovation: the builders are on it/);
     Object.assign(b, { drawn: 2, done: 2, finished: s.week });
-    // (review round 1: the county's inspector passes the final; the electrician does the trim-out and meets him)
-    expect(renoStatus(s, house(s, 'h1'), 'elec')!.text).toMatch(/until it passes the county's final: you do the trim-out .* and meet the inspector/);
-    expect(renoStatus(s, house(s, 'h1'), 'mech')!.text).toMatch(/until it passes the county's final: E does the trim-out .* and meets the inspector/);
+    // (review round 1: the county's inspector passes the final; review round 2: the electrician's part is the final prep)
+    expect(renoStatus(s, house(s, 'h1'), 'elec')!.text).toMatch(/until it passes the county's final: you do the final prep .* and meet the inspector/);
+    expect(renoStatus(s, house(s, 'h1'), 'mech')!.text).toMatch(/until it passes the county's final: E does the final prep .* and meets the inspector/);
     // the grid's service upgrade, on the electrician's and the analyst's grid sheets
     const g = s.assets.find((a) => a.kind === 'grid')! as Asset;
     g.warrantyUntil = s.week + 4;

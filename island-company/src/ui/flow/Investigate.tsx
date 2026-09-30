@@ -6,6 +6,7 @@
 import { useState } from 'preact/hooks';
 import { alertFlags, breakerOf, findingOf, siteOf, symptomOf } from '../../sim/alerts';
 import { islandAircraft } from '../../sim/chain';
+import { safeAfterTurn } from '../../sim/econ';
 import type { Action, Alert, IslandState } from '../../sim/types';
 import { Btn, Icon } from '../kit';
 import { DataPlate } from '../manual';
@@ -58,7 +59,8 @@ export function Investigate({ s, a, run, demo, ended }: { s: IslandState; a: Ale
       )}
       {open && f.hazard && !a.safe && (
         <div class="col" style={{ gap: 8 }}>
-          <Btn block kind="danger" disabled={!can} onClick={() => setAsk(ask === 'safe' ? null : 'safe')}>
+          {/* (review round 2: a hazard passed on this week can be made safe after the turn; its SHUT chip says so) */}
+          <Btn block kind="danger" disabled={!(can || (!demo && safeAfterTurn(s, a)))} onClick={() => setAsk(ask === 'safe' ? null : 'safe')}>
             <Icon name="tag" size={18} /> Make it safe
           </Btn>
           {ask === 'safe' && (

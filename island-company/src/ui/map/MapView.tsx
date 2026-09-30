@@ -21,7 +21,7 @@ import { assetRef, fixtureRef, HOME, OBJECT_LABEL, type ObjectRef } from '../obj
 import { settings } from '../settings';
 import { allCam, camForBox, coverCam, frameOf, HOME_SCENE, limitsFor, nearCam, panCam, pxPerUnit, toScene, touchActionFor, viewRect, zoomAt, type Cam, type MapMode, type Size } from './camera';
 import { MapController } from './controller';
-import { TAP, type PointerKind } from './gestures';
+import { fingersOn, TAP, type PointerKind } from './gestures';
 import { bubbleSpot, hitTest, hotspots, inView, type Hotspot } from './hotspots';
 import { LAYOUTS } from './layouts';
 import { armClickSwallow } from './swallow';
@@ -127,6 +127,7 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
       const b = siteBox(st);
       if (b) return camForBox(b, v, HOME_SCENE, l);
     }
+    // (the whole island: on a portrait phone in Explore the sea is drawn out to the screen's edges, review round 2)
     return allCam(v, HOME_SCENE, l);
   };
 
@@ -281,12 +282,12 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
     // inline, two fingers belong to the map (the page mustn't scroll or zoom under them); one finger scrolls
     // (the fingers on the map: a thumb resting elsewhere on the screen doesn't make one finger here a pinch)
     const onTouch = (e: TouchEvent) => {
-      if (e.targetTouches.length >= 2) multiSeen.current = true;
+      if (fingersOn(e.touches, el) >= 2) multiSeen.current = true;
       // (the finger left from a pinch keeps panning the map until it lifts)
       if (e.cancelable && multiSeen.current) e.preventDefault();
     };
     const onEnd = (e: TouchEvent) => {
-      if (e.targetTouches.length === 0) multiSeen.current = false;
+      if (fingersOn(e.touches, el) === 0) multiSeen.current = false;
     };
     const onGesture = (e: Event) => e.preventDefault(); // iOS Safari's page pinch-zoom
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -512,13 +513,15 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
   const weather = s.weather === 'clear' ? '☀' : s.weather === 'wind' ? '〰 wind' : '⛈ storm';
   const zoomBtns = (
     <>
-      <button class="map-btn" aria-label="Zoom in" onClick={() => vp && ctl.go(zoomAt(ctl.cam, [vp.w / 2, vp.h / 2], 1.5, vp, HOME_SCENE, lim()))}>
+      {/* (map-zoom: hidden inline on a narrow touch phone, where two fingers zoom and the All chip is the whole island:
+          review round 2, four buttons covered 60% of a 360 px map's top edge and a bubble under them) */}
+      <button class="map-btn map-zoom" aria-label="Zoom in" onClick={() => vp && ctl.go(zoomAt(ctl.cam, [vp.w / 2, vp.h / 2], 1.5, vp, HOME_SCENE, lim()))}>
         +
       </button>
-      <button class="map-btn" aria-label="Zoom out" onClick={() => vp && ctl.go(zoomAt(ctl.cam, [vp.w / 2, vp.h / 2], 1 / 1.5, vp, HOME_SCENE, lim()))}>
+      <button class="map-btn map-zoom" aria-label="Zoom out" onClick={() => vp && ctl.go(zoomAt(ctl.cam, [vp.w / 2, vp.h / 2], 1 / 1.5, vp, HOME_SCENE, lim()))}>
         −
       </button>
-      <button class="map-btn" aria-label="The whole island" onClick={() => goPreset('all')}>
+      <button class="map-btn map-zoom" aria-label="The whole island" onClick={() => goPreset('all')}>
         ⌖
       </button>
     </>

@@ -127,6 +127,7 @@ import {
   renovating,
   renoAwaitingFinal,
   closingHazard,
+  safeAfterTurn,
   isBlind,
   isRework,
   SIGNOFF,
@@ -875,10 +876,10 @@ function flagMove(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'fl
   if (!pick) return fail('Nothing there anyone could report.');
   s.flagged = { ...(s.flagged ?? {}), [a.role]: s.week };
   const al = raiseFlag(s, a.role, asset, f.to, pick, now);
-  // both seats read what went on the list in the flagger's name, and whose words it passes on (review round 1)
-  const said = `${nameOf(s, a.role)} passed on ${flagSource(s, al)} to ${nameOf(s, f.to)}: ${alertShort(s, al)}.`;
-  feed(s, f.to, 'info', said, now);
-  feed(s, a.role, 'info', said, now);
+  // what went on the list in the flagger's name, and whose words it passes on (review round 1). Once: the feed is the
+  // island's, not a seat's (Home's "Since you left" and the Board's log list every line), and the receiver has the
+  // alert on their list already (review round 2: written for both seats it showed twice, and pushed a real line out)
+  feed(s, a.role, 'info', `${nameOf(s, a.role)} passed on ${flagSource(s, al)} to ${nameOf(s, f.to)}: ${alertShort(s, al)}.`, now);
   return { s };
 }
 
@@ -1132,6 +1133,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     if (o.kind === 'inspect100' && signed) asset.sinceInspection = 0;
     if (o.kind === 'codeprep' && signed) asset.inspectionUntil = renewedInspection(s, asset, s.week);
   }
+  if (asset && o.kind === 'hottub' && signedNow) spaIn(s, asset, o);
 
   if (o.kind === 'report') {
     closeReport(s, o, a.role, player.name, a.score, now);
@@ -1211,7 +1213,9 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
     return { s };
   }
   if (s.week < 1) return fail('The week has not started yet.');
-  if ('role' in a && a.role && TECH_MOVES.has(a.t) && s.turns[a.role]?.ended) return fail('Your turn is over for this week.');
+  // (review round 2: a hazard passed on this week can be made safe after the turn: it closes the house at once)
+  const lateSafe = a.t === 'makeSafe' && !!alertById(s, a.alert) && safeAfterTurn(s, alertById(s, a.alert)!);
+  if ('role' in a && a.role && TECH_MOVES.has(a.t) && s.turns[a.role]?.ended && !lateSafe) return fail('Your turn is over for this week.');
   const W = s.week;
   switch (a.t) {
     case 'plan': {
@@ -1712,6 +1716,14 @@ function cancelReqsOf(s: IslandState, order: string) {
 /** a job's PO lines not received yet land as free stock */
 function untiePos(s: IslandState, order: string) {
   for (const p of s.pos ?? []) for (const l of p.lines) if (l.order === order && l.got === undefined) delete l.order;
+}
+
+/** a hot-tub job signed off: the house's spa circuit is on record, its breaker and wire as the job ran them (review round 2) */
+function spaIn(s: IslandState, asset: Asset, o: Order) {
+  if (asset.kind !== 'house') return;
+  const al = o.flow ? alertById(s, o.flow.alert) : undefined;
+  const site = al ? siteOf(s, al) : null;
+  asset.spa = { amps: site?.amps ?? 60, awg: site?.awg ?? 6, week: s.week };
 }
 
 /** the allocation made a job ready: say so */
@@ -3621,6 +3633,7 @@ function autoRun(s: IslandState, role: Role) {
       // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
       if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
       if (o.kind === 'inspect100') asset.sinceInspection = 0;
+      if (o.kind === 'hottub') spaIn(s, asset, o);
     }
     // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
     if (o.flow) {

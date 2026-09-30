@@ -17,15 +17,16 @@
 // `checkTruth` is for the sim only (the engine, the bots). UI code never imports
 // it: tests/check.test.ts guards that.
 import { planeModel } from './aircraft';
-import { drawWeight, fits, flagSource, liveAlerts, nameMid, pairsFor, raiseAlert, slotKind, soleGuest, SYMPTOMS, type Symptom } from './alerts';
+import { drawWeight, fits, flagSource, liveAlerts, nameMid, pairsFor, raiseAlert, siteOf, slotKind, soleGuest, SYMPTOMS, type Symptom } from './alerts';
 import {
   CHECK_ROWS,
   checkRowKey,
   genPanel,
   GEN_TELL_ZONE,
+  GEN_UPGRADE,
   GFCI_OK,
   GFCI_TELL,
-  HOME_PANEL,
+  homePanel,
   HOUSE_CIRCUITS,
   IR,
   IR_DAY_OFF,
@@ -162,7 +163,29 @@ function walkTells(a: Asset, kind: string): { zone: WalkZone; v: number }[] {
   return out;
 }
 
-const panelOf = (s: IslandState, a: Asset): IrBreaker[] => (a.kind === 'generator' ? genPanel(genUpgraded(s)) : HOME_PANEL).filter((b) => b.from <= Math.max(1, s.tier));
+const panelOf = (s: IslandState, a: Asset): IrBreaker[] => (a.kind === 'generator' ? genPanel(genUpgraded(s)) : homePanel(genUpgraded(s))).filter((b) => b.from <= Math.max(1, s.tier));
+
+/**
+ * The backed-up load this week (A at 240 V): what the transfer switch carries. Review round 2: the generator's weekly test
+ * run, the island panel's transfer-switch feed and the take-off to upsize the switch each had a number of their own
+ * (37 A on the feed against 106 A through the Resort's switch; "137 A on the 60 A switch" against 28 A on the test run).
+ * Now one number: with the old switch's take-off open, the load it quotes (over the 60 A rating: that's the tell);
+ * else a share of the standby set's rating (the old 60 A set, or the Resort's 200 A one), seeded by the week. null: no
+ * standby set yet (tier 3). The IR scans read it; the generator sheet's fuel line burns at it
+ */
+export function backedUp(s: IslandState, W = s.week): { amps: number; rating: number; over: boolean } | null {
+  const gen = s.assets.find((a) => a.kind === 'generator');
+  if (!gen || s.tier < 3) return null;
+  const up = genUpgraded(s);
+  const rating = up ? GEN_UPGRADE.amps : 60;
+  if (!up) {
+    const take = liveAlerts(s).find((x) => x.assetId === gen.id && x.sym === 'E_TAKEOFF_XFER');
+    const load = take ? siteOf(s, take)?.load : undefined;
+    if (load) return { amps: load, rating, over: load > rating };
+  }
+  const pct = rng(hashSeed(s.seed, 'backedup', W)).range(IR.backedUp[0], IR.backedUp[1]);
+  return { amps: Math.round((pct / 100) * rating), rating, over: false };
+}
 function irTargets(s: IslandState, a: Asset, kind: string): IrBreaker[] {
   const on = IR_SCOPE[kind]?.on;
   const panel = panelOf(s, a);
@@ -239,16 +262,20 @@ const IR_HELP = [
   "Read heat against load: a healthy termination's rise over ambient grows with the square of its load, about +5 °C at half load, +11 °C at three quarters and +20 °C at full. A loose lug runs hot for its load (I²R).",
   'NETA: ΔT against similar components under similar load, 4–15 °C probable, over 15 °C a major deficiency.',
   "A branch's reading is its load at the moment of the scan: judge it by its heat for that load. The main is read for its load over the afternoon: over 80% of its rating continuous (three hours or more) means plan the upgrade (NEC 230.42(A): service conductors at 125% of the continuous load).",
+  "Over 100% of its rating is an overload, not a bad termination: it runs hot for its rating and right for its load. The fix is the load or the equipment, never the lug.",
+  'The transfer-switch feed carries the backed-up load, the same current the generator carries on its weekly test run.',
   'The runway edge lights are a night load: off in an afternoon scan.',
 ];
 const GEN_IR_HELP = [
-  'Scanned during the weekly test run, the set carrying the backed-up load: the generator-side lugs, the load-side lugs and the generator main carry the same current, so compare them: healthy, they read within a degree or two.',
+  'Scanned during the weekly test run, the set carrying the backed-up load (the same current the island panel\'s transfer-switch feed carries on the utility): the generator-side lugs, the load-side lugs and the generator main carry the same current, so compare them: healthy, they read within a degree or two.',
+  'Over 100% of the rating is an overload: the load outgrew the switch and the set. Hot for the rating, right for the load: the fix is the load, not a lug.',
   "Read heat against load: a healthy termination's rise over ambient grows with the square of its load, about +5 °C at half load and +20 °C at full.",
   'NETA: ΔT against similar components under similar load, 4–15 °C probable, over 15 °C a major deficiency.',
 ];
 const METER_HELP = [
   'Each receptacle read with a 12 A load plugged in.',
-  'Expected drop: 2 × run × 12 A × ohms per 1,000 ft (12 AWG about 1.6, 14 AWG about 2.5): about 3.8 V on 100 ft of 12 AWG.',
+  'Expected drop: 2 × run × 12 A × ohms per 1,000 ft (NEC Chapter 9 Table 8, solid copper at 75 °C: 12 AWG 1.93, 14 AWG 3.07): about 4.6 V on 100 ft of 12 AWG.',
+  "A receptacle reads its leg at the panel under the load (L1 with the 12 A on) less its own run's drop: never more than the leg that feeds it.",
   'The 3% guideline is 3.6 V at 120 V (NEC 210.19(A) informational note). It is a design guide: a long run that reads what its length predicts is as built, not a fault.',
   'Both service legs should read about the same under load. One sagging while the other rises is a loose neutral, and then every receptacle under its load sags by the same extra volts, whatever its run.',
   'A GFCI must open on its test button (210.8).',
@@ -282,12 +309,10 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
   const panel = panelOf(s, a);
   const items: CheckItem[] = [];
   if (a.kind === 'generator') {
-    // the weekly test run: the set carries the backed-up load through the generator-side and load-side lugs alike
+    // the weekly test run: the set carries the backed-up load through the generator-side and load-side lugs alike (the
+    // same current as the island panel's transfer-switch feed: backedUp, review round 2)
     const r = rng(hashSeed(s.seed, 'ir', a.id, 'test', W));
-    const loadPct = Math.round(tell ? r.range(IR.tellLoad[0], IR.tellLoad[1]) : r.range(30, 70));
-    // the switch's rating as installed (60 A, or 200 A after the Resort's upgrade: G0)
-    const rating = panel.find((b) => b.id === 'xferG')?.amps ?? 60;
-    const amps = Math.round((loadPct / 100) * rating);
+    const amps = backedUp(s, W)?.amps ?? 0;
     // one current through every loaded termination: one shared offset (the room, the camera), then a little each
     const shared = r.range(-IR.genShared, IR.genShared);
     for (const b of panel) {
@@ -304,9 +329,15 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
     }
     return { kind: 'ir', assetId: a.id, items, help: GEN_IR_HELP, ppe: IR_PPE };
   }
-  // one look-alike a scan: a branch at 70-79% load, reading 10-13 °C: warm, and right for its load
-  const branches = panel.filter((b) => b.id !== 'main' && b.id !== tell?.item && !IR_DAY_OFF.includes(b.id));
+  // one look-alike a scan: a branch at 70-79% load, reading 10-13 °C: warm, and right for its load (never the
+  // transfer-switch feed: its load is the week's backed-up load)
+  const branches = panel.filter((b) => b.id !== 'main' && b.id !== 'xfer' && b.id !== tell?.item && !IR_DAY_OFF.includes(b.id));
   const distractor = branches.length ? rng(hashSeed(s.seed, 'irx', a.id, W)).pick(branches).id : null;
+  // one offset for the scan (the ambient, the camera), then a little each (review round 2: ±3 each read like breakers
+  // at the same load 4 °C and more apart)
+  const shared = rng(hashSeed(s.seed, 'ir', a.id, 'scan', W)).range(-IR.genShared, IR.genShared);
+  const each = (rb: Rng) => shared + rb.range(-IR.genEach, IR.genEach);
+  const bu = backedUp(s, W);
   for (const b of panel) {
     const rb = rng(hashSeed(s.seed, 'ir', a.id, b.id, W));
     if (b.id === 'main') {
@@ -314,7 +345,7 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
       const cont = Math.round(tell?.item === 'main' ? rb.range(IR.panelUp[0], IR.panelUp[1]) : rb.range(40, 70));
       const peak = Math.min(99, cont + Math.round(tell?.item === 'main' ? rb.range(2, 5) : rb.range(8, 16)));
       const amps = Math.round((cont / 100) * b.amps);
-      const rise = r1(Math.max(0.5, expRise(cont) + rb.range(-IR.normal, IR.normal)));
+      const rise = r1(Math.max(0.5, expRise(cont) + each(rb)));
       items.push({
         id: b.id,
         label: `${b.label} ${b.amps} A · ${b.awg}`,
@@ -325,21 +356,23 @@ function irView(s: IslandState, a: Asset, W: number, tell: Tell | null): CheckVi
     }
     let pct: number;
     let rise: number;
+    // the transfer-switch feed carries the week's backed-up load (review round 2), a hot lug on it or not
+    const xferAmps = b.id === 'xfer' && bu ? bu.amps : null;
     if (IR_DAY_OFF.includes(b.id)) {
       // a night load in an afternoon scan: off, or a trickle (the photocell's own draw)
       pct = Math.round(rb.range(0, 3));
       rise = r1(rb.range(0, 0.6));
     } else if (tell?.item === b.id) {
-      pct = Math.round(rb.range(IR.tellLoad[0], IR.tellLoad[1]));
-      rise = r1(expRise(pct) + rb.range(IR.tell[0], IR.tell[1]));
+      pct = xferAmps !== null ? Math.round((100 * xferAmps) / b.amps) : Math.round(rb.range(IR.tellLoad[0], IR.tellLoad[1]));
+      rise = r1(expRise(pct) + shared + rb.range(IR.tell[0], IR.tell[1]));
     } else if (b.id === distractor) {
       pct = Math.round(rb.range(IR.distractorLoad[0], IR.distractorLoad[1]));
-      rise = r1(clamp(expRise(pct) + rb.range(-1, 1), IR.distractorRise[0], IR.distractorRise[1]));
+      rise = r1(clamp(expRise(pct) + each(rb), IR.distractorRise[0], IR.distractorRise[1]));
     } else {
-      pct = Math.round(rb.range(12, 76));
-      rise = r1(Math.max(0.5, expRise(pct) + rb.range(-IR.normal, IR.normal)));
+      pct = xferAmps !== null ? Math.round((100 * xferAmps) / b.amps) : Math.round(rb.range(12, 76));
+      rise = r1(Math.max(0.5, expRise(pct) + each(rb)));
     }
-    items.push(irItem(b, Math.round((pct / 100) * b.amps), pct, rise));
+    items.push(irItem(b, xferAmps ?? Math.round((pct / 100) * b.amps), pct, rise));
   }
   return { kind: 'ir', assetId: a.id, items, help: IR_HELP, ppe: IR_PPE };
 }
@@ -361,15 +394,16 @@ function meterView(s: IslandState, a: Asset, W: number, tell: Tell | null): Chec
   const loose = tell?.item === SERVICE_ID;
   const l1 = r1(loose ? r.range(METER.flickerLow[0], METER.flickerLow[1]) : source - r.range(0.3, 2.2));
   const l2 = r1(loose ? r.range(METER.flickerHigh[0], METER.flickerHigh[1]) : source - r.range(0, 1.6));
-  // a loose service neutral (review round 1): every receptacle read under its own 12 A load carries that current back
-  // through the loose neutral too, so each sags by the same extra volts the loaded leg does at the panel
-  const neutral = loose ? Math.max(0, source - l1) : 0;
+  // Each receptacle is read under its own 12 A load: its leg at the panel under that load (L1's reading: the same 12 A)
+  // less its run's drop (review round 2: read from the source, a receptacle downstream read above the leg feeding it in
+  // two clean checks in three). A loose service neutral (review round 1) sags the loaded leg, so every receptacle sags
+  // with it
   for (const c of circuitsOf(a)) {
     const rc = rng(hashSeed(s.seed, 'meter', a.id, c.id, W));
     const run = runOf(s, a, c.id, c.run);
     const expected = (2 * run * METER.load * METER.ohms[c.awg]) / 1000;
-    const drop = (tell?.item === c.id && tell.kind === 'trip' ? rc.range(METER.tripDrop[0], METER.tripDrop[1]) : expected + rc.range(-0.2, 0.2)) + (neutral ? neutral + rc.range(-0.4, 0.4) : 0);
-    const volts = r1(source - drop);
+    const drop = tell?.item === c.id && tell.kind === 'trip' ? expected + rc.range(METER.tripExtra[0], METER.tripExtra[1]) : Math.max(0, expected + rc.range(-0.2, 0.2));
+    const volts = r1(l1 - drop);
     const gfci = c.gfci ? ` · ${pickSeeded(s, a, c.id, W, tell?.item === c.id && tell.kind === 'gfci' ? GFCI_TELL : GFCI_OK)}` : '';
     items.push({
       id: c.id,
@@ -422,7 +456,7 @@ export const FLAG = {
   srcs: ['guest', 'squawk', 'utility'] as string[],
   never: ['wb', 'inspect100', 'codeprep', 'gpustart'],
   neverSym: ['E_DEAD_CIRCUIT'] as string[],
-  /** weeks before a flagged airworthiness squawk grounds its plane, or a flagged hazard closes its house */
+  /** weeks before a flagged airworthiness squawk grounds its plane; a flagged hazard's due week (it closes its house at once, review round 2) */
   awLead: 1,
 };
 
@@ -457,7 +491,6 @@ export function openWork(s: IslandState, role: OpsRole): { open: number; target:
   return { open: workable + alerts, target: s.tier >= 3 ? 5 : 4 };
 }
 
-const flaggedThisWeek = (s: IslandState, to: OpsRole) => (s.alerts ?? []).some((x) => x.src === 'flag' && x.role === to && x.week === s.week);
 /** a flag's flagger was the analyst (its seat, or on a doc without it, its name) */
 const byFin = (s: IslandState, x: Alert) => (x.by ? x.by === 'fin' : x.who === nameOf(s, 'fin'));
 /**
@@ -480,7 +513,9 @@ export function flagTo(s: IslandState, a: Asset): OpsRole {
   const m = on('mech');
   const e = on('elec');
   if (m !== e) return m ? 'mech' : 'elec';
-  return flaggedThisWeek(s, 'mech') && !flaggedThisWeek(s, 'elec') ? 'elec' : 'mech';
+  // only the analyst flags the generator: the tie-break reads her side's cap (review round 2: a tech-to-tech flag on a
+  // plane sent her generator report to the electrician though the mechanic had none from her)
+  return flaggedFrom(s, 'mech', true) && !flaggedFrom(s, 'elec', true) ? 'elec' : 'mech';
 }
 
 /** whether the seat can flag the asset now (from week 3, one a week, one received per trade from each side, never its own trade's, never a house closed for its renovation), and to whom */
@@ -536,8 +571,9 @@ export function flagPick(s: IslandState, role: Role, a: Asset, to: OpsRole, W = 
 /**
  * the flag's alert for the owner trade (the engine's `flag` move). An airworthiness squawk a crewmate flags gives the
  * mechanic a week to act: raised mid-week with its row's lead of 0 it grounded the plane at once, maybe after his turn
- * had ended (a crewmate's report is a heads-up, not a grounding). A flagged hazard gives the electrician the same week
- * before it closes its house (econ.ts closingHazard, review round 1). The flagger passes on what its source said: the
+ * had ended (a crewmate's report is a heads-up, not a grounding). A flagged hazard closes its house at once like any
+ * hazard (a reported shock: review round 2); its due week is the week after, and the electrician can make it safe after
+ * the turn (econ.ts safeAfterTurn). The flagger passes on what its source said: the
  * alert keeps the flagger's seat (`by`) and a plane's pilot whose squawk it was (`via`), and reads as relayed
  */
 export function raiseFlag(s: IslandState, role: Role, a: Asset, to: OpsRole, pick: { sym: string; cause: number }, now: number): Alert {

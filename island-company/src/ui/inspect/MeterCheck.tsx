@@ -2,7 +2,7 @@
 // tester with a 12 A load at every receptacle circuit, all in one view, and both
 // service legs at the panel. Each circuit shows its voltage under the load, its run
 // length, its breaker and wire; a GFCI circuit what its test button did. He taps a
-// circuit, then Write up: <the zone>; or All normal. At most 3 taps from the sheet.
+// circuit, then Write up (the pick said above it); or All normal. At most 3 taps from the sheet.
 //
 // Reading it is the skill: the expected drop is 2 × run × 12 A × ohms per 1,000 ft,
 // so a long porch run sags as far as a short run with a loose backstab; one leg

@@ -61,6 +61,13 @@
   right: 12px;
   flex-direction: column;
 }
+/* a narrow touch phone (under 375 px): inline, only Explore in the corner. Two fingers zoom and the All chip under the map
+   is the whole island (review round 2: + − ⌖ ⤢ covered 60% of the map's top edge at 360 px, a bubble under them) */
+@media (max-width: 374px) and (pointer: coarse) {
+  .map-ctl:not(.map-ctl-x) .map-zoom {
+    display: none;
+  }
+}
 .map-btn {
   width: 44px;
   height: 44px;

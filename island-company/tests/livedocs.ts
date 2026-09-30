@@ -7,6 +7,7 @@
 //     still runs; the grid (and at tier 5 the generator) raised to at least 80 under a warranty from this week; one
 //     feed line saying so; the stamp stats.g0From
 import { expect } from 'vitest';
+import { oldSetWork as oldSet, retireOldSwitch } from '../src/sim/migrate';
 import type { IslandState } from '../src/sim/types';
 
 const WEEKS = 26;
@@ -40,25 +41,29 @@ export function liveMigrated(doc: IslandState): IslandState {
         a.health = Math.max(a.health, 80);
         a.warrantyUntil = W + WEEKS;
       }
-    // (review round 1: at the Resort the new 200 A switch retires the open alerts about the old 60 A one)
+    // (review round 1: at the Resort the new 200 A switch retires the open alerts about the old 60 A one; review round 2:
+    // and the old set's unfinished work, its jobs, their stock, requisitions and PO lines. That retirement is the one
+    // step called rather than spelled out: tests/stage2r2.test.ts checks it field by field on these same fixtures)
     const gen = want.assets.find((a) => a.kind === 'generator');
-    if (gen && doc.tier >= 5)
-      for (const al of want.alerts ?? [])
-        if (al.assetId === gen.id && al.status === 'open' && al.kind === 'transfer') {
-          al.status = 'closed';
-          al.closed = { week: W, how: 'dropped' };
-        }
+    if (gen && doc.tier >= 5) retireOldSwitch(want, gen);
   }
   return want;
 }
+
+/** the old standby set's work a tier-5 doc has on it (what the Resort's upgrade retires) */
+export const oldSetWork = (doc: IslandState): boolean => {
+  const gen = doc.assets.find((a) => a.kind === 'generator');
+  if (!gen || doc.tier < 5) return false;
+  const w = oldSet(doc, gen);
+  return w.alerts.length + w.jobs.length > 0;
+};
 
 /** migrate()'s result is liveMigrated(doc) plus, on a G0-migrated doc, one feed line naming the service upgrade */
 export function expectLiveMigration(doc: IslandState, got: IslandState, name = doc.id): void {
   const want = liveMigrated(doc);
   if (want.stats.g0From !== undefined) {
     const added = got.feed.filter((e) => !doc.feed.some((d) => d.id === e.id));
-    const retired = doc.tier >= 5 && (doc.alerts ?? []).some((a) => a.status === 'open' && a.kind === 'transfer' && doc.assets.some((g) => g.kind === 'generator' && g.id === a.assetId));
-    expect(added, name).toHaveLength(retired ? 2 : 1);
+    expect(added, name).toHaveLength(oldSetWork(doc) ? 2 : 1);
     // (review round 1: "under warranty": the utility's transformer isn't the builder's; the Resort's switch is named)
     expect(added.at(-1)!.text, name).toMatch(
       new RegExp(`^This update brings the Harbor’s new pad-mount transformer and feeder${doc.tier >= 5 ? ', and the Resort’s bigger standby set with a 200 A automatic transfer switch' : ''}: in at 80 or better, under warranty to week ${doc.week + WEEKS}\\.$`),

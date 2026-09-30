@@ -29,7 +29,7 @@ export function whatsNewUpkeepPanels(s: IslandState, role: Role): WhatsNewPanel[
     mech: <>A house closed for its renovation takes no guests: fewer passengers on your flights for those weeks.</>,
     elec: (
       <>
-        When the builders finish a renovation, its <b>permit final</b> lands on your list: your trim-out (the panel directory, the labels, the clearances, the breakers against their wire), then the county inspector passes it. The house earns nothing until it passes (a code notice already open on it is the same visit), and a hazard open on it has to be made safe first.
+        When the builders finish a renovation, its <b>permit final</b> lands on your list: your final prep (the panel directory, the labels, the clearances, the breakers against their wire), then the county inspector passes it. The house earns nothing until it passes (a code notice already open on it is the same visit), and a hazard open on it has to be made safe first.
       </>
     ),
     fin: (
@@ -62,7 +62,7 @@ export function whatsNewUpkeepPanels(s: IslandState, role: Role): WhatsNewPanel[
                 <>Your island gets it when its Harbor goes up.</>
               ),
               <>
-                <b>Renovations</b> ({role === 'fin' ? 'yours' : `${fin}'s`}, from tier {RENO.fromTier}): a house at {RENO.maxHealth} or below. The builders do the carpentry, roofing and finishes with it closed; it opens again at {RENO.health} with a {RENO.warranty}-week warranty once it passes the county's final ({role === 'elec' ? 'your' : `${elec}'s`} trim-out). One per house every {RENO.cooldown} weeks.
+                <b>Renovations</b> ({role === 'fin' ? 'yours' : `${fin}'s`}, from tier {RENO.fromTier}): a house at {RENO.maxHealth} or below. The builders do the carpentry, roofing and finishes with it closed; it opens again at {RENO.health} with a {RENO.warranty}-week warranty once it passes the county's final ({role === 'elec' ? 'your' : `${elec}'s`} final prep). One per house every {RENO.cooldown} weeks.
               </>,
               seat[role],
             ]}

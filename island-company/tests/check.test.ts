@@ -290,8 +290,9 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
         if (t?.item === i.id) {
           expect(r.loadPct).toBeGreaterThanOrEqual(40);
           expect(r.loadPct).toBeLessThanOrEqual(70);
-          expect(r.riseC! - exp(r.loadPct!)).toBeGreaterThanOrEqual(9.9);
-          expect(r.riseC! - exp(r.loadPct!)).toBeLessThanOrEqual(20.1);
+          // (review round 2: the scan's one offset, ±IR.genShared, is on the hot one too)
+          expect(r.riseC! - exp(r.loadPct!)).toBeGreaterThanOrEqual(9.9 - IR.genShared);
+          expect(r.riseC! - exp(r.loadPct!)).toBeLessThanOrEqual(20.1 + IR.genShared);
           tells.push(r.riseC!);
         } else {
           // every other branch reads what its load predicts, the look-alike too (warm: 10-13 °C at 70-79%)
@@ -302,8 +303,11 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
     }
     expect(tells.length).toBeGreaterThan(20);
     expect(distractors.length).toBeGreaterThan(100);
-    // the raw temperatures overlap: some tells read cooler than some look-alikes
-    expect(Math.min(...tells)).toBeLessThan(Math.max(...distractors));
+    // raw heat alone doesn't tell: a tell at light load (40%: about 13 °C) reads no hotter than the look-alike's 10-13 °C
+    // can, and a scan with no tell still has a warm reading to be fooled by. Review round 2: one offset for the scan and
+    // ±0.8 °C a breaker (the pooled overlap it had came from ±3 °C of noise a breaker, which read like breakers 4 °C apart)
+    expect(Math.min(...tells)).toBeLessThan(Math.max(...distractors) + 3);
+    expect(Math.max(...distractors)).toBeGreaterThanOrEqual(12.5);
   });
 
   it("the generator house's three loaded terminations carry one current: healthy, they read within about 2 °C; the tell stands 10-20 °C over (review round 1)", () => {
@@ -344,7 +348,7 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
     expect(found).toBeGreaterThan(0);
   });
 
-  it('the meter check: volts under a 12 A load and each run’s length; the tell a 5-9 V drop on a short run, the long porch run normal for its length', () => {
+  it('the meter check: volts under a 12 A load and each run’s length; the tell 3-6 V more drop than its short run predicts, the long porch run normal for its length', () => {
     let tells = 0;
     for (let seed = 1; seed <= 300; seed++) {
       const s = island(seed, 80);
@@ -355,12 +359,13 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
         if (i.id === 'service') continue;
         expect(i.reading!.amps).toBe(12);
         expect(i.label).toMatch(/\(\d+ ft\)$/);
-        // the porch's long run reads a 4.5-6 V drop: normal for 120-150 ft of 12 AWG, the check's look-alike
+        // the porch's long run reads a 5.5-7 V drop (NEC Chapter 9 Table 8 at 75 °C, review round 2): normal for 120-150
+        // ft of 12 AWG, the check's look-alike
         if (i.id === 'porch' && t?.item !== 'porch') {
           expect(i.reading!.runFt).toBeGreaterThanOrEqual(120);
           const drop = (2 * i.reading!.runFt! * 12 * METER.ohms[12]) / 1000;
-          expect(drop).toBeGreaterThanOrEqual(4.5);
-          expect(drop).toBeLessThanOrEqual(6);
+          expect(drop).toBeGreaterThanOrEqual(5.5);
+          expect(drop).toBeLessThanOrEqual(7);
         }
         if (t?.item === i.id && t.kind === 'trip') {
           tells++;

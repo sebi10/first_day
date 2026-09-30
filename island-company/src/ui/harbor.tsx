@@ -50,7 +50,7 @@ export function harborLines(s: IslandState): { title: string; body: string }[] {
       : []),
     {
       title: 'Renovations',
-      body: `${fin} can renovate a house at ${RENO.maxHealth} or below from the Staff desk or its sheet: a package paid when ordered plus materials; the builders close it for their two work units, and it opens at ${RENO.health} with a ${RENO.warranty}-week warranty once it passes the county's final (${elec}'s trim-out). One per house every ${RENO.cooldown} weeks.`,
+      body: `${fin} can renovate a house at ${RENO.maxHealth} or below from the Staff desk or its sheet: a package paid when ordered plus materials; the builders close it for their two work units, and it opens at ${RENO.health} with a ${RENO.warranty}-week warranty once it passes the county's final (${elec}'s final prep). One per house every ${RENO.cooldown} weeks.`,
     },
     {
       title: 'The credits',

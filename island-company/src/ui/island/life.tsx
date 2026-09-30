@@ -1,6 +1,6 @@
 // Life and sky: sea creatures, boats, clouds framing two corners, people,
 // gulls, the night sky and the weather overlays.
-import { curve, FALLS, H, LIP, MOUTH, MOUTH_WATER, POOL, RIVER, W } from './geo';
+import { curve, FALLS, H, LIP, MOUTH, MOUTH_WATER, POOL, RIVER, SEA_BOX, SEA_FAR, W } from './geo';
 import { Sailboat } from './craft';
 import { K } from './paint';
 
@@ -37,31 +37,31 @@ export function LifeDefs() {
         <stop offset="0" stop-color="#fff3b0" stop-opacity=".75" />
         <stop offset="1" stop-color="#fff3b0" stop-opacity="0" />
       </linearGradient>
-      <radialGradient id="i-nightvig" cx=".5" cy=".5" r=".72">
+      <radialGradient id="i-nightvig" cx=".5" cy=".5" r=".72" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset=".55" stop-color="#040a24" stop-opacity="0" />
         <stop offset="1" stop-color="#040a24" stop-opacity=".55" />
       </radialGradient>
-      <radialGradient id="i-stormvig" cx=".5" cy=".55" r=".75">
+      <radialGradient id="i-stormvig" cx=".5" cy=".55" r=".75" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset=".45" stop-color="#1a2230" stop-opacity="0" />
         <stop offset="1" stop-color="#1a2230" stop-opacity=".62" />
       </radialGradient>
-      <linearGradient id="i-dawn" x1="0" y1="0" x2="0" y2="1">
+      <linearGradient id="i-dawn" x1="0" y1="0" x2="0" y2="1" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset="0" stop-color="#ff6f9c" stop-opacity=".46" />
         <stop offset=".32" stop-color="#ffa98a" stop-opacity=".2" />
         <stop offset=".7" stop-color="#ffd0b0" stop-opacity=".06" />
         <stop offset="1" stop-color="#8fa6ff" stop-opacity=".16" />
       </linearGradient>
-      <radialGradient id="i-dawnsun" cx="1" cy="0" r=".6">
+      <radialGradient id="i-dawnsun" cx="1" cy="0" r=".6" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset="0" stop-color="#fff3d0" stop-opacity=".7" />
         <stop offset=".35" stop-color="#ffc0a0" stop-opacity=".22" />
         <stop offset="1" stop-color="#ffc0a0" stop-opacity="0" />
       </radialGradient>
-      <linearGradient id="i-golden" x1="0" y1=".2" x2="1" y2=".8">
+      <linearGradient id="i-golden" x1="0" y1=".2" x2="1" y2=".8" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset="0" stop-color="#ffd49a" />
         <stop offset=".55" stop-color="#ffc58e" />
         <stop offset="1" stop-color="#f2a6ae" />
       </linearGradient>
-      <radialGradient id="i-goldsun" cx="0" cy=".8" r=".6">
+      <radialGradient id="i-goldsun" cx="0" cy=".8" r=".6" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset="0" stop-color="#fff0b8" stop-opacity=".55" />
         <stop offset=".45" stop-color="#ffc45c" stop-opacity=".16" />
         <stop offset="1" stop-color="#ffc45c" stop-opacity="0" />
@@ -90,7 +90,7 @@ export function LifeDefs() {
         <stop offset=".45" stop-color="#c9d2ff" stop-opacity=".35" />
         <stop offset="1" stop-color="#c9d2ff" stop-opacity="0" />
       </radialGradient>
-      <linearGradient id="i-stormtop" x1="0" y1="0" x2="0" y2="1">
+      <linearGradient id="i-stormtop" x1="0" y1="0" x2="0" y2="1" gradientUnits="userSpaceOnUse" gradientTransform={`matrix(${W + 120} 0 0 200 -60 -60)`}>
         <stop offset="0" stop-color="#2e3542" stop-opacity=".7" />
         <stop offset="1" stop-color="#2e3542" stop-opacity="0" />
       </linearGradient>
@@ -197,7 +197,7 @@ export function Clouds({ storm, motion, night }: { storm: boolean; motion: boole
   return (
     <g>
       {/* a storm brings a low deck across the whole top of the view */}
-      {storm && <rect x={-60} y={-60} width={W + 120} height={200} fill="url(#i-stormtop)" />}
+      {storm && <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={SEA_FAR - 60 + 200} fill="url(#i-stormtop)" />}
       <g class={motion ? 'cloud' : undefined}>
         {/* merged per tone: a whole cloud deck costs four nodes a cloud at most */}
         {list.map((c, i) => (
@@ -259,11 +259,11 @@ export function NightSky({ motion }: { motion: boolean }) {
 export function NightGrade({ coast, storm }: { coast: string; storm?: boolean }) {
   return (
     <g pointer-events="none">
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#6879c0" style={{ mixBlendMode: "multiply" }} />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="#6879c0" style={{ mixBlendMode: "multiply" }} />
       {storm && <StormWater />}
       {/* moonlight lifts the land's mid-tones, so it separates from the sea */}
       <path d={coast} fill="#7f95d6" opacity=".1" style={{ mixBlendMode: "screen" }} />
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-nightvig)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-nightvig)" />
     </g>
   );
 }
@@ -273,8 +273,8 @@ export function NightGrade({ coast, storm }: { coast: string; storm?: boolean })
 export function DawnGrade() {
   return (
     <g pointer-events="none">
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-dawn)" />
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-dawnsun)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-dawn)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-dawnsun)" />
       <Mist />
     </g>
   );
@@ -320,7 +320,7 @@ function StormWater() {
 }
 
 /** the whole view minus the island: the sea, the shallows and the surf */
-const seaOnly = (coast: string) => `M-60 -60H${W + 60}V${H + 60}H-60Z${coast}`;
+const seaOnly = (coast: string) => `M${-SEA_FAR} ${-SEA_FAR}H${W + SEA_FAR}V${H + SEA_FAR}H${-SEA_FAR}Z${coast}`;
 /** sun glitter on the water under the low western sun */
 const GLITTER = [
   [8, 486, 9], [26, 498, 6], [4, 512, 12], [30, 520, 8], [14, 534, 10], [44, 544, 7], [6, 556, 13], [34, 566, 9], [18, 580, 11], [52, 588, 8], [70, 574, 6],
@@ -334,12 +334,12 @@ const GLITTER = [
 export function GoldenGrade({ coast }: { coast: string }) {
   return (
     <g pointer-events="none">
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-golden)" style={{ mixBlendMode: 'multiply' }} clip-path="url(#i-land)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-golden)" style={{ mixBlendMode: 'multiply' }} clip-path="url(#i-land)" />
       {/* the waterfall keeps its white water over the amber, so it still reads as water */}
       <path d={FALL_D} fill="#eafaff" opacity=".5" />
       <path d={FALL_FOAM} stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" opacity=".9" />
       <path d={seaOnly(coast)} fill="#ffc890" fill-rule="evenodd" opacity=".16" />
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-goldsun)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-goldsun)" />
       <path d={GLITTER} stroke="#ffe59a" stroke-width="1.8" stroke-linecap="round" opacity=".85" />
     </g>
   );
@@ -351,10 +351,10 @@ export function GoldenGrade({ coast }: { coast: string }) {
 export function StormGrade({ coast }: { coast: string }) {
   return (
     <g pointer-events="none">
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="#b4bfd2" style={{ mixBlendMode: 'multiply' }} />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="#b4bfd2" style={{ mixBlendMode: 'multiply' }} />
       <path d={seaOnly(coast)} fill="#5f6f86" fill-rule="evenodd" opacity=".42" />
       <StormWater />
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-stormvig)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-stormvig)" />
     </g>
   );
 }

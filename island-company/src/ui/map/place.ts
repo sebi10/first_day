@@ -87,6 +87,9 @@ export function cartPlaces(s: IslandState, planes: PlanePlace[]): CartPlace[] {
   });
 }
 
+/** how far left of his plane a pilot stands when a cart is hooked to it (the cart is at 24, 23 wide; he is 11) */
+export const PILOT_ASIDE = 44;
+
 /** a cart's tap target: a square around its middle (gse.tsx draws it at (2, -4) from the cart's ground point) */
 export const cartHitCentre = (p: Pt): Pt => [p[0] + 2, p[1] - 4];
 
@@ -147,7 +150,10 @@ export function figurePlaces(s: IslandState, phase: Phase, planes: PlanePlace[])
   for (const p of [planes.find((q) => flying(q, false)), planes.find((q) => flying(q, true))]) {
     if (!p || p.water) continue;
     const npc = seats.get(p.a.id)![0].npc;
-    out.push({ kind: 'pilot', at: [p.x - 24, p.y + 14], npc, of: p.a.id });
+    // (review round 2: a ground power cart hooked to his plane stands where he does, drawn over him and taking his tap:
+    // he steps aside, clear of it)
+    const hooked = gseCarts(s).some((c) => c.hookedTo === p.a.id);
+    out.push({ kind: 'pilot', at: hooked ? [p.x - PILOT_ASIDE, p.y + 14] : [p.x - 24, p.y + 14], npc, of: p.a.id });
   }
   const keepers = working(s).filter((n) => n.role === 'housekeeper');
   s.assets

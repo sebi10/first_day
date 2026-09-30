@@ -223,17 +223,21 @@ export function renoStatus(s: IslandState, h: Asset, me?: Role): Said | null {
   const b = renoOpen(s, h.id);
   if (b) {
     if (b.finished !== undefined) {
-      // review round 1: the county's inspector passes the final; the electrician does the trim-out and meets him
+      // review round 1: the county's inspector passes the final; the electrician does the final prep and meets him
       const hz = closingHazard(s, h.id);
       const who = me === 'elec' ? 'you do' : `${elec} does`;
       return {
-        text: `The builders finished its renovation in week ${b.finished}. It stays closed until it passes the county's final: ${who} the trim-out (the panel directory, the labels, the clearances, the breakers against their wire) and ${me === 'elec' ? 'meet' : 'meets'} the inspector${hz ? `, once the hazard on it is made safe` : ''}. Then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.`,
+        text: `The builders finished its renovation in week ${b.finished}. It stays closed until it passes the county's final: ${who} the final prep (the panel directory, the labels, the clearances, the breakers against their wire) and ${me === 'elec' ? 'meet' : 'meets'} the inspector${hz ? `, once the hazard on it is made safe` : ''}. Then it opens at ${RENO.health} with a ${RENO.warranty}-week warranty.`,
         tone: 'rust',
       };
     }
-    if ((b.drawn ?? 0) > 0) return { text: `Closed for its renovation: the builders are on it (${units(b.done)} of ${b.need} units). No guests meanwhile, and it doesn't wear.`, tone: 'rust' };
-    const ahead = openBuild(s);
     const noBuilder = !crewOf(s).some((n) => n.role === 'builder');
+    if ((b.drawn ?? 0) > 0)
+      // (review round 2: the last builder let go mid-renovation left it "the builders are on it", closed with no end)
+      return noBuilder
+        ? { text: `Closed for its renovation, waiting for a builder: none on the payroll${me === 'fin' ? ' (hire one on the Staff desk)' : ''}, ${units(b.done)} of ${b.need} units done. No guests until a builder finishes it and it passes its final.`, tone: 'rust' }
+        : { text: `Closed for its renovation: the builders are on it (${units(b.done)} of ${b.need} units). No guests meanwhile, and it doesn't wear.`, tone: 'rust' };
+    const ahead = openBuild(s);
     const wait = noBuilder
       ? `waiting for a builder (none on the payroll${me === 'fin' ? ': hire one on the Staff desk' : ''})`
       : ahead && ahead.id !== b.id

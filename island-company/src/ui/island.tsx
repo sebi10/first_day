@@ -398,7 +398,7 @@ export function Island({
     const why = houseBlocker(s, h);
     const model = modelOf(h);
     // G0: a house closed for its renovation shows the builders' scaffold and tarp (no boarded windows: they're fixing
-    // it), then the permit card while it waits on the electrician's final
+    // it), then the permit card while it waits on the county's final
     const reno = renovating(s, h.id) ? (renoAwaitingFinal(s, h.id) ? 'final' : 'work') : undefined;
     const smoking = h.health < 30 && !reno;
     const fault: Fault = { tag: why === 'red-tagged', damaged: h.health < 40 && !reno, lapsed: (h.inspectionUntil ?? 0) < s.week && !reno, smoking, ...(reno ? { reno } : {}) };

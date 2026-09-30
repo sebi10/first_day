@@ -6,7 +6,7 @@
 import type { Weather } from '../../sim/types';
 import {
   APRON, BEACH_STEPS, BRIDGES, COAST, COAST_S, DOCK, FALLS, H, HANGAR_PAD, LIP, MOUTH, MOUTH_WATER, PATHS, PLATEAU, PLATEAU_S, POOL, POS, RIVER, RIVER_S, RUNWAY, RUNWAY_ANGLE,
-  RUNWAY_C, RUNWAY_LEN, SPOT, SQUARE, TAXIWAY, TERRACE, TERRACE_H, W, WINDSOCK, curve, edgeDist, groveLeft, inPoly, inset, lin, lineDist, scatter, type Pt, type Zone,
+  RUNWAY_C, RUNWAY_LEN, SEA_BOX, SEA_FAR, SPOT, SQUARE, TAXIWAY, TERRACE, TERRACE_H, W, WINDSOCK, curve, edgeDist, groveLeft, inPoly, inset, lin, lineDist, scatter, type Pt, type Zone,
 } from './geo';
 import { GroveField } from './extras';
 import { FloraDefs, Palm, Use } from './flora';
@@ -82,7 +82,7 @@ const onBeach = (p: Pt) => inPoly(p, COAST_S) && !inPoly(p, PLATEAU_S) && edgeDi
 export function TerrainDefs() {
   return (
     <>
-      <radialGradient id="i-sea" cx="0.5" cy="0.48" r="0.72">
+      <radialGradient id="i-sea" cx="0.5" cy="0.48" r="0.72" gradientUnits="userSpaceOnUse" gradientTransform={SEA_BOX}>
         <stop offset="0" stop-color={K.seaCenter} />
         <stop offset="0.6" stop-color={K.seaMid} />
         <stop offset="1" stop-color={K.seaEdge} />
@@ -148,8 +148,8 @@ function Sea({ motion, weather }: { motion: boolean; weather: Weather }) {
   const caps = storm ? CAP_ALL : CAP_WIND;
   return (
     <g>
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-sea)" />
-      <rect x={-60} y={-60} width={W + 120} height={H + 120} fill="url(#i-ripple)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-sea)" />
+      <rect x={-SEA_FAR} y={-SEA_FAR} width={W + 2 * SEA_FAR} height={H + 2 * SEA_FAR} fill="url(#i-ripple)" />
       {/* whitecaps when it blows */}
       {rough && (
         <g class={motion ? 'bob' : undefined} fill="none" stroke="#fff" stroke-linecap="round">

@@ -441,7 +441,7 @@ describe('the puzzles label what the tech picked (display only)', () => {
 
   it('panel: the panelboard (or the transfer switch) a lot brings', () => {
     expect(pickedPanel(pickOf([{ item: 'LOT-DIST', qty: 1 }]))).toBe('600 A distribution panelboard · LOT-DIST');
-    expect(pickedPanel(pickOf([{ item: 'LOT-XFER', qty: 1 }]))).toBe('200 A manual transfer switch (listed for the backed-up load) · LOT-XFER');
+    expect(pickedPanel(pickOf([{ item: 'LOT-XFER', qty: 1 }]))).toBe('automatic transfer switch sized to the standby set · LOT-XFER');
     expect(pickedPanel(pickOf([{ item: 'KP120', qty: 1 }]))).toBeNull();
     const bare = generatePanel(5, 3, [], 'panelUp');
     const labelled = generatePanel(5, 3, [], 'panelUp', pickOf([{ item: 'LOT-DIST', qty: 1 }]));

@@ -1,7 +1,7 @@
 // The mechanic's walkaround (docs/EXPANSION.md 6.4): the plane in plan view (or
 // the generator side on, its door open) with every zone's observation in one view,
 // as a real walkaround circles the whole aircraft. He taps the zone he'd write up,
-// then Write up: <the zone>; or All serviceable. At most 3 taps from the sheet: Walkaround,
+// then Write up (the pick said above it); or All serviceable. At most 3 taps from the sheet: Walkaround,
 // a zone, the call.
 //
 // The skill is reading the signs: brake dust vs fretting dust, a breather's mist vs

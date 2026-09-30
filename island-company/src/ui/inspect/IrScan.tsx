@@ -3,7 +3,7 @@
 // rating, its conductor, its load (amps and % of rating) and its temperature rise
 // over ambient; the camera paints the lugs by their temperature, the way a real
 // one does, never by whether they're wrong. He taps the breaker he'd open, then
-// Write up: <the breaker>; or All normal. At most 3 taps from the sheet.
+// Write up (the pick said above it); or All normal. At most 3 taps from the sheet.
 //
 // Reading it is the skill: a healthy termination's rise grows with the square of
 // its load, so a lug at half load running as hot as a neighbour at 90% is the one

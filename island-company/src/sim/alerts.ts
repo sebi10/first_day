@@ -502,7 +502,7 @@ const ELEC: Symptom[] = [
     key: 'E_SHOWER_TINGLE',
     role: 'elec',
     src: 'guest',
-    text: 'Guest at {house} felt a tingle at the shower valve.',
+    text: 'Guest at {house}: a tingle at the shower valve.',
     targets: HOUSES,
     rooms: ['bath'],
     hazard: true,
@@ -578,7 +578,7 @@ const ELEC: Symptom[] = [
     key: 'E_RENO_FINAL',
     role: 'elec',
     src: 'code',
-    text: "Renovation at {house}: the builders are done. The county's final on the permit: your trim-out (the panel directory, the labels, the clearances, the breakers against their wire), then the inspector's visit. The house stays closed until it passes.",
+    text: "Renovation at {house}: the builders are done. The county's final on the permit: your final prep (the panel directory, the labels, the clearances, the breakers against their wire), then the inspector's visit. The house stays closed until it passes.",
     short: 'Permit final: {house} stays closed until it passes',
     targets: HOUSES,
     rooms: ['panel'],
@@ -646,7 +646,7 @@ const ELEC: Symptom[] = [
     targets: ['panel'],
     rooms: ['panel'],
     lead: [1, 2],
-    causes: [{ kind: 'xfmr', w: 3, fix: 'ref:deadckt', finding: 'Phase B lug at the main 40 °F hot on the IR scan.' }],
+    causes: [{ kind: 'xfmr', w: 3, fix: 'ref:deadckt', finding: 'Phase B lug at the main +22 °C over its neighbours on the IR scan.' }],
     nff: [{ w: 1, finding: "The utility transformer's tap: their side, reported to them." }],
   },
   {
@@ -695,7 +695,7 @@ const ELEC: Symptom[] = [
     key: 'E_TAKEOFF_XFER',
     role: 'elec',
     src: 'takeoff',
-    text: 'The houses now back up {load} A on the {amps} A transfer switch: install a larger one (702.4(B)).',
+    text: 'The houses now back up {load} A on the {amps} A transfer switch and the {amps} A set: fit an automatic switch with load shed, sized to the set (702.4(B)(2)(b)).',
     targets: ['gen'],
     rooms: ['gen'],
     lead: [2, 3],
@@ -950,6 +950,8 @@ export function symptomText(s: IslandState, a: Alert): string {
   if (a.sole && sym.sole && sym.sole !== 'none') raw = sym.sole.text;
   // "after the storm" only when the week before it was raised had one
   if (sym.alt && s.history.find((h) => h.week === a.week - 1)?.weather !== 'storm') raw = sym.alt;
+  // a hot-tub take-off on a house whose spa circuit is already in: a re-run of it (review round 2)
+  if (a.sym === 'E_TAKEOFF_SPA' && asset?.spa) raw = SPA_RERUN;
   let text = fill(raw, v);
   if (sym.writeUp) text = `Written up by ${a.who ?? 'the crew'}: ${lowerFirst(text)}`;
   // stage 2 (docs/EXPANSION.md 6.5): a crewmate's flag passes on what its source said (a guest's complaint, the pilot's
@@ -1000,6 +1002,9 @@ export function flagSource(s: IslandState, a: Pick<Alert, 'sym' | 'assetId' | 'v
   return `a report on ${at}`;
 }
 
+/** E_TAKEOFF_SPA on a house with its spa circuit already in (Asset.spa) */
+const SPA_RERUN = "Re-run the hot-tub circuit at {house}: the buried run to the pad ({feet} ft) fails its insulation test.";
+
 /** who noticed it, at the start of a symptom's text ("Guest at Cottage 1:", "Utility log:") */
 const WHO_SAID = /^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm|Weekly test|Weekly generator run): /i;
 
@@ -1016,7 +1021,11 @@ export function siteOf(s: IslandState, a: Pick<Alert, 'seed' | 'sym' | 'cause' |
   if (cause?.site) Object.assign(site, cause.site);
   if (site.single) site.appliance = room === 'kitchen' ? 'microwave' : 'window unit';
   // the E_DEAD_OUTLET GFCI and the E_STORM_DEAD porch are in their own rooms; a bath receptacle downstream of the GFCI is in the bath
-  void s;
+  // (review round 2: a house with a spa circuit on record re-runs that circuit, its breaker and wire as they are)
+  if (a.sym === 'E_TAKEOFF_SPA') {
+    const spa = s.assets?.find((x) => x.id === a.assetId)?.spa;
+    if (spa) Object.assign(site, { amps: spa.amps, awg: spa.awg });
+  }
   return site;
 }
 
@@ -1041,8 +1050,10 @@ function siteFor(room: Room, r: Rng): ElecSite {
     case 'dock':
       return { room, amps: 30, awg: 10, wet: true, run: 'buried', feet: r.int(60, 120) };
     case 'gen':
-      // the transfer switch as it is (60 A on #6), and the houses' backed-up load (a larger switch carries it, 702.4(B))
-      return { room, amps: 60, awg: 6, load: r.int(72, 140) };
+      // the transfer switch as it is (60 A on #6), and the houses' backed-up load: over its rating (a larger switch
+      // carries it, 702.4(B)). Review round 2: 107-130% of 60 A, what the weekly test run then reads through the switch
+      // and the set's 60 A main (checks.ts backedUp); 72-140 A would have tripped the set's main on the first test run
+      return { room, amps: 60, awg: 6, load: r.int(64, 78) };
   }
 }
 

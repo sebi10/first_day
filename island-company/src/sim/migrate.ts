@@ -11,9 +11,10 @@ import { kitValue, STOCK, TIERS, WARRANTY } from './data';
 import { bomValue, laborCost, repairLabor, repairTask, stdPick } from './flow';
 import { hashSeed } from './rng';
 import { migrateStaff } from './staff';
-import { addStarter, allOnHand, jobLines, placePo, reserve, toolsToBuy } from './stock';
+import { book } from './ledger';
+import { addStarter, allOnHand, jobLines, placePo, release, reserve, toolsToBuy } from './stock';
 import { benchFor, defaultTask } from './tasks';
-import type { Alert, Asset, IslandState, Order, WeekLedger } from './types';
+import type { Alert, Asset, IslandState, OpsRole, Order, WeekLedger } from './types';
 import { needsOf, siteOf } from './alerts';
 
 const open = (o: Order) => o.status !== 'done' && o.status !== 'cancelled';
@@ -117,23 +118,90 @@ function upkeepMigrate(s: IslandState, W: number): void {
   }
 }
 
+/** the old standby set's work the Resort's upgrade makes moot: its transfer switch (the electrician's) and its engine service (the mechanic's) */
+const OLD_SET_KINDS = new Set(['transfer', 'genService']);
 /**
- * G0 review round 1: the Resort's new 200 A transfer switch is in (with the tier, or by this migration), so the open
- * (not yet planned) alerts to upsize or replace the old 60 A one are moot: they close as dropped, said once in the feed
+ * the alerts about the old set and switch, by what they say (never by an alert's hidden cause, which would tell the
+ * crew what it was): the set's weekly-run squawks, the take-off to upsize the switch, a transfer that didn't pick up, and
+ * the quick checks' write-ups on the set and the switch. A backed-up circuit that didn't come on (E_GEN_TEST) is the
+ * circuits', not the set's: it stays
+ */
+const OLD_SET_SYMS = new Set(['M_GEN_RUN', 'M_GEN_SHAKE', 'E_TAKEOFF_XFER', 'E_XFER_FAIL']);
+const kindOfWork = (x: { kind: string; repair?: { defect: { job?: string; orderKind: string } } }) => (x.repair ? (x.repair.defect.job ?? x.repair.defect.orderKind) : x.kind);
+const oldSetAlert = (a: Alert) => (a.repair ? OLD_SET_KINDS.has(kindOfWork(a)) : OLD_SET_SYMS.has(a.sym) || /^K_(walk|ir):/.test(a.sym));
+
+/** the old set's live alerts and unfinished jobs (its alerts' jobs, and its own kinds' orders: a legacy one, a redo) */
+export function oldSetWork(s: IslandState, gen: Asset): { alerts: Alert[]; jobs: Order[] } {
+  const alerts = (s.alerts ?? []).filter((a) => a.assetId === gen.id && a.status !== 'closed' && oldSetAlert(a));
+  const ids = new Set(alerts.map((a) => a.order).filter((x): x is string => !!x));
+  const jobs = s.orders.filter((o) => o.assetId === gen.id && open(o) && (ids.has(o.id) || (!o.flow && OLD_SET_KINDS.has(kindOfWork(o))) || (o.repair && OLD_SET_KINDS.has(kindOfWork(o)))));
+  return { alerts, jobs };
+}
+
+/**
+ * G0: the Resort's bigger standby set and its new 200 A automatic transfer switch are in (with the tier, or by the
+ * migration of a live tier-5 island), so the work on the old set is moot. Review round 1 closed its open alerts; review
+ * round 2 retires its unfinished jobs too: a job already planned (a card, an approved job waiting on its parts, a ready
+ * one, a redo) was left open, and the crew paid about $2,000 to swap the brand-new switch for the old one's lot. Now,
+ * for the transfer switch and the set's engine (the alerts by what they say, their jobs, and those kinds' repairs): the alerts close as dropped, the jobs are
+ * cancelled (reserved stock released, the labour of a job never started comes back, the requisitions close), the lines
+ * still with the vendor are cancelled (a line already received and held lands as free stock), and the old set's hidden
+ * defects go with it (the equipment they were in is gone). Said once in the feed
  */
 export function retireOldSwitch(s: IslandState, gen: Asset): void {
-  const old = (s.alerts ?? []).filter((a) => a.assetId === gen.id && a.status === 'open' && a.kind === 'transfer');
-  for (const a of old) {
-    a.status = 'closed';
-    a.closed = { week: s.week, how: 'dropped' };
+  const W = s.week;
+  const { alerts, jobs } = oldSetWork(s, gen);
+  let labour = 0;
+  let parts = 0;
+  for (const o of jobs) {
+    release(s, o.id);
+    // the labour of a job never started comes back (as the job flow's Drop does)
+    const refund = o.approvedWeek !== undefined && !o.result ? o.cost : 0;
+    if (refund > 0) {
+      s.cash += refund;
+      book(s, 'labor', -refund, { trade: o.role as OpsRole, asset: o.assetId });
+      if (o.autoApproved && o.approvedWeek === W) s.autoSpent[o.role as OpsRole] = Math.max(0, (s.autoSpent[o.role as OpsRole] ?? 0) - refund);
+      labour += refund;
+    }
+    for (const r of s.reqs ?? []) {
+      if (r.order !== o.id) continue;
+      if (r.status === 'open') {
+        r.status = 'cancelled';
+        r.closed = W;
+      } else if (r.status === 'ordered') delete r.order;
+    }
+    for (const p of s.pos ?? []) {
+      for (const l of p.lines) {
+        if (l.order !== o.id || l.got !== undefined) continue;
+        if (p.status === 'open') {
+          // still with the vendor: cancelled, and its requisition with it
+          p.cost = Math.round((p.cost - l.qty * l.unit) * 100) / 100;
+          parts += l.qty * l.unit;
+          l.qty = 0;
+          for (const r of s.reqs ?? []) if (l.req && r.id === l.req && r.status !== 'filled') Object.assign(r, { status: 'cancelled', closed: W });
+        } else delete l.order;
+      }
+      p.lines = p.lines.filter((l) => l.qty > 0);
+    }
+    o.status = 'cancelled';
   }
-  if (!old.length) return;
+  // a PO left with nothing on it: the vendor's shipment is cancelled, its freight with it
+  if (s.pos) s.pos = s.pos.filter((p) => p.lines.length > 0 || p.status !== 'open');
+  for (const a of alerts) {
+    a.status = 'closed';
+    a.closed = { week: W, how: 'dropped' };
+  }
+  const defects = (s.defects ?? []).filter((d) => d.assetId === gen.id && OLD_SET_KINDS.has(d.job ?? d.orderKind));
+  if (defects.length) s.defects = (s.defects ?? []).filter((d) => !defects.includes(d));
+  if (!alerts.length && !jobs.length) return;
+  const n = jobs.length;
+  const back = [labour > 0 ? `$${Math.round(labour).toLocaleString('en-US')} of labour back` : '', parts > 0 ? `$${Math.round(parts).toLocaleString('en-US')} of parts cancelled with the vendor` : ''].filter(Boolean).join(', ');
   s.feed.push({
     id: (s.feed[s.feed.length - 1]?.id ?? 0) + 1,
-    week: s.week,
-    role: 'elec',
+    week: W,
+    role: 'all',
     tone: 'info',
-    text: `${GEN_UPGRADE.words.replace(/^a /, 'The new ')} is in: the open ${old.length === 1 ? 'alert' : 'alerts'} about the old 60 A switch closed.`,
+    text: `The Resort’s new standby set and ${GEN_UPGRADE.words.replace(/^a /, 'its ')} are in: the work on the old set is dropped (${n ? `${n === 1 ? 'a job' : `${n} jobs`} cancelled` : `${alerts.length === 1 ? 'an alert' : `${alerts.length} alerts`} closed`}${back ? `; ${back}` : ''}).`,
     at: s.updatedAt,
   });
   if (s.feed.length > 60) s.feed.splice(0, s.feed.length - 60);

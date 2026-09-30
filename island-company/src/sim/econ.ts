@@ -55,15 +55,23 @@ export function hazardOn(s: Pick<IslandState, 'alerts'>, houseId: string): Alert
   return (s.alerts ?? []).find((a) => a.assetId === houseId && a.status !== 'closed' && !!symptomOf(a)?.hazard);
 }
 /**
- * the hazard that closes the house in `week`: an open or planned hazard not made safe. A hazard a crewmate flagged
- * (src 'flag') gives the electrician until its due week (checks.ts raiseFlag: the week after), as a flagged
- * airworthiness squawk gives the mechanic: a flag made after his turn ended used to close the house at that night's
- * resolve with no chance to make it safe (stage 2 review round 1)
+ * the hazard that closes the house: an open or planned hazard not made safe. A hazard a crewmate passed on (src 'flag')
+ * closes it at once like any other (stage 2 review round 2: no licensed electrician keeps a unit rented on a reported
+ * shock; round 1's week of grace kept it booked through that night's resolve while the sheets said it was shut). What
+ * keeps it fair instead: its due week is the week after (checks.ts raiseFlag), and the electrician can make it safe
+ * after ending the turn (engine.ts `makeSafe`, `lateSafe`). `week` is kept for the callers that project a week
  */
 export function closingHazard(s: Pick<IslandState, 'alerts'>, houseId: string, week = (s as IslandState).week): Alert | undefined {
-  const hz = (s.alerts ?? []).find((a) => a.assetId === houseId && a.status !== 'closed' && !!symptomOf(a)?.hazard && !(a.src === 'flag' && a.due > week));
+  void week;
+  const hz = hazardOn(s, houseId);
   return hz && !hz.safe ? hz : undefined;
 }
+/**
+ * a hazard a crewmate passed on this week, not made safe yet: the electrician can make it safe after ending the turn
+ * (stage 2 review round 2). It closes the house at once like any hazard, and a flag can come after the electrician's turn
+ * is over: without this the house stayed closed through that night's resolve with nothing they could do
+ */
+export const safeAfterTurn = (s: Pick<IslandState, 'week'>, a: Alert): boolean => a.src === 'flag' && a.week === s.week && a.status !== 'closed' && !a.safe && !!symptomOf(a)?.hazard;
 /** 0.75 while a made-safe hazard is open on the house, else 1 */
 export const rentFactor = (s: Pick<IslandState, 'alerts'>, h: Pick<Asset, 'id'>) => (hazardOn(s, h.id)?.safe ? 0.75 : 1);
 
@@ -448,7 +456,9 @@ export function houseRentable(s: IslandState, h: Asset, week = s.week) {
 
 export function houseBlocker(s: IslandState, h: Asset, week = s.week): string | null {
   if (isTagged(s, h.id)) return 'red-tagged';
-  if (renovating(s, h.id)) return renoAwaitingFinal(s, h.id) ? "renovation: the electrician's final" : 'renovation: the builders are on it';
+  // (review round 2: the county passes the final, the electrician preps it; a renovation under way with no builder
+  // left on the payroll says so, not "the builders are on it")
+  if (renovating(s, h.id)) return renoAwaitingFinal(s, h.id) ? 'renovation: waiting on its county final' : s.staff && !s.staff.some((n) => n.role === 'builder') ? 'renovation: waiting for a builder (none on the payroll)' : 'renovation: the builders are on it';
   if (!powered(s).on) return 'no power';
   if (closingHazard(s, h.id, week)) return 'hazard';
   if (h.health < 40) return `reliability ${Math.round(h.health)}`;

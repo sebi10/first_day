@@ -606,8 +606,11 @@ describe('the walkaround (6.4): every zone in one view, the call in 3 taps', () 
       const zone = view.items[view.items.length - 1];
       await click(marks[marks.length - 1]);
       expect(items[items.length - 1].getAttribute('aria-pressed')).toBe('true');
-      // (review round 1: the call names what it writes up, apart from the sheet's squawk card)
-      expect(textOf(button(m.root, 'Write up'))).toBe(`Write up: ${zone.label}`);
+      // (review round 1: the call names what it writes up, apart from the sheet's squawk card; review round 2: on its own
+      // line above the buttons, where a long label wraps instead of being cut short on a phone)
+      expect(textOf(button(m.root, 'Write up'))).toBe('Write up');
+      expect(button(m.root, 'Write up').getAttribute('aria-label')).toBe(`Write up: ${zone.label}`);
+      expect(textOf(walk(m.root).find((e) => (e.getAttribute('class') ?? '').split(' ').includes('qc-pick'))!)).toBe(`Your call: ${zone.label}`);
       await click(button(m.root, 'Write up'));
       expect(m.calls).toEqual([{ t: 'check', role: 'mech', assetId: id, item: zone.id, week: s.week }]);
       // blind: the words say it's on the list, never whether it was right

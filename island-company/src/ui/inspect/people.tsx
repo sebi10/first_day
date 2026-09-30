@@ -132,7 +132,7 @@ export function BuildCard({ ctl, a }: { ctl: Ctl; a: Extract<Act, { t: 'build' }
       <span>{a.text}</span>
       {!a.ok && <span class="label">{a.why}</span>}
       {a.ok && !sure && (
-        <Btn small kind="soft" onClick={() => setSure(true)}>
+        <Btn small kind={a.plain ? 'ghost' : 'soft'} onClick={() => setSure(true)}>
           {a.label}
         </Btn>
       )}

@@ -23,7 +23,7 @@ const UL = ({ items }: { items: preact.ComponentChildren[] }) => (
 const SEAT_TAP: Record<Role, preact.ComponentChildren[]> = {
   mech: [
     <>
-      <b>A plane:</b> airworthiness, the next 100-hr, MEL placards, its logbook and the cart on it. Ground it, write it up, or open its alerts.
+      <b>A plane:</b> its condition, the next 100-hr, MEL placards, its logbook and the cart on it. Ground it, write it up, or open its alerts.
     </>,
     <>
       <b>The hangar:</b> its power, the reports holding you up, the carts on charge.
@@ -105,8 +105,9 @@ export function whatsNewMapPanels(s: IslandState, role: Role): WhatsNewPanel[] {
           </P>
         )}
         <P>
-          <b>Report a problem</b> on {role === 'mech' ? 'a house or the grid' : role === 'elec' ? 'a plane' : 'a plane, a house or the grid'}: it lands on that trade's alert list, in your name. One a week each, and each trade receives at most one a week.
+          <b>Report a problem</b> on {role === 'mech' ? 'a house or the grid' : role === 'elec' ? 'a plane' : 'a plane, a house, the grid or the generator'}: it goes on that trade's alert list as what its source said (a guest's complaint, the pilot's squawk, the utility's log), passed on by you. One a week each; a trade takes one a week from the other tech and one from the analyst.
           {s.week < REPORT.fromWeek ? ` It opens in week ${REPORT.fromWeek}.` : ''} For the hangar, the office or anything else, message them from its sheet.
+          {role === 'elec' ? ' A hazard passed on to you closes the house at once, like any hazard: you can still make it safe after your turn.' : ''}
         </P>
       </>
     ),

@@ -20,7 +20,7 @@ import { botTurn, TEAMS } from '../src/sim/bots';
 import { islandAircraft, openChain } from '../src/sim/chain';
 import { kitValue, STOCK } from '../src/sim/data';
 import { ENGINE_VERSION, apply } from '../src/sim/engine';
-import { expectLiveMigration } from './livedocs';
+import { expectLiveMigration, liveMigrated, oldSetWork } from './livedocs';
 import { cardOf, flowStage } from '../src/sim/flow';
 import { committed } from '../src/sim/ledger';
 import { migrate } from '../src/sim/migrate';
@@ -294,17 +294,21 @@ describe('v3 → v5 in one read: a doc the job-flow build wrote (bd1e1d2), not o
       expect(m.stats.g0From).toBe(doc.tier >= 4 ? doc.week : undefined);
       expect(m.feed.filter((e) => G0_LINE.test(e.text))).toHaveLength(doc.tier >= 4 ? 1 : 0);
       // the first write on this build: engine 5 (never a v4 doc on the way), the money, the work, the streak as they were
+      // (review round 2: at the Resort, less the old standby set's retired work: its jobs cancelled, their unstarted
+      // labour back, as liveMigrated has it)
       const r = apply(doc, { t: 'rename', role: 'fin', name: doc.players.fin!.name }, doc.updatedAt + 1000);
       expect(r.error).toBeUndefined();
       const s = r.s;
+      const want = liveMigrated(doc);
       expect(s.engine).toBe(5);
-      expect(s.cash).toBe(doc.cash);
+      expect(s.cash).toBe(want.cash);
       expect(s.credit ?? 0).toBe(doc.credit ?? 0);
       expect(s.loan).toEqual(doc.loan);
       expect(s.creditsWeek).toBe(doc.creditsWeek);
       expect(s.stats.aStreak ?? 0).toBe(doc.stats.aStreak ?? 0);
       expect([s.stats.v4From, s.stats.aCarry, s.stats.g0From]).toEqual([m.stats.v4From, m.stats.aCarry, m.stats.g0From]);
-      expect(s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(doc.orders.map((o) => `${o.id}:${o.status}`));
+      expect(s.orders.map((o) => `${o.id}:${o.status}`)).toEqual(want.orders.map((o) => `${o.id}:${o.status}`));
+      expect(s.orders.filter((o, i) => o.status !== doc.orders[i].status).every((o) => o.status === 'cancelled' && o.assetId === 'gen' && oldSetWork(doc))).toBe(true);
       expect(s.feed.filter((e) => G0_LINE.test(e.text))).toHaveLength(doc.tier >= 4 ? 1 : 0);
       // stamped once: reads and writes after it change nothing more
       expect(JSON.stringify(migrate(clone(s)))).toBe(JSON.stringify(s));

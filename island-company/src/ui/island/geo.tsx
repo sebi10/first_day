@@ -9,6 +9,14 @@ import type { IslandState, Role } from '../../sim/types';
 export type Pt = [number, number];
 export const W = 800;
 export const H = 600;
+/**
+ * how far the sea (and the light over it) is drawn past the scene's edges: a whole-island view in a portrait Explore,
+ * or a landscape one, shows sea out to the screen's edges (review round 2: flat bands of another blue read like a
+ * broken render). The sea's gradients keep the frame they had on the old 60-unit overhang (SEA_BOX), padded beyond it
+ */
+export const SEA_FAR = 700;
+/** the old overhang's box (-60 on every side) as a gradient frame: userSpaceOnUse gradients drawn as they were on it */
+export const SEA_BOX = `matrix(${W + 120} 0 0 ${H + 120} -60 -60)`;
 
 const f1 = (n: number) => Math.round(n * 10) / 10;
 export const pt = (p: Pt) => `${f1(p[0])} ${f1(p[1])}`;

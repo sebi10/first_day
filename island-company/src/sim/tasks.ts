@@ -622,8 +622,8 @@ const REF: Task[] = [
   }),
   ref('deadckt', {
     no: 'R-DEAD',
-    title: 'Dead circuit at the panel: breaker, lug, bus',
-    short: 'Dead circuit repair',
+    title: 'The panel: a dead circuit or a hot lug (breaker, lug, bus)',
+    short: 'Panel breaker or lug repair',
     chapter: 'Art. 408 Panels',
     kind: 'xfmr',
     targets: ['panel'],
@@ -663,7 +663,7 @@ const REF: Task[] = [
     tools: ['T-TORQUE', 'T-KO'],
     nec: ['702.4(B)', '702.5', '445.13'],
     keywords: ['transfer', 'switch', 'ats', 'generator', 'standby', 'backup', 'villas', 'pick', 'up'],
-    summary: 'A standby system’s transfer equipment is sized for the load it carries (702.4(B)) and listed for the purpose (702.5); the generator’s conductors carry 115% of its nameplate (445.13).',
+    summary: 'A standby system’s transfer equipment is sized for the load it carries (702.4(B)), or a load shed holds the load to what the set can carry (702.4(B)(2)(b)); listed for the purpose (702.5); the generator’s conductors carry 115% of its nameplate (445.13).',
   }),
   ref('gentest', {
     no: 'R-GENT',

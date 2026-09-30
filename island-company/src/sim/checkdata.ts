@@ -26,7 +26,7 @@ export const WALK_ZONES: Record<PlaneModel | 'gen', { id: WalkZone; label: strin
   ],
   cargo: [
     { id: 'nose', label: 'Nose gear' },
-    { id: 'cowl', label: 'Cowl and nacelle' },
+    { id: 'cowl', label: 'Cowl' },
     { id: 'lmain', label: 'L main' },
     { id: 'root', label: 'Wing root' },
     { id: 'tail', label: 'Empennage' },
@@ -97,7 +97,8 @@ export const WALK_SCOPE: Record<string, { zones: WalkZone[]; late?: boolean; tel
     ],
   },
   corrosion: {
-    zones: ['lmain', 'rmain', 'lfloat', 'rfloat'],
+    // (review round 2: the nose wheel's halves corrode like the mains'; the nose gear zone could never carry a tell)
+    zones: ['nose', 'lmain', 'rmain', 'lfloat', 'rfloat'],
     tells: [
       {
         cause: { fix: '32-40-03', finding: 'Blistered paint and pitting at the wheel-half tie bolts. Strip, treat, penetrant-inspect, coat and refit.' },
@@ -244,6 +245,12 @@ export const GEN_PANEL: IrBreaker[] = [
 export const GEN_UPGRADE = { amps: 200, awg: '3/0 Cu', words: 'a 200 A automatic transfer switch' };
 /** the generator house's schedule as installed: before the Resort's upgrade, or after it */
 export const genPanel = (upgraded: boolean): IrBreaker[] => (upgraded ? GEN_PANEL.map((b) => ({ ...b, amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg })) : GEN_PANEL);
+/**
+ * the island panel's schedule as installed: after the Resort's upgrade its transfer-switch feed is sized for the new
+ * 200 A switch too (review round 2: it still read 60 A on #6 while the switch it feeds was 200 A, a feed breaker that
+ * would trip on retransfer)
+ */
+export const homePanel = (upgraded: boolean): IrBreaker[] => (upgraded ? HOME_PANEL.map((b) => (b.id === 'xfer' ? { ...b, amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg } : b)) : HOME_PANEL);
 
 /** the IR scan's scope: which breakers a kind's tell can show on */
 export const IR_SCOPE: Record<string, { on: 'branch' | 'main' | 'xfer' }> = {
@@ -258,11 +265,13 @@ export const IR_SCOPE: Record<string, { on: 'branch' | 'main' | 'xfer' }> = {
  * 14-18 °C a licensed electrician applying the screen's own rules wrote it up every week); a reading under NFPA 70B's
  * 40% is marked too light to judge (it said 40 and marked 30); the generator's three terminations carry one current, so
  * a healthy set reads within about 2 °C across them (one shared offset, then ±genEach each; ±3 each read 4 °C apart in
- * one scan in ten)
+ * one scan in ten). Review round 2: the island panel reads the same way (one offset for the scan, ±genEach a breaker):
+ * two like breakers at about the same load read 4 °C or more apart in 122 of 1,455 clean scans with ±3 each, a
+ * "probable deficiency" by the help's own NETA line with nothing to find. `backedUp`: the backed-up load's share of the
+ * standby set's rating in a week (the test run and the panel's transfer-switch feed carry it alike; never too light)
  */
 export const IR = {
   riseFull: 20,
-  normal: 3,
   tell: [10, 20] as [number, number],
   tellLoad: [40, 70] as [number, number],
   distractorLoad: [70, 79] as [number, number],
@@ -271,6 +280,7 @@ export const IR = {
   panelUp: [82, 95] as [number, number],
   genShared: 1,
   genEach: 0.8,
+  backedUp: [40, 70] as [number, number],
 };
 /** the branches no tell or look-alike shows on in an afternoon scan: the runway edge lights are a night load, off by day */
 export const IR_DAY_OFF = ['edge'];
@@ -295,8 +305,12 @@ export const HOUSE_CIRCUITS: Circuit[] = [
 /** the service at the panel: both legs under the load (a loose neutral: one sags, the other rises) */
 export const SERVICE_ID = 'service';
 
-/** ohms per 1,000 ft of copper, and the bands (6.4, tune) */
-export const METER = { ohms: { 12: 1.6, 14: 2.5 } as Record<12 | 14, number>, load: 12, tripDrop: [5, 9] as [number, number], tripRunUnder: 50, flickerLow: [104, 110] as [number, number], flickerHigh: [130, 136] as [number, number] };
+/**
+ * ohms per 1,000 ft of copper, and the bands (6.4, tune). Review round 2: NEC Chapter 9 Table 8 at 75 °C, solid uncoated
+ * copper as NM cable is (12 AWG 1.93, 14 AWG 3.07): the 20 °C values (1.6, 2.5) read 20-25% under an electrician's
+ * voltage-drop calc. The loose backstab's tell: its drop runs `tripExtra` volts over what its run predicts
+ */
+export const METER = { ohms: { 12: 1.93, 14: 3.07 } as Record<12 | 14, number>, load: 12, tripExtra: [3, 6] as [number, number], tripRunUnder: 50, flickerLow: [104, 110] as [number, number], flickerHigh: [130, 136] as [number, number] };
 
 export const METER_SCOPE: Record<string, { on: 'short' | 'gfci' | 'service' }> = {
   trip: { on: 'short' },

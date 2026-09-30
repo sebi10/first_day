@@ -492,7 +492,7 @@ Fictional brand "Keystone" for devices and the island panels' breakers (breakers
 | --- | --- | --- | --- | --- |
 | LOT-STORM | Storm repair: 50 ft UF-B 12/2, two 20 A TR/WR receptacles, two weatherproof boxes, an in-use cover, connectors | 260 | 1 | ref:storm |
 | LOT-DIST | Distribution panel upgrade: 400 A distribution panelboard, feeder lugs, two ground rods, the GEC and clamps | 1,400 | 2 | ref:panel |
-| LOT-XFER | Transfer switch upgrade: 100 A manual transfer switch (listed), conductors and breakers | 900 | 2 | ref:xfer |
+| LOT-XFER | Transfer switch lot: an automatic transfer switch sized to the standby set, with load shed (702.4(B)(2)(b)), conductors and breakers (stage 2 review round 2: before the Resort the set carries no more than its 60 A; after it, the Resort's 200 A switch like for like) | 900 | 2 | ref:xfer |
 | LOT-DOCK | Fuel dock run: RMC and a seal fitting with compound for the classified section, THWN-2 by the foot, a 2-pole 30 A GFPE breaker | 420 | 1 | ref:dock |
 
 ### 3.4 Tools, both trades (A, `ITEMS`, kind `tool`)
@@ -761,7 +761,7 @@ v1 has no kind for ignition or the hot section: the first draft's `M_ROUGH_MAG` 
 | `E_PANEL_LOAD` · trend | "The island's distribution panel ran at 92% of its rating at peak: plan the upgrade." | panel | — · 3–4 | panelUp 1: ref:panel | — |
 | `E_TAKEOFF_DOCK` · takeoff | "The fuel dock's old direct-burial run fails its insulation test: replace it with a conduit run." | panel · dock | — · 2–3 | dockrun 1: ref:dock | — |
 | `E_DOCK_TRIP` · utility | "The fuel-dock pumps trip their ground-fault protection." | panel · dock | — · 0–1 | dockrun 2: ref:dock → "Buried run 0.3 MΩ; water in the dispenser junction." | 1: "Rain in the pump motor's box; dried and resealed; the run tests fine." |
-| `E_TAKEOFF_XFER` · takeoff | "The transfer switch is too small for the houses now: install a larger one." | gen | — · 2–3 | transfer 1: ref:xfer | — |
+| `E_TAKEOFF_XFER` · takeoff | "The houses now back up {load} A on the 60 A transfer switch and the 60 A set: fit an automatic switch with load shed, sized to the set (702.4(B)(2)(b))." ({load} 64-78 A: the weekly test run and the island panel read it too; stage 2 review round 2) | gen | — · 2–3 | transfer 1: ref:xfer | — |
 | `E_XFER_FAIL` · utility | "In the weekly test the transfer didn't pick up the villas." | gen | — · 0–1 | transfer 2: ref:xfer → "The transfer switch's contacts pitted and burnt on the villas' leg." · genTest 2: ref:gentest → "The villas' transfer-panel relay coil reads open." · needs relay | — |
 | `E_GEN_TEST` · utility | "Weekly test: a backed-up circuit didn't come on." | gen | — · 0–1 | genTest 1: ref:gentest → "The transfer-panel relay's coil reads open." · needs relay | — |
 
