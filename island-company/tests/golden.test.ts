@@ -73,6 +73,17 @@ function run(team: string, seed: number, weeks: number): { d: string; leaks: num
 const digest = (team: string, seed: number, weeks: number) => run(team, seed, weeks).d;
 
 /**
+ * Re-recorded for stage 2 review round 3 (2026-09-30; DECISIONS "stage 2 review round 3"), all eleven, for what the round
+ * changed on purpose. Checked run by run against the round-2 build's (30d8b19) docs, week by week, with the new records
+ * dropped and the new words mapped back: identical but for these. (1) What a signed-off job put in, on record: a
+ * transfer job's switch before the Resort (`Asset.xfer`: rated for the backed-up load, load management on the 60 A set)
+ * and a panel upgrade's 600 A main (`Asset.panel`); every run signs one or both off. (2) Words the docs store: the storm
+ * complaint names its house once ("water in the porch box after the rain", "after the storm at Cottage 1: two rooms
+ * dead"), and a house under 40 made safe "stays closed under 40 until it's brought back up" (not "rents at 75%"). The
+ * round's other play changes (a flag takes a slot, a late-flagged hazard made safe at the resolve, the renovation's
+ * committed materials through the freeze, no write-up on a house closed for its renovation, a transfer take-off retired
+ * once its switch is in) don't come up in these runs: they play with checks and flags off.
+ *
  * Re-recorded for stage 2 review round 2 (2026-09-30; DECISIONS "stage 2 review round 2"), all eleven, for what the round
  * changed on purpose. Checked run by run against the round-1 build's docs with the words mapped back and the new field
  * dropped: identical but for these. (1) A house's spa circuit on record (`Asset.spa`, written when a hot-tub job is signed
@@ -99,17 +110,17 @@ const digest = (team: string, seed: number, weeks: number) => run(team, seed, we
  * electrician's helper held back.
  */
 const GOLDEN: Record<string, string> = {
-  'three friends/1': 'b085d876cbac70bb',
-  'three friends/2': '385eb139c7e2c98a',
-  'three friends/3': '9c7c180130a50095',
-  'all average/1': '847d24fb23646aa9',
-  'three friends/1/52': 'cc9ad033761ddef0',
-  'all average/1/52': '257fff5ea79e9c1a',
-  'mistakes/1/52': '8a9ef04a84f31864',
-  'mistakes/6/52': 'e20e001da75acf50',
-  'all average/4/52': '8fba0028910e203c',
-  'mistakes/10/52': '86e0a5504ae01c21',
-  'nobody/1': 'aae7feb694b3f26a',
+  'three friends/1': '6a45e7cc36602428',
+  'three friends/2': '1e108e1b11d1a32e',
+  'three friends/3': 'e2e54b06cd4abdaa',
+  'all average/1': '53589df62acbb74f',
+  'three friends/1/52': '9f703cb2680f7e07',
+  'all average/1/52': '7961b93d0024068c',
+  'mistakes/1/52': '62a0b99830b9f330',
+  'mistakes/6/52': 'ca5ddfad6bfab074',
+  'all average/4/52': 'c48c6cd150a125ab',
+  'mistakes/10/52': 'f880d0ae1c56116f',
+  'nobody/1': 'b789b139918f4afb',
 };
 
 describe('golden digests: home plays byte-identical (the paper-sim crews, 26 and 52 weeks)', () => {

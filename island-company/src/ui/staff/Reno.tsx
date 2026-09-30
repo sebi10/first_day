@@ -20,11 +20,19 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 /** the rule, in one line: the same words on the desk, the house's sheet and the confirm */
 export const RENO_RULE = `The builders renovate a house at ${RENO.maxHealth} or below: carpentry, roofing and finishes, with the house closed while they work. It opens again at ${RENO.health} with a ${RENO.warranty}-week warranty when it passes the county's final (the electrician's final prep and the inspector's visit). One renovation per house every ${RENO.cooldown} weeks.`;
 
-/** the case's weeks closed, in words: at the builders' output, or with one skill-3 builder once one is hired */
-const closedWords = (p: RenoPlan) =>
-  p.planned
-    ? `With one skill-3 builder it's closed about ${plural(p.weeksClosed, 'week')} (2 units at 1 a week, then the county's final), counted from when they start`
-    : `Closed about ${plural(p.weeksClosed, 'week')}: the builders' 2 units at ${p.out % 1 ? p.out.toFixed(2).replace(/0$/, '') : p.out} a week, then the county's final`;
+/** "closed about 1 week", or, when the builders finish the week they start, "closed only if its final slips" */
+export const closedShort = (p: RenoPlan) => (p.weeksClosed > 0 ? `closed about ${plural(p.weeksClosed, 'week')}` : 'closed only if its final slips');
+
+/**
+ * the case's weeks closed, in words (review round 3: the engine's timeline): open this week (its rent is booked before the
+ * builders start at the resolve), closed while they draw the rest, open again the week its final passes; at the
+ * builders' output, or one skill-3 builder's once one is hired
+ */
+const closedWords = (p: RenoPlan) => {
+  const units = p.planned ? 'With one skill-3 builder, 2 units at 1 a week' : `The builders' 2 units at ${p.out % 1 ? p.out.toFixed(2).replace(/0$/, '') : p.out} a week`;
+  const closed = p.weeksClosed > 0 ? `closed ${plural(p.weeksClosed, 'week')}` : 'not closed a full week';
+  return `${units}: ${closed}; it opens when the county's final passes, the week after the last unit (+1 week if it isn't passed that week)${p.planned ? ', counted from when they start' : ''}`;
+};
 
 /** the verdict line: the payback, or that it doesn't pay back on rent alone */
 export const paybackWords = (p: RenoPlan) =>
@@ -70,13 +78,21 @@ export function RenoNumbers({ s, h, onHire }: { s: IslandState; h: Asset; onHire
           ? `Rent lost about ${usd(p.rentLost)} (${usd(p.rentNow)} a week while it's closed: a normal week, net of the guests the other houses take${p.planned ? '; counted as if a builder started this week' : ''})`
           : p.closedNow
             ? `No rent lost: it earns nothing now (closed: ${p.closedNow})`
-            : 'No rent lost: at these bookings the other houses take its guests'}
+            : p.weeksClosed === 0
+              ? 'No rent lost: it is closed no full week'
+              : 'No rent lost: at these bookings the other houses take its guests'}
       </span>
+      {p.closedFor && <span>Closed this week ({p.closedFor}): counted as open, it reopens when that clears.</span>}
       <span>
         Left as it is: {p.closesIn > 0 ? `under 40 and closed in about ${plural(p.closesIn, 'week')} (it loses about ${Math.round(p.wear)} a booked week)` : 'it earns nothing now'}.
       </span>
       <span>
-        Renovated: open about {plural(p.life, 'week')} after its final before it's under 40 again{p.rent > 0 ? `, about ${plural(p.gained, 'more open week')} than left as it is, about ${usd(p.gain)} of rent at ${usd(p.rent)} a normal week` : ': at these bookings the other houses take its guests either way'}.
+        {/* (review round 3: the net figure; the gross one counted the weeks it's closed for the work as gained) */}
+        Renovated: open about {plural(p.life, 'week')} after its final before it's under 40 again
+        {p.rent > 0
+          ? `, open about ${plural(Math.max(0, p.gained - Math.min(p.weeksClosed, Math.max(0, p.closesIn - 1))), 'more week')} in all than left as it is${p.weeksClosed > 0 ? ` (it's closed ${p.weeksClosed} for the work)` : ''}: about ${usd(p.gain)} of rent at ${usd(p.rent)} a normal week in the weeks it would otherwise have been closed`
+          : ': at these bookings the other houses take its guests either way'}
+        .
       </span>
       <span>
         Back to {RENO.health}: {p.restore} points, about {plural(p.jobs, 'routine job')} of {elec}'s on it saved.
@@ -105,7 +121,7 @@ function Confirm({ ctl, h, onDone, compact, onHire }: { ctl: Ctl; h: Asset; onDo
           : ahead
             ? `The builders start it after ${buildSite(ahead, s)}`
             : 'The builders start it when its first materials are in (Site work)'}
-        {p.closedNow ? '; it stays closed meanwhile.' : '; it stays open until they start.'}
+        {p.closedNow ? '; it stays closed meanwhile.' : '; it stays open until they start (its rent that week is booked before they do).'}
       </span>
       <div class={compact ? 'row wrap' : 'sheet-actions col'} style={{ gap: 8 }}>
         <Btn
@@ -160,6 +176,14 @@ export function RenoCard({ ctl, id, onHire }: { ctl: Ctl; id: string; onHire?: (
   const p = renoPlan(s, h);
   const onList = !!renoOpen(s, h.id);
   if (onList) return null;
+  // renovated recently: the cooldown says it all (review round 3: a whole hypothetical case sat above it)
+  if (p.againFrom > s.week)
+    return (
+      <div class="insp-card">
+        <b>Renovation</b>
+        <span class="label">{p.blocker}</span>
+      </div>
+    );
   return (
     <div class="insp-card">
       <b>Renovation</b>
@@ -169,7 +193,7 @@ export function RenoCard({ ctl, id, onHire }: { ctl: Ctl; id: string; onHire?: (
           <span>
             {h.health > RENO.maxHealth
               ? `In good shape (${Math.round(h.health)}): the builders renovate a house at ${RENO.maxHealth} or below.`
-              : `${usd(p.pkg)} package + ${usd(p.materials)} materials; closed about ${plural(p.weeksClosed, 'week')}${p.planned ? ' once a builder starts' : ''}. ${paybackWords(p)}.`}
+              : `${usd(p.pkg)} package + ${usd(p.materials)} materials; ${closedShort(p)}${p.planned ? ' once a builder starts' : ''}. ${paybackWords(p)}.`}
           </span>
           {p.blocker && h.health <= RENO.maxHealth && <span class="label">{p.blocker}</span>}
           {!p.blocker && (
@@ -213,7 +237,7 @@ export function Renovations({ ctl, onPick }: { ctl: Ctl; onPick(id: string): voi
               <>
                 {p.planned && <NoBuilder onHire={toHiring} />}
                 <span class="label num">
-                  {usd(p.pkg)} + {usd(p.materials)} materials · closed about {plural(p.weeksClosed, 'week')}
+                  {usd(p.pkg)} + {usd(p.materials)} materials · {closedShort(p)}
                   {p.planned ? ' once a builder starts' : ''}
                   {p.rentLost > 0 ? ` · ${usd(p.rentLost)} rent lost` : ''}
                   {p.payback ? ` · pays back in about ${plural(p.payback, 'week')}` : " · doesn't pay back on rent alone"}

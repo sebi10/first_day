@@ -251,7 +251,10 @@ describe("G0: the transfer switch's one backed-up load (trades major)", () => {
     const load = siteOf(s, t)!.load!;
     expect(load).toBeGreaterThanOrEqual(64);
     expect(load).toBeLessThanOrEqual(78);
-    expect(symptomText(s, t)).toBe(`The houses now back up ${load} A on the 60 A transfer switch and the 60 A set: fit an automatic switch with load shed, sized to the set (702.4(B)(2)(b)).`);
+    // (review round 3: the new switch is rated for the backed-up load; load management holds the set)
+    expect(symptomText(s, t)).toBe(
+      `The houses now back up ${load} A on the 60 A transfer switch and the 60 A set: fit an automatic switch rated for the backed-up load (100 A, its feed breaker and conductors to match: #3 Cu), with load management so the 60 A set carries no more than its rating (702.4(B)(2)(b)).`,
+    );
     const g = checkView(s, 'elec', gen.id)!.items;
     expect(g.find((i) => i.id === 'xferG')!.reading).toMatchObject({ amps: load, loadPct: Math.round((100 * load) / 60) });
     expect(checkView(s, 'elec', 'g1')!.items.find((i) => i.id === 'xfer')!.reading!.amps).toBe(load);
@@ -273,7 +276,7 @@ describe("G0: the transfer switch's one backed-up load (trades major)", () => {
     expect(factsText(facts(s, assetRef(s.assets.find((a) => a.kind === 'generator')!), 'elec'))).toContain(`Fuel: the 150 gal sub-base tank topped up after each test run: about ${hours} h at this week's test-run load (${amps} A).`);
     const t3 = island(4, 70, 3);
     expect(factsText(facts(t3, assetRef(t3.assets.find((a) => a.kind === 'generator')!), 'elec'))).toMatch(/Fuel: the 36 gal belly tank topped up after each test run: about \d+ h at this week's test-run load \(\d+ A\)\./);
-    expect(itemById('LOT-XFER')!.nomen).toMatch(/^Transfer switch lot: automatic transfer switch sized to the standby set, with load shed/);
+    expect(itemById('LOT-XFER')!.nomen).toMatch(/^Transfer switch lot: automatic transfer switch rated for the backed-up load, with load management for the standby set/);
     expect(itemById('LOT-XFER')!.nomen).not.toMatch(/manual/);
   });
 });
@@ -335,7 +338,8 @@ describe("the checks' physics (trades minors)", () => {
         like('office', 'dock');
       }
     }
-    expect(pairs).toBeGreaterThan(200);
+    // (review round 3: a feeder's load follows its houses and the branches fit under the main, so fewer like pairs)
+    expect(pairs).toBeGreaterThan(100);
     expect(wide).toBe(0);
     // the reviewers' repro: seed 20, week 9
     const s = island(20, 95, 3);
@@ -491,7 +495,10 @@ describe('the sheets (play-fun minors)', () => {
     const s = migrate(load('v4-e810cc5-early'));
     for (const role of ROLES) {
       const text = whatsNewMapPanels(s, role).map((p) => vtext(p.body)).join(' ');
-      expect(text).toContain("as what its source said (a guest's complaint, the pilot's squawk, the utility's log), passed on by you");
+      // (review round 3: only the sources that seat can pass on)
+      expect(text).toContain(
+        `as what its source said (${role === 'mech' ? "a guest's complaint, the utility's log" : role === 'elec' ? "the pilot's squawk" : "a guest's complaint, the pilot's squawk, the utility's log"}), passed on by you`,
+      );
       expect(text).toContain('a trade takes one a week from the other tech and one from the analyst');
       expect(text).not.toMatch(/in your name|receives at most one a week/);
       if (role === 'mech') expect(text).toContain('its condition, the next 100-hr');

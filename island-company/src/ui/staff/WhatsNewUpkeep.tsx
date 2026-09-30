@@ -18,7 +18,8 @@ const UL = ({ items }: { items: preact.ComponentChildren[] }) => (
 
 /** the panel for this seat on this island ([] on a new island's first week) */
 export function whatsNewUpkeepPanels(s: IslandState, role: Role): WhatsNewPanel[] {
-  if (s.week <= 1) return [];
+  // (review round 3: an island before tier 3 is 10+ weeks from any of this: one line in the map's "Also in this update")
+  if (s.week <= 1 || s.tier < 3) return [];
   const elec = s.players.elec?.name ?? 'the electrician';
   const fin = s.players.fin?.name ?? 'the analyst';
   // a live island at the Harbor or the Resort got the service upgrade with this update (migrate.ts step 9)

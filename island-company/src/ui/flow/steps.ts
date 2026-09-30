@@ -693,6 +693,9 @@ export function siteWords(site: ElecSite | null, takeoff = false): string {
   // upgrade, review round 1; the site's own numbers are the old switch's)
   if (site.room === 'gen') return 'Generator house · the transfer switch and the backed-up circuits (their ratings on the generator’s sheet)';
   const room = { bath: 'Bathroom', kitchen: 'Kitchen', bedroom: 'Bedroom', living: 'Living room', laundry: 'Laundry', outdoor: 'Porch (wet location)', hall: 'Hall', panel: 'Distribution panel', spa: 'Spa pad (outdoors)', dock: 'Fuel dock', gen: 'Generator house' }[site.deviceRoom ?? site.room];
+  // an island-panel breaker an IR scan wrote up: as the breaker schedule reads it (review round 3: the main read as a
+  // "15 A breaker, 14 AWG")
+  if (site.cond) return `${room} · ${site.what ?? 'Breaker'} ${site.amps} A · ${site.cond}`;
   // a non-breaking hyphen: "NM-B" never splits at the end of a line
   const wire = site.run === 'buried' ? 'underground' : site.run === 'nm' ? 'NM\u2011B' : '';
   // the circuit's own equipment when it isn't the room's (the water heater's 2-pole, not the bathroom's)
@@ -740,6 +743,8 @@ export function siteAnswer(s: IslandState, a: Alert, t: Task): string | undefine
     case 'ref:3way':
       return `this circuit: ${site.amps} A, ${site.awg} AWG: ${site.awg === 14 ? '14/3' : '12/3'} for the travelers; two 12/3 cables and a device need 20.25 cu in of box.`;
     case 'ref:deadckt':
+      // (review round 3: a feeder's or the main's hot lug from an IR scan is no KP branch breaker's job)
+      if (site.cond) return `this breaker: ${site.what ?? 'the breaker'} ${site.amps} A on ${site.cond}: a hot lug is re-terminated and torqued to the listing (110.14(D)), no branch breaker in it.`;
       return `this circuit: ${site.amps} A, ${site.awg} AWG: if it's the breaker, a 1-pole ${site.amps} A KP breaker (listed for the panel).`;
     case 'ref:feeder':
       return 'four direct-burial splice kits: L1, L2, N and the EGC (split bolts and tape are not listed for burial).';

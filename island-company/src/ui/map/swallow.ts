@@ -25,3 +25,39 @@ export function armClickSwallow(w: Target = window, ms = 450, later: (f: () => v
   later(off, ms);
   return off;
 }
+
+/**
+ * The second tap of a double tap on an object (stage 2 review round 3). An object's tap opens its sheet at once (snappy),
+ * so the second tap of a double tap landed on that sheet or its scrim: the sheet blinked shut and the map never zoomed
+ * (on about half of an island's area at the whole-island view: every object). Armed by an object tap: the next
+ * pointerdown of the same kind within `ms` and `px` of it, wherever it lands, is the map's: it's eaten (and its click)
+ * and `onDouble` runs (the view closes the sheet and zooms x2 about the point). Any other pointerdown, or `ms`
+ * passing, disarms it.
+ */
+export function armObjectDouble(
+  at: { x: number; y: number },
+  kind: string,
+  onDouble: () => void,
+  o: { w?: Target; ms?: number; px?: number; later?: (f: () => void, ms: number) => unknown } = {},
+): () => void {
+  const w = o.w ?? window;
+  let on = true;
+  const off = () => {
+    if (!on) return;
+    on = false;
+    w.removeEventListener('pointerdown', down as EventListener, true);
+  };
+  const down = (e: PointerEvent) => {
+    off();
+    const same = (e.pointerType === 'mouse') === (kind === 'mouse');
+    if (!same || Math.hypot(e.clientX - at.x, e.clientY - at.y) > (o.px ?? 30)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    // (its click would land on what the first tap opened: a button on a tall sheet, or the scrim)
+    armClickSwallow(w);
+    onDouble();
+  };
+  w.addEventListener('pointerdown', down as EventListener, true);
+  (o.later ?? ((f, t) => setTimeout(f, t)))(off, o.ms ?? 300);
+  return off;
+}

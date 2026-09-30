@@ -3,7 +3,8 @@
 //   npm run balance                       # summary over 26 weeks x 30 seeds, with the job flow's columns and a timing line
 //   npm run balance -- detail [team] [n]  # week by week for one seed
 //   npm run balance -- robust             # the two target teams over 90 seeds x 4 re-rolled crews (slow, a few minutes);
-//                                         # its 26-week columns as before, plus the long game's (52 weeks: games below $0 in weeks 24-52, credits by week 45)
+//                                         # its 26-week columns as before, plus the long game's (52 weeks: games below $0 in weeks 24-52, credits by week 45);
+//                                         # and a third row, `flag weekly` (the three friends reporting a problem from every seat every week)
 //   npm run balance -- long [78]          # the long game (docs/EXPANSION.md 11.1 T1): every team over 52 weeks x 30 seeds, no network;
 //                                         # its money table (T1) and a trajectory table (does the Resort hold: houses rentable at
 //                                         # weeks 40 and 52, revenue against budget, the cash slope). `long 78` plays 78 weeks and
@@ -51,6 +52,17 @@ const arg = process.argv[2];
 /** a team as the run plays it: with checks=off, no bot makes a quick check or a flag */
 const crew = (t: Team): Team =>
   checksOff ? { mech: { ...t.mech, checks: false, flags: false }, elec: { ...t.elec, checks: false, flags: false }, fin: { ...t.fin, checks: false, flags: false } } : t;
+/**
+ * stage 2 review round 3: the three friends using Report a problem as What's new invites it ("one a week each"): every
+ * seat, every week it can, flags the lowest-health asset it may (Bot.flagWeekly). A robust row, so what weekly
+ * reporting costs is measured: the bots' own analyst flags only a house under 60 with nothing open (0.5 flags a game)
+ */
+const FLAG_WEEKLY = 'flag weekly';
+const teamOf = (name: string): Team => {
+  if (name !== FLAG_WEEKLY) return TEAMS[name];
+  const t = TEAMS['three friends'];
+  return { mech: { ...t.mech, flagWeekly: true }, elec: { ...t.elec, flagWeekly: true }, fin: { ...t.fin, flagWeekly: true } };
+};
 if (checksOff) console.log('(checks=off: no quick checks or flags)');
 
 const usd = (n: number) => (n < 0 ? '-' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
@@ -237,7 +249,7 @@ if (arg === 'detail') {
   console.log(`\nRobustness: ${WEEKS} weeks x 90 seeds x 4 crews per team (and the long game: ${LONG} weeks)\n`);
   console.log(`team            crew  wk→T5  miss T5  weeks<0  min cash  defect/wk  latency  AOG wk  fill%  long<0 wk${LONG_FROM}+  credits≤${CREDITS_BY}`);
   // (env ROBUST_TEAMS=a,b and SALTS=-,a run a part of the sweep, for parallel runs; '-' is the unsalted crew)
-  for (const name of process.env.ROBUST_TEAMS?.split(',') ?? ['three friends', 'all average']) {
+  for (const name of process.env.ROBUST_TEAMS?.split(',') ?? ['three friends', 'all average', FLAG_WEEKLY]) {
     for (const salt of process.env.SALTS?.split(',').map((x) => (x === '-' ? '' : x)) ?? ['', 'a', 'b', 'c']) {
       const t5: number[] = [];
       let neg = 0;
@@ -251,7 +263,7 @@ if (arg === 'detail') {
       let credits = 0;
       for (let seed = 1; seed <= 90; seed++) {
         const { f, trace } = flowTrace();
-        const { g, weeks } = longGame(crew(TEAMS[name]), seed, salt, (s) => {
+        const { g, weeks } = longGame(crew(teamOf(name)), seed, salt, (s) => {
           if (s.week - 1 <= WEEKS) trace(s);
         });
         t5.push(g.t5 <= WEEKS ? g.t5 : 99);
@@ -274,6 +286,7 @@ if (arg === 'detail') {
     }
   }
   console.log(`\nlong<0: games ever below $0 in weeks ${LONG_FROM}-${LONG}; credits: games that reach the credits (8 full-crew A weeks at the Resort, none below A) by week ${CREDITS_BY}.`);
+  console.log(`${FLAG_WEEKLY}: the three friends with every seat flagging the lowest-health asset it may, every week it can (review round 3: Report a problem used as What's new invites it).`);
 } else if (arg === 'long') {
   // the long game (docs/EXPANSION.md 11.1 T1): does the Resort hold? 52 weeks x 30 seeds, no network, every team
   console.log(`\nThe long game: ${LONG_MAX} weeks x ${SEEDS} seeds per team (weeks ${LONG_FROM}-${LONG} judged; medians unless noted)\n`);

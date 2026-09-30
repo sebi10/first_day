@@ -127,7 +127,19 @@ export function IslandScreen({ islandRef }: { islandRef: IslandRef }) {
 
   return (
     <div class={`${reduce ? 'reduce-motion' : ''} ${lefty}`}>
-      {tab === 'island' && <Home ctl={ctl} onPlay={onPlay} onSeat={() => setHandoff(role)} onGse={setGse} onObject={(o) => (o.kind === 'cart' ? setGse(o.id) : setInspect(o))} />}
+      {tab === 'island' && (
+        <Home
+          ctl={ctl}
+          onPlay={onPlay}
+          onSeat={() => setHandoff(role)}
+          onGse={setGse}
+          onObject={(o) => (o.kind === 'cart' ? setGse(o.id) : setInspect(o))}
+          onDismiss={() => {
+            setInspect(null);
+            setGse(undefined);
+          }}
+        />
+      )}
       {tab === 'board' && <Board ctl={ctl} onReview={setReview} />}
       {tab === 'me' && <Me ctl={ctl} onLeave={() => (location.hash = '#/')} />}
 
@@ -230,7 +242,7 @@ function Loading({ text, back }: { text: string; back?: boolean }) {
   );
 }
 
-function Home({ ctl, onPlay, onSeat, onGse, onObject }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void; onGse(cart: string | null): void; onObject(o: ObjectRef): void }) {
+function Home({ ctl, onPlay, onSeat, onGse, onObject, onDismiss }: { ctl: Ctl; onPlay(o: Order, cover?: boolean): void; onSeat(): void; onGse(cart: string | null): void; onObject(o: ObjectRef): void; onDismiss(): void }) {
   const { s, role, ref, sync } = ctl;
   const r = role!;
   // the map's view (the seat's zone, the builders' site, the whole island) lives in MapView (B); the builders' line
@@ -279,7 +291,7 @@ function Home({ ctl, onPlay, onSeat, onGse, onObject }: { ctl: Ctl; onPlay(o: Or
 
         {/* the builders' line scrolls the map back into view on a phone, with the island's header above it */}
         <div ref={wrap} style={{ scrollMarginTop: 75 }}>
-          <MapView s={s} role={r} onObject={onObject} onCart={(id) => onGse(id)} go={go} />
+          <MapView s={s} role={r} onObject={onObject} onCart={(id) => onGse(id)} onDismiss={onDismiss} go={go} />
         </div>
 
         <div class="team">

@@ -7,7 +7,7 @@
 import { liveAlerts } from '../../sim/alerts';
 import { flowStage } from '../../sim/flow';
 import type { Alert, OpsRole, Order } from '../../sim/types';
-import { chainStepOrder, openTarget, revenueMoves, yourMoves } from '../select';
+import { chainStepOrder, openTarget, quickCheckMove, revenueMoves, yourMoves } from '../select';
 import type { Ctl } from '../useIsland';
 import { Icon } from '../kit';
 import { AlertRow } from './AlertRow';
@@ -29,7 +29,9 @@ export function YourMove({ ctl, role }: { ctl: Ctl; role: OpsRole }) {
   // the week's revenue work that isn't an alert: the load sheet, a ground power start
   const revenue = revenueMoves(s, role);
   const ended = !!s.turns[role]?.ended;
-  const n = rows.length + checks.length + revenue.length;
+  // the week's quick check while it's open (review round 3): one line, to the object's sheet
+  const qc = quickCheckMove(s, role);
+  const n = rows.length + checks.length + revenue.length + (qc ? 1 : 0);
   // a row in the research branch opens the chain's step itself (the IPC, the logbooks), not the job sheet
   const openRow = (a: Alert) => {
     const step = flowStage(s, a) === 'research' ? chainStepOrder(s) : null;
@@ -92,6 +94,22 @@ export function YourMove({ ctl, role }: { ctl: Ctl; role: OpsRole }) {
             {rows.map(({ alert: a }) => (
               <AlertRow key={a.id} s={s} a={a} me={role} held={ended} quiet onOpen={() => openRow(a)} onStart={() => (a.order ? openTarget({ order: a.order }) : startAlert(a.id))} />
             ))}
+            {qc && (
+              <div class="jf-arow mine rev" role="listitem">
+                <button class="jf-arow-main" onClick={() => openTarget({ object: qc.ref })}>
+                  <span class="jf-src utility">
+                    <Icon name={role === 'mech' ? 'plane' : 'meter'} size={20} />
+                  </span>
+                  <span class="col grow" style={{ gap: 3, minWidth: 0 }}>
+                    <span class="jf-arow-sym">{qc.label}</span>
+                    <span class="jf-arow-meta">
+                      <span class="label">{qc.sub}</span>
+                    </span>
+                  </span>
+                  <span class="jf-move mine">This week</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

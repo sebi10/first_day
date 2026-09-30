@@ -24,7 +24,7 @@ import { MapController } from './controller';
 import { fingersOn, TAP, type PointerKind } from './gestures';
 import { bubbleSpot, hitTest, hotspots, inView, type Hotspot } from './hotspots';
 import { LAYOUTS } from './layouts';
-import { armClickSwallow } from './swallow';
+import { armClickSwallow, armObjectDouble } from './swallow';
 import './map.css';
 
 export type Preset = 'zone' | 'site' | 'all';
@@ -46,6 +46,8 @@ export type MapProps = {
   phase?: Phase;
   /** reduced motion (default: the setting) */
   reduceMotion?: boolean;
+  /** a double tap on an object (review round 3): close the sheet its first tap opened, the map zooms instead */
+  onDismiss?: () => void;
 };
 
 const lsGet = (k: string) => {
@@ -380,7 +382,18 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
     const l = lim();
     const atMax = c.k >= l.kMax - 1e-3;
     const res = hitTest(spots(), toScene(c, at, v), pxPerUnit(c, v), atMax);
-    if ('hit' in res) return open(res.hit.ref);
+    if ('hit' in res) {
+      open(res.hit.ref);
+      // its sheet is open at once; a second tap here within the double-tap window closes it and zooms x2 about the
+      // point, as on empty ground (review round 3: it landed on the new sheet's scrim, which blinked shut)
+      armObjectDouble({ x: at[0] + rect.current.left, y: at[1] + rect.current.top }, kind, () => {
+        cur.current.p.onDismiss?.();
+        fx.tap();
+        const now = ctl.cam;
+        ctl.go(now.k >= lim().kMax - 1e-3 ? presetCam('all') : zoomAt(now, at, 2, v, HOME_SCENE, lim()));
+      }, { ms: TAP.dblMs, px: TAP.dblObjPx });
+      return;
+    }
     if ('zoom' in res) {
       fx.tap();
       return ctl.go(zoomAt(c, at, 2, v, HOME_SCENE, l));
@@ -583,7 +596,8 @@ function MapBody(p: MapProps & { host: HTMLElement; slot: HTMLElement }) {
         ) : (
           !explore && (
             <span class="island-hint">
-              {weather} · {verb} anything · ground: {atAll ? (role ? 'your zone' : 'zoom') : 'whole island'}
+              {/* (review round 3: say what a tap on the ground does: it toggles your zone and the whole island) */}
+              {weather} · {verb} anything · {verb} ground: {role ? 'zone ↔ all' : atAll ? 'zoom' : 'whole island'}
             </span>
           )
         )}

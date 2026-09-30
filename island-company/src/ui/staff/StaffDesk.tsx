@@ -382,7 +382,11 @@ function Builds({ ctl, onCottage }: { ctl: Ctl; onCottage(): void }) {
                   ? `Rents about ${usd(plan.rent)} a week (a normal week's flights and bookings, averaged over the last 8 weeks)${plan.housekeeper ? `, with another housekeeper to turn it over (${usd(STAFF.wage.housekeeper)}/wk)` : ''}.`
                   : `At this week’s bookings it would sit empty: ${projectWeek(s).booked} of ${projectWeek(s).rentable} houses are booked.`}
               </span>
-              <span class="label">{plan.payback ? `Pays back in about ${plan.payback} weeks.` : 'More guests (more flights) would fill it.'} The builders start it after the tier’s own site work.</span>
+              {/* (review round 3: with no builder on the payroll it says so first, as the renovation card does) */}
+              {!s.staff?.some((n) => n.role === 'builder') && <span class="st-bad">No builder on the payroll: hire one first. The weeks count from when a builder starts.</span>}
+              <span class="label">
+                {plan.payback ? `Pays back in about ${plan.payback} weeks.` : 'More guests (more flights) would fill it.'} {s.staff?.some((n) => n.role === 'builder') ? 'The builders start it after the tier’s own site work.' : 'A builder starts it after the tier’s own site work.'}
+              </span>
               <Btn small kind="soft" onClick={onCottage} disabled={spendable(s) < COTTAGE_SHELL || s.receivership > 0}>
                 Start a cottage · {usd(COTTAGE_SHELL)}
               </Btn>

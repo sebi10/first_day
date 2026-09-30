@@ -25,6 +25,8 @@ export const TAP = {
   dblMs: 300,
   /** ... and this close on screen */
   dblPx: 24,
+  /** a double tap's second tap on the sheet an object's first tap opened: this close (review round 3; a finger lands wider than a pointer's point) */
+  dblObjPx: 30,
   /** a tap on empty ground acts after this, so a double tap can cancel it (5.1) */
   singleDelayMs: 250,
 };

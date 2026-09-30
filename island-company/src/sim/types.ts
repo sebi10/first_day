@@ -34,6 +34,18 @@ export interface Asset {
    * Absent: no spa circuit on record (live islands' houses before v5 too)
    */
   spa?: { amps: number; awg: number; week: number };
+  /**
+   * the generator (stage 2 review round 3): the transfer switch a transfer job put in before the Resort's upgrade, an
+   * automatic switch rated for the backed-up load (its feed breaker and conductors to match) with load management that
+   * holds the 60 A set to its rating (702.4(B)(2)(b)); `load` the backed-up load its take-off quoted. The generator
+   * house's and the island panel's schedules, the IR scans and the sheets read it. Absent: the 60 A switch as installed
+   */
+  xfer?: { amps: number; awg: string; load?: number; week: number };
+  /**
+   * the grid (stage 2 review round 3): the island panel's main once a panel upgrade is signed off (the 600 A panelboard
+   * the job's lot puts in). The breaker schedule and the IR scan read it. Absent: the 400 A main as built
+   */
+  panel?: { amps: number; awg: string; week: number };
 }
 
 export type OrderStatus = 'pending' | 'countered' | 'approved' | 'waiting_part' | 'ready' | 'done' | 'cancelled';
@@ -983,6 +995,8 @@ export interface Alert {
   by?: Role;
   /** stage 2 (src 'flag' on a plane): the pilot whose squawk the flagger passed on */
   via?: string;
+  /** stage 2 review round 3 (src 'flag'): passed on after the receiving tech had ended the turn (a hazard's made safe by the book at the resolve if they didn't come back to it) */
+  late?: true;
 }
 
 /** the resolve's review-line writer, shared with the staff hooks */
@@ -1105,8 +1119,8 @@ export interface ElecSite {
   room: 'bath' | 'kitchen' | 'bedroom' | 'living' | 'laundry' | 'outdoor' | 'hall' | 'panel' | 'spa' | 'dock' | 'gen';
   /** where the device the fix replaces sits, when it isn't the complaint's room (default: room) */
   deviceRoom?: ElecSite['room'];
-  /** the circuit's breaker as it is */
-  amps: 15 | 20 | 30 | 50 | 60 | 100;
+  /** the circuit's breaker as it is (the island panel's feeders and main too, from an IR scan's write-up) */
+  amps: 15 | 20 | 30 | 50 | 60 | 100 | 125 | 150 | 200 | 400 | 600;
   /** its conductors as they are */
   awg: 14 | 12 | 10 | 8 | 6 | 3;
   /** an individual branch circuit with a single receptacle (a microwave, a window unit) */
@@ -1124,4 +1138,10 @@ export interface ElecSite {
   what?: string;
   /** a 2-pole breaker (a 240 V load) */
   poles?: 1 | 2;
+  /**
+   * stage 2 review round 3: an island-panel breaker an IR scan wrote up (a feeder, the main): its conductors as the
+   * breaker schedule reads them ('2 × 250 kcmil Al', '#3 Cu'); `what` is its schedule label. Its words, its sizing and its
+   * teaching answer read these, never a branch circuit's AWG
+   */
+  cond?: string;
 }

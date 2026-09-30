@@ -333,10 +333,10 @@ describe('what a check shows: the wear coming, never s.defects (6.4)', () => {
     expect(told).toBeGreaterThan(20);
   });
 
-  it("the panel's main is read for its load: 82-95% continuous is the upgrade's tell", () => {
+  it("the panel's main is read for its load: 82-95% continuous is the upgrade's tell (from tier 4: review round 3, the feeders under it must carry that much)", () => {
     let found = 0;
     for (let seed = 1; seed <= 300; seed++) {
-      const s = island(seed, 60, 3);
+      const s = island(seed, 60, 4);
       const t = checkTruth(s, 'elec', 'g1', 5);
       const main = checkView(s, 'elec', 'g1')!.items.find((i) => i.id === 'main')!;
       if (t?.item === 'main') {

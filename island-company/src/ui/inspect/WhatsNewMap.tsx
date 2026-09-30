@@ -40,7 +40,7 @@ const SEAT_TAP: Record<Role, preact.ComponentChildren[]> = {
       <b>The grid:</b> what it feeds, the generator, the breaker schedule. <b>The generator:</b> the transfer switch and its fuel.
     </>,
     <>
-      <b>A plane:</b> an electrical check the mechanic asked of you. Or tell the mechanic what you saw.
+      <b>A plane:</b> an electrical check the mechanic asked of you. Or pass on what its pilot reported.
     </>,
   ],
   fin: [
@@ -51,7 +51,7 @@ const SEAT_TAP: Record<Role, preact.ComponentChildren[]> = {
       <b>A house:</b> its booking and the nightly rate, stepped from the sheet with this week's effect.
     </>,
     <>
-      <b>A staff figure:</b> hire this week's candidate for that job. <b>The office:</b> cash and runway.
+      <b>A staff figure:</b> what they cost and do; hire from the Hiring board. <b>The office:</b> cash and runway.
     </>,
   ],
 };
@@ -66,7 +66,7 @@ export function whatsNewMapPanels(s: IslandState, role: Role): WhatsNewPanel[] {
         <UL
           items={[
             <>
-              <b>Two fingers</b> to move and zoom (on a computer: Ctrl + scroll, and drag). <b>Double-tap</b> to zoom in.
+              <b>Two fingers</b> to move and zoom (on a computer: Ctrl + scroll, and drag). <b>Double-tap</b> to zoom in, on anything. <b>Tap the ground</b> for your zone or the whole island.
             </>,
             <>
               <b>The chips</b> jump to your zone, the build site or the whole island.
@@ -105,9 +105,12 @@ export function whatsNewMapPanels(s: IslandState, role: Role): WhatsNewPanel[] {
           </P>
         )}
         <P>
-          <b>Report a problem</b> on {role === 'mech' ? 'a house or the grid' : role === 'elec' ? 'a plane' : 'a plane, a house, the grid or the generator'}: it goes on that trade's alert list as what its source said (a guest's complaint, the pilot's squawk, the utility's log), passed on by you. One a week each; a trade takes one a week from the other tech and one from the analyst.
+          <b>Report a problem</b> on {role === 'mech' ? 'a house or the grid' : role === 'elec' ? 'a plane' : 'a plane, a house, the grid or the generator'}: it goes on that trade's alert list as what its source said (
+          {role === 'mech' ? "a guest's complaint, the utility's log" : role === 'elec' ? "the pilot's squawk" : "a guest's complaint, the pilot's squawk, the utility's log"}), passed on by you. It takes a slot the week's draw would have filled, so a trade whose list is full takes none: save it for what you're worried about. At most one a week each, and a trade takes one a week from the other tech and one from the analyst.
           {s.week < REPORT.fromWeek ? ` It opens in week ${REPORT.fromWeek}.` : ''} For the hangar, the office or anything else, message them from its sheet.
-          {role === 'elec' ? ' A hazard passed on to you closes the house at once, like any hazard: you can still make it safe after your turn.' : ''}
+          {role === 'elec'
+            ? " A hazard passed on to you closes the house at once, like any hazard: you can still make it safe after your turn, and if you don't, it's made safe by the book at the resolve."
+            : ` A guest's reported shock or burning smell closes the house at once, until ${s.players.elec?.name ?? 'the electrician'} makes it safe.`}
         </P>
       </>
     ),
@@ -119,7 +122,10 @@ export function whatsNewMapPanels(s: IslandState, role: Role): WhatsNewPanel[] {
         items={[
           'Your island carries on where it was: jobs, stock, cash and crew are all as you left them.',
           tech ? 'A quick check never tells you on the spot whether you were right: the closer look at Investigate does.' : 'A quick check is the techs’ own call: the review says what they wrote up, never whether it was right.',
-          'A walkaround write-up on a plane is an airworthiness item: close it before its due week, or the plane stays on the ground.',
+          // (review round 3: the mechanic's alone: the others never write up a walkaround)
+          ...(role === 'mech' ? ['A walkaround write-up on a plane is an airworthiness item: close it before its due week, or the plane stays on the ground.'] : []),
+          // (review round 3: an island before tier 3 gets the upkeep page when it matters, not a full page now)
+          ...(s.tier < 3 ? ['From the Harbor (tier 4): builder’s warranties on new buildings, a service upgrade and renovations. Their sheets explain them when they come.'] : []),
         ]}
       />
     ),

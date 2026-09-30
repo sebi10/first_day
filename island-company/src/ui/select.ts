@@ -1,6 +1,6 @@
 // UI-side derived data: who is blocking whom, what to launch for an order.
 import type { PuzzleId, PuzzleSite } from '../puzzles/types';
-import { alertFlags, alertShort, causeOf, liveAlerts, siteOf, soleGuest } from '../sim/alerts';
+import { alertFlags, alertShort, causeOf, liveAlerts, siteOf, soleGuest, symptomText } from '../sim/alerts';
 import { benchMove, chainMove, islandAircraft, manualCard, openChain } from '../sim/chain';
 import { externalPower } from '../sim/aircraft';
 import { CABLE_REPORT, ECON, FLOAT_AUCTION, GSE, LATE, MODELS, REPORT_BY_KEY, ROLE_LABEL } from '../sim/data';
@@ -15,12 +15,12 @@ import { spendable } from '../sim/ledger';
 import { taskById } from '../sim/tasks';
 import { ROLES, type Action, type Alert, type Asset, type IslandState, type OpsRole, type Order, type PartChain, type Role } from '../sim/types';
 import type { PuzzleLaunch } from './puzzlehost';
-import { flagCheck } from '../sim/checks';
-import { downtimeOf, houseRentable, houseWeekRevenue, rentFactor, tierDef } from '../sim/econ';
+import { canCheck, CHECK, checkKindFor, flagCheck } from '../sim/checks';
+import { closingHazard, downtimeOf, houseRentable, houseWeekRevenue, rentFactor, tierDef } from '../sim/econ';
 import { invValue, runway } from '../sim/ledger';
 import { binsInUse, binsTotal, carryCost } from '../sim/stock';
 import { INSURANCE, REPORTS } from '../sim/data';
-import { FIXTURE_NAME, isAssetRef, OBJECT_LABEL, type ObjectKind, type ObjectRef, type StationId } from './objects';
+import { assetRef, FIXTURE_NAME, isAssetRef, OBJECT_LABEL, type ObjectKind, type ObjectRef, type StationId } from './objects';
 import { buildSite, crewOf, openBuild } from '../sim/staff';
 
 /** `kind`: a cross-trade move (a crewmate's report, or the part chain), as crossMoves() lists them */
@@ -338,6 +338,35 @@ export function healthMarks(s: IslandState, a: Pick<Asset, 'kind'>): { at: numbe
 export type DockTarget = { alert: string } | { order: string } | { desk: 'approvals' | 'stock' | 'money' | 'staff'; at?: string } | { object: ObjectRef };
 
 /**
+ * The week's quick check while it's still open (review round 3: once What's new was dismissed nothing on Home said so,
+ * and the early catch, a tier cheaper, only works if the friends remember it every week): the mechanic's walkaround on
+ * the plane in the worst condition, the electrician's IR scan on the grid (under 70) or the meter check on the worst
+ * house. null once it's done, before the checks open, or after the turn
+ */
+export function quickCheckMove(s: IslandState, role: Role): { label: string; sub: string; ref: ObjectRef; end: string } | null {
+  if (role === 'fin' || s.turns[role]?.ended || s.checked?.[role] === s.week || s.tier < CHECK.fromTier || s.week < 1) return null;
+  const can = s.assets.filter((a) => checkKindFor(s, role, a) && canCheck(s, role, a.id).ok);
+  if (!can.length) return null;
+  const worst = (xs: Asset[]) => xs.reduce((m, x) => (x.health < m.health ? x : m));
+  if (role === 'mech') {
+    const ps = can.filter((a) => a.kind === 'plane');
+    const a = ps.length ? worst(ps) : worst(can);
+    const w = `${a.name} (${a.kind === 'plane' ? 'condition' : 'reliability'} ${Math.round(a.health)})`;
+    return { label: 'Walkaround: one a week', sub: `Worst: ${a.name} (${Math.round(a.health)})`, ref: assetRef(a), end: `Your walkaround is still open this week: the worst plane is ${w}. An early catch plays a tier cheaper.` };
+  }
+  const grid = can.find((a) => a.kind === 'grid' && a.health < 70);
+  const houses = can.filter((a) => a.kind === 'house');
+  const a = grid ?? (houses.length ? worst(houses) : worst(can));
+  const w = `${a.name} (reliability ${Math.round(a.health)})`;
+  return {
+    label: 'IR scan or meter check: one a week',
+    sub: `Worst: ${a.name} (${Math.round(a.health)})`,
+    ref: assetRef(a),
+    end: `Your quick check is still open this week: the grid's IR scan or a house's meter check (the worst: ${w}). An early catch plays a tier cheaper.`,
+  };
+}
+
+/**
  * This week's work that earns the week's money but isn't an alert (16): the charter load sheet (no sheet, half a
  * plane's charters stay on the ramp) and a ground power start on a weak battery (no cart on it, its first flight is
  * lost). Your move, the Dock and End turn show it with what skipping it costs.
@@ -450,6 +479,9 @@ export function endTurnChecks(s: IslandState, role: Role): EndCheck[] {
   }
   // the week's revenue work, by what skipping it costs (a weak battery's start: home's cart line says it)
   for (const m of revenueMoves(s, role).filter((x) => x.order.kind === 'wb')) out.push({ text: m.cost, urgent: true });
+  // the week's quick check, still open (review round 3)
+  const qc = quickCheckMove(s, role);
+  if (qc) out.push({ text: qc.end, urgent: false });
   return out.sort((x, y) => Number(y.urgent) - Number(x.urgent));
 }
 
@@ -581,6 +613,19 @@ export function pushes(before: IslandState, after: IslandState, a: Action): { ti
     const al = after.alerts?.find((x) => x.id === a.alert);
     const where = al ? after.assets.find((x) => x.id === al.assetId)?.name : undefined;
     if (al) push(`${after.name}: ${name(al.role)}, plan it`, `${name('fin')}: ${where ?? 'the asset'}'s ${alertShort(after, al)} is due week ${al.due}. Plan it so the parts come in time.`);
+  }
+  // a crewmate's flag (review round 3): the receiver hears of it, and a guest's reported shock that shuts a house says so
+  // (the electrician can make it safe that night; round 2's fairness rested on it, and nothing told them)
+  if (a.t === 'flag') {
+    const al = (after.alerts ?? []).find((x) => x.src === 'flag' && !(before.alerts ?? []).some((y) => y.id === x.id));
+    const where = al ? after.assets.find((x) => x.id === al.assetId) : undefined;
+    if (al && where) {
+      const shut = where.kind === 'house' && closingHazard(after, where.id)?.id === al.id;
+      const tail = shut
+        ? ` ${where.name} is closed until it's made safe${after.turns[al.role]?.ended ? ': you can still do it tonight' : ''}.`
+        : ` It's on your list, due week ${al.due}.`;
+      push(`${after.name}: ${name(al.role)}, a report`, `${symptomText(after, al)}${tail}`);
+    }
   }
   // a report raised mid-week (a cart's cable written up at an inspection), or one closed out: tell the other trade
   for (const m of fresh) push(`${after.name}: ${name(m.waits)} reports`, `${m.what.charAt(0).toUpperCase() + m.what.slice(1)}. ${name(m.who)}, your move.`);

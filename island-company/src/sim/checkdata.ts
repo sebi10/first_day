@@ -6,6 +6,7 @@
 // reads it is checks.ts. Tune here.
 import type { PlaneModel } from './aircraft';
 import type { Cause, Symptom } from './alerts';
+import type { ElecSite } from './types';
 
 export type CheckKind = 'walkaround' | 'ir' | 'meter';
 
@@ -21,6 +22,8 @@ export const WALK_ZONES: Record<PlaneModel | 'gen', { id: WalkZone; label: strin
     { id: 'lmain', label: 'L main' },
     { id: 'lnac', label: 'L nacelle' },
     { id: 'root', label: 'Wing root' },
+    // (review round 3: the controls, hinges, trim tab and static wicks are a stop on any preflight, the twin's too)
+    { id: 'tail', label: 'Empennage' },
     { id: 'rnac', label: 'R nacelle' },
     { id: 'rmain', label: 'R main' },
   ],
@@ -234,7 +237,8 @@ export const GEN_PANEL: IrBreaker[] = [
   { id: 'xferG', label: 'Transfer switch, generator-side lugs', amps: 60, awg: '#6 Cu', from: 3 },
   { id: 'xferL', label: 'Transfer switch, load-side lugs', amps: 60, awg: '#6 Cu', from: 3 },
   { id: 'genbrk', label: 'Generator main breaker', amps: 60, awg: '#6 Cu', from: 3 },
-  { id: 'xferU', label: 'Transfer switch, utility-side lugs (open)', amps: 60, awg: '#6 Cu', from: 3 },
+  // (review round 3: the contacts are open on the utility side, not the lugs: they're live)
+  { id: 'xferU', label: 'Transfer switch, utility side (contacts open)', amps: 60, awg: '#6 Cu', from: 3 },
 ];
 
 /**
@@ -243,14 +247,39 @@ export const GEN_PANEL: IrBreaker[] = [
  * electrician read; the IR scan and the generator sheet still showed the 60 A switch
  */
 export const GEN_UPGRADE = { amps: 200, awg: '3/0 Cu', words: 'a 200 A automatic transfer switch' };
-/** the generator house's schedule as installed: before the Resort's upgrade, or after it */
-export const genPanel = (upgraded: boolean): IrBreaker[] => (upgraded ? GEN_PANEL.map((b) => ({ ...b, amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg })) : GEN_PANEL);
+/**
+ * a transfer job before the Resort (review round 3; Asset.xfer): the houses' backed-up load (64-78 A) outgrew the 60 A
+ * switch, so the switch goes up to one rated for that load, its feed breaker and conductors to match (#3 Cu: 100 A at
+ * 75 °C, Table 310.16), with load management holding the 60 A set to its rating (702.4(B)(2)(b)). Load management sizes
+ * the standby source, never the transfer equipment: on the utility the switch still carries the whole backed-up load
+ * (round 2's "sized to the set" left a 60 A switch and feed carrying 64-78 A every day)
+ */
+export const XFER_UP = { amps: 100, awg: '#3 Cu' };
+/** a panel upgrade signed off (review round 3; Asset.panel): the job's lot is a 600 A panelboard, its main on two parallel sets of 500 kcmil Al (310 A each at 75 °C) */
+export const MAIN_UP = { amps: 600, awg: '2 × 500 kcmil Al' };
+type Rating = { amps: number; awg: string };
+/** the generator house's schedule as installed: the set's own switch, a transfer job's (xfer: its switch; the set's main stays 60 A), or the Resort's upgrade */
+export const genPanel = (upgraded: boolean, xfer?: Rating): IrBreaker[] =>
+  upgraded ? GEN_PANEL.map((b) => ({ ...b, amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg })) : xfer ? GEN_PANEL.map((b) => (b.id === 'genbrk' ? b : { ...b, amps: xfer.amps, awg: xfer.awg })) : GEN_PANEL;
 /**
  * the island panel's schedule as installed: after the Resort's upgrade its transfer-switch feed is sized for the new
  * 200 A switch too (review round 2: it still read 60 A on #6 while the switch it feeds was 200 A, a feed breaker that
- * would trip on retransfer)
+ * would trip on retransfer); after a transfer job, for its switch (xfer); after a panel upgrade, the 600 A main (main)
  */
-export const homePanel = (upgraded: boolean): IrBreaker[] => (upgraded ? HOME_PANEL.map((b) => (b.id === 'xfer' ? { ...b, amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg } : b)) : HOME_PANEL);
+export const homePanel = (upgraded: boolean, xfer?: Rating, main?: Rating): IrBreaker[] =>
+  HOME_PANEL.map((b) => (b.id === 'xfer' && (upgraded || xfer) ? { ...b, ...(upgraded ? { amps: GEN_UPGRADE.amps, awg: GEN_UPGRADE.awg } : { amps: xfer!.amps, awg: xfer!.awg }) } : b.id === 'main' && main ? { ...b, amps: main.amps, awg: main.awg } : b));
+/**
+ * the houses each feeder serves (review round 3: a feeder's load follows what it feeds; the builders' extra cottages
+ * are on the west feeder)
+ */
+export const FEEDS: Record<string, string[]> = { cfeedE: ['h1', 'h2'], cfeedW: ['h3', 'h4'], villas: ['h5', 'h6'], lodge: ['h7'] };
+/** a panel breaker's write-up site (review round 3): its rating and its conductors as the schedule reads them, never a random branch circuit's 15 A on 14 AWG */
+export function panelSite(b: Rating & { label: string }): Pick<ElecSite, 'amps' | 'awg' | 'cond' | 'what' | 'poles'> {
+  const n = /^#(\d+) Cu$/.exec(b.awg);
+  // (the branch tables stop at #3: a heavier conductor's numeric AWG is a placeholder, `cond` says what it is)
+  const awg = (n && [14, 12, 10, 8, 6, 3].includes(Number(n[1])) ? Number(n[1]) : 3) as ElecSite['awg'];
+  return { amps: b.amps as ElecSite['amps'], awg, cond: b.awg, what: b.label, poles: b.amps > 20 ? 2 : 1 };
+}
 
 /** the IR scan's scope: which breakers a kind's tell can show on */
 export const IR_SCOPE: Record<string, { on: 'branch' | 'main' | 'xfer' }> = {
@@ -333,7 +362,7 @@ const PLANE_ZONES: Partial<Record<WalkZone, PlaneModel[]>> = {
   rnac: ['twin'],
   cowl: ['cargo', 'float'],
   root: ['twin', 'cargo', 'float'],
-  tail: ['cargo', 'float'],
+  tail: ['twin', 'cargo', 'float'],
   lfloat: ['float'],
   rfloat: ['float'],
 };
@@ -387,10 +416,13 @@ function irRows(): Symptom[] {
     const key = checkRowKey('ir', b.id);
     const word = `${midWord(b.label)} breaker`;
     CHECK_ROWS[key] = { kind: 'ir', item: b.id, word };
+    // the job's site is the breaker the scan read, its rating and conductors (review round 3: it fell through to a random
+    // 15 A on 14 AWG or 20 A on 12 AWG branch circuit for the 400 A main). As built: siteOf reads the installed schedule
+    const site = panelSite(b);
     const causes: Cause[] =
       b.id === 'main'
-        ? [{ kind: 'panelUp', w: 1, fix: 'ref:panel', finding: 'Logged over the afternoon: the main carries 82-95% of its rating for three hours and more; the bus lugs are at their limit. Plan the panel upgrade.' }]
-        : [{ kind: 'xfmr', w: 1, fix: 'ref:deadckt', finding: `The ${midWord(b.label)} breaker's lug is loose and discoloured, running hot for its load. Re-terminate it; check the breaker.` }];
+        ? [{ kind: 'panelUp', w: 1, fix: 'ref:panel', site, finding: 'Logged over the afternoon: the main carries 82-95% of its rating for three hours and more; the bus lugs are at their limit. Plan the panel upgrade.' }]
+        : [{ kind: 'xfmr', w: 1, fix: 'ref:deadckt', site, finding: `The ${midWord(b.label)} breaker's lug is loose and discoloured, running hot for its load. Re-terminate it and torque it to the listing; check the breaker.` }];
     out.push({
       key,
       role: 'elec',
@@ -402,12 +434,12 @@ function irRows(): Symptom[] {
       lead: [1, 2],
       auto: true,
       causes,
-      nff: [{ w: 1, finding: `Re-scanned at the same load: the ${word} runs as its load predicts. Nothing to open up.` }],
+      nff: [{ w: 1, site, finding: `Re-scanned at the same load: the ${word} runs as its load predicts. Nothing to open up.` }],
     });
   }
   for (const b of GEN_PANEL) {
     const key = checkRowKey('ir', b.id);
-    const word = midWord(b.label).replace(/ \(open\)$/, '');
+    const word = midWord(b.label).replace(/ \(contacts open\)$/, '');
     CHECK_ROWS[key] = { kind: 'ir', item: b.id, word };
     const causes: Cause[] =
       b.id === 'xferG' || b.id === 'xferL'
@@ -424,7 +456,8 @@ function irRows(): Symptom[] {
       lead: [1, 2],
       auto: true,
       causes,
-      nff: [{ w: 1, finding: `Re-scanned during the next test run: the ${word} runs as it should for its load. Nothing to open up.` }],
+      // (review round 3: "the transfer switch, generator-side lugs runs": the lugs run)
+      nff: [{ w: 1, finding: `Re-scanned during the next test run: the ${word} ${/lugs$/.test(word) ? 'run' : 'runs'} as ${/lugs$/.test(word) ? 'they' : 'it'} should for the load. Nothing to open up.` }],
     });
   }
   return out;
@@ -454,7 +487,8 @@ function meterRows(): Symptom[] {
       lead: [1, 2],
       auto: true,
       causes,
-      nff: [{ w: 1, rooms: [c.room], finding: `Re-tested with the load on: the ${word} reads as its run should. Nothing to replace.` }],
+      // (review round 3: the circuit's site on the no-fault finding too: a bedroom's read 20 A on 12 AWG a third of the time)
+      nff: [{ w: 1, rooms: [c.room], site, finding: `Re-tested with the load on: the ${word} reads as its run should. Nothing to replace.` }],
     });
   }
   const key = checkRowKey('meter', SERVICE_ID);

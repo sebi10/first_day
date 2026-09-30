@@ -6,7 +6,8 @@ import { capOf, closingHazard, genUpgraded, houseBlocker, underWarranty } from '
 import { helperQueues } from '../../sim/engine';
 import { itemById, priceAt } from '../../sim/items';
 import { nextTierProgress } from '../../sim/progression';
-import { buildDef, buildSite, crewOf, nextUnit, openBuild, pilotSeats, renoAgainFrom, renoOpen, STAFF, unitLines, working } from '../../sim/staff';
+import { buildDef, buildSite, crewOf, nextUnit, openBuild, pilotSeats, renoAgainFrom, renoOpen, renoShort, STAFF, unitLines, working } from '../../sim/staff';
+import { spendable } from '../../sim/ledger';
 import type { Asset, Build, IslandState, ItemId, Npc, NpcRole, Role } from '../../sim/types';
 
 /** building materials by their short names (the catalog's are the yard's full descriptions) */
@@ -37,11 +38,20 @@ export function doingNow(s: IslandState, n: Npc): string {
     const parts: string[] = [];
     let seated = 0;
     for (const p of s.assets.filter((a) => a.kind === 'plane')) {
-      const seat = (seats.get(p.id) ?? []).find((x) => x.npc.id === n.id)?.n ?? 0;
+      const list = seats.get(p.id) ?? [];
+      const seat = list.find((x) => x.npc.id === n.id)?.n ?? 0;
       if (!seat) continue;
       seated += seat;
-      // the plane's own week: the weather and a plane on the ground (review round 1: the pilot flew 5 in a windy week the plane flew 4)
-      const k = Math.min(seat, capOf(s, p));
+      // the plane's own week: the weather and a plane on the ground (review round 1: the pilot flew 5 in a windy week the
+      // plane flew 4), shared across its seats in order (review round 3: two pilots on one plane each capped at its
+      // flights flew more between them than it did): the first takes up to their seat, the next what's left
+      let left = capOf(s, p);
+      let k = 0;
+      for (const x of list) {
+        const got = Math.min(x.n, left);
+        left -= got;
+        if (x.npc.id === n.id) k = got;
+      }
       parts.push(k ? `${p.name}: ${plural(k, 'flight')}` : `${p.name}: on the ground`);
     }
     if (!seated) return n.skill < STAFF.guestMinSkill && !s.assets.some((a) => a.kind === 'plane' && a.model === 'cargo') ? 'cargo runs only: no cargo plane yet' : 'a spare: every flight has a pilot';
@@ -236,7 +246,11 @@ export function renoStatus(s: IslandState, h: Asset, me?: Role): Said | null {
       // (review round 2: the last builder let go mid-renovation left it "the builders are on it", closed with no end)
       return noBuilder
         ? { text: `Closed for its renovation, waiting for a builder: none on the payroll${me === 'fin' ? ' (hire one on the Staff desk)' : ''}, ${units(b.done)} of ${b.need} units done. No guests until a builder finishes it and it passes its final.`, tone: 'rust' }
-        : { text: `Closed for its renovation: the builders are on it (${units(b.done)} of ${b.need} units). No guests meanwhile, and it doesn't wear.`, tone: 'rust' };
+        : renoShort(s, true).length && spendable(s) < renoShort(s, true).reduce((n, l) => n + (itemById(l.item) ? priceAt(itemById(l.item)!) * l.qty : 0), 0)
+          ? // (review round 3: a started renovation's next materials that can't be bought: the house would sit closed unsaid.
+            // They go through the stock freeze down to $0, and the receiver funds them from its allowance)
+            { text: `Closed for its renovation, ${units(b.done)} of ${b.need} units done: its next materials wait for the cash (a started renovation's go through the stock freeze, down to $0${s.receivership > 0 ? ', and the receiver funds them from its allowance' : ''}). No guests until they're in and it passes its final.`, tone: 'rust' }
+          : { text: `Closed for its renovation: the builders are on it (${units(b.done)} of ${b.need} units). No guests meanwhile, and it doesn't wear.`, tone: 'rust' };
     const ahead = openBuild(s);
     const wait = noBuilder
       ? `waiting for a builder (none on the payroll${me === 'fin' ? ': hire one on the Staff desk' : ''})`

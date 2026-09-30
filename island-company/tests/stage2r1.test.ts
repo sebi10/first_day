@@ -219,11 +219,13 @@ describe('Report a problem: relayed, never in the flagger’s words', () => {
       expect(closingHazard(s, h.id)?.id).toBe(al.id);
       expect(houseBlocker(s, house(s, h.id))).toBe('hazard');
       expect(houseRentable(s, house(s, h.id))).toBe(false);
-      // unmade safe, that night's review says it's closed
+      // unmade safe by the resolve: made safe by the book, as autopilot would for an away seat (review round 3: a
+      // present electrician was worse off than an absent one)
       const W = s.week;
       const t = resolveWeek(structuredClone(s));
       const rep = t.history.find((r) => r.week === W)!;
-      expect(rep.lines.some((l) => new RegExp(`${h.name} closed: .*make it safe`).test(l.text))).toBe(true);
+      expect(rep.lines.some((l) => new RegExp(`${h.name} closed: .*make it safe`).test(l.text))).toBe(false);
+      expect(rep.lines.some((l) => new RegExp(`made ${h.name} safe by the book`).test(l.text))).toBe(true);
       // made safe after the turn: it rents at 75% that night
       s = ok(s, { t: 'makeSafe', role: 'elec', alert: al.id, how: 'breaker' });
       expect(houseRentable(s, house(s, h.id))).toBe(true);
@@ -353,12 +355,12 @@ describe('G0: renovations', () => {
     expect(low.rent).toBeGreaterThan(0);
     expect(low.closesIn).toBe(0);
     expect(low.gained).toBe(low.life);
-    if (low.gain >= low.total) expect(low.payback).toBe(low.weeksClosed + Math.ceil(low.total / low.rent));
+    if (low.gain >= low.total) expect(low.payback).toBe(low.toFinal + Math.ceil(low.total / low.rent));
     // at 41 it's open: the rent it earns now is lost only for the weeks it would have been open
     h.health = 41;
     const open = renoPlan(s, h);
     expect(open.rentNow).toBeGreaterThanOrEqual(0);
-    expect(open.rentLost).toBe(open.rentNow * Math.min(open.closesIn, open.weeksClosed));
+    expect(open.rentLost).toBe(open.rentNow * Math.min(open.weeksClosed, Math.max(0, open.closesIn - 1)));
     // the renovated house wears too: its open life is finite, and a payback is only claimed when the rent gained covers it
     expect(open.life).toBeGreaterThan(RENO.warranty);
     expect(open.life).toBeLessThan(52);
@@ -370,7 +372,7 @@ describe('G0: renovations', () => {
     s.staff = (s.staff ?? []).filter((n) => n.role !== 'builder');
     const p = renoPlan(s, house(s, 'h6'));
     expect(p.planned).toBe(true);
-    expect(p.weeksClosed).toBe(3);
+    expect(p.weeksClosed).toBe(1);
     // ordered anyway: every seat reads that it waits for a builder
     const t = ok(s, { t: 'build', what: 'reno', asset: 'h6', week: s.week } as Action);
     expect(renoStatus(t, house(t, 'h6'), 'fin')!.text).toMatch(/waiting for a builder \(none on the payroll: hire one on the Staff desk\)/);

@@ -663,7 +663,7 @@ const REF: Task[] = [
     tools: ['T-TORQUE', 'T-KO'],
     nec: ['702.4(B)', '702.5', '445.13'],
     keywords: ['transfer', 'switch', 'ats', 'generator', 'standby', 'backup', 'villas', 'pick', 'up'],
-    summary: 'A standby system’s transfer equipment is sized for the load it carries (702.4(B)), or a load shed holds the load to what the set can carry (702.4(B)(2)(b)); listed for the purpose (702.5); the generator’s conductors carry 115% of its nameplate (445.13).',
+    summary: 'A standby system’s transfer equipment is rated for the load it carries on the normal source, its feed breaker and conductors to match; where the set is smaller than that load, load management holds what the set carries to its capacity (702.4(B)(2)(b)); listed for the purpose (702.5); the generator’s conductors carry 115% of its nameplate (445.13).',
   }),
   ref('gentest', {
     no: 'R-GENT',

@@ -1072,7 +1072,8 @@ function helperWhyNot(s: IslandState, crew: Npc[]): string {
 }
 
 /** a normal week at `s` (nothing grounded or closed for an alert, no safety tag, no plane chain-grounded) in week `w` */
-const normalWeek = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {} });
+// (review round 3: a normal week has the grid up too: a grid-down week read every house's rent as nothing)
+const normalWeek = (x: IslandState, w: number): IslandState => ({ ...x, week: w, alerts: [], chain: null, tags: {}, assets: x.assets.map((a) => (a.kind === 'grid' && a.health < 40 ? { ...a, health: 40 } : a)) });
 
 /** the revenue of a normal week at this week's rates, averaged over the last 8 weeks' season */
 function normalRevenue(s: IslandState, x: IslandState): number {
@@ -1159,8 +1160,17 @@ export type RenoPlan = {
   out: number;
   /** no builder on the payroll: the weeks are planned with one skill-3 builder, and count from when one starts */
   planned: boolean;
-  /** the builders' two units at their output (or one skill-3 builder's), then the week of the final */
+  /**
+   * the resolves that find it closed (review round 3, the engine's timeline): the builders draw the first unit at the
+   * resolve after the order (that week's rent is booked first), so it's closed from the next week through the week they
+   * draw the last; the final comes due the week after that and counts open when it's passed that week. So
+   * ceil(units / output) - 1 weeks, one more if the final slips (round 2 said +2: a week per unit and one for the final)
+   */
   weeksClosed: number;
+  /** the weeks from now to the final's week (ceil(units / output)): the renovated house's life and warranty start there */
+  toFinal: number;
+  /** closed this week for a reason that clears (a red tag, a hazard, a lapsed inspection, no power): the case counts it open at its health (review round 3) */
+  closedFor: string | null;
   /** the rent it would have earned in the weeks it's closed for the work (none once it would have closed anyway) */
   rentLost: number;
   /** left as it is: what it loses a booked week now, and the weeks until it's under 40 (0: closed now) */
@@ -1200,8 +1210,14 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
   const { pkg, materials } = renoCost(h);
   const total = pkg + materials;
   const without = normalRevenue(s, { ...s, assets: s.assets.filter((a) => a.id !== h.id) });
-  const open = houseRentable(s, h);
-  const rentNow = open ? Math.max(0, Math.round(normalRevenue(s, s) - without)) : 0;
+  // review round 3: only a house under 40 is closed for the case. A red tag, a hazard, a lapsed inspection or no power
+  // clear (the renovation doesn't clear them: its final even waits on a hazard), so such a house is projected open at its
+  // health: before, any closure counted as permanent and credited the renovation with reopening a house that would
+  // reopen anyway (a one-week red tag took Villa East's case from "doesn't pay back" to "pays back in about 9 weeks")
+  const blocked = houseRentable(s, h) ? null : houseBlocker(s, h);
+  const open = h.health >= 40;
+  const asOpen: IslandState = { ...s, assets: s.assets.map((a) => (a.id === h.id ? { ...h, inspectionUntil: Math.max(h.inspectionUntil ?? 0, s.week) } : a)) };
+  const rentNow = open ? Math.max(0, Math.round(normalRevenue(s, asOpen) - without)) : 0;
   // the house as the renovation leaves it: at RENO.health, its inspection current, not closed for the work
   const done: Asset = { ...h, health: Math.max(h.health, RENO.health), inspectionUntil: Math.max(h.inspectionUntil ?? 0, s.week) };
   const renovated: IslandState = { ...s, assets: s.assets.map((a) => (a.id === h.id ? done : a)), builds: (s.builds ?? []).filter((b) => b.reno !== h.id) };
@@ -1211,18 +1227,21 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
     .reduce((t, n) => t + (STAFF.output[n.skill - 1] ?? 0), 0);
   const planned = !(out > 0);
   const rate = planned ? (STAFF.output[2] ?? 1) : out;
-  // (the builders' units, then the week the county's final is due)
-  const weeksClosed = Math.ceil(RENO.units.length / rate - 1e-9) + 1;
+  // (the engine's timeline, review round 3: this week open, the builders' weeks after the first draw closed, the final's
+  // week open when it's passed that week)
+  const toFinal = Math.max(1, Math.ceil(RENO.units.length / rate - 1e-9));
+  const weeksClosed = toFinal - 1;
   const wear = Math.max(0.5, decayOf(s, h) + houseWearOf(s));
   const closesIn = open ? weeksOpen(s, h, h.health, h.warrantyUntil, s.week) : 0;
-  const final = s.week + weeksClosed;
+  const final = s.week + toFinal;
   const warrantyTo = Math.max(h.warrantyUntil ?? 0, final + RENO.warranty);
   const life = weeksOpen(s, h, RENO.health, warrantyTo, final);
-  const rentLost = rentNow * Math.min(closesIn, weeksClosed);
-  const gained = Math.max(0, weeksClosed + life - Math.max(closesIn, weeksClosed));
+  // (the weeks it would have been open left alone that the work closes: this week is booked either way)
+  const rentLost = rentNow * Math.min(weeksClosed, Math.max(0, closesIn - 1));
+  const gained = Math.max(0, toFinal + life - Math.max(closesIn, toFinal));
   const gain = rent * gained;
   const restore = Math.max(0, Math.round(RENO.health - h.health));
-  const payback = rent > 0 && gain >= total + rentLost ? Math.max(closesIn, weeksClosed) + Math.ceil((total + rentLost) / rent) : null;
+  const payback = rent > 0 && gain >= total + rentLost ? Math.max(closesIn, toFinal) + Math.ceil((total + rentLost) / rent) : null;
   return {
     pkg,
     materials,
@@ -1232,6 +1251,8 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
     out,
     planned,
     weeksClosed,
+    toFinal,
+    closedFor: blocked && open ? blocked : null,
     rentLost,
     wear,
     closesIn,
@@ -1241,7 +1262,7 @@ export function renoPlan(s: IslandState, h: Asset): RenoPlan {
     restore,
     jobs: Math.round(restore / perJob()),
     payback,
-    closedNow: open ? null : houseBlocker(s, h),
+    closedNow: open ? null : blocked,
     hazard: !!closingHazard(s, h.id),
     warrantyUntil: underWarranty(s, h) && (h.warrantyUntil ?? 0) > final + RENO.warranty ? h.warrantyUntil! : null,
     againFrom: renoAgainFrom(s, h.id),
@@ -1377,6 +1398,8 @@ export function botStaff(s: IslandState, bot: Bot, _r: Rng, now: number): Island
   if (renovates && s.staff.some((n) => n.role === 'builder')) {
     const lines = renoShort(s);
     if (lines.length && spendable(s) >= ECON.freezeBelow + 500) step({ t: 'buy', lines, week: W });
+    // (a started renovation's are committed: through the freeze, or the receiver's, review round 3)
+    else if (renoShort(s, true).length) step({ t: 'buy', lines: renoShort(s, true), week: W });
   }
   return s;
 }
@@ -1388,10 +1411,10 @@ export function renoDemand(s: IslandState): number {
   return open.length + worn;
 }
 
-/** every unfinished renovation's undrawn materials that are neither on the shelf nor on order */
-export function renoShort(s: IslandState): { item: ItemId; qty: number }[] {
+/** every unfinished renovation's undrawn materials that are neither on the shelf nor on order (`started`: only renovations the builders have begun) */
+export function renoShort(s: IslandState, started = false): { item: ItemId; qty: number }[] {
   const need = new Map<ItemId, number>();
-  for (const b of (s.builds ?? []).filter((x) => x.reno && x.finished === undefined))
+  for (const b of (s.builds ?? []).filter((x) => x.reno && x.finished === undefined && (!started || (x.drawn ?? 0) > 0)))
     for (let k = b.drawn ?? 0; k < b.need; k++) for (const l of unitLines(b, k)) need.set(l.item, (need.get(l.item) ?? 0) + l.qty);
   const out: { item: ItemId; qty: number }[] = [];
   for (const [item, q] of need) {
@@ -1399,6 +1422,18 @@ export function renoShort(s: IslandState): { item: ItemId; qty: number }[] {
     if (short > 0) out.push({ item, qty: short });
   }
   return out;
+}
+
+/**
+ * a buy of nothing but a started renovation's remaining materials (review round 3): committed work. Once the builders
+ * draw the first unit the house is closed until the last unit's materials are in, so these go through the $2,000 stock
+ * freeze (down to $0), and in receivership the receiver funds them from its allowance as it does safety-critical work.
+ * Before, a cash crunch or a receivership left the house closed with no move any seat could make (the reviewers: the
+ * Lodge closed weeks 30-36)
+ */
+export function renoCommitted(s: IslandState, lines: { item: ItemId; qty: number }[]): boolean {
+  const short = new Map(renoShort(s, true).map((l) => [l.item, l.qty]));
+  return lines.length > 0 && lines.every((l) => (short.get(l.item) ?? 0) >= l.qty);
 }
 
 /**

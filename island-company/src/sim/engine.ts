@@ -57,7 +57,7 @@ import {
 } from './alerts';
 import { acOf, assignSlots, bomValue, cardOf, earlyLess, earlyTier, fillOf, fixTaskFor, installCheck, judgeElecPick, judgeSlot, laborCost, planTask, realFault, repairLabor, stdPick } from './flow';
 import { canCheck, checkDid, checkReviewLines, checkView, flagCheck, flagPick, raiseCheckWriteUp, raiseFlag } from './checks';
-import { CHECK_ROWS } from './checkdata';
+import { CHECK_ROWS, MAIN_UP, XFER_UP } from './checkdata';
 import { itemById, priceAt } from './items';
 import { book, bookAog, bookFill, bookWait, closeLedger, spendable } from './ledger';
 import { migrate, retireOldSwitch } from './migrate';
@@ -98,7 +98,7 @@ import {
   urgentReq,
   vendorFor,
 } from './stock';
-import { builtShare, buildWeek, charterMult, helperOn, housekeepingCap, newIslandStaff, payroll, pilotCap, renoSignoff, reviewMult, STAFF, staffAction, staffAfterFlights, staffOpenWeek, autoStaff, working } from './staff';
+import { builtShare, buildWeek, charterMult, helperOn, housekeepingCap, newIslandStaff, payroll, pilotCap, renoCommitted, renoShort, renoSignoff, reviewMult, STAFF, staffAction, staffAfterFlights, staffOpenWeek, autoStaff, working } from './staff';
 import { benchFor, defaultTask, defaultTaskNo, fixedFor, laborMin, plannable, taskById, taskOn, tasksFor, type Task } from './tasks';
 import {
   aStreakAfter,
@@ -128,6 +128,7 @@ import {
   renoAwaitingFinal,
   closingHazard,
   safeAfterTurn,
+  genUpgraded,
   isBlind,
   isRework,
   SIGNOFF,
@@ -748,6 +749,8 @@ function applyMove(prev: IslandState, a: Action, now: number): ApplyResult {
       if (s.squawked?.[a.role] === s.week) return fail('One write-up per week.');
       const asset = s.assets.find((x) => x.id === a.assetId);
       if (!asset) return fail('No such asset.');
+      // (review round 3: nobody's in a house closed for its renovation, and its county final covers the electrical side)
+      if (asset.kind === 'house' && renovating(s, asset.id)) return fail(`${asset.name} is closed for its renovation: its county final covers the electrical side.`);
       const c = squawkable(a.role, asset).find((x) => x.kind === a.kind);
       if (!c) return fail("That job doesn't apply to this asset.");
       if (s.orders.some((o) => open(o) && o.kind === c.kind && o.assetId === asset.id)) return fail('That job is already open.');
@@ -930,7 +933,7 @@ export const receiverWords = (amount: number) => `The receiver funds ${usd(amoun
  * used. The loan's term stays 10 weeks (the release gate): its weekly payment grows with it instead of the term
  * stretching unsaid, and the feed says the fee and where the loan stands
  */
-function receiverAdvance(s: IslandState, amount: number, what: string, now: number) {
+function receiverAdvance(s: IslandState, amount: number, what: string, now: number, why = 'safety-critical') {
   const W = s.week;
   const loan = (s.loan ??= { left: 0, weekly: 0 });
   loan.adv = { week: W, usd: (loan.adv?.week === W ? loan.adv.usd : 0) + amount };
@@ -941,7 +944,7 @@ function receiverAdvance(s: IslandState, amount: number, what: string, now: numb
     s,
     'fin',
     'info',
-    `${receiverWords(amount)} for ${what} (safety-critical): the loan is ${usd(loan.left)} at ${usd(loan.weekly)}/week. ${usd(receiverLeft(s))} of the week's ${usd(RECEIVER.allowance)} allowance left.`,
+    `${receiverWords(amount)} for ${what} (${why}): the loan is ${usd(loan.left)} at ${usd(loan.weekly)}/week. ${usd(receiverLeft(s))} of the week's ${usd(RECEIVER.allowance)} allowance left.`,
     now,
   );
 }
@@ -1133,7 +1136,7 @@ function complete(s: IslandState, prev: IslandState, a: Extract<Action, { t: 'co
     if (o.kind === 'inspect100' && signed) asset.sinceInspection = 0;
     if (o.kind === 'codeprep' && signed) asset.inspectionUntil = renewedInspection(s, asset, s.week);
   }
-  if (asset && o.kind === 'hottub' && signedNow) spaIn(s, asset, o);
+  if (asset && signedNow) equipIn(s, asset, o);
 
   if (o.kind === 'report') {
     closeReport(s, o, a.role, player.name, a.score, now);
@@ -1302,7 +1305,7 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
       }
       // a branch breaker doesn't isolate a service-neutral fault: it is still there (hidden)
       if (a.how === 'breaker' && causeOf(al)?.neutral) plantIsolation(s, al, nameOf(s, 'elec'));
-      feed(s, 'elec', 'info', `${nameOf(s, 'elec')} made ${asset.name} safe (${a.how === 'breaker' ? `${breakerOf(siteOf(s, al))} off and tagged` : 'a blank-off'}): it rents at 75% until the fix.`, now);
+      feed(s, 'elec', 'info', `${nameOf(s, 'elec')} made ${asset.name} safe (${a.how === 'breaker' ? `${breakerOf(siteOf(s, al))} off and tagged` : 'a blank-off'}): ${asset.kind === 'house' && asset.health < 40 ? "it stays closed under 40 until it's brought back up" : 'it rents at 75% until the fix'}.`, now);
       return { s };
     }
     case 'askBench': {
@@ -1462,14 +1465,18 @@ function flowAction(s: IslandState, prev: IslandState, a: FlowAct, now: number):
         if (!x) return fail(`Unknown item ${l.item}.`);
         if (!(l.qty >= 1 && l.qty <= STOCK.maxQty)) return fail(`Buy 1 to ${STOCK.maxQty} of an item.`);
       }
-      if (spendable(s) < ECON.freezeBelow) return fail(`Spendable cash under ${usd(ECON.freezeBelow)}: stock orders are frozen.`);
+      // (review round 3: a started renovation's remaining materials are committed work: the house is closed until they're in)
+      const committed = renoCommitted(s, a.lines);
+      if (spendable(s) < ECON.freezeBelow && !committed) return fail(`Spendable cash under ${usd(ECON.freezeBelow)}: stock orders are frozen.`);
       const cost =
         a.lines.reduce((n, l) => n + reqCost({ item: l.item, qty: l.qty }, a.buy), 0) +
         (a.buy?.freight === 'aog' ? FREIGHT.aog : schedFreight(s, a.lines.map((l) => ({ item: l.item, vendor: vendorFor(itemById(l.item)!, a.buy) }))).cost);
-      if (spendable(s) - cost < 0) return fail('Not enough cash.');
+      const adv = committed ? receiverFunds(s, cost, true) : null;
+      if (spendable(s) - cost < 0 && adv === null) return fail(committed ? noCash(s, cost, true) : 'Not enough cash.');
       const fresh = [...new Set(a.lines.map((l) => l.item))].filter((id) => needsNewBin(s, id));
       if (fresh.length && binsInUse(s) + fresh.length > binsTotal(s))
         return fail(`Stores full: ${binsInUse(s)} of ${binsTotal(s)} bins. Use up, scrap or return a line first.`);
+      if (adv) receiverAdvance(s, adv, "a started renovation's materials", now, "committed: the house is closed until they're in");
       const pos = placePo(s, a.lines, a.buy ?? {}, 'fin', now);
       feed(s, 'fin', 'info', `${nameOf(s, 'fin')} ordered stock: ${pos.map((p) => `${p.id} ${usd(p.cost)}`).join(', ')}.`, now);
       for (const x of allocate(s)) partsIn(s, x, now);
@@ -1718,12 +1725,23 @@ function untiePos(s: IslandState, order: string) {
   for (const p of s.pos ?? []) for (const l of p.lines) if (l.order === order && l.got === undefined) delete l.order;
 }
 
-/** a hot-tub job signed off: the house's spa circuit is on record, its breaker and wire as the job ran them (review round 2) */
-function spaIn(s: IslandState, asset: Asset, o: Order) {
-  if (asset.kind !== 'house') return;
+/**
+ * what a signed-off job put in, on record (derived data can't say it: signed-off orders are pruned after two weeks):
+ * a hot-tub job's spa circuit, its breaker and wire as the job ran them (review round 2); review round 3: a transfer job's
+ * switch before the Resort (rated for the backed-up load, load management on the 60 A set: checkdata XFER_UP), and a
+ * panel upgrade's 600 A main (MAIN_UP). The schedules, the IR scans and the sheets read them
+ */
+function equipIn(s: IslandState, asset: Asset, o: Order) {
   const al = o.flow ? alertById(s, o.flow.alert) : undefined;
-  const site = al ? siteOf(s, al) : null;
-  asset.spa = { amps: site?.amps ?? 60, awg: site?.awg ?? 6, week: s.week };
+  if (o.kind === 'hottub' && asset.kind === 'house') {
+    const site = al ? siteOf(s, al) : null;
+    asset.spa = { amps: site?.amps ?? 60, awg: site?.awg ?? 6, week: s.week };
+  }
+  if (o.kind === 'transfer' && asset.kind === 'generator' && !genUpgraded(s)) {
+    const load = al?.sym === 'E_TAKEOFF_XFER' ? siteOf(s, al)?.load : asset.xfer?.load;
+    asset.xfer = { amps: XFER_UP.amps, awg: XFER_UP.awg, ...(load ? { load } : {}), week: s.week };
+  }
+  if (o.kind === 'panelUp' && asset.kind === 'grid') asset.panel = { amps: MAIN_UP.amps, awg: MAIN_UP.awg, week: s.week };
 }
 
 /** the allocation made a job ready: say so */
@@ -3424,6 +3442,26 @@ function autoApprove(s: IslandState, now: number) {
 }
 
 /** Missed turn: the role runs itself at 50% (never a punishment screen). */
+/**
+ * Stage 2 review round 3: a hazard a crewmate passed on after the electrician had ended the turn, not made safe by the
+ * resolve, is made safe by the book as autopilot does for an away seat (a branch breaker off and tagged; a service-neutral
+ * fault stays closed, a breaker doesn't isolate it). The house closes at once on the report (review round 2) and the
+ * electrician can make it safe that night, but nothing forces them to come back: without this an electrician who had
+ * played and ended the turn lost the house's week, while an away one's autopilot made it safe and kept it (the reviewers:
+ * week-4 revenue $3,170 → $1,479 on the live early doc)
+ */
+function lateFlagSafe(s: IslandState, line: Liner) {
+  const W = s.week;
+  const by = `Autopilot (${nameOf(s, 'elec')})`;
+  for (const al of s.alerts ?? []) {
+    if (!al.late || al.src !== 'flag' || al.week !== W || al.status === 'closed' || al.safe || !symptomOf(al)?.hazard) continue;
+    if (causeOf(al)?.neutral) continue;
+    al.safe = { how: 'breaker', week: W, by };
+    const h = s.assets.find((x) => x.id === al.assetId);
+    line('elec', 'info', `${by} made ${h?.name ?? 'the house'} safe by the book (${breakerOf(siteOf(s, al))} off and tagged): ${al.who ?? 'a crewmate'}'s report came after ${nameOf(s, 'elec')}'s turn. ${h && h.health < 40 ? "It stays closed under 40 until it's brought back up." : 'It rents at 75% until the fix.'}`);
+  }
+}
+
 function autoRun(s: IslandState, role: Role) {
   const now = s.updatedAt;
   const auto = `Autopilot (${s.players[role]?.name ?? ROLE_LABEL[role]})`;
@@ -3488,6 +3526,16 @@ function autoRun(s: IslandState, role: Role) {
       r.po = po?.id;
     }
     autoStaff(s);
+    // a started renovation's next materials are committed work (review round 3): through the freeze, or the receiver's
+    const reno = renoShort(s, true);
+    if (reno.length && s.staff?.some((n) => n.role === 'builder')) {
+      const value = reno.reduce((n, l) => n + reqCost({ item: l.item, qty: l.qty }), 0);
+      const radv = receiverFunds(s, value, true);
+      if (spendable(s) - value >= 0 || radv !== null) {
+        if (radv) receiverAdvance(s, radv, "a started renovation's materials", now, "committed: the house is closed until they're in");
+        placePo(s, reno, {}, 'auto', now);
+      }
+    }
     const close = s.orders.find((o) => (o.kind === 'close' || o.kind === 'reconcile') && o.status === 'ready' && o.createdWeek === s.week);
     if (close) {
       close.status = 'done';
@@ -3633,7 +3681,7 @@ function autoRun(s: IslandState, role: Role) {
       // Before, a covered code prep closed its notice without renewing, so the notice came straight back and the house lapsed
       if (o.kind === 'codeprep') asset.inspectionUntil = renewedInspection(s, asset, s.week);
       if (o.kind === 'inspect100') asset.sinceInspection = 0;
-      if (o.kind === 'hottub') spaIn(s, asset, o);
+      equipIn(s, asset, o);
     }
     // the job flow: what was pulled leaves stock and the alert closes (autopilot keeps to the manual: no hidden defects)
     if (o.flow) {
@@ -4000,7 +4048,10 @@ export function resolveWeek(s: IslandState, now: number) {
       autoRunRoles.push(role);
       if (p) p.missedStreak += 1;
       line(role, 'info', `${p?.name ?? role} was covered by autopilot (50%).`);
-    } else if (p) p.missedStreak = 0;
+    } else {
+      if (p) p.missedStreak = 0;
+      if (role === 'elec') lateFlagSafe(s, line);
+    }
   }
   // 1b. a part chain's card that came in after the analyst had ended the turn goes through on the standing
   // AOG approval (cash permitting): a plane shouldn't sit a week longer only because of the order the crew played in.

@@ -133,20 +133,22 @@ describe('renovations: the rules', () => {
     expect(p.pkg).toBe(6000);
     expect(p.materials).toBe(850);
     expect(p.total).toBe(6850);
-    // one skill-3 builder: 1 unit a week, 2 units, then the final's week
+    // one skill-3 builder: 1 unit a week, 2 units; open this week (booked before they start), closed the next, open again
+    // the week its final passes (review round 3: the engine's timeline, not a week a unit plus one for the final)
     expect(p.out).toBe(1);
     expect(p.planned).toBe(false);
-    expect(p.weeksClosed).toBe(3);
+    expect(p.weeksClosed).toBe(1);
+    expect(p.toFinal).toBe(2);
     expect(p.rent).toBeGreaterThan(0);
     // (review round 1) the rent lost is only the weeks it would have been open: it closes left alone in closesIn
-    expect(p.rentLost).toBe(houseRentable(s, house(s, 'h1')) ? p.rentNow * Math.min(p.closesIn, 3) : 0);
+    expect(p.rentLost).toBe(p.rentNow * Math.min(1, Math.max(0, p.closesIn - 1)));
     expect(p.restore).toBe(40);
     // it gains the renovated life's open weeks past when it would have closed; it pays back only if their rent covers it
-    expect(p.gained).toBe(Math.max(0, 3 + p.life - Math.max(p.closesIn, 3)));
+    expect(p.gained).toBe(Math.max(0, 2 + p.life - Math.max(p.closesIn, 2)));
     expect(p.gain).toBe(p.rent * p.gained);
     if (p.payback !== null) {
       expect(p.gain).toBeGreaterThanOrEqual(p.total + p.rentLost);
-      expect(p.payback).toBe(Math.max(p.closesIn, 3) + Math.ceil((p.total + p.rentLost) / p.rent));
+      expect(p.payback).toBe(Math.max(p.closesIn, 2) + Math.ceil((p.total + p.rentLost) / p.rent));
     } else expect(p.gain).toBeLessThan(p.total + p.rentLost);
     expect(p.blocker).toBeNull();
     // no builder: it can still be ordered (it waits for one); the case plans one skill-3 builder, counted from their start
@@ -155,7 +157,7 @@ describe('renovations: the rules', () => {
     const q = renoPlan(none, house(none, 'h1'));
     expect(q.planned).toBe(true);
     expect(q.out).toBe(0);
-    expect(q.weeksClosed).toBe(3);
+    expect(q.weeksClosed).toBe(1);
   });
 });
 
@@ -480,7 +482,11 @@ describe('live islands: the one-time G0 migration (docs an older engine wrote, a
     expect(text(late, 'fin')).toMatch(/Your island got it with this update/);
     expect(text(late, 'fin')).toMatch(/under warranty to week /);
     expect(text(late, 'elec')).toMatch(/permit final/);
-    expect(text(migrate(load('v4-e810cc5-t2')), 'mech')).toMatch(/Your island gets it when its Harbor goes up/);
+    // (review round 3: an island before tier 3 gets one line in the map's "Also in this update", not a full page)
+    expect(whatsNewUpkeepPanels(migrate(load('v4-e810cc5-t2')), 'mech')).toEqual([]);
+    const t3 = migrate(load('v4-e810cc5-t2'));
+    t3.tier = 3;
+    expect(text(t3, 'mech')).toMatch(/Your island gets it when its Harbor goes up/);
     const fresh = load('v4-e810cc5-t2');
     fresh.week = 1;
     expect(whatsNewUpkeepPanels(fresh, 'fin')).toEqual([]);

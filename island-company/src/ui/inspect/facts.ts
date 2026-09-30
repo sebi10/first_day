@@ -19,15 +19,16 @@
 import { alertShort, flagSource, liveAlerts, nameMid, soleGuest } from '../../sim/alerts';
 import { externalPower, fmtDate, planeModel } from '../../sim/aircraft';
 import { islandAircraft } from '../../sim/chain';
-import { genPanel, homePanel, HOUSE_CIRCUITS } from '../../sim/checkdata';
-import { backedUp, canCheck, CHECK, checkKindFor, type CheckKind } from '../../sim/checks';
-import { ECON, INSURANCE, MODELS, RENO, REPORTS, ROLE_LABEL } from '../../sim/data';
+import { HOUSE_CIRCUITS } from '../../sim/checkdata';
+import { backedUp, canCheck, CHECK, checkKindFor, genSchedule, homeSchedule, type CheckKind } from '../../sim/checks';
+import { ECON, INSURANCE, MODELS, RENO, REPORTS, ROLE_LABEL, STORM_HIT } from '../../sim/data';
 import {
   alertAog,
   cableReport,
   capOf,
   cartOn,
   chainAog,
+  decayOf,
   downtimeOf,
   fixedNow,
   flightsPerPlane,
@@ -45,6 +46,7 @@ import {
   powered,
   projectWeek,
   rateBounds,
+  renovating,
   rentFactor,
   startCart,
   subCharterOn,
@@ -52,7 +54,7 @@ import {
 } from '../../sim/econ';
 import { runway, spendable } from '../../sim/ledger';
 import { hashSeed, rng } from '../../sim/rng';
-import { buildSite, COTTAGE_SHELL, cottagePlan, crewOf, housekeepingCap, openBuild, pilotOf, renoCost, severanceOf, STAFF, staffEffect } from '../../sim/staff';
+import { buildSite, COTTAGE_SHELL, cottagePlan, crewOf, housekeepingCap, openBuild, pilotSeats, renoCost, severanceOf, STAFF, staffEffect } from '../../sim/staff';
 import type { Alert, Asset, Candidate, IslandState, Npc, OpsRole, Order, Role } from '../../sim/types';
 import { cableWords, cartWhere, weakBatteryNow } from '../gse';
 import { moveChip } from '../flow/words';
@@ -222,6 +224,8 @@ function checkAct(s: IslandState, role: Role, a: Asset, lines?: Line[]): Act | n
 function writeUpAct(s: IslandState, role: Role, a: Asset): Act {
   const turn = s.turns[role];
   if (s.week < 1) return { t: 'writeUp', assetId: a.id, ok: false, why: 'The week has not started yet.' };
+  // (review round 3: nobody's in a house closed for its renovation, and its final covers the electrical side)
+  if (a.kind === 'house' && renovating(s, a.id)) return { t: 'writeUp', assetId: a.id, ok: false, why: `${a.name} is closed for its renovation: its county final covers the electrical side.` };
   if (turn?.ended) return { t: 'writeUp', assetId: a.id, ok: false, why: 'Your turn is over for this week.' };
   if (s.squawked?.[role] === s.week) return { t: 'writeUp', assetId: a.id, ok: false, why: 'One write-up a week: yours is done.' };
   return { t: 'writeUp', assetId: a.id, ok: true };
@@ -264,7 +268,8 @@ function assetReport(s: IslandState, role: Role, a: Asset): Report | null {
       ok: true,
       // true of every flag, a real fault or none (a no-fault one still costs a close), and it says nothing of which;
       // it passes on its source's words, never the flagger's own (review round 1)
-      words: `Passes on what ${a.kind === 'plane' ? 'the pilot wrote up' : a.kind === 'house' ? 'a guest reported' : 'the logs show'} about ${nameMid(a)}: one alert on ${n}'s list, from you, until ${n} closes it. You'll see what it said.`,
+      // (review round 3: it takes a slot the week's draw would have filled; a guest's reported shock shuts the house)
+      words: `Passes on what ${a.kind === 'plane' ? 'the pilot wrote up' : a.kind === 'house' ? 'a guest reported' : 'the logs show'} about ${nameMid(a)}: one alert on ${n}'s list, from you, in a slot the week's draw would have filled, until ${n} closes it. You'll see what it said.${a.kind === 'house' ? ` A reported shock or burning smell closes the house at once, until ${n} makes it safe.` : ''}`,
       dms: [dmOne(s, f.to, nameMid(a))],
     };
   }
@@ -338,7 +343,8 @@ function planeFacts(s: IslandState, p: Asset, role: Role): Facts {
     blocks.push({ t: 'log', season: seasonLog(s, p), entries: [...ac.log].reverse().slice(0, 6).map((e) => ({ id: e.id, date: fmtDate(e.date), book: e.pos ? `${e.book} (${e.pos})` : e.book, text: e.text, ref: e.ref, meter: `${ac.meter} ${e.tach.toFixed(1)} · TT ${e.tt.toFixed(1)}`, sig: e.signature })) });
     for (const x of live.filter((x) => x.role === 'mech')) actions.push(alertAct(s, x, role));
     primary = checkAct(s, role, p, lines);
-    actions.push(tagAct(s, role, p, 'Ground'));
+    // (review round 3: no Ground call on a plane already on the ground: AOG, or under 40; the status says why)
+    if (tagged || !(aog || weak)) actions.push(tagAct(s, role, p, 'Ground'));
     actions.push({ t: 'gse', cart: cart?.id ?? startCart(s, p.id)?.id ?? null, label: cart ? `Ground power: ${cart.name}` : 'Ground power' });
   } else if (role === 'elec') {
     status = aog || tagged || weak ? 'On the ground this week' : 'Flying this week';
@@ -352,7 +358,9 @@ function planeFacts(s: IslandState, p: Asset, role: Role): Facts {
   } else {
     const dt = downtimeOf(s, p.id);
     const pnl = assetPnl(s, p.id, 13);
-    status = aog ? (cargo ? 'AOG this week' : `AOG this week: about ${money(dt.usd)} of guests and tours lost`) : tagged ? 'Grounded this week (a safety call)' : weak ? 'On the ground this week: condition under 40' : `Flies ${plural(flying, 'flight')} this week`;
+    // (review round 3: the sub-charter's fee is a cost, not lost revenue: said apart, and summed)
+    const lost = subbed ? `about ${money(Math.max(0, dt.usd - sub!.usd))} of tours lost + ${money(sub!.usd)} sub-charter = ${money(dt.usd)}` : `about ${money(dt.usd)} of guests and tours lost`;
+    status = aog ? (cargo ? 'AOG this week' : `AOG this week: ${lost}`) : tagged ? 'Grounded this week (a safety call)' : weak ? 'On the ground this week: condition under 40' : `Flies ${plural(flying, 'flight')} this week`;
     tone = aog || tagged || weak ? 'rust' : '';
     if (cargo) lines.push({ text: `The cargo runs: it brings the bulk freight in.${dt.usd > 0 ? ` A week down holds ${money(dt.usd)} of AOG boats for safety parts.` : ''}` });
     // (review round 2: on an AOG plane the status already says what the week on the ground loses)
@@ -360,8 +368,9 @@ function planeFacts(s: IslandState, p: Asset, role: Role): Facts {
     if (subbed) lines.push({ text: `Down: the mainland sub-charter flies its guests (${sub!.flights} × $${sub!.fee} = ${money(sub!.usd)} this week).`, tone: 'rust' });
     lines.push({ text: repairsLine(pnl) });
     lines.push({ text: 'Owned outright: no lease, no deposit held.' });
-    const pilot = pilotOf(s, p.id);
-    lines.push({ text: pilot ? `Flown by ${pilot.name || 'a contract pilot'} (skill ${pilot.skill}, ${money(pilot.wage)} a week).` : 'No pilot on it this week.' });
+    // every pilot on it, the one with the most of its flights first (review round 3: it named one of two)
+    const flyers = [...(pilotSeats(s).get(p.id) ?? [])].sort((a, b) => b.n - a.n).map((x) => `${x.npc.name || 'a contract pilot'} (skill ${x.npc.skill}, ${money(x.npc.wage)} a week)`);
+    lines.push({ text: flyers.length ? `Flown by ${flyers.join(' and ')}.` : 'No pilot on it this week.' });
     const cards = flowQueue(s).filter((o) => o.assetId === p.id);
     for (const o of cards) {
       const vm = cardVM(s, o);
@@ -464,14 +473,17 @@ function houseFacts(s: IslandState, h: Asset, role: Role): Facts {
     status = why ? `Closed: ${why}` : `Rentable · inspection to week ${h.inspectionUntil ?? 0}`;
     tone = why ? 'rust' : '';
     lines.push({ text: `Inspection valid to week ${h.inspectionUntil ?? 0}${(h.inspectionUntil ?? 0) < s.week ? ': lapsed, the house is closed until it passes' : ''}.`, tone: (h.inspectionUntil ?? 0) < s.week ? 'rust' : '' });
-    if (hz) lines.push({ text: hz.safe ? `Made safe by ${hz.safe.by} in week ${hz.safe.week} (${hz.safe.how === 'breaker' ? 'the circuit off and tagged' : 'blanked off'}): ${short(s, hz)}. It rents at 75% until the fix.` : `Hazard open: ${short(s, hz)}. The house is shut until it's made safe or fixed.`, tone: hz.safe ? 'palm' : 'rust' });
+    // (review round 3: a house under 40 stays closed for its reliability either way: no 75% line)
+    const low = h.health < 40 ? " It stays closed under 40 until it's brought back up." : '';
+    if (hz) lines.push({ text: hz.safe ? `Made safe by ${hz.safe.by} in week ${hz.safe.week} (${hz.safe.how === 'breaker' ? 'the circuit off and tagged' : 'blanked off'}): ${short(s, hz)}.${low || ' It rents at 75% until the fix.'}` : `Hazard open: ${short(s, hz)}. The house is shut until it's made safe or fixed.${low}`, tone: hz.safe ? 'palm' : 'rust' });
     if (isTagged(s, h.id)) lines.push({ text: `Red-tagged this week (${nameOf(s, s.tags![h.id]!)}'s safety call).`, tone: 'rust' });
     const complaints = live.filter((x) => x.role === 'elec');
     if (!complaints.length) lines.push({ text: 'No open complaints on it.' });
     for (const x of complaints) actions.push(alertAct(s, x, role));
     blocks.push(houseSchedule(h, live.some((x) => x.sym === 'E_TAKEOFF_SPA')));
     primary = checkAct(s, role, h, lines);
-    actions.push(tagAct(s, role, h, 'Red-tag'));
+    // (review round 3: no safety call on a house closed for its renovation: nobody's in it)
+    if (!renovating(s, h.id)) actions.push(tagAct(s, role, h, 'Red-tag'));
   } else if (role === 'mech') {
     // the guest planes flying this week (review round 2: a plane under 40 flies nothing, AOG or not)
     const guestPlanes = s.assets.filter((p) => p.kind === 'plane' && !MODELS[p.model]?.cargo && capOf(s, p) > 0).map((p) => p.name);
@@ -490,7 +502,8 @@ function houseFacts(s: IslandState, h: Asset, role: Role): Facts {
     const occ = occupancy(s, nightly);
     status = why ? `Closed this week (${why}): no rent` : booked ? `Booked this week · about ${money(pnl.revenue)}` : 'Empty this week';
     tone = why ? 'rust' : '';
-    lines.push({ text: mult !== 1 ? `${money(nightly * mult)} a night: the island's ${money(nightly)} × ${mult} for a ${(MODELS[h.model]?.label ?? 'house').toLowerCase()}${rentFactor(s, h) < 1 ? ', at 75% while it is made safe' : ''}.` : `${money(nightly)} a night (the island's nightly rate)${rentFactor(s, h) < 1 ? ', at 75% while it is made safe' : ''}.` });
+    const safe75 = rentFactor(s, h) < 1 && h.health >= 40 ? ', at 75% while it is made safe' : '';
+    lines.push({ text: mult !== 1 ? `${money(nightly * mult)} a night: the island's ${money(nightly)} × ${mult} for a ${(MODELS[h.model]?.label ?? 'house').toLowerCase()}${safe75}.` : `${money(nightly)} a night (the island's nightly rate)${safe75}.` });
     lines.push({ text: `At this rate ${Math.round(occ * 100)}% of its nights fill: a booked week brings about ${money(houseWeekRevenue(s, h) * rentFactor(s, h))}.` });
     lines.push({ text: repairsLine(pnl) });
     const capex = capexLine(s, h);
@@ -500,7 +513,14 @@ function houseFacts(s: IslandState, h: Asset, role: Role): Facts {
     if (Number.isFinite(hk)) lines.push({ text: `Housekeeping turns over ${plural(hk, 'house')} a week; ${proj.booked} of ${proj.rentable} rentable houses are booked.` });
     if (h.model === 'cottage' && s.tier >= 3) {
       const plan = cottagePlan(s);
-      if (plan.plot) lines.push({ text: plan.payback ? `An extra cottage like it: ${money(plan.cost)}, rents about ${money(plan.rent)} a week, pays back in about ${plural(plan.payback, 'week')}.` : `An extra cottage like it: ${money(plan.cost)}; at this week's bookings it would sit empty.` });
+      // (review round 3: with no builder on the payroll the case says so first, as the renovation card does)
+      const noBuilder = !s.staff?.some((n) => n.role === 'builder') ? 'No builder on the payroll: hire one first. ' : '';
+      if (plan.plot)
+        lines.push({
+          text: plan.payback
+            ? `${noBuilder}An extra cottage like it: ${money(plan.cost)}, rents about ${money(plan.rent)} a week, pays back in about ${plural(plan.payback, 'week')}${noBuilder ? ', counted from when a builder starts' : ''}.`
+            : `${noBuilder}An extra cottage like it: ${money(plan.cost)}; at this week's bookings it would sit empty.`,
+        });
     }
     primary = ratesAct(s);
     // the rest of pricing (the charter rate, the season, the rate's effect on occupancy) is on the desk's Money tab
@@ -556,7 +576,8 @@ export function gridSchedule(s: IslandState): Extract<Block, { t: 'schedule' }> 
     lodge: 'the lodge',
     edge: 'the runway edge lights',
   };
-  return { t: 'schedule', title: 'Breaker schedule', rows: homePanel(genUpgraded(s)).filter((b) => b.from <= Math.max(1, s.tier)).map((b) => ({ label: b.label, rating: `${b.amps} A`, wire: b.awg, note: feeds[b.id] ?? '' })) };
+  // (as installed, review round 3: a panel upgrade's 600 A main, a transfer job's switch feed)
+  return { t: 'schedule', title: 'Breaker schedule', rows: homeSchedule(s).map((b) => ({ label: b.label, rating: `${b.amps} A`, wire: b.awg, note: feeds[b.id] ?? '' })) };
 }
 
 /** the rent that rides on the grid: this week's bookings (a grid-down week with no generator closes every house) */
@@ -615,10 +636,12 @@ function gridFacts(s: IslandState, g: Asset, role: Role): Facts {
 /** the generator as installed (the electrician's): its transfer switch and main from the generator house's schedule (after the Resort's upgrade: G0) */
 function genInstalled(s: IslandState): string {
   const up = genUpgraded(s);
-  const panel = genPanel(up);
+  const panel = genSchedule(s);
   const x = panel.find((b) => b.id === 'xferG');
   const m = panel.find((b) => b.id === 'genbrk');
-  return `${up ? 'Automatic transfer switch' : 'Transfer switch'} ${x?.amps ?? 60} A on ${x?.awg ?? '#6 Cu'} THWN; generator main ${m?.amps ?? 60} A on ${m?.awg ?? '#6 Cu'}${up ? ' (the Resort’s upgrade)' : ''}.`;
+  // (review round 3: a transfer job's switch, rated for the backed-up load, with load management on the 60 A set)
+  const job = !up && s.assets.find((a) => a.kind === 'generator')?.xfer;
+  return `${up || job ? 'Automatic transfer switch' : 'Transfer switch'} ${x?.amps ?? 60} A on ${x?.awg ?? '#6 Cu'} THWN${job ? ', with load management' : ''}; generator main ${m?.amps ?? 60} A on ${m?.awg ?? '#6 Cu'}${up ? ' (the Resort’s upgrade)' : job ? ` (the set: load management holds it to ${m?.amps ?? 60} A)` : ''}.`;
 }
 /**
  * the set's diesel (review round 2: the Resort's bigger set read "the 36 gal belly tank, about 38 h at the backed-up
@@ -630,7 +653,7 @@ const GEN_FUEL = { tank: 36, resortTank: 150, idle: 0.3, perKw: 0.07 };
 export function genFuelLine(s: IslandState): string {
   const up = genUpgraded(s);
   const tank = up ? GEN_FUEL.resortTank : GEN_FUEL.tank;
-  const amps = backedUp(s)?.amps ?? 0;
+  const amps = backedUp(s)?.test ?? 0;
   const burn = GEN_FUEL.idle + GEN_FUEL.perKw * ((amps * 240) / 1000);
   return `Fuel: the ${tank} gal ${up ? 'sub-base' : 'belly'} tank topped up after each test run: about ${Math.round(tank / burn)} h at this week's test-run load (${amps} A).`;
 }
@@ -750,9 +773,23 @@ function fixtureMore(s: IslandState, kind: ObjectKind, role: Role, lines: Line[]
     }
   }
   if (kind === 'windsock' && role === 'elec' && s.weather === 'storm') {
-    const low = s.assets.filter((a) => a.kind === 'house').sort((a, b) => a.health - b.health).slice(0, 2);
-    lines.push({ text: `In its path at the resolve: ${[...low.map((h) => `${h.name} (${Math.round(h.health)})`), ...(grid ? [`the grid (${Math.round(grid.health)})`] : [])].join(', ')}.` });
-    for (const h of low) actions.push({ t: 'object', ref: assetRef(h), label: h.name, sub: `Reliability ${Math.round(h.health)}: its sheet` });
+    // review round 3: the storm hits every house and the grid at the resolve (engine step 9), not the two lowest: say so,
+    // and name the ones it (with the week's wear) takes under 40, open now
+    const shield = s.modifiers.some((m) => m.kind === 'stormShield' && m.until >= s.week) ? 0.5 : 1;
+    const dark = !powered(s).on;
+    const after = (a: Asset, hit: number) => a.health - (a.touchedWeek < s.week && !renovating(s, a.id) ? decayOf(s, a, dark) : 0) - hit * shield;
+    const closing = s.assets.filter((a) => a.kind === 'house' && a.health >= 40 && after(a, STORM_HIT.house) < 40).sort((a, b) => a.health - b.health);
+    const g = grid && grid.health >= 40 && after(grid, STORM_HIT.grid) < 40;
+    lines.push({
+      text: `Every house takes −${STORM_HIT.house * shield} and the grid −${STORM_HIT.grid * shield} at the resolve, on top of the week's wear. ${
+        closing.length || g
+          ? `Closest to closing (40): ${[...closing.map((h) => `${h.name} (${Math.round(h.health)} → ${Math.max(0, Math.round(after(h, STORM_HIT.house)))})`), ...(g ? [`the grid (${Math.round(grid!.health)} → ${Math.max(0, Math.round(after(grid!, STORM_HIT.grid)))}): down`] : [])].join(', ')}.`
+          : 'None it takes under 40.'
+      }`,
+      tone: closing.length || g ? 'amber' : '',
+    });
+    for (const h of closing) actions.push({ t: 'object', ref: assetRef(h), label: h.name, sub: `Reliability ${Math.round(h.health)}, under 40 after the storm: its sheet` });
+    if (g && grid) actions.push({ t: 'object', ref: assetRef(grid), label: grid.name, sub: `Reliability ${Math.round(grid.health)}, down after the storm: its sheet` });
   }
   if (kind === 'runway' && role === 'elec' && grid && tierDef(s.tier).nightFlights)
     actions.push({ t: 'object', ref: assetRef(grid), label: 'The edge lights’ breaker', sub: `${grid.name}: the runway edge lights breaker, its schedule and the IR scan` });

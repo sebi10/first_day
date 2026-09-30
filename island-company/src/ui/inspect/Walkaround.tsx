@@ -28,6 +28,8 @@ const MARKS: Record<Art, Record<string, Mark>> = {
     lmain: { at: [52, 146], spot: [98, 124] },
     lnac: { at: [50, 50], spot: [98, 74] },
     root: { at: [160, 146], spot: [146, 100] },
+    // (review round 3: the twin's empennage is a stop too)
+    tail: { at: [240, 198], spot: [200, 191] },
     rnac: { at: [270, 50], spot: [222, 74] },
     rmain: { at: [268, 146], spot: [222, 124] },
   },

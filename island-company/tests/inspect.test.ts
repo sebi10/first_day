@@ -734,7 +734,9 @@ describe('Report a problem (6.5)', () => {
     const s = island(6, 3);
     const m = await mount(s, 'fin', assetRef(s.assets.find((a) => a.id === 'h1')!));
     await click(button(m.root, 'Report a problem to Ben'));
-    expect(textOf(m.root)).toContain("Passes on what a guest reported about Cottage 1: one alert on Ben's list, from you, until Ben closes it. You'll see what it said.");
+    expect(textOf(m.root)).toContain(
+      "Passes on what a guest reported about Cottage 1: one alert on Ben's list, from you, in a slot the week's draw would have filled, until Ben closes it. You'll see what it said. A reported shock or burning smell closes the house at once, until Ben makes it safe.",
+    );
     expect(m.calls).toEqual([]);
     await click(button(m.root, 'Report it'));
     expect(m.calls).toEqual([{ t: 'flag', role: 'fin', assetId: 'h1', week: s.week }]);
@@ -827,6 +829,19 @@ describe("stage 2's What's new (9.5)", () => {
       render(null, root as unknown as Element);
     }
     expect(whatsNewMapPanels(island(2, 3), 'elec').length).toBe(4);
+  });
+});
+
+describe('the house sheet after its renovation (stage 2 review round 3)', () => {
+  it('renovated recently: the Renovation card is the cooldown line alone, no hypothetical case above it', async () => {
+    const s = island(31, 5, 60);
+    s.assets.push({ id: 'h6', kind: 'house', model: 'villa', name: 'Villa West', health: 70, touchedWeek: 0, inspectionUntil: 40 });
+    s.builds = [...(s.builds ?? []), { id: 'reno-villa-h6-27', what: 'Renovate Villa West', reno: 'h6', done: 2, drawn: 2, need: 2, started: 27, finished: 28, signed: 29 }];
+    const m = await mount(s, 'fin', assetRef(s.assets.find((a) => a.id === 'h6')!));
+    const words = textOf(m.root);
+    expect(words).toContain('Villa West was renovated recently: one renovation per house every 26 weeks (again from week 53).');
+    expect(words).not.toMatch(/Doesn't pay back|Pays back in about|closed about|about \$[\d,]+ of rent gained/);
+    expect(buttons(m.root).some((b) => /Renovate/.test(textOf(b)))).toBe(false);
   });
 });
 

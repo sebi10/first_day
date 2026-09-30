@@ -3,7 +3,7 @@
 import { planeModel, type Ata } from './aircraft';
 import { alertFlags, alertTier, causeOf, fixesOf, liveAlerts, needsOf, siteOf, symptomOf } from './alerts';
 import { botChainData, islandAircraft, needsFreight, openChain, wrongPn } from './chain';
-import { botCall, canCheck, checkKindFor, flagCheck, openWork } from './checks';
+import { botCall, canCheck, checkKindFor, flagCheck } from './checks';
 import { ECON, FLOAT_AUCTION, GSE, STOCK, TIERS } from './data';
 import { apply, createIsland, forecastContext, isEmergency, receiverFunds } from './engine';
 import { cableBand, charterLoad, downtimeOf, expectedDeferralCost, fixedNow, gseCarts, houseWeekRevenue, logistic, needsCart, occupancy, startCart, urgency } from './econ';
@@ -41,6 +41,12 @@ export type Bot = {
    */
   checks?: boolean;
   flags?: boolean;
+  /**
+   * stage 2 review round 3: a person using Report a problem as What's new invites it ("one a week each"): at the end of
+   * the seat's turn, a flag on the lowest-health asset it may flag, whatever the trade's list holds. The balance run's
+   * `flag weekly` crew (robust), so what weekly reporting costs is measured, not assumed
+   */
+  flagWeekly?: boolean;
 };
 export type Team = Record<Role, Bot>;
 
@@ -664,17 +670,21 @@ function botFlag(s: IslandState, role: 'fin' | 'elec', bot: Bot, now: number): I
     role === 'fin'
       ? s.assets.filter((a) => a.kind === 'house' && a.health < 60 && nothingOpen(s, a.id)).sort((x, y) => houseWeekRevenue(s, y) - houseWeekRevenue(s, x))
       : s.assets.filter((a) => a.kind === 'plane' && a.health < 60 && nothingOpen(s, a.id)).sort((x, y) => x.health - y.health);
+  // (a trade at its open-work target is refused by the game itself since review round 3: flagCheck)
   const a = pool.find((x) => flagCheck(s, role, x.id).ok);
-  if (!a) return s;
-  // a considerate crewmate: a trade already at its open-work target gets a message, not a flag on top
-  const to = flagCheck(s, role, a.id) as { ok: true; to: 'mech' | 'elec' };
-  const w = openWork(s, to.to);
-  return w.open < w.target ? step(s, { t: 'flag', role, assetId: a.id, week: s.week }, now) : s;
+  return a ? step(s, { t: 'flag', role, assetId: a.id, week: s.week }, now) : s;
 }
 
 /** One seat's turn as a bot plays it: the sim's week loop, and tests that start from an island they set up. */
 export function botTurn(s: IslandState, role: Role, bot: Bot, r: Rng, now: number) {
-  return role === 'fin' ? playFin(s, bot, r, now) : playOps(s, role, bot, r, now);
+  s = role === 'fin' ? playFin(s, bot, r, now) : playOps(s, role, bot, r, now);
+  return bot.flagWeekly ? flagWeekly(s, role, now) : s;
+}
+
+/** the weekly reporter (Bot.flagWeekly): the lowest-health asset the seat may flag this week, flagged (a refusal is a no-op) */
+function flagWeekly(s: IslandState, role: Role, now: number): IslandState {
+  const a = s.assets.filter((x) => flagCheck(s, role, x.id).ok).sort((x, y) => x.health - y.health)[0];
+  return a ? step(s, { t: 'flag', role, assetId: a.id, week: s.week }, now) : s;
 }
 
 export type SimWeek = {

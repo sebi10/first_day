@@ -286,7 +286,8 @@ export function stdPick(s: IslandState, asset: Asset, task: Task, site?: ElecSit
         out.push({ item: 'DBS-2', qty: 4, slot: m.slot });
         break;
       case 'breaker':
-        if (want(m)) out.push({ item: st.amps >= 20 ? 'KP120' : 'KP115', qty: 1, slot: m.slot });
+        // (never on a feeder or the main an IR scan wrote up: no KP branch breaker fits them, review round 3)
+        if (want(m) && !st.cond) out.push({ item: st.amps >= 20 ? 'KP120' : 'KP115', qty: 1, slot: m.slot });
         break;
       case 'relay':
         if (want(m)) out.push({ item: 'KP-TSR30', qty: 1, slot: m.slot });

@@ -8,7 +8,7 @@
 // alert's seed.
 import { planeModel, type PlaneModel } from './aircraft';
 import { islandAircraft, manualCard } from './chain';
-import { CHECK_SYMPTOMS } from './checkdata';
+import { CHECK_SYMPTOMS, HOME_PANEL, homePanel, panelSite } from './checkdata';
 import { ALERTS, CATALOG, CATALOG_BY_KIND, LATE, MODELS } from './data';
 import { FEED_KINDS, feedAlert, genUpgraded, gridFirst, gridFirstJob, renovating, underWarranty } from './econ';
 import { hashSeed, rng, type Rng } from './rng';
@@ -64,7 +64,7 @@ export type Symptom = {
   bench?: boolean;
   intermittent?: boolean;
   causes: Cause[];
-  nff?: { w: number; finding: string; rooms?: Room[] }[];
+  nff?: { w: number; finding: string; rooms?: Room[]; site?: Partial<ElecSite> }[];
   /** the only guest plane: the early-sign wording and its lead; 'none': never raised there */
   sole?: { text: string; lead: [number, number] } | 'none';
   /** the task the Manual step opens with (due items, ADs, code notices, take-offs, write-ups) */
@@ -591,8 +591,9 @@ const ELEC: Symptom[] = [
     key: 'E_STORM_DEAD',
     role: 'elec',
     src: 'guest',
-    text: 'After the storm: two rooms at {house} dead, water in the porch box.',
-    alt: 'Water in the porch box at {house} after the rain.',
+    // (review round 3: a relayed complaint named the house twice; "Guest at …:" and "After the storm at …:" are stripped)
+    text: 'After the storm at {house}: two rooms dead, water in the porch box.',
+    alt: 'Guest at {house}: water in the porch box after the rain.',
     targets: HOUSES,
     rooms: ['outdoor', 'bedroom'],
     hazard: true,
@@ -667,7 +668,7 @@ const ELEC: Symptom[] = [
     targets: ['panel'],
     rooms: ['panel'],
     lead: [3, 4],
-    causes: [{ kind: 'panelUp', w: 1, fix: 'ref:panel', finding: 'Peak demand 368 A on a 400 A bus; the lugs are at their limit.' }],
+    causes: [{ kind: 'panelUp', w: 1, fix: 'ref:panel', site: panelSite(HOME_PANEL[0]), finding: 'Peak demand {peak} A on a {amps} A bus; the lugs are at their limit.' }],
   },
   {
     key: 'E_TAKEOFF_DOCK',
@@ -695,7 +696,9 @@ const ELEC: Symptom[] = [
     key: 'E_TAKEOFF_XFER',
     role: 'elec',
     src: 'takeoff',
-    text: 'The houses now back up {load} A on the {amps} A transfer switch and the {amps} A set: fit an automatic switch with load shed, sized to the set (702.4(B)(2)(b)).',
+    // (review round 3: load management sizes the standby source, never the transfer equipment: on the utility the switch
+    // and its feed carry the whole backed-up load, so the new switch is rated for it; round 2 sized it to the set)
+    text: 'The houses now back up {load} A on the {amps} A transfer switch and the {amps} A set: fit an automatic switch rated for the backed-up load (100 A, its feed breaker and conductors to match: #3 Cu), with load management so the {amps} A set carries no more than its rating (702.4(B)(2)(b)).',
     targets: ['gen'],
     rooms: ['gen'],
     lead: [2, 3],
@@ -895,6 +898,8 @@ function vars(s: IslandState, a: Alert): Record<string, string> {
     amps: String(site?.amps ?? 60),
     feet: String(site?.feet ?? 40),
     load: String(site?.load ?? 90),
+    // (review round 3: the panel's peak at 92% of its main as installed: 368 A on the 400 A, 552 A on a 600 A upgrade)
+    peak: String(Math.round(0.92 * (site?.amps ?? 400))),
     leg,
     Leg: leg.charAt(0).toUpperCase() + leg.slice(1),
     problem: a.repair?.problem ?? 'a known defect',
@@ -1002,11 +1007,22 @@ export function flagSource(s: IslandState, a: Pick<Alert, 'sym' | 'assetId' | 'v
   return `a report on ${at}`;
 }
 
+/**
+ * the island panel's schedule as installed (review round 3): the 400 A main or a panel upgrade's 600 A (Asset.panel on the
+ * grid), the transfer-switch feed as its switch is (a transfer job's, Asset.xfer; the Resort's 200 A). Every screen that
+ * reads a rating reads this: the breaker schedule, the IR scan, an IR write-up's job
+ */
+export function installedHome(s: Pick<IslandState, 'tier' | 'assets'>) {
+  const gen = s.assets.find((a) => a.kind === 'generator');
+  const grid = s.assets.find((a) => a.kind === 'grid');
+  return homePanel(genUpgraded(s), gen?.xfer, grid?.panel);
+}
+
 /** E_TAKEOFF_SPA on a house with its spa circuit already in (Asset.spa) */
 const SPA_RERUN = "Re-run the hot-tub circuit at {house}: the buried run to the pad ({feet} ft) fails its insulation test.";
 
 /** who noticed it, at the start of a symptom's text ("Guest at Cottage 1:", "Utility log:") */
-const WHO_SAID = /^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm|Weekly test|Weekly generator run): /i;
+const WHO_SAID = /^(Guest at [^:]+|Inspector's note at [^:]+|Utility log|Meter data|After the storm(?: at [^:]+)?|Weekly test|Weekly generator run): /i;
 
 /** the site of an electrical job (derived from the seed): room, circuit, AWG, run, protection upstream */
 export function siteOf(s: IslandState, a: Pick<Alert, 'seed' | 'sym' | 'cause' | 'role' | 'assetId'>): ElecSite | null {
@@ -1019,6 +1035,16 @@ export function siteOf(s: IslandState, a: Pick<Alert, 'seed' | 'sym' | 'cause' |
   const room = r.pick(rooms);
   const site: ElecSite = siteFor(room, r);
   if (cause?.site) Object.assign(site, cause.site);
+  // a no-fault finding with a site of its own (review round 3: the checks' write-ups: the circuit the meter read, the
+  // panel breaker the IR scan read)
+  const nffSite = a.cause < 0 ? (sym.nff ?? []).find((n) => n.site)?.site : undefined;
+  if (nffSite) Object.assign(site, nffSite);
+  // an island-panel breaker (an IR write-up's, the panel's own load trend): as installed (a transfer job's switch feed, the
+  // Resort's, a 600 A main)
+  if (site.cond && s.assets) {
+    const b = installedHome(s).find((x) => x.label === site.what);
+    if (b) Object.assign(site, panelSite(b));
+  }
   if (site.single) site.appliance = room === 'kitchen' ? 'microwave' : 'window unit';
   // the E_DEAD_OUTLET GFCI and the E_STORM_DEAD porch are in their own rooms; a bath receptacle downstream of the GFCI is in the bath
   // (review round 2: a house with a spa circuit on record re-runs that circuit, its breaker and wire as they are)
@@ -1052,7 +1078,8 @@ function siteFor(room: Room, r: Rng): ElecSite {
     case 'gen':
       // the transfer switch as it is (60 A on #6), and the houses' backed-up load: over its rating (a larger switch
       // carries it, 702.4(B)). Review round 2: 107-130% of 60 A, what the weekly test run then reads through the switch
-      // and the set's 60 A main (checks.ts backedUp); 72-140 A would have tripped the set's main on the first test run
+      // and the set's 60 A main (checks.ts backedUp); 72-140 A would have tripped the set's main on the first test run.
+      // Review round 3: the job fits a switch rated for it (checkdata XFER_UP), load management holding the set to 60 A
       return { room, amps: 60, awg: 6, load: r.int(64, 78) };
   }
 }
@@ -1191,6 +1218,8 @@ export function pairsFor(kind: string, asset: Asset, sole: boolean, s?: Pick<Isl
   for (const sym of Object.values(SYMPTOMS)) {
     if (sym.auto || !fits(sym, asset)) continue;
     if (upgraded && UPGRADE_RETIRES.has(sym.key)) continue;
+    // (review round 3: once a transfer job put in a switch rated for the backed-up load, its take-off never comes back)
+    if (asset.xfer && UPGRADE_RETIRES.has(sym.key)) continue;
     if (sole && sym.sole === 'none') continue;
     if (!sym.causes.some((c) => c.kind === kind && onModel(c))) continue;
     sym.causes.forEach((c, i) => {
@@ -1329,8 +1358,9 @@ export function generateAlerts(s: IslandState, r: Rng, now: number, direct: (kin
     // the electrician's helper (review round 1) walks the houses too: their rounds write up as much more as they do
     const extra = role === 'elec' ? helperJobs(s) : 0;
     const target = (s.tier >= 3 ? 5 : 4) + extra;
-    // stage 2 (docs/EXPANSION.md 4.5, 6.4): a quick check's wrong call (a no-fault write-up) holds a slot until it's closed on site
-    const checkUps = (s.alerts ?? []).filter((a) => a.role === role && a.status === 'open' && a.src === 'check' && a.cause < 0).length;
+    // stage 2 (docs/EXPANSION.md 4.5, 6.4): a quick check's wrong call (a no-fault write-up) holds a slot until it's closed
+    // on site; so does a crewmate's flag with nothing wrong (review round 3: a flag takes a slot, never adds one)
+    const checkUps = (s.alerts ?? []).filter((a) => a.role === role && a.status === 'open' && (a.src === 'check' || a.src === 'flag') && a.cause < 0).length;
     let openCount = workable.length + openAlerts.length + checkUps;
     let slots = Math.max(0, Math.min(3 + extra, target - openCount));
     const cands: { kind: string; asset: Asset; w: number }[] = [];

@@ -241,7 +241,8 @@ const BOXES: Item[] = [
 const LOTS: Item[] = [
   el('LOT-STORM', { nomen: 'Storm repair lot: 50 ft UF-B 12/2, two 20 A TR/WR receptacles, two weatherproof boxes, an in-use cover, connectors', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 260, nec: ['110.11', '334.12(B)(4)', '406.9(B)(1)'], tags: ['storm', 'lot', 'uf-b', 'weatherproof'] }),
   el('LOT-DIST', { nomen: 'Distribution panel upgrade lot: 600 A distribution panelboard, feeder lugs, two ground rods, the GEC and clamps', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 1400, lead: 2, bulk: true, nec: ['408', '250.52(A)(5)', '250.53(A)'], tags: ['panel', 'panelboard', 'distribution', 'upgrade', 'lot', '600a'] }),
-  el('LOT-XFER', { nomen: 'Transfer switch lot: automatic transfer switch sized to the standby set, with load shed (702.4(B)(2)(b)), conductors and breakers', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 900, lead: 2, bulk: true, nec: ['702.4(B)', '702.5'], tags: ['transfer', 'switch', 'ats', 'automatic', 'generator', 'standby', 'lot', '200a', 'shed'] }),
+  // (review round 3: load management sizes the standby set, never the switch: the switch is rated for the backed-up load)
+  el('LOT-XFER', { nomen: 'Transfer switch lot: automatic transfer switch rated for the backed-up load, with load management for the standby set (702.4(B)(2)(b)), its feed breaker and conductors', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 900, lead: 2, bulk: true, nec: ['702.4(B)', '702.5'], tags: ['transfer', 'switch', 'ats', 'automatic', 'generator', 'standby', 'lot', '100a', '200a', 'shed', 'load', 'management'] }),
   el('LOT-DOCK', { nomen: 'Fuel dock run lot: RMC and a seal fitting with compound for the classified section, THWN-2 by the foot, a 2-pole 30 A GFPE breaker', kind: 'lot', cat: 'lots', unit: 'lot', pack: 1, price: 420, nec: ['514.8', '514.9', '555.35'], tags: ['fuel', 'dock', 'rmc', 'seal', 'gfpe', 'classified', 'lot'] }),
 ];
 

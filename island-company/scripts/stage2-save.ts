@@ -1,7 +1,8 @@
 // A pass-and-play save for trying stage 2 fast (docs/EXPANSION.md 6.4, 6.5): a
 // tier-2+ island past week 3, every seat's turn open, where the mechanic's
 // walkaround and the electrician's check show a tell this week and every seat can
-// flag. Written by this build's own reducer (the paper-sim crew plays the weeks,
+// flag (the electrician's list has room for two: a flag fits only under its trade's
+// open-work target, review round 3). Written by this build's own reducer (the paper-sim crew plays the weeks,
 // quick checks and flags off, so nothing stage 2 is used yet); only the seats are
 // moved to the pass-and-play device ids.
 //
@@ -17,7 +18,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { botTurn, TEAMS, type Team } from '../src/sim/bots';
-import { checkTruth } from '../src/sim/checks';
+import { checkTruth, openWork } from '../src/sim/checks';
 import { apply, createIsland } from '../src/sim/engine';
 import { hashSeed, rng } from '../src/sim/rng';
 import { ROLES, type IslandState } from '../src/sim/types';
@@ -54,7 +55,10 @@ for (let seed = 1; seed < 200 && !save; seed++) {
     if (s.tier < 2 || s.week < 3) continue;
     const planes = s.assets.filter((a) => a.kind === 'plane' && checkTruth(s, 'mech', a.id, s.week));
     const elec = s.assets.filter((a) => (a.kind === 'house' || a.kind === 'grid') && checkTruth(s, 'elec', a.id, s.week));
-    if (planes.length && elec.length) {
+    // room on the electrician's list for two flags (stage 2 review round 3: a flag fits only under the trade's
+    // open-work target): the mechanic's, then the analyst's
+    const w = openWork(s, 'elec');
+    if (planes.length && elec.length && w.open <= w.target - 2) {
       save = s;
       console.log(`seed ${seed}, week ${s.week}, tier ${s.tier}: walkaround tell on ${planes.map((a) => a.name).join(', ')}; electrician's on ${elec.map((a) => a.name).join(', ')}`);
       break;

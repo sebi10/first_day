@@ -158,13 +158,13 @@ describe('what a flag raises (6.5)', () => {
     expect(tried).toBeGreaterThan(5);
   });
 
-  it('a healthy twin: a no-fault write-up that takes no slot, and costs the mechanic a close', () => {
+  it('a healthy twin: a no-fault write-up that holds a slot until it is closed (review round 3), and costs the mechanic a close', () => {
     let s = island(5, 100);
     const before = openWork(s, 'mech').open;
     s = ok(s, { t: 'flag', role: 'elec', assetId: 'p1', week: s.week });
     const a = s.alerts!.at(-1)!;
     expect(a).toMatchObject({ role: 'mech', src: 'flag', cause: -1, kind: 'nff', who: 'Ben' });
-    expect(openWork(s, 'mech').open).toBe(before);
+    expect(openWork(s, 'mech').open).toBe(before + 1);
     const closed = ok(s, { t: 'nff', role: 'mech', alert: a.id, week: s.week });
     expect(closed.alerts!.find((x) => x.id === a.id)!.closed?.how).toBe('nff');
   });
